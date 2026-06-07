@@ -1,0 +1,17 @@
+{
+  "name": "rida",
+  "version": "0.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:server": "npm run dev --workspace=apps/server",
+    "dev:mobile": "npm run start --workspace=apps/mobile",
+    "build:shared": "npm run build --workspace=packages/shared",
+    "db:migrate": "npm run db:migrate --workspace=apps/server",
+    "db:seed": "npm run db:seed --workspace=apps/server",
+    "db:generate": "npm run db:generate --workspace=apps/server"
+  }
+}

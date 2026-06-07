@@ -1,0 +1,256 @@
+// All monetary values are stored as INTEGER PESEWAS (GHS 1 = 100 pesewas).
+// Never use Float for money fields. GHS 5.00 is stored as 500.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")  // pooled connection (runtime queries)
+  directUrl = env("DIRECT_URL")    // direct connection (migrations / DDL)
+}
+
+enum UserRole {
+  RIDER
+  DRIVER
+  ADMIN
+}
+
+enum RideType {
+  LONE
+  SHARED
+}
+
+enum RideStatus {
+  REQUESTED
+  MATCHED
+  ARRIVED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  AWAITING_RIDER_DECISION
+}
+
+enum PaymentStatus {
+  PENDING
+  COLLECTED
+  DISBURSED
+  FAILED
+}
+
+enum PassengerStatus {
+  WAITING
+  PICKED_UP
+  DROPPED_OFF
+  CANCELLED
+}
+
+enum RideCancelReason {
+  RIDER_CANCELLED
+  DRIVER_BACKED_OUT
+  NO_DRIVERS_AVAILABLE
+  ALL_PASSENGERS_LEFT
+  MERGED_INTO_ANOTHER_RIDE
+}
+
+enum PaymentType {
+  COLLECTION
+  DISBURSEMENT
+  REFUND
+}
+
+enum PaymentRecordStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum OtpPurpose {
+  SIGNUP
+  LOGIN
+}
+
+model User {
+  id        String   @id @default(cuid())
+  phone     String   @unique
+  name      String
+  role      UserRole
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  driver         Driver?
+  ridesAsRider   Ride[]          @relation("RiderRides")
+  ridesAsDriver  Ride[]          @relation("DriverRides")
+  ridePassengers RidePassenger[]
+  payments       Payment[]
+  refreshTokens  RefreshToken[]
+}
+
+model Driver {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  /// Nullable until the driver completes their profile (Phase 3:
+  /// completeDriverProfile) — a Driver row is created at signup with these
+  /// fields empty and isApproved=false.
+  carMake       String?
+  carModel      String?
+  carColor      String?
+  plate         String?
+  photoUrl      String?
+  isApproved    Boolean  @default(false)
+  isOnline      Boolean  @default(false)
+  currentZoneId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user        User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currentZone Zone? @relation(fields: [currentZoneId], references: [id], onDelete: SetNull)
+
+  @@index([isOnline])
+  @@index([currentZoneId])
+}
+
+model Zone {
+  id        String @id @default(cuid())
+  name      String
+  quadrant  String
+  latitude  Float
+  longitude Float
+
+  drivers           Driver[]
+  pickupRides       Ride[]          @relation("PickupZone")
+  dropoffRides      Ride[]          @relation("DropoffZone")
+  passengerPickups  RidePassenger[] @relation("PassengerPickup")
+  passengerDropoffs RidePassenger[] @relation("PassengerDropoff")
+  adjacencies       ZoneAdjacency[] @relation("ZoneAdjacencies")
+  adjacentTo        ZoneAdjacency[] @relation("AdjacentZones")
+}
+
+model ZoneAdjacency {
+  id             String @id @default(cuid())
+  zoneId         String
+  adjacentZoneId String
+
+  zone         Zone @relation("ZoneAdjacencies", fields: [zoneId], references: [id], onDelete: Restrict)
+  adjacentZone Zone @relation("AdjacentZones", fields: [adjacentZoneId], references: [id], onDelete: Restrict)
+
+  @@unique([zoneId, adjacentZoneId])
+  @@index([zoneId])
+}
+
+model Ride {
+  id            String        @id @default(cuid())
+  riderId       String
+  driverId      String?
+  type          RideType
+  status        RideStatus    @default(REQUESTED)
+  pickupZoneId  String
+  dropoffZoneId String
+  occupancy     Int           @default(1)
+  /// Fare total in pesewas — computed at completion, null until then
+  fareTotal     Int?
+  /// Driver's share in pesewas — computed at completion, null until then
+  driverShare   Int?
+  paymentStatus PaymentStatus @default(PENDING)
+  /// Reason recorded on every CANCELLED transition; null otherwise
+  cancelReason  RideCancelReason?
+  createdAt     DateTime      @default(now())
+  departedAt    DateTime?
+  completedAt   DateTime?
+  /// Stamped when the ride enters REQUESTED and is broadcast to eligible
+  /// drivers; the 90s dispatch timeout is measured from this (or createdAt
+  /// if never set).
+  broadcastStartedAt DateTime?
+  /// Stamped when the ride enters AWAITING_RIDER_DECISION; the 90s grace
+  /// period for the rider to choose is measured from this.
+  decisionStartedAt  DateTime?
+  /// Set when this ride is absorbed into another car via addRiderToCar
+  /// (Phase 2d): the request ride is closed (CANCELLED,
+  /// MERGED_INTO_ANOTHER_RIDE) and points at the anchor ride it joined.
+  mergedIntoRideId   String?
+
+  rider       User            @relation("RiderRides", fields: [riderId], references: [id], onDelete: Restrict)
+  driver      User?           @relation("DriverRides", fields: [driverId], references: [id], onDelete: Restrict)
+  pickupZone  Zone            @relation("PickupZone", fields: [pickupZoneId], references: [id], onDelete: Restrict)
+  dropoffZone Zone            @relation("DropoffZone", fields: [dropoffZoneId], references: [id], onDelete: Restrict)
+  passengers  RidePassenger[]
+  payments    Payment[]
+  mergedInto  Ride?           @relation("RideMerge", fields: [mergedIntoRideId], references: [id], onDelete: SetNull)
+  mergedRides Ride[]          @relation("RideMerge")
+
+  @@index([status])
+  @@index([riderId])
+  @@index([driverId])
+  @@index([pickupZoneId])
+  @@index([mergedIntoRideId])
+}
+
+model RidePassenger {
+  id            String          @id @default(cuid())
+  rideId        String
+  riderId       String
+  pickupZoneId  String
+  dropoffZoneId String
+  /// Fare charged in pesewas — null until computed
+  fareCharged   Int?
+  /// Price-locked fare in pesewas, set at join-time and ratcheted downward
+  /// only as occupancy increases; frozen permanently once the ride departs
+  lockedFare    Int?
+  status        PassengerStatus @default(WAITING)
+
+  ride        Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  rider       User @relation(fields: [riderId], references: [id], onDelete: Restrict)
+  pickupZone  Zone @relation("PassengerPickup", fields: [pickupZoneId], references: [id], onDelete: Restrict)
+  dropoffZone Zone @relation("PassengerDropoff", fields: [dropoffZoneId], references: [id], onDelete: Restrict)
+
+  @@index([rideId])
+}
+
+model Payment {
+  id          String              @id @default(cuid())
+  rideId      String
+  riderId     String
+  /// Amount in pesewas — never use Float for money
+  amount      Int
+  type        PaymentType
+  status      PaymentRecordStatus @default(PENDING)
+  providerRef String?
+  createdAt   DateTime            @default(now())
+
+  ride  Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  rider User @relation(fields: [riderId], references: [id], onDelete: Restrict)
+
+  @@index([rideId])
+  @@index([riderId])
+}
+
+model OtpCode {
+  id           String     @id @default(cuid())
+  phone        String
+  /// SHA-256 hash of the 6-digit code — never store the raw code.
+  codeHash     String
+  purpose      OtpPurpose
+  expiresAt    DateTime
+  consumedAt   DateTime?
+  attemptCount Int        @default(0)
+  createdAt    DateTime   @default(now())
+
+  @@index([phone])
+}
+
+model RefreshToken {
+  id          String    @id @default(cuid())
+  userId      String
+  /// SHA-256 hash of the refresh token — never store the raw token.
+  tokenHash   String
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  deviceLabel String?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+}
