@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "CampusRide Driver",
+    "slug": "campusride-driver",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "scheme": "campusride-driver",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "gh.edu.ug.rida.driver"
+    },
+    "android": {
+      "package": "gh.edu.ug.rida.driver",
+      "adaptiveIcon": {
+        "backgroundColor": "#1A7A3C"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "SERVER_URL": "http://localhost:3000"
+    }
+  }
+}

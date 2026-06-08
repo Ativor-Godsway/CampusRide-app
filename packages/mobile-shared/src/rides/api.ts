@@ -1,0 +1,39 @@
+import type { Ride, RideType, Zone } from "@rida/shared";
+import { api } from "../auth/apiClient";
+
+export async function getZones(): Promise<Zone[]> {
+  const res = await api.get<{ zones: Zone[] }>("/zones");
+  return res.data.zones;
+}
+
+export interface CreateRideInput {
+  pickupZoneId: string;
+  dropoffZoneId: string;
+  type: RideType;
+}
+
+export interface CreateRideConflictError extends Error {
+  isActiveRideConflict: true;
+}
+
+/** Thrown when the rider already has an active ride (backend returns 409). */
+export class ActiveRideExistsError extends Error implements CreateRideConflictError {
+  readonly isActiveRideConflict = true as const;
+  constructor() {
+    super("You already have an active ride");
+    this.name = "ActiveRideExistsError";
+  }
+}
+
+export async function createRide(input: CreateRideInput): Promise<Ride> {
+  try {
+    const res = await api.post<{ ride: Ride }>("/rides", input);
+    return res.data.ride;
+  } catch (err) {
+    const status = (err as { response?: { status?: number } }).response?.status;
+    if (status === 409) {
+      throw new ActiveRideExistsError();
+    }
+    throw err;
+  }
+}

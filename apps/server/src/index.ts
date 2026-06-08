@@ -6,6 +6,9 @@ import { prisma } from "./db/prisma";
 import { processTimeouts } from "./services/ride/timeouts";
 import { otpService, paymentService, routeService } from "./services/active";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerWebhookRoutes } from "./routes/webhooks";
+import { registerZoneRoutes } from "./routes/zones";
+import { registerRideRoutes } from "./routes/rides";
 
 const TIMEOUT_POLL_INTERVAL_MS = 15_000;
 
@@ -21,6 +24,9 @@ async function bootstrap() {
   });
 
   registerAuthRoutes(app, prisma, otpService);
+  registerWebhookRoutes(app, prisma, paymentService, config.moolre.webhookSecret);
+  registerZoneRoutes(app, prisma);
+  registerRideRoutes(app, prisma);
 
   // app.server is the underlying http.Server — attach Socket.io to it directly
   await app.ready();

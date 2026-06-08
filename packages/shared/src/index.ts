@@ -3,6 +3,7 @@ export * from "./types/driver";
 export * from "./types/zone";
 export * from "./types/ride";
 export * from "./types/payment";
+export * from "./geo/distance";
 export * from "./pricing/pricing";
 export * from "./ranking/ranking";
 export * from "./ranking/bestFit";

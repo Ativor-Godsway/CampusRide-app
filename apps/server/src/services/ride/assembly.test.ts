@@ -16,11 +16,13 @@ import {
 import {
   createTestRide,
   createTestDriver,
+  createTestUser,
   cleanupRide,
   cleanupDriver,
   getTestZones,
   getThreeTestZones,
 } from "./testFixtures";
+import { collectionExternalRef } from "../payment/paymentFlow";
 
 const createdRideIds: string[] = [];
 const createdDriverUserIds: string[] = [];
@@ -437,6 +439,55 @@ describe("departRide — guard rails", () => {
     await expect(departRide(prisma, driver.user.id, ride.id)).rejects.toThrow(
       RideNotReadyToDepartError,
     );
+  });
+});
+
+// ─── Phase 4c: departure initiates collections ──────────────────────────────
+
+describe("departRide — payment collection wiring (Phase 4c)", () => {
+  it("initiates a COLLECTION Payment for every active passenger, for their lockedFare, with the deterministic externalRef", async () => {
+    const { pickup, dropoff } = await getTestZones();
+
+    const driver = await createTestDriver({ isOnline: true, isApproved: true });
+    createdDriverUserIds.push(driver.user.id);
+
+    const riderB = await createTestUser("RIDER");
+    const riderC = await createTestUser("RIDER");
+    const riderD = await createTestUser("RIDER");
+
+    const { ride } = await createTestRide({
+      type: "SHARED",
+      status: "ARRIVED",
+      driverId: driver.user.id,
+      occupancy: 3,
+      pickupZoneId: pickup.id,
+      dropoffZoneId: dropoff.id,
+      passengers: [
+        { riderId: riderB.id, status: "WAITING", lockedFare: 600 },
+        { riderId: riderC.id, status: "WAITING", lockedFare: 600 },
+        // A cancelled passenger must NOT get a collection initiated.
+        { riderId: riderD.id, status: "CANCELLED", lockedFare: 600 },
+      ],
+    });
+    createdRideIds.push(ride.id);
+
+    const result = await departRide(prisma, driver.user.id, ride.id);
+    expect(result.status).toBe("IN_PROGRESS");
+
+    const payments = await prisma.payment.findMany({ where: { rideId: ride.id, type: "COLLECTION" } });
+    expect(payments).toHaveLength(2);
+
+    const byRider = new Map(payments.map((p) => [p.riderId, p]));
+    for (const riderId of [riderB.id, riderC.id]) {
+      const payment = byRider.get(riderId);
+      expect(payment).toBeDefined();
+      expect(payment!.amount).toBe(600);
+      expect(payment!.providerRef).toBe(collectionExternalRef(ride.id, riderId));
+      expect(payment!.status).toBe("PENDING");
+    }
+
+    // The cancelled passenger never gets a collection.
+    expect(byRider.get(riderD.id)).toBeUndefined();
   });
 });
 

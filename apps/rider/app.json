@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "CampusRide",
+    "slug": "campusride-rider",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "scheme": "campusride-rider",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "gh.edu.ug.rida.rider"
+    },
+    "android": {
+      "package": "gh.edu.ug.rida.rider",
+      "adaptiveIcon": {
+        "backgroundColor": "#1A7A3C"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "CampusRide uses your location to find the nearest pickup zone."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "SERVER_URL": "http://localhost:3000"
+    }
+  }
+}
