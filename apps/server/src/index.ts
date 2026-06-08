@@ -9,6 +9,8 @@ import { registerAuthRoutes } from "./routes/auth";
 import { registerWebhookRoutes } from "./routes/webhooks";
 import { registerZoneRoutes } from "./routes/zones";
 import { registerRideRoutes } from "./routes/rides";
+import { registerRatingRoutes } from "./routes/ratings";
+import { initRideSocket } from "./realtime/rideSocket";
 
 const TIMEOUT_POLL_INTERVAL_MS = 15_000;
 
@@ -27,6 +29,7 @@ async function bootstrap() {
   registerWebhookRoutes(app, prisma, paymentService, config.moolre.webhookSecret);
   registerZoneRoutes(app, prisma);
   registerRideRoutes(app, prisma);
+  registerRatingRoutes(app, prisma);
 
   // app.server is the underlying http.Server — attach Socket.io to it directly
   await app.ready();
@@ -41,6 +44,8 @@ async function bootstrap() {
       app.log.info(`[Socket.io] client disconnected: ${socket.id}`);
     });
   });
+
+  initRideSocket(io, prisma);
 
   await app.listen({ port: config.port, host: "0.0.0.0" });
 

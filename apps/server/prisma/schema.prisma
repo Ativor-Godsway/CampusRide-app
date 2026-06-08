@@ -79,12 +79,14 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  driver         Driver?
-  ridesAsRider   Ride[]          @relation("RiderRides")
-  ridesAsDriver  Ride[]          @relation("DriverRides")
-  ridePassengers RidePassenger[]
-  payments       Payment[]
-  refreshTokens  RefreshToken[]
+  driver          Driver?
+  ridesAsRider    Ride[]          @relation("RiderRides")
+  ridesAsDriver   Ride[]          @relation("DriverRides")
+  ridePassengers  RidePassenger[]
+  payments        Payment[]
+  refreshTokens   RefreshToken[]
+  ratingsGiven    Rating[]        @relation("RatingsGiven")
+  ratingsReceived Rating[]        @relation("RatingsReceived")
 }
 
 model Driver {
@@ -178,6 +180,7 @@ model Ride {
   payments    Payment[]
   mergedInto  Ride?           @relation("RideMerge", fields: [mergedIntoRideId], references: [id], onDelete: SetNull)
   mergedRides Ride[]          @relation("RideMerge")
+  ratings     Rating[]
 
   @@index([status])
   @@index([riderId])
@@ -253,4 +256,24 @@ model RefreshToken {
 
   @@index([userId])
   @@index([tokenHash])
+}
+
+/// Phase 5c: a rider rating their driver (or vice versa, in future) at the
+/// end of a COMPLETED ride. Minimal — one rating per (ride, rater, ratee).
+model Rating {
+  id        String   @id @default(cuid())
+  rideId    String
+  raterId   String
+  rateeId   String
+  /// 1-5, validated at the application layer.
+  stars     Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  ride  Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  rater User @relation("RatingsGiven", fields: [raterId], references: [id], onDelete: Restrict)
+  ratee User @relation("RatingsReceived", fields: [rateeId], references: [id], onDelete: Restrict)
+
+  @@unique([rideId, raterId, rateeId])
+  @@index([rateeId])
 }

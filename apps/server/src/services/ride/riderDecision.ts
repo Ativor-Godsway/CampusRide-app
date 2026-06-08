@@ -1,12 +1,12 @@
 import type { PrismaClient } from "@prisma/client";
-import { getLoneFare } from "@rida/shared";
+import { getLoneFare, type RiderDecisionAction } from "@rida/shared";
 import { applyRideTransition } from "./rideService";
 import { isActivePassengerStatus, transitionRide } from "./stateMachine";
 import { InvalidSwitchToLoneError } from "./errors";
 
 const TX_OPTIONS = { timeout: 20000 } as const;
 
-export type RiderDecisionAction = "KEEP_WAITING" | "SWITCH_TO_LONE" | "CANCEL";
+export type { RiderDecisionAction };
 
 /**
  * Applies a rider's decision while their ride is AWAITING_RIDER_DECISION

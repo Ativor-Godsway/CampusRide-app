@@ -1,4 +1,12 @@
-import type { Ride, RideType, Zone } from "@rida/shared";
+import type {
+  DriverAssignedPayload,
+  Ride,
+  RideCompletedFareSummary,
+  RidePassenger,
+  RiderDecisionAction,
+  RideType,
+  Zone,
+} from "@rida/shared";
 import { api } from "../auth/apiClient";
 
 export async function getZones(): Promise<Zone[]> {
@@ -27,7 +35,7 @@ export class ActiveRideExistsError extends Error implements CreateRideConflictEr
 
 export async function createRide(input: CreateRideInput): Promise<Ride> {
   try {
-    const res = await api.post<{ ride: Ride }>("/rides", input);
+    const res = await api.post<{ ride: Ride & { passengers: RidePassenger[] } }>("/rides", input);
     return res.data.ride;
   } catch (err) {
     const status = (err as { response?: { status?: number } }).response?.status;
@@ -36,4 +44,43 @@ export async function createRide(input: CreateRideInput): Promise<Ride> {
     }
     throw err;
   }
+}
+
+export interface RideWithDetails extends Ride {
+  pickupZone: Zone;
+  dropoffZone: Zone;
+  passengers: RidePassenger[];
+}
+
+export type RideDriverInfo = Omit<DriverAssignedPayload, "rideId">;
+
+export interface GetRideResult {
+  ride: RideWithDetails;
+  driver: RideDriverInfo | null;
+  fareSummary?: RideCompletedFareSummary;
+}
+
+export async function getRide(rideId: string): Promise<GetRideResult> {
+  const res = await api.get<GetRideResult>(`/rides/${rideId}`);
+  return res.data;
+}
+
+export async function submitRideDecision(rideId: string, action: RiderDecisionAction): Promise<Ride> {
+  const res = await api.post<{ ride: Ride }>(`/rides/${rideId}/decision`, { action });
+  return res.data.ride;
+}
+
+export async function cancelRide(rideId: string): Promise<Ride> {
+  const res = await api.post<{ ride: Ride }>(`/rides/${rideId}/cancel`);
+  return res.data.ride;
+}
+
+export interface SubmitRatingInput {
+  rideId: string;
+  stars: number;
+  comment?: string;
+}
+
+export async function submitRating(input: SubmitRatingInput): Promise<void> {
+  await api.post("/ratings", input);
 }

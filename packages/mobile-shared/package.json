@@ -19,6 +19,7 @@
     "expo-secure-store": "*",
     "react": "*",
     "react-native": "*",
-    "react-native-safe-area-context": "*"
+    "react-native-safe-area-context": "*",
+    "socket.io-client": "^4.7.5"
   }
 }

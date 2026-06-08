@@ -36,4 +36,12 @@ export const config = {
    * If the requested provider's prerequisites aren't met, falls back to DummyOtpService.
    */
   otpProvider: process.env.OTP_PROVIDER ?? "dummy",
+  /**
+   * Phase 5c dev-only mock driver: when true, every ride created via
+   * POST /rides is driven through MATCHED -> ARRIVED -> IN_PROGRESS ->
+   * COMPLETED by a simulated driver (src/dev/mockDriver.ts), emitting the
+   * same Socket.io events Phase 6's real driver app will emit. Never enable
+   * in production.
+   */
+  enableMockDriver: process.env.ENABLE_MOCK_DRIVER === "true",
 } as const;

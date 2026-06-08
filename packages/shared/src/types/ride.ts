@@ -17,6 +17,8 @@ export type PassengerStatus =
   | "DROPPED_OFF"
   | "CANCELLED";
 
+export type RiderDecisionAction = "KEEP_WAITING" | "SWITCH_TO_LONE" | "CANCEL";
+
 export type RideCancelReason =
   | "RIDER_CANCELLED"
   | "DRIVER_BACKED_OUT"
