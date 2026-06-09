@@ -32,6 +32,10 @@ export function shouldExpireDecision(ride: RideTimeoutFields, now: Date): boolea
   return now.getTime() - ride.decisionStartedAt.getTime() >= DECISION_GRACE_MS;
 }
 
+interface TimeoutLogger {
+  warn: (obj: unknown, msg?: string) => void;
+}
+
 /**
  * Finds rides needing a timeout-driven transition as of `now` and applies
  * them:
@@ -43,37 +47,58 @@ export function shouldExpireDecision(ride: RideTimeoutFields, now: Date): boolea
  * (used by tests to avoid touching fixtures created by other test files
  * sharing the same database).
  *
- * TODO(server bootstrap): call this on an interval (e.g. every 10-15s) from
- * apps/server/src/index.ts so the running server actually times out stale
- * rides — see the scheduler hook there.
+ * Resilient by design: the candidate scan uses a `select` (not a full row
+ * fetch) and is a single short query, and any failure — the scan itself, or
+ * an individual ride's transition (e.g. a transient Neon P2024/P1001 pool
+ * error) — is caught, logged as a warning, and skips that ride/cycle rather
+ * than throwing. A bad cycle or a single bad ride never takes down the
+ * interval or blocks the rest of the sweep.
  */
 export async function processTimeouts(
   prisma: PrismaClient,
   now: Date = new Date(),
-  options: { rideIds?: readonly string[] } = {},
+  options: { rideIds?: readonly string[]; logger?: TimeoutLogger } = {},
 ) {
-  const candidates = await prisma.ride.findMany({
-    where: {
-      status: { in: ["REQUESTED", "AWAITING_RIDER_DECISION"] },
-      ...(options.rideIds ? { id: { in: [...options.rideIds] } } : {}),
-    },
-  });
-
+  const logger = options.logger ?? console;
   const transitioned: { rideId: string; from: string; to: string }[] = [];
 
+  let candidates: (RideTimeoutFields & { id: string })[];
+  try {
+    candidates = await prisma.ride.findMany({
+      where: {
+        status: { in: ["REQUESTED", "AWAITING_RIDER_DECISION"] },
+        ...(options.rideIds ? { id: { in: [...options.rideIds] } } : {}),
+      },
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        broadcastStartedAt: true,
+        decisionStartedAt: true,
+      },
+    });
+  } catch (err) {
+    logger.warn({ err }, "processTimeouts: failed to scan for timed-out rides, skipping cycle");
+    return transitioned;
+  }
+
   for (const ride of candidates) {
-    if (shouldTimeout(ride, now)) {
-      await applyRideTransition(prisma, ride.id, "AWAITING_RIDER_DECISION", {}, now);
-      transitioned.push({ rideId: ride.id, from: ride.status, to: "AWAITING_RIDER_DECISION" });
-    } else if (shouldExpireDecision(ride, now)) {
-      await applyRideTransition(
-        prisma,
-        ride.id,
-        "CANCELLED",
-        { cancelReason: "NO_DRIVERS_AVAILABLE" },
-        now,
-      );
-      transitioned.push({ rideId: ride.id, from: ride.status, to: "CANCELLED" });
+    try {
+      if (shouldTimeout(ride, now)) {
+        await applyRideTransition(prisma, ride.id, "AWAITING_RIDER_DECISION", {}, now);
+        transitioned.push({ rideId: ride.id, from: ride.status, to: "AWAITING_RIDER_DECISION" });
+      } else if (shouldExpireDecision(ride, now)) {
+        await applyRideTransition(
+          prisma,
+          ride.id,
+          "CANCELLED",
+          { cancelReason: "NO_DRIVERS_AVAILABLE" },
+          now,
+        );
+        transitioned.push({ rideId: ride.id, from: ride.status, to: "CANCELLED" });
+      }
+    } catch (err) {
+      logger.warn({ err, rideId: ride.id }, "processTimeouts: failed to transition ride, skipping");
     }
   }
 

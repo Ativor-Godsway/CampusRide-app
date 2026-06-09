@@ -12,7 +12,10 @@ import { registerRideRoutes } from "./routes/rides";
 import { registerRatingRoutes } from "./routes/ratings";
 import { initRideSocket } from "./realtime/rideSocket";
 
-const TIMEOUT_POLL_INTERVAL_MS = 15_000;
+// 15s was too aggressive for Neon's pooled connection budget alongside
+// request traffic; 30s still keeps the 90s dispatch/decision timeouts
+// responsive (worst case +30s) while halving the steady-state query load.
+const TIMEOUT_POLL_INTERVAL_MS = 30_000;
 
 export { paymentService, routeService, otpService };
 
@@ -55,7 +58,7 @@ async function bootstrap() {
   // Periodically sweep REQUESTED/AWAITING_RIDER_DECISION rides for the 90s
   // dispatch and decision-grace timeouts (see services/ride/timeouts.ts).
   setInterval(() => {
-    processTimeouts(prisma).catch((err) => {
+    processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
       app.log.error({ err }, "processTimeouts failed");
     });
   }, TIMEOUT_POLL_INTERVAL_MS);

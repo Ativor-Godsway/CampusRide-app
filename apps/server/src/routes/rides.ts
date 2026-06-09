@@ -49,13 +49,11 @@ const RIDER_CANCELLABLE_STATUSES: RideStatus[] = [
  * reconnects/reloads after the assignment sees the same shape.
  */
 async function getDriverInfo(prisma: PrismaClient, driverId: string) {
-  const driver = await prisma.user.findUnique({ where: { id: driverId }, include: { driver: true } });
+  const [driver, { _avg }] = await Promise.all([
+    prisma.user.findUnique({ where: { id: driverId }, include: { driver: true } }),
+    prisma.rating.aggregate({ where: { rateeId: driverId }, _avg: { stars: true } }),
+  ]);
   if (!driver) return null;
-
-  const { _avg } = await prisma.rating.aggregate({
-    where: { rateeId: driverId },
-    _avg: { stars: true },
-  });
 
   return {
     driverId: driver.id,
