@@ -8,7 +8,7 @@
     "@rida/shared": "*"
   },
   "devDependencies": {
-    "typescript": "~5.3.3"
+    "typescript": "~5.9.2"
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.40.0",
