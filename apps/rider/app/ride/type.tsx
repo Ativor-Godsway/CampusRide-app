@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Alert, Pressable, StyleSheet, View } from "react-native";
+import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import type { RideType } from "@rida/shared";
 import { getSharedFarePerRider, priceLoneRide } from "@rida/shared";
 import {
@@ -8,22 +8,32 @@ import {
   Badge,
   Button,
   Card,
+  CampusMapView,
   LoadingState,
   Screen,
   Text,
   colors,
   createRide,
   formatGhs,
+  radii,
+  regionForCoordinates,
   spacing,
 } from "@rida/mobile-shared";
 
 export default function RideTypeScreen() {
   const router = useRouter();
+  const { height: windowHeight } = useWindowDimensions();
+  const mapHeight = Math.round(windowHeight * 0.4);
+
   const params = useLocalSearchParams<{
     pickupZoneId: string;
     dropoffZoneId: string;
     pickupZoneName: string;
     dropoffZoneName: string;
+    pickupLat: string;
+    pickupLng: string;
+    dropoffLat: string;
+    dropoffLng: string;
   }>();
 
   const [selectedType, setSelectedType] = useState<RideType>("SHARED");
@@ -35,6 +45,28 @@ export default function RideTypeScreen() {
   }, []);
 
   const loneFare = useMemo(() => priceLoneRide().fare, []);
+
+  const pickupCoord = useMemo(
+    () => ({ latitude: Number(params.pickupLat), longitude: Number(params.pickupLng) }),
+    [params.pickupLat, params.pickupLng],
+  );
+  const dropoffCoord = useMemo(
+    () => ({ latitude: Number(params.dropoffLat), longitude: Number(params.dropoffLng) }),
+    [params.dropoffLat, params.dropoffLng],
+  );
+
+  const region = useMemo(
+    () => regionForCoordinates([pickupCoord, dropoffCoord], 0.8),
+    [pickupCoord, dropoffCoord],
+  );
+
+  const mapZones = useMemo(
+    () => [
+      { id: "pickup", ...pickupCoord, label: params.pickupZoneName, role: "pickup" as const },
+      { id: "dropoff", ...dropoffCoord, label: params.dropoffZoneName, role: "dropoff" as const },
+    ],
+    [pickupCoord, dropoffCoord, params.pickupZoneName, params.dropoffZoneName],
+  );
 
   async function handleSubmit() {
     if (!params.pickupZoneId || !params.dropoffZoneId) return;
@@ -72,61 +104,83 @@ export default function RideTypeScreen() {
   }
 
   return (
-    <Screen scroll>
-      <Text variant="h1">Choose your ride</Text>
+    <Screen scroll noPadding>
+      <CampusMapView
+        initialRegion={region}
+        zones={mapZones}
+        routeLine={[pickupCoord, dropoffCoord]}
+        height={mapHeight}
+        light
+        showRecenter
+        rounded={false}
+      />
 
-      <View style={styles.route}>
-        <Text variant="bodySmall" color="muted">
-          {params.pickupZoneName} → {params.dropoffZoneName}
-        </Text>
-      </View>
+      <View style={styles.sheet}>
+        <Text variant="h1">Choose your ride</Text>
 
-      <Pressable accessibilityRole="button" onPress={() => setSelectedType("SHARED")}>
-        <Card style={[styles.option, selectedType === "SHARED" && styles.optionSelected]}>
-          <View style={styles.optionHeader}>
-            <Text variant="h3">Shared</Text>
-            <Badge label="Recommended" variant="success" />
-          </View>
-          <Text variant="h2" color="primary" style={styles.price}>
-            {formatGhs(sharedRange.min)}–{formatGhs(sharedRange.max)}
-          </Text>
+        <View style={styles.route}>
           <Text variant="bodySmall" color="muted">
-            Share & save — the more riders join, the cheaper it gets for everyone. Final price
-            depends on how full the car is when it departs.
+            {params.pickupZoneName} → {params.dropoffZoneName}
           </Text>
-        </Card>
-      </Pressable>
+        </View>
 
-      <Pressable accessibilityRole="button" onPress={() => setSelectedType("LONE")}>
-        <Card style={[styles.option, selectedType === "LONE" && styles.optionSelected]}>
-          <View style={styles.optionHeader}>
-            <Text variant="h3">Ride alone</Text>
-          </View>
-          <Text variant="h2" style={styles.price}>
-            {formatGhs(loneFare)}
-          </Text>
-          <Text variant="bodySmall" color="muted">
-            Skip the wait for other riders — a car is dispatched just for you, leaving as soon as
-            it's matched.
-          </Text>
-        </Card>
-      </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => setSelectedType("SHARED")}>
+          <Card style={[styles.option, selectedType === "SHARED" && styles.optionSelected]}>
+            <View style={styles.optionHeader}>
+              <Text variant="h3">Shared</Text>
+              <Badge label="Recommended" variant="success" />
+            </View>
+            <Text variant="h2" color="primary" style={styles.price}>
+              {formatGhs(sharedRange.min)}–{formatGhs(sharedRange.max)}
+            </Text>
+            <Text variant="bodySmall" color="muted">
+              Share & save — the more riders join, the cheaper it gets for everyone. Final price
+              depends on how full the car is when it departs.
+            </Text>
+          </Card>
+        </Pressable>
 
-      <View style={styles.footer}>
-        {submitting ? (
-          <LoadingState message="Requesting your ride..." />
-        ) : (
-          <Button
-            label={selectedType === "SHARED" ? "Request shared ride" : "Request solo ride"}
-            onPress={() => void handleSubmit()}
-          />
-        )}
+        <Pressable accessibilityRole="button" onPress={() => setSelectedType("LONE")}>
+          <Card style={[styles.option, selectedType === "LONE" && styles.optionSelected]}>
+            <View style={styles.optionHeader}>
+              <Text variant="h3">Ride alone</Text>
+            </View>
+            <Text variant="h2" style={styles.price}>
+              {formatGhs(loneFare)}
+            </Text>
+            <Text variant="bodySmall" color="muted">
+              Skip the wait for other riders — a car is dispatched just for you, leaving as soon as
+              it's matched.
+            </Text>
+          </Card>
+        </Pressable>
+
+        <View style={styles.footer}>
+          {submitting ? (
+            <LoadingState message="Requesting your ride..." />
+          ) : (
+            <Button
+              label={selectedType === "SHARED" ? "Request shared ride" : "Request solo ride"}
+              onPress={() => void handleSubmit()}
+            />
+          )}
+        </View>
       </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  sheet: {
+    flexGrow: 1,
+    backgroundColor: colors.white,
+    borderTopLeftRadius: radii["2xl"],
+    borderTopRightRadius: radii["2xl"],
+    marginTop: -radii["2xl"],
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.xl,
+  },
   route: { marginTop: spacing.xs, marginBottom: spacing.xl },
   option: { marginBottom: spacing.lg, gap: spacing.sm, borderWidth: 2 },
   optionSelected: { borderColor: colors.primary[500] },

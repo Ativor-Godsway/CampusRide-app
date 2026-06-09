@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Alert, Pressable, StyleSheet, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import type { Zone } from "@rida/shared";
 import { nearestZone } from "@rida/shared";
 import {
   Badge,
   Button,
   Card,
-  CampusMapView,
   Input,
   LoadingState,
   Screen,
@@ -16,7 +16,6 @@ import {
   colors,
   getZones,
   radii,
-  regionForCoordinates,
   spacing,
   useCurrentLocation,
 } from "@rida/mobile-shared";
@@ -25,8 +24,6 @@ type ActiveField = "pickup" | "dropoff" | null;
 
 export default function LocationScreen() {
   const router = useRouter();
-  const { height: windowHeight } = useWindowDimensions();
-  const mapHeight = Math.round(windowHeight * 0.42);
   const { status: locationStatus, requestLocation } = useCurrentLocation();
 
   const { data: zones, isLoading, isError } = useQuery<Zone[]>({
@@ -38,9 +35,6 @@ export default function LocationScreen() {
   const [dropoffZoneId, setDropoffZoneId] = useState<string | null>(null);
   const [activeField, setActiveField] = useState<ActiveField>("pickup");
   const [search, setSearch] = useState("");
-  const [userCoords, setUserCoords] = useState<{ latitude: number; longitude: number } | null>(
-    null,
-  );
 
   const zoneList: Zone[] = zones ?? [];
 
@@ -52,11 +46,6 @@ export default function LocationScreen() {
 
   const pickupZone = pickupZoneId ? zoneById.get(pickupZoneId) ?? null : null;
   const dropoffZone = dropoffZoneId ? zoneById.get(dropoffZoneId) ?? null : null;
-
-  const initialRegion = useMemo(() => {
-    if (zoneList.length === 0) return null;
-    return regionForCoordinates(zoneList);
-  }, [zoneList]);
 
   const filteredZones = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -75,31 +64,18 @@ export default function LocationScreen() {
     setSearch("");
   }
 
-  function handleMapZonePress(zoneId: string) {
-    if (!pickupZoneId) {
-      setPickupZoneId(zoneId);
-      setActiveField(dropoffZoneId ? null : "dropoff");
-    } else if (!dropoffZoneId) {
-      setDropoffZoneId(zoneId);
-      setActiveField(null);
-    } else {
-      setDropoffZoneId(zoneId);
-    }
-  }
-
   async function handleUseMyLocation() {
     const coords = await requestLocation();
     if (!coords) {
       Alert.alert(
         "Location unavailable",
-        "We couldn't get your location. Pick your pickup spot from the map or list instead.",
+        "We couldn't get your location. Pick your pickup spot from the list instead.",
       );
       return;
     }
     if (zoneList.length === 0) return;
     const zone = nearestZone(coords.latitude, coords.longitude, zoneList);
     if (zone) {
-      setUserCoords(coords);
       setPickupZoneId(zone.id);
       setActiveField(dropoffZoneId ? null : "dropoff");
     }
@@ -119,6 +95,10 @@ export default function LocationScreen() {
         dropoffZoneId: dropoffZone.id,
         pickupZoneName: pickupZone.name,
         dropoffZoneName: dropoffZone.name,
+        pickupLat: String(pickupZone.latitude),
+        pickupLng: String(pickupZone.longitude),
+        dropoffLat: String(dropoffZone.latitude),
+        dropoffLng: String(dropoffZone.longitude),
       },
     });
   }
@@ -131,7 +111,7 @@ export default function LocationScreen() {
     );
   }
 
-  if (isError || !zones || !initialRegion) {
+  if (isError || !zones) {
     return (
       <Screen>
         <View style={styles.errorContent}>
@@ -149,56 +129,49 @@ export default function LocationScreen() {
     pickupZone && dropoffZone && pickupZone.id !== dropoffZone.id,
   );
 
-  const mapZones = zoneList.map((zone) => ({
-    id: zone.id,
-    latitude: zone.latitude,
-    longitude: zone.longitude,
-    label: zone.name,
-    role:
-      zone.id === pickupZoneId
-        ? ("pickup" as const)
-        : zone.id === dropoffZoneId
-          ? ("dropoff" as const)
-          : undefined,
-  }));
-
-  const mapPrompt = !pickupZone
-    ? "Tap a zone to set pickup"
-    : !dropoffZone
-      ? "Tap a zone to set dropoff"
-      : "Tap a pin to change your dropoff, or continue";
-
   return (
     <Screen scroll>
       <Text variant="h1">Plan your ride</Text>
       <Text variant="bodySmall" color="muted" style={styles.subtitle}>
-        {mapPrompt}
+        Choose where you're starting and where you're headed.
       </Text>
 
-      <View style={styles.mapWrapper}>
-        <CampusMapView
-          initialRegion={initialRegion}
-          zones={mapZones}
-          onZonePress={handleMapZonePress}
-          userLocation={userCoords}
-          height={mapHeight}
-        />
-      </View>
-
-      <View style={styles.fieldsRow}>
+      <Card dark style={styles.planCard}>
         <Pressable
           accessibilityRole="button"
           onPress={() => setActiveField("pickup")}
-          style={styles.fieldPressable}
+          style={[styles.fieldRow, activeField === "pickup" && styles.fieldRowActive]}
         >
-          <Card style={[styles.fieldCard, activeField === "pickup" && styles.fieldCardActive]}>
-            <Text variant="label" color="muted">
+          <View style={styles.markerCol}>
+            <View style={styles.pickupDot} />
+            <View style={styles.connector} />
+          </View>
+          <View style={styles.fieldTextCol}>
+            <Text variant="label" style={styles.fieldLabel}>
               PICKUP
             </Text>
-            <Text variant="bodyMedium" numberOfLines={1}>
+            <Text variant="bodyMedium" color="inverse" numberOfLines={1}>
               {pickupZone?.name ?? "Tap to select"}
             </Text>
-          </Card>
+          </View>
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => setActiveField("dropoff")}
+          style={[styles.fieldRow, activeField === "dropoff" && styles.fieldRowActive]}
+        >
+          <View style={styles.markerCol}>
+            <Ionicons name="location" size={16} color={colors.white} />
+          </View>
+          <View style={styles.fieldTextCol}>
+            <Text variant="label" style={styles.fieldLabel}>
+              DROPOFF
+            </Text>
+            <Text variant="bodyMedium" color="inverse" numberOfLines={1}>
+              {dropoffZone?.name ?? "Tap to select"}
+            </Text>
+          </View>
         </Pressable>
 
         <Pressable
@@ -207,24 +180,9 @@ export default function LocationScreen() {
           onPress={handleSwap}
           style={styles.swapButton}
         >
-          <Text variant="h3">⇄</Text>
+          <Ionicons name="swap-vertical" size={20} color={colors.white} />
         </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setActiveField("dropoff")}
-          style={styles.fieldPressable}
-        >
-          <Card style={[styles.fieldCard, activeField === "dropoff" && styles.fieldCardActive]}>
-            <Text variant="label" color="muted">
-              DROPOFF
-            </Text>
-            <Text variant="bodyMedium" numberOfLines={1}>
-              {dropoffZone?.name ?? "Tap to select"}
-            </Text>
-          </Card>
-        </Pressable>
-      </View>
+      </Card>
 
       <View style={styles.useLocationButton}>
         <Button
@@ -276,20 +234,55 @@ export default function LocationScreen() {
 
 const styles = StyleSheet.create({
   subtitle: { marginTop: spacing.xs, marginBottom: spacing.lg },
-  mapWrapper: { marginBottom: spacing.lg },
-  fieldsRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  fieldPressable: { flex: 1 },
-  fieldCard: { gap: 2 },
-  fieldCardActive: { borderColor: colors.primary[500] },
-  swapButton: {
-    width: 40,
-    height: 40,
+  planCard: { gap: 0, position: "relative" },
+  fieldRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radii.md,
+  },
+  fieldRowActive: {
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  markerCol: {
+    width: 20,
+    alignItems: "center",
+  },
+  pickupDot: {
+    width: 10,
+    height: 10,
     borderRadius: radii.full,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.primary[400],
+  },
+  connector: {
+    width: 1,
+    height: 24,
+    backgroundColor: colors.borderDark,
+    marginVertical: 4,
+  },
+  fieldTextCol: {
+    flex: 1,
+    gap: 2,
+    paddingRight: 44,
+  },
+  fieldLabel: {
+    color: "rgba(255,255,255,0.5)",
+  },
+  swapButton: {
+    position: "absolute",
+    right: spacing.sm,
+    top: "50%",
+    marginTop: -18,
+    width: 36,
+    height: 36,
+    borderRadius: radii.full,
+    backgroundColor: "rgba(255,255,255,0.12)",
     alignItems: "center",
     justifyContent: "center",
   },
-  useLocationButton: { marginTop: spacing.md },
+  useLocationButton: { marginTop: spacing.lg },
   pickerSection: { marginTop: spacing.lg },
   pickerLabel: { marginBottom: spacing.sm, letterSpacing: 1 },
   zoneList: { gap: spacing.sm },
