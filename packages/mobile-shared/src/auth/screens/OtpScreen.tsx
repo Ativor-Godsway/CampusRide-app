@@ -49,6 +49,7 @@ export function OtpScreen() {
           placeholder="000000"
           keyboardType="number-pad"
           maxLength={6}
+          doneAccessory
           value={code}
           onChangeText={setCode}
           error={error ?? undefined}

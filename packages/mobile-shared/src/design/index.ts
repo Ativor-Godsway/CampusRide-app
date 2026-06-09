@@ -8,5 +8,6 @@ export * from "./components/Screen";
 export * from "./components/LoadingState";
 export * from "./components/EmptyState";
 export * from "./components/ListRow";
+export * from "./components/ServiceIcon";
 export * from "./components/ProgressBar";
 export * from "./components/Sheet";

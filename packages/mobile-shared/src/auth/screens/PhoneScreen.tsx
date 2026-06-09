@@ -43,6 +43,7 @@ export function PhoneScreen() {
           placeholder="+233 ..."
           keyboardType="phone-pad"
           autoComplete="tel"
+          doneAccessory
           value={phone}
           onChangeText={setPhone}
           error={error ?? undefined}

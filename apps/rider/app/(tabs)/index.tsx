@@ -1,24 +1,39 @@
 import { useRouter } from "expo-router";
-import { Alert, StyleSheet, View } from "react-native";
+import { useQuery } from "@tanstack/react-query";
+import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  Button,
+  Badge,
   Card,
   ListRow,
   Screen,
+  ServiceIcon,
   Text,
   colors,
+  getMyRides,
+  radii,
   spacing,
   useAuth,
+  type RideSummary,
 } from "@rida/mobile-shared";
 
-/**
- * Home tab placeholder for R1 — keeps the verified "request a ride" flow
- * reachable while R2 builds the real Uber-style "Where to?" home screen.
- */
+/** Time-of-day greeting — label + a small Ionicons glyph for visual warmth. */
+function getGreeting(): { label: string; icon: keyof typeof Ionicons.glyphMap } {
+  const hour = new Date().getHours();
+  if (hour < 12) return { label: "Good morning", icon: "sunny-outline" };
+  if (hour < 17) return { label: "Good afternoon", icon: "partly-sunny-outline" };
+  return { label: "Good evening", icon: "moon-outline" };
+}
+
+/** Home tab — Bolt-style service grid + "Where to?" search bar + recent destinations. */
 export default function HomeTab() {
   const router = useRouter();
   const { user } = useAuth();
+  const { data: rides } = useQuery<RideSummary[]>({ queryKey: ["myRides"], queryFn: getMyRides });
+
+  const greeting = getGreeting();
+  const firstName = user?.name?.split(" ")[0] ?? "Rider";
+  const recentRides = (rides ?? []).slice(0, 3);
 
   const showComingSoon = (service: string) =>
     Alert.alert(`${service} is coming soon`, "We're working on it — check back in a future update.");
@@ -26,74 +41,175 @@ export default function HomeTab() {
   return (
     <Screen scroll>
       <View style={styles.header}>
-        <Text variant="bodySmall" color="muted">
-          Welcome back
-        </Text>
-        <Text variant="h1">{user?.name ?? "Rider"}</Text>
+        <View>
+          <View style={styles.greetingRow}>
+            <Ionicons name={greeting.icon} size={16} color={colors.accent[500]} />
+            <Text variant="bodySmall" color="muted">
+              {greeting.label}
+            </Text>
+          </View>
+          <Text variant="h1">{firstName}</Text>
+        </View>
+        <Pressable
+          onPress={() => router.push("/account")}
+          style={styles.avatar}
+          accessibilityRole="button"
+          accessibilityLabel="Account"
+        >
+          <Text variant="h3" color="inverse">
+            {firstName.charAt(0).toUpperCase()}
+          </Text>
+        </Pressable>
       </View>
 
-      <Card style={styles.heroCard}>
-        <View style={styles.heroIcon}>
-          <Ionicons name="navigate" size={24} color={colors.primary[600]} />
-        </View>
-        <Text variant="h2" style={styles.heroTitle}>
-          Where are you headed?
+      <View style={styles.grid}>
+        <Pressable style={styles.tilePressable} onPress={() => router.push("/ride/location")}>
+          <Card dark noPadding style={styles.tile}>
+            <ServiceIcon
+              name="car-sport"
+              color={colors.white}
+              background="rgba(255,255,255,0.14)"
+              size={48}
+            />
+            <Text variant="h3" color="inverse" style={styles.tileTitle}>
+              Rides
+            </Text>
+            <Text variant="bodySmall" style={styles.tileSubtitleDark}>
+              Around campus, in minutes
+            </Text>
+            <Badge label="Live" variant="success" style={styles.tileBadge} />
+          </Card>
+        </Pressable>
+
+        <Pressable style={styles.tilePressable} onPress={() => showComingSoon("Food delivery")}>
+          <Card noPadding style={styles.tile}>
+            <ServiceIcon name="fast-food-outline" color={colors.accent[600]} background={colors.accent[50]} size={48} />
+            <Text variant="h3" style={styles.tileTitle}>
+              Food
+            </Text>
+            <Text variant="bodySmall" color="muted">
+              Order from campus vendors
+            </Text>
+            <Badge label="Soon" variant="soon" style={styles.tileBadge} />
+          </Card>
+        </Pressable>
+
+        <Pressable style={styles.tilePressable} onPress={() => showComingSoon("Courier")}>
+          <Card noPadding style={styles.tile}>
+            <ServiceIcon name="cube-outline" color={colors.accent[600]} background={colors.accent[50]} size={48} />
+            <Text variant="h3" style={styles.tileTitle}>
+              Courier
+            </Text>
+            <Text variant="bodySmall" color="muted">
+              Send packages around campus
+            </Text>
+            <Badge label="Soon" variant="soon" style={styles.tileBadge} />
+          </Card>
+        </Pressable>
+      </View>
+
+      <Pressable
+        onPress={() => router.push("/ride/location")}
+        style={styles.searchBar}
+        accessibilityRole="button"
+        accessibilityLabel="Where to?"
+      >
+        <Ionicons name="search" size={20} color={colors.ink[400]} />
+        <Text variant="bodyMedium" color="muted" style={styles.searchLabel}>
+          Where to?
         </Text>
-        <Text variant="body" color="muted" style={styles.heroSubtitle}>
-          Request a shared or solo ride across campus in seconds.
-        </Text>
-        <Button label="Request a ride" onPress={() => router.push("/ride/location")} />
-      </Card>
+      </Pressable>
 
       <Text variant="label" color="muted" style={styles.sectionLabel}>
-        MORE SERVICES
+        RECENT DESTINATIONS
       </Text>
 
-      <Card>
-        <ListRow
-          title="Food"
-          subtitle="Order from campus vendors"
-          leading={<ListRow.Icon name="fast-food-outline" color={colors.accent[600]} background={colors.accent[50]} />}
-          onPress={() => showComingSoon("Food delivery")}
-          showChevron={false}
-          trailing={<Text variant="caption" color="muted">Soon</Text>}
-        />
-        <View style={styles.divider} />
-        <ListRow
-          title="Courier"
-          subtitle="Send packages around campus"
-          leading={<ListRow.Icon name="cube-outline" color={colors.accent[600]} background={colors.accent[50]} />}
-          onPress={() => showComingSoon("Courier")}
-          showChevron={false}
-          trailing={<Text variant="caption" color="muted">Soon</Text>}
-        />
-      </Card>
+      {recentRides.length > 0 ? (
+        <Card>
+          {recentRides.map((ride, index) => (
+            <View key={ride.id}>
+              <ListRow
+                title={ride.dropoffZone.name}
+                subtitle={ride.dropoffZone.quadrant}
+                leading={<ListRow.Icon name="time-outline" color={colors.ink[500]} background={colors.surfaceMuted} />}
+                showChevron={false}
+                onPress={() => router.push("/ride/location")}
+              />
+              {index < recentRides.length - 1 ? <View style={styles.divider} /> : null}
+            </View>
+          ))}
+        </Card>
+      ) : (
+        <Card style={styles.emptyRecents}>
+          <Text variant="bodySmall" color="muted">
+            Your recent trips will show here once you take your first ride.
+          </Text>
+        </Card>
+      )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
   header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: spacing.xl,
   },
-  heroCard: {
-    marginBottom: spacing["2xl"],
-    gap: spacing.sm,
+  greetingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    marginBottom: 2,
   },
-  heroIcon: {
+  avatar: {
     width: 44,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.primary[50],
+    borderRadius: radii.full,
+    backgroundColor: colors.primary[500],
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: spacing.xs,
   },
-  heroTitle: {
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  tilePressable: {
+    flexBasis: "47%",
+    flexGrow: 1,
+  },
+  tile: {
+    padding: spacing.lg,
+    minHeight: 150,
+    gap: spacing.xs,
+    justifyContent: "space-between",
+  },
+  tileTitle: {
+    marginTop: spacing.sm,
+  },
+  tileSubtitleDark: {
+    color: "rgba(255,255,255,0.7)",
+  },
+  tileBadge: {
     marginTop: spacing.xs,
   },
-  heroSubtitle: {
-    marginBottom: spacing.sm,
+  searchBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.lg,
+    minHeight: 52,
+    marginBottom: spacing["2xl"],
+  },
+  searchLabel: {
+    flex: 1,
   },
   sectionLabel: {
     marginBottom: spacing.md,
@@ -102,5 +218,8 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: colors.border,
     marginVertical: spacing.xs,
+  },
+  emptyRecents: {
+    alignItems: "center",
   },
 });
