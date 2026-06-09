@@ -8,27 +8,25 @@ import {
   Badge,
   Button,
   Card,
+  CampusMapView,
   Input,
   LoadingState,
-  MapboxStaticMap,
   Screen,
   Text,
   colors,
-  getMapboxToken,
   getZones,
   radii,
+  regionForCoordinates,
   spacing,
   useCurrentLocation,
 } from "@rida/mobile-shared";
 
 type ActiveField = "pickup" | "dropoff" | null;
 
-const MAP_HEIGHT = 220;
-
 export default function LocationScreen() {
   const router = useRouter();
-  const { width: windowWidth } = useWindowDimensions();
-  const mapboxToken = getMapboxToken();
+  const { height: windowHeight } = useWindowDimensions();
+  const mapHeight = Math.round(windowHeight * 0.42);
   const { status: locationStatus, requestLocation } = useCurrentLocation();
 
   const { data: zones, isLoading, isError } = useQuery<Zone[]>({
@@ -55,14 +53,10 @@ export default function LocationScreen() {
   const pickupZone = pickupZoneId ? zoneById.get(pickupZoneId) ?? null : null;
   const dropoffZone = dropoffZoneId ? zoneById.get(dropoffZoneId) ?? null : null;
 
-  const center = useMemo(() => {
+  const initialRegion = useMemo(() => {
     if (zoneList.length === 0) return null;
-    const latitude = zoneList.reduce((sum, z) => sum + z.latitude, 0) / zoneList.length;
-    const longitude = zoneList.reduce((sum, z) => sum + z.longitude, 0) / zoneList.length;
-    return { latitude, longitude };
+    return regionForCoordinates(zoneList);
   }, [zoneList]);
-
-  const mapWidth = windowWidth - spacing.xl * 2;
 
   const filteredZones = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -79,6 +73,18 @@ export default function LocationScreen() {
       setActiveField(dropoffZoneId ? null : "dropoff");
     }
     setSearch("");
+  }
+
+  function handleMapZonePress(zoneId: string) {
+    if (!pickupZoneId) {
+      setPickupZoneId(zoneId);
+      setActiveField(dropoffZoneId ? null : "dropoff");
+    } else if (!dropoffZoneId) {
+      setDropoffZoneId(zoneId);
+      setActiveField(null);
+    } else {
+      setDropoffZoneId(zoneId);
+    }
   }
 
   async function handleUseMyLocation() {
@@ -125,7 +131,7 @@ export default function LocationScreen() {
     );
   }
 
-  if (isError || !zones || !center) {
+  if (isError || !zones || !initialRegion) {
     return (
       <Screen>
         <View style={styles.errorContent}>
@@ -143,41 +149,41 @@ export default function LocationScreen() {
     pickupZone && dropoffZone && pickupZone.id !== dropoffZone.id,
   );
 
-  const markers = zoneList.map((zone) => ({
+  const mapZones = zoneList.map((zone) => ({
     id: zone.id,
     latitude: zone.latitude,
     longitude: zone.longitude,
     label: zone.name,
-    selected: zone.id === pickupZoneId || zone.id === dropoffZoneId,
+    role:
+      zone.id === pickupZoneId
+        ? ("pickup" as const)
+        : zone.id === dropoffZoneId
+          ? ("dropoff" as const)
+          : undefined,
   }));
+
+  const mapPrompt = !pickupZone
+    ? "Tap a zone to set pickup"
+    : !dropoffZone
+      ? "Tap a zone to set dropoff"
+      : "Tap a pin to change your dropoff, or continue";
 
   return (
     <Screen scroll>
       <Text variant="h1">Plan your ride</Text>
       <Text variant="bodySmall" color="muted" style={styles.subtitle}>
-        Choose where you're starting and where you're headed.
+        {mapPrompt}
       </Text>
 
-      {mapboxToken ? (
-        <View style={styles.mapWrapper}>
-          <MapboxStaticMap
-            accessToken={mapboxToken}
-            center={center}
-            width={mapWidth}
-            height={MAP_HEIGHT}
-            markers={markers}
-            userLocation={userCoords}
-            onMarkerPress={selectZone}
-          />
-        </View>
-      ) : (
-        <Card style={styles.mapFallback}>
-          <Text variant="bodySmall" color="muted">
-            Map preview unavailable — set EXPO_PUBLIC_MAPBOX_TOKEN to enable it. Use the list
-            below to choose zones.
-          </Text>
-        </Card>
-      )}
+      <View style={styles.mapWrapper}>
+        <CampusMapView
+          initialRegion={initialRegion}
+          zones={mapZones}
+          onZonePress={handleMapZonePress}
+          userLocation={userCoords}
+          height={mapHeight}
+        />
+      </View>
 
       <View style={styles.fieldsRow}>
         <Pressable
@@ -271,7 +277,6 @@ export default function LocationScreen() {
 const styles = StyleSheet.create({
   subtitle: { marginTop: spacing.xs, marginBottom: spacing.lg },
   mapWrapper: { marginBottom: spacing.lg },
-  mapFallback: { marginBottom: spacing.lg, backgroundColor: colors.surface },
   fieldsRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   fieldPressable: { flex: 1 },
   fieldCard: { gap: 2 },

@@ -54,3 +54,33 @@ export function projectToPixel(
     y: height / 2 + (pointY - centerY),
   };
 }
+
+export interface MapRegion extends LatLng {
+  latitudeDelta: number;
+  longitudeDelta: number;
+}
+
+/**
+ * A `react-native-maps` `Region` (center + zoom deltas) that frames every
+ * point in `points`, with a fractional `padding` added around the bounding
+ * box (e.g. `0.4` adds 40% extra span on each axis).
+ */
+export function regionForCoordinates(points: LatLng[], padding = 0.4): MapRegion {
+  const latitudes = points.map((p) => p.latitude);
+  const longitudes = points.map((p) => p.longitude);
+  const minLat = Math.min(...latitudes);
+  const maxLat = Math.max(...latitudes);
+  const minLng = Math.min(...longitudes);
+  const maxLng = Math.max(...longitudes);
+
+  const MIN_DELTA = 0.01;
+  const latitudeDelta = Math.max((maxLat - minLat) * (1 + padding), MIN_DELTA);
+  const longitudeDelta = Math.max((maxLng - minLng) * (1 + padding), MIN_DELTA);
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta,
+    longitudeDelta,
+  };
+}
