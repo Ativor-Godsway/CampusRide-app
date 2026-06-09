@@ -24,7 +24,9 @@
         {
           "locationWhenInUsePermission": "CampusRide uses your location to find the nearest pickup zone."
         }
-      ]
+      ],
+      "expo-asset",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true
