@@ -65,6 +65,17 @@ export async function getRide(rideId: string): Promise<GetRideResult> {
   return res.data;
 }
 
+export interface RideSummary extends Ride {
+  pickupZone: Zone;
+  dropoffZone: Zone;
+}
+
+/** The signed-in rider's past rides, newest first. */
+export async function getMyRides(): Promise<RideSummary[]> {
+  const res = await api.get<{ rides: RideSummary[] }>("/rides/mine");
+  return res.data.rides;
+}
+
 export async function submitRideDecision(rideId: string, action: RiderDecisionAction): Promise<Ride> {
   const res = await api.post<{ ride: Ride }>(`/rides/${rideId}/decision`, { action });
   return res.data.ride;

@@ -193,6 +193,61 @@ describe("GET /rides/:id", () => {
   });
 });
 
+describe("GET /rides/mine", () => {
+  it("requires auth", async () => {
+    const res = await app.inject({ method: "GET", url: "/rides/mine" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("returns only the requesting rider's rides, newest first, with zones", async () => {
+    const { token, rider } = await authedRider();
+    const { pickup, dropoff } = await getTestZones();
+
+    const olderRide = await prisma.ride.create({
+      data: {
+        riderId: rider.id,
+        type: "LONE",
+        status: "COMPLETED",
+        pickupZoneId: pickup.id,
+        dropoffZoneId: dropoff.id,
+        occupancy: 1,
+        createdAt: new Date(Date.now() - 60_000),
+      },
+    });
+
+    const newerRide = await prisma.ride.create({
+      data: {
+        riderId: rider.id,
+        type: "LONE",
+        status: "REQUESTED",
+        pickupZoneId: pickup.id,
+        dropoffZoneId: dropoff.id,
+        occupancy: 1,
+      },
+    });
+
+    const { ride: otherRiderRide } = await createTestRide({ type: "LONE", status: "REQUESTED" });
+    createdRideIds.push(otherRiderRide.id);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/rides/mine",
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    const ids = body.rides.map((r: { id: string }) => r.id);
+    expect(ids).toEqual([newerRide.id, olderRide.id]);
+    expect(ids).not.toContain(otherRiderRide.id);
+    expect(body.rides[0].pickupZone).toHaveProperty("latitude");
+    expect(body.rides[0].dropoffZone).toHaveProperty("latitude");
+
+    await prisma.ride.deleteMany({ where: { id: { in: [olderRide.id, newerRide.id] } } });
+    await prisma.user.delete({ where: { id: rider.id } });
+  });
+});
+
 describe("POST /rides/:id/decision", () => {
   it("requires auth", async () => {
     const res = await app.inject({ method: "POST", url: "/rides/nonexistent/decision", payload: {} });

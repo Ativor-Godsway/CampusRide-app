@@ -2,7 +2,7 @@ import { View, StyleSheet, type ViewProps } from "react-native";
 import { colors, radii, spacing } from "../tokens";
 import { Text } from "./Text";
 
-export type BadgeVariant = "default" | "soon" | "success" | "error" | "warning";
+export type BadgeVariant = "default" | "soon" | "success" | "error" | "warning" | "accent";
 
 export interface BadgeProps extends ViewProps {
   label: string;
@@ -50,5 +50,9 @@ const variantStyles: Record<BadgeVariant, { container: object; text: object }> =
   warning: {
     container: { backgroundColor: colors.warningSurface },
     text: { color: colors.warning },
+  },
+  accent: {
+    container: { backgroundColor: colors.accent[50] },
+    text: { color: colors.accent[600] },
   },
 };

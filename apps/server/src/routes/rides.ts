@@ -145,6 +145,19 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     return reply.code(201).send({ ride });
   });
 
+  app.get("/rides/mine", { preHandler: requireAuth }, async (request, reply) => {
+    const riderId = request.user!.userId;
+
+    const rides = await prisma.ride.findMany({
+      where: { riderId },
+      include: { pickupZone: true, dropoffZone: true },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
+
+    return reply.code(200).send({ rides });
+  });
+
   app.get("/rides/:id", { preHandler: requireAuth }, async (request, reply) => {
     const { id } = request.params as { id: string };
 

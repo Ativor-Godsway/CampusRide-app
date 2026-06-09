@@ -3,8 +3,9 @@ import { useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { useAuth } from "../AuthContext";
 import { verifyOtp, type OtpPurpose } from "../api";
-import { Button, Screen, Text, Input, spacing } from "../../design";
+import { Button, Screen, Text, Input, colors, radii, spacing } from "../../design";
 import { errorMessage } from "../errorMessage";
+import { AuthHero } from "./AuthHero";
 
 /** OTP entry — second step of the auth flow, shared by both apps. */
 export function OtpScreen() {
@@ -40,40 +41,36 @@ export function OtpScreen() {
   }
 
   return (
-    <Screen edges={["top", "bottom"]} style={styles.container}>
-      <View style={styles.intro}>
-        <Text variant="h1">Enter the code</Text>
-        <Text variant="body" color="muted" style={styles.subtitle}>
-          We sent a 6-digit code to {phone}
-        </Text>
+    <Screen scroll noPadding edges={["top"]}>
+      <AuthHero compact title="Verify your number" subtitle={`We sent a 6-digit code to ${phone}`} onBack={() => router.back()} />
+      <View style={styles.panel}>
+        <Input
+          label="Verification code"
+          placeholder="000000"
+          keyboardType="number-pad"
+          maxLength={6}
+          value={code}
+          onChangeText={setCode}
+          error={error ?? undefined}
+          style={styles.codeInput}
+        />
+
+        <Button label="Continue" loading={isSubmitting} onPress={() => void handleVerify()} />
       </View>
-
-      <Input
-        placeholder="000000"
-        keyboardType="number-pad"
-        maxLength={6}
-        value={code}
-        onChangeText={setCode}
-        error={error ?? undefined}
-        style={styles.codeInput}
-      />
-
-      <Button label="Continue" loading={isSubmitting} onPress={() => void handleVerify()} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    justifyContent: "center",
-  },
-  intro: {
-    marginBottom: spacing["3xl"],
-    alignItems: "center",
-  },
-  subtitle: {
-    marginTop: spacing.sm,
-    textAlign: "center",
+  panel: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderTopLeftRadius: radii["2xl"],
+    borderTopRightRadius: radii["2xl"],
+    marginTop: -radii["2xl"],
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing["2xl"],
+    paddingBottom: spacing.xl,
   },
   codeInput: {
     fontSize: 24,

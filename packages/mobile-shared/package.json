@@ -11,6 +11,7 @@
     "typescript": "~5.9.2"
   },
   "peerDependencies": {
+    "@expo/vector-icons": "*",
     "@tanstack/react-query": "^5.40.0",
     "axios": "^1.7.2",
     "expo-constants": "*",

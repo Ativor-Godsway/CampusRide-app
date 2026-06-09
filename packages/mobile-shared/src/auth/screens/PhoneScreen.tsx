@@ -2,8 +2,9 @@ import { useRouter } from "expo-router";
 import { useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { requestOtp } from "../api";
-import { Button, Screen, Text, Input, spacing } from "../../design";
+import { Button, Screen, Text, Input, colors, radii, spacing } from "../../design";
 import { errorMessage } from "../errorMessage";
+import { AuthHero } from "./AuthHero";
 
 /** Phone entry — start of the auth flow for both rider and driver apps. */
 export function PhoneScreen() {
@@ -31,51 +32,57 @@ export function PhoneScreen() {
   }
 
   return (
-    <Screen edges={["top", "bottom"]} style={styles.container}>
-      <View style={styles.intro}>
-        <Text variant="display" color="primary">
-          CampusRide
-        </Text>
-        <Text variant="body" color="muted" style={styles.subtitle}>
-          Enter your phone number to continue
-        </Text>
-      </View>
-
-      <Input
-        placeholder="+233 ..."
-        keyboardType="phone-pad"
-        autoComplete="tel"
-        value={phone}
-        onChangeText={setPhone}
-        error={error ?? undefined}
+    <Screen scroll noPadding edges={["top"]}>
+      <AuthHero
+        title="Campus rides, on demand"
+        subtitle="Fast, affordable trips around campus — book in seconds."
       />
-
-      <View style={styles.actions}>
-        <Button label="Log in" loading={isSubmitting} onPress={() => void handleContinue("LOGIN")} />
-        <Button
-          label="Sign up"
-          variant="secondary"
-          loading={isSubmitting}
-          onPress={() => void handleContinue("SIGNUP")}
+      <View style={styles.panel}>
+        <Input
+          label="Phone number"
+          placeholder="+233 ..."
+          keyboardType="phone-pad"
+          autoComplete="tel"
+          value={phone}
+          onChangeText={setPhone}
+          error={error ?? undefined}
         />
+
+        <View style={styles.actions}>
+          <Button label="Log in" loading={isSubmitting} onPress={() => void handleContinue("LOGIN")} />
+          <Button
+            label="Create an account"
+            variant="secondary"
+            loading={isSubmitting}
+            onPress={() => void handleContinue("SIGNUP")}
+          />
+        </View>
+
+        <Text variant="caption" color="muted" style={styles.disclaimer}>
+          By continuing you agree to CampusRide's terms and privacy policy.
+        </Text>
       </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    justifyContent: "center",
-  },
-  intro: {
-    marginBottom: spacing["3xl"],
-    alignItems: "center",
-  },
-  subtitle: {
-    marginTop: spacing.sm,
-    textAlign: "center",
+  panel: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderTopLeftRadius: radii["2xl"],
+    borderTopRightRadius: radii["2xl"],
+    marginTop: -radii["2xl"],
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing["2xl"],
+    paddingBottom: spacing.xl,
   },
   actions: {
     gap: spacing.md,
+    marginTop: spacing.sm,
+  },
+  disclaimer: {
+    marginTop: spacing.xl,
+    textAlign: "center",
   },
 });

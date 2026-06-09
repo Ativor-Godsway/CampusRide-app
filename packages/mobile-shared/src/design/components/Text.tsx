@@ -12,7 +12,7 @@ export type TextVariant =
   | "caption"
   | "label";
 
-export type TextColor = "default" | "muted" | "inverse" | "primary" | "error" | "success";
+export type TextColor = "default" | "muted" | "subtle" | "inverse" | "primary" | "accent" | "error" | "success";
 
 export interface TextComponentProps extends RNTextProps {
   variant?: TextVariant;
@@ -21,19 +21,22 @@ export interface TextComponentProps extends RNTextProps {
 
 const variantStyles = StyleSheet.create({
   display: {
-    fontSize: typography.size["4xl"],
-    fontWeight: typography.weight.bold,
-    lineHeight: typography.size["4xl"] * typography.lineHeight.tight,
+    fontSize: typography.size["5xl"],
+    fontWeight: typography.weight.extrabold,
+    lineHeight: typography.size["5xl"] * typography.lineHeight.tight,
+    letterSpacing: typography.letterSpacing.tighter,
   },
   h1: {
     fontSize: typography.size["3xl"],
     fontWeight: typography.weight.bold,
     lineHeight: typography.size["3xl"] * typography.lineHeight.tight,
+    letterSpacing: typography.letterSpacing.tight,
   },
   h2: {
     fontSize: typography.size["2xl"],
     fontWeight: typography.weight.bold,
     lineHeight: typography.size["2xl"] * typography.lineHeight.tight,
+    letterSpacing: typography.letterSpacing.tight,
   },
   h3: {
     fontSize: typography.size.xl,
@@ -64,14 +67,17 @@ const variantStyles = StyleSheet.create({
     fontSize: typography.size.sm,
     fontWeight: typography.weight.semibold,
     lineHeight: typography.size.sm * typography.lineHeight.normal,
+    letterSpacing: typography.letterSpacing.wide,
   },
 });
 
 const colorStyles: Record<TextColor, { color: string }> = {
   default: { color: colors.ink[900] },
   muted: { color: colors.ink[400] },
+  subtle: { color: colors.ink[300] },
   inverse: { color: colors.white },
   primary: { color: colors.primary[500] },
+  accent: { color: colors.accent[600] },
   error: { color: colors.error },
   success: { color: colors.success },
 };

@@ -4,6 +4,7 @@ import { Pressable, View, StyleSheet } from "react-native";
 import { useAuth } from "../AuthContext";
 import { Button, Screen, Text, Input, colors, radii, spacing, touchTarget } from "../../design";
 import { errorMessage } from "../errorMessage";
+import { AuthHero } from "./AuthHero";
 
 type SignupRole = "RIDER" | "DRIVER";
 
@@ -41,61 +42,73 @@ export function SignupScreen({ allowedRoles = ["RIDER", "DRIVER"] }: SignupScree
   }
 
   return (
-    <Screen edges={["top", "bottom"]} style={styles.container}>
-      <Text variant="h1" style={styles.title}>
-        Tell us about you
-      </Text>
+    <Screen scroll noPadding edges={["top"]}>
+      <AuthHero compact title="Tell us about you" subtitle="One more step before you're ready to ride" onBack={() => router.back()} />
+      <View style={styles.panel}>
+        <Input label="Full name" placeholder="Full name" autoComplete="name" value={name} onChangeText={setName} />
 
-      <Input placeholder="Full name" autoComplete="name" value={name} onChangeText={setName} />
+        {allowedRoles.length > 1 ? (
+          <View style={styles.roleSection}>
+            <Text variant="label" color="muted" style={styles.roleLabel}>
+              I am a...
+            </Text>
+            <View style={styles.roleRow}>
+              {allowedRoles.map((option) => {
+                const selected = role === option;
+                return (
+                  <Pressable
+                    key={option}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    style={[styles.roleButton, selected && styles.roleButtonSelected]}
+                    onPress={() => setRole(option)}
+                  >
+                    <Text variant="bodyMedium" color={selected ? "inverse" : "default"}>
+                      {option === "RIDER" ? "Rider" : "Driver"}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
 
-      {allowedRoles.length > 1 ? (
-        <View style={styles.roleRow}>
-          {allowedRoles.map((option) => {
-            const selected = role === option;
-            return (
-              <Pressable
-                key={option}
-                accessibilityRole="button"
-                accessibilityState={{ selected }}
-                style={[styles.roleButton, selected && styles.roleButtonSelected]}
-                onPress={() => setRole(option)}
-              >
-                <Text variant="bodyMedium" color={selected ? "inverse" : "default"}>
-                  {option === "RIDER" ? "Rider" : "Driver"}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
+        {error ? (
+          <Text variant="bodySmall" color="error" style={styles.error}>
+            {error}
+          </Text>
+        ) : null}
 
-      {error ? (
-        <Text variant="bodySmall" color="error" style={styles.error}>
-          {error}
-        </Text>
-      ) : null}
-
-      <Button label="Finish" loading={isSubmitting} onPress={() => void handleSubmit()} />
+        <Button label="Finish" loading={isSubmitting} onPress={() => void handleSubmit()} />
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    justifyContent: "center",
+  panel: {
+    flex: 1,
+    backgroundColor: colors.white,
+    borderTopLeftRadius: radii["2xl"],
+    borderTopRightRadius: radii["2xl"],
+    marginTop: -radii["2xl"],
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing["2xl"],
+    paddingBottom: spacing.xl,
   },
-  title: {
-    marginBottom: spacing.xl,
-    textAlign: "center",
+  roleSection: {
+    marginBottom: spacing.lg,
+  },
+  roleLabel: {
+    marginBottom: spacing.sm,
   },
   roleRow: {
     flexDirection: "row",
     gap: spacing.md,
-    marginBottom: spacing.lg,
   },
   roleButton: {
     flex: 1,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.border,
     borderRadius: radii.md,
     minHeight: touchTarget.minHeight,

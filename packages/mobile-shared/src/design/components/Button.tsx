@@ -1,5 +1,5 @@
 import { ActivityIndicator, Pressable, StyleSheet, type PressableProps } from "react-native";
-import { colors, radii, spacing, touchTarget } from "../tokens";
+import { colors, radii, shadows, spacing, touchTarget } from "../tokens";
 import { Text } from "./Text";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -87,8 +87,8 @@ const sizeStyles = StyleSheet.create({
 });
 
 const variantStyles = StyleSheet.create({
-  primary: { backgroundColor: colors.primary[500] },
-  secondary: { backgroundColor: colors.white, borderWidth: 1, borderColor: colors.primary[500] },
+  primary: { backgroundColor: colors.primary[500], ...shadows.sm },
+  secondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.primary[500] },
   ghost: { backgroundColor: "transparent" },
-  danger: { backgroundColor: colors.error },
+  danger: { backgroundColor: colors.error, ...shadows.sm },
 });
