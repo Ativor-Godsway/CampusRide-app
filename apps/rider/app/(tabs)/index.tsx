@@ -63,47 +63,49 @@ export default function HomeTab() {
       </View>
 
       <View style={styles.grid}>
-        <Pressable style={styles.tilePressable} onPress={() => router.push("/ride/location")}>
-          <Card dark noPadding style={styles.tile}>
-            <ServiceIcon
-              name="car-sport"
-              color={colors.white}
-              background="rgba(255,255,255,0.14)"
-              size={48}
-            />
-            <Text variant="h3" color="inverse" style={styles.tileTitle}>
-              Rides
-            </Text>
-            <Text variant="bodySmall" style={styles.tileSubtitleDark}>
-              Around campus, in minutes
-            </Text>
-            <Badge label="Live" variant="success" style={styles.tileBadge} />
-          </Card>
-        </Pressable>
+        <View style={styles.gridRow}>
+          <Pressable style={styles.gridCell} onPress={() => router.push("/ride/location")}>
+            <Card dark noPadding style={styles.tile}>
+              <ServiceIcon
+                name="car-sport"
+                color={colors.white}
+                background="rgba(255,255,255,0.14)"
+                size={48}
+              />
+              <Text variant="h3" color="inverse" style={styles.tileTitle}>
+                Rides
+              </Text>
+              <Text variant="bodySmall" style={styles.tileSubtitleDark} numberOfLines={2}>
+                Around campus, in minutes
+              </Text>
+              <Badge label="Live" variant="success" style={styles.tileBadge} />
+            </Card>
+          </Pressable>
 
-        <Pressable style={styles.tilePressable} onPress={() => showComingSoon("Food delivery")}>
-          <Card noPadding style={styles.tile}>
-            <ServiceIcon name="fast-food-outline" color={colors.accent[600]} background={colors.accent[50]} size={48} />
-            <Text variant="h3" style={styles.tileTitle}>
-              Food
-            </Text>
-            <Text variant="bodySmall" color="muted">
-              Order from campus vendors
-            </Text>
-            <Badge label="Soon" variant="soon" style={styles.tileBadge} />
-          </Card>
-        </Pressable>
+          <Pressable style={styles.gridCell} onPress={() => showComingSoon("Food delivery")}>
+            <Card noPadding style={styles.tile}>
+              <ServiceIcon name="fast-food-outline" color={colors.accent[600]} background={colors.accent[50]} size={48} />
+              <Text variant="h3" style={styles.tileTitle}>
+                Food
+              </Text>
+              <Text variant="bodySmall" color="muted" numberOfLines={2}>
+                Order from campus vendors
+              </Text>
+              <Badge label="Soon" variant="soon" style={styles.tileBadge} />
+            </Card>
+          </Pressable>
+        </View>
 
-        <Pressable style={styles.tilePressable} onPress={() => showComingSoon("Courier")}>
-          <Card noPadding style={styles.tile}>
+        <Pressable onPress={() => showComingSoon("Courier")}>
+          <Card noPadding style={styles.fullTile}>
             <ServiceIcon name="cube-outline" color={colors.accent[600]} background={colors.accent[50]} size={48} />
-            <Text variant="h3" style={styles.tileTitle}>
-              Courier
-            </Text>
-            <Text variant="bodySmall" color="muted">
-              Send packages around campus
-            </Text>
-            <Badge label="Soon" variant="soon" style={styles.tileBadge} />
+            <View style={styles.fullTileBody}>
+              <Text variant="h3">Courier</Text>
+              <Text variant="bodySmall" color="muted">
+                Send packages around campus
+              </Text>
+            </View>
+            <Badge label="Soon" variant="soon" />
           </Card>
         </Pressable>
       </View>
@@ -172,16 +174,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.md,
     marginBottom: spacing.lg,
   },
-  tilePressable: {
-    flexBasis: "47%",
-    flexGrow: 1,
+  gridRow: {
+    flexDirection: "row",
+    gap: spacing.md,
+    marginBottom: spacing.md,
+  },
+  gridCell: {
+    flex: 1,
   },
   tile: {
+    flex: 1,
     padding: spacing.lg,
     minHeight: 150,
     gap: spacing.xs,
@@ -195,6 +199,16 @@ const styles = StyleSheet.create({
   },
   tileBadge: {
     marginTop: spacing.xs,
+  },
+  fullTile: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  fullTileBody: {
+    flex: 1,
+    gap: 2,
   },
   searchBar: {
     flexDirection: "row",

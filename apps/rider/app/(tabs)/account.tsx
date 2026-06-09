@@ -29,7 +29,7 @@ export default function AccountTab() {
     Alert.alert(`${label} is coming soon`, "We're working on it — check back in a future update.");
 
   return (
-    <Screen scroll>
+    <Screen scroll style={styles.content}>
       <View style={styles.header}>
         <View style={styles.avatar}>
           <Text variant="h2" color="inverse">
@@ -105,6 +105,9 @@ export default function AccountTab() {
 }
 
 const styles = StyleSheet.create({
+  content: {
+    paddingBottom: spacing["4xl"],
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
