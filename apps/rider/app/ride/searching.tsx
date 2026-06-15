@@ -1,17 +1,21 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import {
   Badge,
   Button,
   Card,
+  CampusMapView,
+  type CampusMapZone,
   LoadingState,
-  MapboxStaticMap,
+  ProgressBar,
   Screen,
   Text,
   cancelRide,
   colors,
-  getMapboxToken,
+  radii,
+  regionForCoordinates,
   spacing,
   submitRating,
   submitRideDecision,
@@ -20,11 +24,9 @@ import {
   type RideDriverInfo,
 } from "@rida/mobile-shared";
 
-type MapMarker = { id: string; latitude: number; longitude: number; label?: string; selected?: boolean };
-
 const DUMMY_ETA_MINUTES = 4;
-const MAP_HEIGHT = 220;
 const STARS = [1, 2, 3, 4, 5];
+const BROADCAST_WINDOW_MS = 90_000;
 
 export default function SearchingScreen() {
   const router = useRouter();
@@ -36,9 +38,7 @@ export default function SearchingScreen() {
     priceLabel: string;
   }>();
 
-  const { width: windowWidth } = useWindowDimensions();
-  const mapboxToken = getMapboxToken();
-  const mapWidth = windowWidth - spacing.xl * 2;
+  const { height: windowHeight } = useWindowDimensions();
 
   const { data, isLoading } = useRideTracking(params.rideId);
   const [driverLocation, setDriverLocation] = useState<{ latitude: number; longitude: number } | null>(
@@ -46,6 +46,7 @@ export default function SearchingScreen() {
   );
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   useDriverLocation(params.rideId, (payload) => {
     setDriverLocation({ latitude: payload.lat, longitude: payload.lng });
@@ -54,25 +55,46 @@ export default function SearchingScreen() {
   const ride = data?.ride;
   const driver = data?.driver;
 
-  const center = useMemo(() => {
-    if (!ride) return null;
-    return {
-      latitude: (ride.pickupZone.latitude + ride.dropoffZone.latitude) / 2,
-      longitude: (ride.pickupZone.longitude + ride.dropoffZone.longitude) / 2,
-    };
-  }, [ride]);
+  useEffect(() => {
+    if (ride?.status !== "REQUESTED") return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [ride?.status]);
 
-  const markers = useMemo(() => {
-    if (!ride) return [];
-    const list = [
-      { id: "pickup", latitude: ride.pickupZone.latitude, longitude: ride.pickupZone.longitude, label: "Pickup" },
-      { id: "dropoff", latitude: ride.dropoffZone.latitude, longitude: ride.dropoffZone.longitude, label: "Dropoff", selected: true },
+  const pickupCoord = useMemo(
+    () => (ride ? { latitude: ride.pickupZone.latitude, longitude: ride.pickupZone.longitude } : null),
+    [ride],
+  );
+  const dropoffCoord = useMemo(
+    () => (ride ? { latitude: ride.dropoffZone.latitude, longitude: ride.dropoffZone.longitude } : null),
+    [ride],
+  );
+
+  const region = useMemo(() => {
+    if (!pickupCoord || !dropoffCoord) return null;
+    const points = [pickupCoord, dropoffCoord];
+    if (driverLocation) points.push(driverLocation);
+    return regionForCoordinates(points, 0.8);
+  }, [pickupCoord, dropoffCoord, driverLocation]);
+
+  const mapZones = useMemo(() => {
+    if (!pickupCoord || !dropoffCoord) return [];
+    const zones: CampusMapZone[] = [
+      { id: "pickup", ...pickupCoord, label: params.pickupZoneName, role: "pickup" },
+      { id: "dropoff", ...dropoffCoord, label: params.dropoffZoneName, role: "dropoff" },
     ];
     if (driverLocation) {
-      list.push({ id: "driver", ...driverLocation, label: "Driver" });
+      zones.push({ id: "driver", ...driverLocation, label: "Driver" });
     }
-    return list;
-  }, [ride, driverLocation]);
+    return zones;
+  }, [pickupCoord, dropoffCoord, driverLocation, params.pickupZoneName, params.dropoffZoneName]);
+
+  const searchProgress = useMemo(() => {
+    if (!ride?.broadcastStartedAt) return 1;
+    const start = new Date(ride.broadcastStartedAt).getTime();
+    const elapsed = now - start;
+    return Math.max(0, Math.min(1, 1 - elapsed / BROADCAST_WINDOW_MS));
+  }, [ride?.broadcastStartedAt, now]);
 
   async function handleDecision(action: "KEEP_WAITING" | "SWITCH_TO_LONE" | "CANCEL") {
     if (!params.rideId) return;
@@ -102,7 +124,7 @@ export default function SearchingScreen() {
     }
   }
 
-  if (isLoading || !ride) {
+  if (isLoading || !ride || !region || !pickupCoord || !dropoffCoord) {
     return (
       <Screen>
         <LoadingState message="Loading your ride..." />
@@ -110,111 +132,126 @@ export default function SearchingScreen() {
     );
   }
 
+  const canSwitchToLone = ride.type === "SHARED" && ride.occupancy === 1;
+
   return (
-    <Screen scroll>
-      {ride.status === "REQUESTED" && (
-        <SearchingState
-          pickupZoneName={params.pickupZoneName}
-          dropoffZoneName={params.dropoffZoneName}
-          priceLabel={params.priceLabel}
-          type={params.type}
-          onCancel={() => void handleCancel()}
-          cancelling={cancelling}
-        />
-      )}
+    <View style={styles.container}>
+      <CampusMapView
+        initialRegion={region}
+        zones={mapZones}
+        routeLine={[pickupCoord, dropoffCoord]}
+        height={windowHeight}
+        light
+        showRecenter
+        rounded={false}
+      />
 
-      {ride.status === "AWAITING_RIDER_DECISION" && (
-        <DecisionState
-          canSwitchToLone={ride.type === "SHARED" && ride.occupancy === 1}
-          submitting={decisionSubmitting}
-          onAction={(action) => void handleDecision(action)}
-        />
-      )}
+      <BottomSheet
+        snapPoints={["40%", "85%"]}
+        index={0}
+        backgroundStyle={styles.sheetBackground}
+        handleIndicatorStyle={styles.sheetHandle}
+      >
+        <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
+          {ride.status === "REQUESTED" && (
+            <SearchingContent
+              pickupZoneName={params.pickupZoneName}
+              dropoffZoneName={params.dropoffZoneName}
+              priceLabel={params.priceLabel}
+              rideType={params.type}
+              progress={searchProgress}
+              canSwitchToLone={canSwitchToLone}
+              onSwitchToLone={() => void handleDecision("SWITCH_TO_LONE")}
+              switching={decisionSubmitting}
+              onCancel={() => void handleCancel()}
+              cancelling={cancelling}
+            />
+          )}
 
-      {(ride.status === "MATCHED" || ride.status === "ARRIVED") && driver && (
-        <DriverEnRouteState
-          status={ride.status}
-          driver={driver}
-          center={center}
-          markers={markers}
-          mapWidth={mapWidth}
-          mapboxToken={mapboxToken}
-          hasLocation={!!driverLocation}
-          onCancel={() => void handleCancel()}
-          cancelling={cancelling}
-        />
-      )}
+          {ride.status === "AWAITING_RIDER_DECISION" && (
+            <NoDriverContent
+              canSwitchToLone={canSwitchToLone}
+              submitting={decisionSubmitting}
+              onAction={(action) => void handleDecision(action)}
+            />
+          )}
 
-      {ride.status === "IN_PROGRESS" && driver && (
-        <InProgressState
-          driver={driver}
-          center={center}
-          markers={markers}
-          mapWidth={mapWidth}
-          mapboxToken={mapboxToken}
-          dropoffZoneName={params.dropoffZoneName}
-        />
-      )}
+          {(ride.status === "MATCHED" || ride.status === "ARRIVED") && driver && (
+            <DriverFoundContent
+              status={ride.status}
+              driver={driver}
+              hasLocation={!!driverLocation}
+              onCancel={() => void handleCancel()}
+              cancelling={cancelling}
+            />
+          )}
 
-      {ride.status === "COMPLETED" && (
-        <CompletedState
-          rideId={ride.id}
-          fareSummary={data?.fareSummary}
-          onDone={() => router.replace("/")}
-        />
-      )}
+          {ride.status === "IN_PROGRESS" && driver && (
+            <InProgressContent driver={driver} dropoffZoneName={params.dropoffZoneName} />
+          )}
 
-      {ride.status === "CANCELLED" && (
-        <View style={styles.center}>
-          <Text variant="h1" style={styles.centerTitle}>
-            Ride cancelled
-          </Text>
-          <Button label="Back to home" variant="secondary" onPress={() => router.replace("/")} />
-        </View>
-      )}
-    </Screen>
+          {ride.status === "COMPLETED" && (
+            <CompletedContent
+              rideId={ride.id}
+              fareSummary={data?.fareSummary}
+              onDone={() => router.replace("/")}
+            />
+          )}
+
+          {ride.status === "CANCELLED" && (
+            <View style={styles.cancelledContent}>
+              <Text variant="h1" style={styles.centerTitle}>
+                Ride cancelled
+              </Text>
+              <Button label="Back to home" variant="secondary" onPress={() => router.replace("/")} />
+            </View>
+          )}
+        </BottomSheetScrollView>
+      </BottomSheet>
+    </View>
   );
 }
 
-function SearchingState({
+function SearchingContent({
   pickupZoneName,
   dropoffZoneName,
   priceLabel,
-  type,
+  rideType,
+  progress,
+  canSwitchToLone,
+  onSwitchToLone,
+  switching,
   onCancel,
   cancelling,
 }: {
   pickupZoneName: string;
   dropoffZoneName: string;
   priceLabel: string;
-  type: string;
+  rideType: string;
+  progress: number;
+  canSwitchToLone: boolean;
+  onSwitchToLone: () => void;
+  switching: boolean;
   onCancel: () => void;
   cancelling: boolean;
 }) {
   return (
-    <View style={styles.content}>
-      <ActivityIndicator size="large" color={colors.primary[500]} />
-      <Text variant="h1" style={styles.title}>
-        Searching for a driver...
+    <View style={styles.section}>
+      <Text variant="h1">Finding your driver</Text>
+      <Text variant="bodySmall" color="muted" style={styles.route}>
+        {pickupZoneName} → {dropoffZoneName}
       </Text>
-      <Text variant="body" color="muted" style={styles.subtitle}>
-        We'll match you with a nearby driver. This usually takes a minute or two.
-      </Text>
+
+      <View style={styles.progressWrap}>
+        <ProgressBar progress={progress} />
+      </View>
 
       <Card style={styles.summary}>
         <View style={styles.summaryRow}>
           <Text variant="label" color="muted">
-            ROUTE
-          </Text>
-          <Text variant="bodyMedium">
-            {pickupZoneName} → {dropoffZoneName}
-          </Text>
-        </View>
-        <View style={styles.summaryRow}>
-          <Text variant="label" color="muted">
             RIDE TYPE
           </Text>
-          <Text variant="bodyMedium">{type === "SHARED" ? "Shared" : "Lone"}</Text>
+          <Text variant="bodyMedium">{rideType === "SHARED" ? "Shared" : "Lone"}</Text>
         </View>
         <View style={styles.summaryRow}>
           <Text variant="label" color="muted">
@@ -224,12 +261,17 @@ function SearchingState({
         </View>
       </Card>
 
-      <Button label="Cancel request" variant="secondary" onPress={onCancel} loading={cancelling} />
+      <View style={styles.buttonGroup}>
+        {canSwitchToLone && (
+          <Button label="Switch to Lone" variant="secondary" onPress={onSwitchToLone} loading={switching} />
+        )}
+        <Button label="Cancel request" variant="ghost" onPress={onCancel} loading={cancelling} />
+      </View>
     </View>
   );
 }
 
-function DecisionState({
+function NoDriverContent({
   canSwitchToLone,
   submitting,
   onAction,
@@ -239,25 +281,19 @@ function DecisionState({
   onAction: (action: "KEEP_WAITING" | "SWITCH_TO_LONE" | "CANCEL") => void;
 }) {
   return (
-    <View style={styles.content}>
-      <Text variant="h1" style={styles.title}>
-        Still looking...
-      </Text>
-      <Text variant="body" color="muted" style={styles.subtitle}>
-        We haven't found a driver yet. You can keep waiting, switch to a solo ride, or cancel.
+    <View style={styles.section}>
+      <Text variant="h1">No driver found</Text>
+      <Text variant="body" color="muted">
+        We couldn't find a driver in time. You can search again, switch to a solo ride, or cancel.
       </Text>
 
       {submitting ? (
         <LoadingState message="Updating your ride..." />
       ) : (
-        <View style={styles.decisionButtons}>
-          <Button label="Keep waiting" onPress={() => onAction("KEEP_WAITING")} />
+        <View style={styles.buttonGroup}>
+          <Button label="Search again" onPress={() => onAction("KEEP_WAITING")} />
           {canSwitchToLone && (
-            <Button
-              label="Switch to solo ride"
-              variant="secondary"
-              onPress={() => onAction("SWITCH_TO_LONE")}
-            />
+            <Button label="Switch to Lone" variant="secondary" onPress={() => onAction("SWITCH_TO_LONE")} />
           )}
           <Button label="Cancel ride" variant="danger" onPress={() => onAction("CANCEL")} />
         </View>
@@ -288,107 +324,60 @@ function DriverCard({ driver }: { driver: RideDriverInfo }) {
   );
 }
 
-function MapBlock({
-  mapboxToken,
-  center,
-  markers,
-  mapWidth,
-}: {
-  mapboxToken: string | undefined;
-  center: { latitude: number; longitude: number } | null;
-  markers: MapMarker[];
-  mapWidth: number;
-}) {
-  if (!mapboxToken || !center) return null;
-  return (
-    <View style={styles.mapWrapper}>
-      <MapboxStaticMap
-        accessToken={mapboxToken}
-        center={center}
-        width={mapWidth}
-        height={MAP_HEIGHT}
-        markers={markers}
-      />
-    </View>
-  );
-}
-
-function DriverEnRouteState({
+function DriverFoundContent({
   status,
   driver,
-  center,
-  markers,
-  mapWidth,
-  mapboxToken,
   hasLocation,
   onCancel,
   cancelling,
 }: {
   status: "MATCHED" | "ARRIVED";
   driver: RideDriverInfo;
-  center: { latitude: number; longitude: number } | null;
-  markers: MapMarker[];
-  mapWidth: number;
-  mapboxToken: string | undefined;
   hasLocation: boolean;
   onCancel: () => void;
   cancelling: boolean;
 }) {
   return (
-    <View style={styles.content}>
-      <Text variant="h1" style={styles.title}>
-        {status === "ARRIVED" ? "Your driver is here" : "Driver on the way"}
-      </Text>
+    <View style={styles.section}>
+      <Text variant="h1">{status === "ARRIVED" ? "Your driver is here" : "Driver on the way"}</Text>
       {status === "MATCHED" && (
-        <Text variant="body" color="muted" style={styles.subtitle}>
+        <Text variant="body" color="muted">
           {hasLocation ? `Your driver is about ${DUMMY_ETA_MINUTES} min away.` : "Your driver is getting ready."}
         </Text>
       )}
       {status === "ARRIVED" && (
-        <Text variant="body" color="muted" style={styles.subtitle}>
+        <Text variant="body" color="muted">
           Head to your pickup point — your driver is waiting.
         </Text>
       )}
 
       <DriverCard driver={driver} />
-      <MapBlock mapboxToken={mapboxToken} center={center} markers={markers} mapWidth={mapWidth} />
 
       <Button label="Cancel ride" variant="secondary" onPress={onCancel} loading={cancelling} />
     </View>
   );
 }
 
-function InProgressState({
+function InProgressContent({
   driver,
-  center,
-  markers,
-  mapWidth,
-  mapboxToken,
   dropoffZoneName,
 }: {
   driver: RideDriverInfo;
-  center: { latitude: number; longitude: number } | null;
-  markers: MapMarker[];
-  mapWidth: number;
-  mapboxToken: string | undefined;
   dropoffZoneName: string;
 }) {
   return (
-    <View style={styles.content}>
-      <Text variant="h1" style={styles.title}>
-        On your way
-      </Text>
-      <Text variant="body" color="muted" style={styles.subtitle}>
-        Heading to {dropoffZoneName}.
+    <View style={styles.section}>
+      <Text variant="h1">On your way</Text>
+      <Text variant="body" color="muted">
+        Heading to {dropoffZoneName} · about {DUMMY_ETA_MINUTES} min away.
       </Text>
 
       <DriverCard driver={driver} />
-      <MapBlock mapboxToken={mapboxToken} center={center} markers={markers} mapWidth={mapWidth} />
     </View>
   );
 }
 
-function CompletedState({
+function CompletedContent({
   rideId,
   fareSummary,
   onDone,
@@ -415,10 +404,8 @@ function CompletedState({
   }
 
   return (
-    <View style={styles.content}>
-      <Text variant="h1" style={styles.title}>
-        Ride completed
-      </Text>
+    <View style={styles.section}>
+      <Text variant="h1">Ride completed</Text>
 
       {fareSummary && (
         <Card style={styles.summary}>
@@ -433,9 +420,7 @@ function CompletedState({
 
       {!submitted ? (
         <>
-          <Text variant="bodyMedium" style={styles.subtitle}>
-            Rate your driver
-          </Text>
+          <Text variant="bodyMedium">Rate your driver</Text>
           <View style={styles.starsRow}>
             {STARS.map((value) => (
               <Pressable key={value} accessibilityRole="button" onPress={() => setStars(value)}>
@@ -445,17 +430,19 @@ function CompletedState({
               </Pressable>
             ))}
           </View>
-          <Button
-            label="Submit rating"
-            onPress={() => void handleSubmitRating()}
-            loading={submitting}
-            disabled={stars === 0}
-          />
-          <Button label="Skip" variant="ghost" onPress={onDone} />
+          <View style={styles.buttonGroup}>
+            <Button
+              label="Submit rating"
+              onPress={() => void handleSubmitRating()}
+              loading={submitting}
+              disabled={stars === 0}
+            />
+            <Button label="Skip" variant="ghost" onPress={onDone} />
+          </View>
         </>
       ) : (
         <>
-          <Text variant="body" color="muted" style={styles.subtitle}>
+          <Text variant="body" color="muted">
             Thanks for rating your driver!
           </Text>
           <Button label="Back to home" onPress={onDone} />
@@ -466,16 +453,30 @@ function CompletedState({
 }
 
 const styles = StyleSheet.create({
-  content: { flex: 1, justifyContent: "center", alignItems: "center", gap: spacing.md },
-  center: { flex: 1, justifyContent: "center", alignItems: "center", gap: spacing.lg },
-  centerTitle: { textAlign: "center" },
-  title: { textAlign: "center", marginTop: spacing.lg },
-  subtitle: { textAlign: "center", marginBottom: spacing.lg },
-  summary: { width: "100%", gap: spacing.md, marginBottom: spacing.xl },
+  container: { flex: 1 },
+  sheetBackground: {
+    backgroundColor: colors.white,
+    borderTopLeftRadius: radii["2xl"],
+    borderTopRightRadius: radii["2xl"],
+  },
+  sheetHandle: {
+    backgroundColor: colors.border,
+    width: 40,
+  },
+  sheetContent: {
+    paddingHorizontal: spacing.xl,
+    paddingBottom: spacing.xl,
+    gap: spacing.lg,
+  },
+  section: { gap: spacing.md },
+  route: { marginTop: -spacing.xs },
+  progressWrap: { marginVertical: spacing.xs },
+  summary: { gap: spacing.md },
   summaryRow: { gap: spacing.xs },
-  decisionButtons: { width: "100%", gap: spacing.md },
-  driverCard: { width: "100%", gap: spacing.xs },
+  buttonGroup: { gap: spacing.md, marginTop: spacing.sm },
+  driverCard: { gap: spacing.xs },
   driverHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  mapWrapper: { width: "100%", marginVertical: spacing.lg },
-  starsRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.lg },
+  starsRow: { flexDirection: "row", gap: spacing.sm },
+  cancelledContent: { alignItems: "center", gap: spacing.lg, paddingVertical: spacing.xl },
+  centerTitle: { textAlign: "center" },
 });
