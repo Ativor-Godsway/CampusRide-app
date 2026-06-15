@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import type { RideType } from "@rida/shared";
 import { getSharedFarePerRider, priceLoneRide } from "@rida/shared";
 import {
@@ -10,7 +12,7 @@ import {
   Card,
   CampusMapView,
   LoadingState,
-  Screen,
+  ServiceIcon,
   Text,
   colors,
   createRide,
@@ -20,10 +22,18 @@ import {
   spacing,
 } from "@rida/mobile-shared";
 
+interface RideOption {
+  type: RideType;
+  title: string;
+  priceLabel: string;
+  summary: string;
+  details: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}
+
 export default function RideTypeScreen() {
   const router = useRouter();
   const { height: windowHeight } = useWindowDimensions();
-  const mapHeight = Math.round(windowHeight * 0.4);
 
   const params = useLocalSearchParams<{
     pickupZoneId: string;
@@ -37,6 +47,7 @@ export default function RideTypeScreen() {
   }>();
 
   const [selectedType, setSelectedType] = useState<RideType>("SHARED");
+  const [expandedType, setExpandedType] = useState<RideType | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const sharedRange = useMemo(() => {
@@ -45,6 +56,30 @@ export default function RideTypeScreen() {
   }, []);
 
   const loneFare = useMemo(() => priceLoneRide().fare, []);
+
+  const options: RideOption[] = useMemo(
+    () => [
+      {
+        type: "SHARED",
+        title: "Shared",
+        priceLabel: `${formatGhs(sharedRange.min)} – ${formatGhs(sharedRange.max)}`,
+        summary: "Share with others & save",
+        details:
+          "Share & save — the more riders join, the cheaper it gets for everyone. Final price depends on how full the car is when it departs.",
+        icon: "people",
+      },
+      {
+        type: "LONE",
+        title: "Ride alone",
+        priceLabel: formatGhs(loneFare),
+        summary: "Private ride, no waiting",
+        details:
+          "Skip the wait for other riders — a car is dispatched just for you, leaving as soon as it's matched.",
+        icon: "car-sport",
+      },
+    ],
+    [sharedRange, loneFare],
+  );
 
   const pickupCoord = useMemo(
     () => ({ latitude: Number(params.pickupLat), longitude: Number(params.pickupLng) }),
@@ -104,87 +139,126 @@ export default function RideTypeScreen() {
   }
 
   return (
-    <Screen scroll noPadding>
+    <View style={styles.container}>
       <CampusMapView
         initialRegion={region}
         zones={mapZones}
         routeLine={[pickupCoord, dropoffCoord]}
-        height={mapHeight}
+        height={windowHeight}
         light
         showRecenter
         rounded={false}
       />
 
-      <View style={styles.sheet}>
-        <Text variant="h1">Choose your ride</Text>
+      <BottomSheet
+        snapPoints={["40%", "85%"]}
+        index={0}
+        backgroundStyle={styles.sheetBackground}
+        handleIndicatorStyle={styles.sheetHandle}
+      >
+        <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
+          <Text variant="h1">Choose your ride</Text>
 
-        <View style={styles.route}>
-          <Text variant="bodySmall" color="muted">
-            {params.pickupZoneName} → {params.dropoffZoneName}
-          </Text>
-        </View>
-
-        <Pressable accessibilityRole="button" onPress={() => setSelectedType("SHARED")}>
-          <Card style={[styles.option, selectedType === "SHARED" && styles.optionSelected]}>
-            <View style={styles.optionHeader}>
-              <Text variant="h3">Shared</Text>
-              <Badge label="Recommended" variant="success" />
-            </View>
-            <Text variant="h2" color="primary" style={styles.price}>
-              {formatGhs(sharedRange.min)}–{formatGhs(sharedRange.max)}
-            </Text>
+          <View style={styles.route}>
             <Text variant="bodySmall" color="muted">
-              Share & save — the more riders join, the cheaper it gets for everyone. Final price
-              depends on how full the car is when it departs.
+              {params.pickupZoneName} → {params.dropoffZoneName}
             </Text>
-          </Card>
-        </Pressable>
+          </View>
 
-        <Pressable accessibilityRole="button" onPress={() => setSelectedType("LONE")}>
-          <Card style={[styles.option, selectedType === "LONE" && styles.optionSelected]}>
-            <View style={styles.optionHeader}>
-              <Text variant="h3">Ride alone</Text>
-            </View>
-            <Text variant="h2" style={styles.price}>
-              {formatGhs(loneFare)}
-            </Text>
-            <Text variant="bodySmall" color="muted">
-              Skip the wait for other riders — a car is dispatched just for you, leaving as soon as
-              it's matched.
-            </Text>
-          </Card>
-        </Pressable>
+          {options.map((option) => {
+            const isSelected = selectedType === option.type;
+            const isExpanded = expandedType === option.type;
+            return (
+              <Pressable
+                key={option.type}
+                accessibilityRole="button"
+                onPress={() => setSelectedType(option.type)}
+              >
+                <Card style={[styles.option, isSelected && styles.optionSelected]}>
+                  <View style={styles.optionRow}>
+                    <ServiceIcon
+                      name={option.icon}
+                      size={52}
+                      iconSize={26}
+                      background={isSelected ? colors.primary[50] : colors.surface}
+                      color={isSelected ? colors.primary[600] : colors.ink[500]}
+                    />
+                    <View style={styles.optionInfo}>
+                      <View style={styles.optionHeader}>
+                        <Text variant="h3">{option.title}</Text>
+                        {option.type === "SHARED" ? (
+                          <Badge label="Recommended" variant="success" />
+                        ) : null}
+                      </View>
+                      <Text variant="h2" color={isSelected ? "primary" : undefined} style={styles.price}>
+                        {option.priceLabel}
+                      </Text>
+                      <Text variant="bodySmall" color="muted">
+                        {option.summary}
+                      </Text>
+                    </View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={isExpanded ? "Hide details" : "Show details"}
+                      onPress={() => setExpandedType(isExpanded ? null : option.type)}
+                      style={styles.chevron}
+                    >
+                      <Ionicons
+                        name={isExpanded ? "chevron-up" : "chevron-down"}
+                        size={20}
+                        color={colors.ink[400]}
+                      />
+                    </Pressable>
+                  </View>
+                  {isExpanded ? (
+                    <Text variant="bodySmall" color="muted" style={styles.details}>
+                      {option.details}
+                    </Text>
+                  ) : null}
+                </Card>
+              </Pressable>
+            );
+          })}
 
-        <View style={styles.footer}>
-          {submitting ? (
-            <LoadingState message="Requesting your ride..." />
-          ) : (
-            <Button
-              label={selectedType === "SHARED" ? "Request shared ride" : "Request solo ride"}
-              onPress={() => void handleSubmit()}
-            />
-          )}
-        </View>
-      </View>
-    </Screen>
+          <View style={styles.footer}>
+            {submitting ? (
+              <LoadingState message="Requesting your ride..." />
+            ) : (
+              <Button
+                label={selectedType === "SHARED" ? "Request shared ride" : "Request solo ride"}
+                onPress={() => void handleSubmit()}
+              />
+            )}
+          </View>
+        </BottomSheetScrollView>
+      </BottomSheet>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  sheet: {
-    flexGrow: 1,
+  container: { flex: 1 },
+  sheetBackground: {
     backgroundColor: colors.white,
     borderTopLeftRadius: radii["2xl"],
     borderTopRightRadius: radii["2xl"],
-    marginTop: -radii["2xl"],
+  },
+  sheetHandle: {
+    backgroundColor: colors.border,
+    width: 40,
+  },
+  sheetContent: {
     paddingHorizontal: spacing.xl,
-    paddingTop: spacing.xl,
     paddingBottom: spacing.xl,
   },
-  route: { marginTop: spacing.xs, marginBottom: spacing.xl },
-  option: { marginBottom: spacing.lg, gap: spacing.sm, borderWidth: 2 },
+  route: { marginTop: spacing.xs, marginBottom: spacing.lg },
+  option: { marginBottom: spacing.lg, borderWidth: 2, borderColor: "transparent" },
   optionSelected: { borderColor: colors.primary[500] },
-  optionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  price: { marginTop: spacing.xs },
-  footer: { marginTop: spacing.lg, marginBottom: spacing.xl, minHeight: 80 },
+  optionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  optionInfo: { flex: 1, gap: 2 },
+  optionHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  price: { marginTop: 2 },
+  chevron: { padding: spacing.xs },
+  details: { marginTop: spacing.md },
+  footer: { marginTop: spacing.sm, marginBottom: spacing.xl, minHeight: 80 },
 });

@@ -1,15 +1,13 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { Zone } from "@rida/shared";
 import { nearestZone } from "@rida/shared";
 import {
-  Badge,
   Button,
   Card,
-  Input,
   LoadingState,
   Screen,
   Text,
@@ -24,66 +22,60 @@ type ActiveField = "pickup" | "dropoff" | null;
 
 export default function LocationScreen() {
   const router = useRouter();
-  const { status: locationStatus, requestLocation } = useCurrentLocation();
+  const { requestLocation } = useCurrentLocation();
 
   const { data: zones, isLoading, isError } = useQuery<Zone[]>({
     queryKey: ["zones"],
     queryFn: getZones,
   });
 
-  const [pickupZoneId, setPickupZoneId] = useState<string | null>(null);
-  const [dropoffZoneId, setDropoffZoneId] = useState<string | null>(null);
-  const [activeField, setActiveField] = useState<ActiveField>("pickup");
-  const [search, setSearch] = useState("");
-
   const zoneList: Zone[] = zones ?? [];
 
-  const zoneById = useMemo(() => {
-    const map = new Map<string, Zone>();
-    for (const zone of zoneList) map.set(zone.id, zone);
-    return map;
-  }, [zoneList]);
+  const [pickupText, setPickupText] = useState("");
+  const [dropoffText, setDropoffText] = useState("");
+  const [activeField, setActiveField] = useState<ActiveField>("dropoff");
+  const [located, setLocated] = useState(false);
 
-  const pickupZone = pickupZoneId ? zoneById.get(pickupZoneId) ?? null : null;
-  const dropoffZone = dropoffZoneId ? zoneById.get(dropoffZoneId) ?? null : null;
+  useEffect(() => {
+    if (located || zoneList.length === 0) return;
+    setLocated(true);
+    void (async () => {
+      const coords = await requestLocation();
+      if (!coords) return;
+      const zone = nearestZone(coords.latitude, coords.longitude, zoneList);
+      if (zone) setPickupText(zone.name);
+    })();
+  }, [located, zoneList, requestLocation]);
 
-  const filteredZones = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return zoneList;
-    return zoneList.filter((zone) => zone.name.toLowerCase().includes(query));
-  }, [zoneList, search]);
+  const pickupZone = useMemo(
+    () => zoneList.find((zone) => zone.name.toLowerCase() === pickupText.trim().toLowerCase()) ?? null,
+    [zoneList, pickupText],
+  );
+  const dropoffZone = useMemo(
+    () => zoneList.find((zone) => zone.name.toLowerCase() === dropoffText.trim().toLowerCase()) ?? null,
+    [zoneList, dropoffText],
+  );
 
-  function selectZone(zoneId: string) {
+  const activeText = activeField === "pickup" ? pickupText : activeField === "dropoff" ? dropoffText : "";
+  const activeZone = activeField === "pickup" ? pickupZone : activeField === "dropoff" ? dropoffZone : null;
+
+  const suggestions = useMemo(() => {
+    const query = activeText.trim().toLowerCase();
+    if (!activeField || !query || activeZone) return [];
+    return zoneList.filter((zone) => zone.name.toLowerCase().includes(query)).slice(0, 6);
+  }, [zoneList, activeText, activeField, activeZone]);
+
+  const showSuggestions = Boolean(activeField && activeText.trim() && !activeZone);
+  const showNoMatch = showSuggestions && suggestions.length === 0;
+
+  function selectSuggestion(zone: Zone) {
     if (activeField === "dropoff") {
-      setDropoffZoneId(zoneId);
-      setActiveField(pickupZoneId ? null : "pickup");
+      setDropoffText(zone.name);
+      setActiveField(pickupZone ? null : "pickup");
     } else {
-      setPickupZoneId(zoneId);
-      setActiveField(dropoffZoneId ? null : "dropoff");
+      setPickupText(zone.name);
+      setActiveField(dropoffZone ? null : "dropoff");
     }
-    setSearch("");
-  }
-
-  async function handleUseMyLocation() {
-    const coords = await requestLocation();
-    if (!coords) {
-      Alert.alert(
-        "Location unavailable",
-        "We couldn't get your location. Pick your pickup spot from the list instead.",
-      );
-      return;
-    }
-    if (zoneList.length === 0) return;
-    const zone = nearestZone(coords.latitude, coords.longitude, zoneList);
-    if (zone) {
-      setPickupZoneId(zone.id);
-      setActiveField(dropoffZoneId ? null : "dropoff");
-    }
-  }
-
-  function handleSwap() {
-    setPickupZoneId(dropoffZoneId);
-    setDropoffZoneId(pickupZoneId);
   }
 
   function handleContinue() {
@@ -137,11 +129,7 @@ export default function LocationScreen() {
       </Text>
 
       <Card dark style={styles.planCard}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setActiveField("pickup")}
-          style={[styles.fieldRow, activeField === "pickup" && styles.fieldRowActive]}
-        >
+        <View style={[styles.fieldRow, activeField === "pickup" && styles.fieldRowActive]}>
           <View style={styles.markerCol}>
             <View style={styles.pickupDot} />
             <View style={styles.connector} />
@@ -150,17 +138,36 @@ export default function LocationScreen() {
             <Text variant="label" style={styles.fieldLabel}>
               PICKUP
             </Text>
-            <Text variant="bodyMedium" color="inverse" numberOfLines={1}>
-              {pickupZone?.name ?? "Tap to select"}
-            </Text>
+            <TextInput
+              value={pickupText}
+              onChangeText={(text) => {
+                setPickupText(text);
+                setActiveField("pickup");
+              }}
+              onFocus={() => setActiveField("pickup")}
+              placeholder="Current location"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              style={styles.fieldInput}
+              autoCorrect={false}
+              autoCapitalize="words"
+            />
           </View>
-        </Pressable>
+          {pickupText ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear pickup"
+              onPress={() => {
+                setPickupText("");
+                setActiveField("pickup");
+              }}
+              style={styles.clearButton}
+            >
+              <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+            </Pressable>
+          ) : null}
+        </View>
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => setActiveField("dropoff")}
-          style={[styles.fieldRow, activeField === "dropoff" && styles.fieldRowActive]}
-        >
+        <View style={[styles.fieldRow, activeField === "dropoff" && styles.fieldRowActive]}>
           <View style={styles.markerCol}>
             <Ionicons name="location" size={16} color={colors.white} />
           </View>
@@ -168,61 +175,62 @@ export default function LocationScreen() {
             <Text variant="label" style={styles.fieldLabel}>
               DROPOFF
             </Text>
-            <Text variant="bodyMedium" color="inverse" numberOfLines={1}>
-              {dropoffZone?.name ?? "Tap to select"}
-            </Text>
+            <TextInput
+              value={dropoffText}
+              onChangeText={(text) => {
+                setDropoffText(text);
+                setActiveField("dropoff");
+              }}
+              onFocus={() => setActiveField("dropoff")}
+              placeholder="Where to?"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              style={styles.fieldInput}
+              autoCorrect={false}
+              autoCapitalize="words"
+              autoFocus
+            />
           </View>
-        </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Swap pickup and dropoff"
-          onPress={handleSwap}
-          style={styles.swapButton}
-        >
-          <Ionicons name="swap-vertical" size={20} color={colors.white} />
-        </Pressable>
+          {dropoffText ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Clear dropoff"
+              onPress={() => {
+                setDropoffText("");
+                setActiveField("dropoff");
+              }}
+              style={styles.clearButton}
+            >
+              <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+            </Pressable>
+          ) : null}
+        </View>
       </Card>
 
-      <View style={styles.useLocationButton}>
-        <Button
-          label="Use my current location"
-          variant="secondary"
-          onPress={() => void handleUseMyLocation()}
-          loading={locationStatus === "loading"}
-        />
-      </View>
+      {showSuggestions ? (
+        <Card noPadding style={styles.suggestionsCard}>
+          {suggestions.map((zone, index) => (
+            <Pressable
+              key={zone.id}
+              accessibilityRole="button"
+              onPress={() => selectSuggestion(zone)}
+              style={[styles.suggestionRow, index > 0 && styles.suggestionRowDivider]}
+            >
+              <Ionicons name="location-outline" size={18} color={colors.ink[400]} />
+              <View style={styles.suggestionTextCol}>
+                <Text variant="bodyMedium">{zone.name}</Text>
+                <Text variant="caption" color="muted">
+                  {zone.quadrant}
+                </Text>
+              </View>
+            </Pressable>
+          ))}
+        </Card>
+      ) : null}
 
-      {activeField ? (
-        <View style={styles.pickerSection}>
-          <Text variant="label" color="muted" style={styles.pickerLabel}>
-            {activeField === "pickup" ? "SELECT PICKUP" : "SELECT DROPOFF"}
-          </Text>
-          <Input
-            placeholder="Search zones"
-            value={search}
-            onChangeText={setSearch}
-            autoCorrect={false}
-          />
-          <View style={styles.zoneList}>
-            {filteredZones.map((zone) => {
-              const isSelected = zone.id === pickupZoneId || zone.id === dropoffZoneId;
-              return (
-                <Pressable key={zone.id} accessibilityRole="button" onPress={() => selectZone(zone.id)}>
-                  <Card noPadding style={styles.zoneRow}>
-                    <View>
-                      <Text variant="bodyMedium">{zone.name}</Text>
-                      <Text variant="caption" color="muted">
-                        {zone.quadrant}
-                      </Text>
-                    </View>
-                    {isSelected ? <Badge label="Selected" variant="success" /> : null}
-                  </Card>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
+      {showNoMatch ? (
+        <Text variant="bodySmall" color="error" style={styles.noMatch}>
+          No matching zone
+        </Text>
       ) : null}
 
       <View style={styles.continueButton}>
@@ -234,7 +242,7 @@ export default function LocationScreen() {
 
 const styles = StyleSheet.create({
   subtitle: { marginTop: spacing.xs, marginBottom: spacing.lg },
-  planCard: { gap: 0, position: "relative" },
+  planCard: { gap: 0 },
   fieldRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -265,33 +273,39 @@ const styles = StyleSheet.create({
   fieldTextCol: {
     flex: 1,
     gap: 2,
-    paddingRight: 44,
   },
   fieldLabel: {
     color: "rgba(255,255,255,0.5)",
   },
-  swapButton: {
-    position: "absolute",
-    right: spacing.sm,
-    top: "50%",
-    marginTop: -18,
-    width: 36,
-    height: 36,
-    borderRadius: radii.full,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
+  fieldInput: {
+    color: colors.white,
+    fontSize: 16,
+    paddingVertical: 0,
+    margin: 0,
   },
-  useLocationButton: { marginTop: spacing.lg },
-  pickerSection: { marginTop: spacing.lg },
-  pickerLabel: { marginBottom: spacing.sm, letterSpacing: 1 },
-  zoneList: { gap: spacing.sm },
-  zoneRow: {
+  clearButton: {
+    padding: spacing.xs,
+  },
+  suggestionsCard: {
+    marginTop: spacing.md,
+  },
+  suggestionRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
+  },
+  suggestionRowDivider: {
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  suggestionTextCol: {
+    flex: 1,
+    gap: 2,
+  },
+  noMatch: {
+    marginTop: spacing.sm,
   },
   continueButton: { marginTop: spacing.xl, marginBottom: spacing.xl },
   errorContent: { flex: 1, justifyContent: "center", gap: spacing.lg },
