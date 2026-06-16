@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import { Ionicons } from "@expo/vector-icons";
 import type { RideType } from "@rida/shared";
 import { getSharedFarePerRider, priceLoneRide } from "@rida/shared";
 import {
@@ -11,16 +11,34 @@ import {
   Button,
   Card,
   CampusMapView,
+  type CampusMapZone,
   LoadingState,
+  ProgressBar,
   ServiceIcon,
   Text,
+  cancelRide,
   colors,
   createRide,
   formatGhs,
   radii,
   regionForCoordinates,
   spacing,
+  submitRating,
+  submitRideDecision,
+  useDriverLocation,
+  useRideTracking,
+  type RideDriverInfo,
 } from "@rida/mobile-shared";
+
+const BROADCAST_WINDOW_MS = 90_000;
+const DUMMY_ETA_MINUTES = 4;
+const STARS = [1, 2, 3, 4, 5];
+const SEARCHING_MESSAGES = [
+  "Finding your driver…",
+  "Connecting you with nearby drivers…",
+  "Reaching out to drivers near you…",
+  "Hang tight, almost there…",
+] as const;
 
 interface RideOption {
   type: RideType;
@@ -44,17 +62,42 @@ export default function RideTypeScreen() {
     pickupLng: string;
     dropoffLat: string;
     dropoffLng: string;
+    /** Present when resuming an active ride from the "Your rides" tab. */
+    rideId?: string;
   }>();
 
+  // ── Options phase ───────────────────────────────────────────────────────────
   const [selectedType, setSelectedType] = useState<RideType>("SHARED");
   const [expandedType, setExpandedType] = useState<RideType | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // ── Tracking phase (null = options phase, string = post-request or resume) ───
+  const [activeRideId, setActiveRideId] = useState<string | null>(params.rideId ?? null);
+  const [driverLocation, setDriverLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [decisionSubmitting, setDecisionSubmitting] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  const { data: trackingData } = useRideTracking(activeRideId ?? undefined);
+
+  useDriverLocation(activeRideId ?? undefined, (payload) => {
+    setDriverLocation({ latitude: payload.lat, longitude: payload.lng });
+  });
+
+  const ride = trackingData?.ride;
+  const driver = trackingData?.driver;
+
+  useEffect(() => {
+    if (ride?.status !== "REQUESTED") return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [ride?.status]);
+
+  // ── Fares ───────────────────────────────────────────────────────────────────
   const sharedRange = useMemo(() => {
     const fares = [1, 2, 3, 4].map((occ) => getSharedFarePerRider(occ));
     return { min: Math.min(...fares), max: Math.max(...fares) };
   }, []);
-
   const loneFare = useMemo(() => priceLoneRide().fare, []);
 
   const options: RideOption[] = useMemo(
@@ -81,6 +124,7 @@ export default function RideTypeScreen() {
     [sharedRange, loneFare],
   );
 
+  // ── Map coords & region ─────────────────────────────────────────────────────
   const pickupCoord = useMemo(
     () => ({ latitude: Number(params.pickupLat), longitude: Number(params.pickupLng) }),
     [params.pickupLat, params.pickupLng],
@@ -90,43 +134,49 @@ export default function RideTypeScreen() {
     [params.dropoffLat, params.dropoffLng],
   );
 
-  const region = useMemo(
-    () => regionForCoordinates([pickupCoord, dropoffCoord], 0.8),
-    [pickupCoord, dropoffCoord],
-  );
+  const region = useMemo(() => {
+    const points = [pickupCoord, dropoffCoord];
+    if (driverLocation) points.push(driverLocation);
+    return regionForCoordinates(points, 0.8);
+  }, [pickupCoord, dropoffCoord, driverLocation]);
 
-  const mapZones = useMemo(
-    () => [
-      { id: "pickup", ...pickupCoord, label: params.pickupZoneName, role: "pickup" as const },
-      { id: "dropoff", ...dropoffCoord, label: params.dropoffZoneName, role: "dropoff" as const },
-    ],
-    [pickupCoord, dropoffCoord, params.pickupZoneName, params.dropoffZoneName],
-  );
+  const mapZones = useMemo(() => {
+    const zones: CampusMapZone[] = [
+      { id: "pickup", ...pickupCoord, label: params.pickupZoneName, role: "pickup" },
+      { id: "dropoff", ...dropoffCoord, label: params.dropoffZoneName, role: "dropoff" },
+    ];
+    if (driverLocation) {
+      zones.push({ id: "driver", ...driverLocation, label: "Driver" });
+    }
+    return zones;
+  }, [pickupCoord, dropoffCoord, driverLocation, params.pickupZoneName, params.dropoffZoneName]);
 
+  // ── Search progress ─────────────────────────────────────────────────────────
+  const searchProgress = useMemo(() => {
+    if (!ride?.broadcastStartedAt) return 1;
+    const start = new Date(ride.broadcastStartedAt).getTime();
+    const elapsed = now - start;
+    return Math.max(0, Math.min(1, 1 - elapsed / BROADCAST_WINDOW_MS));
+  }, [ride?.broadcastStartedAt, now]);
+
+  const priceLabel =
+    selectedType === "SHARED"
+      ? `${formatGhs(sharedRange.min)} – ${formatGhs(sharedRange.max)}`
+      : formatGhs(loneFare);
+
+  const canSwitchToLone = ride?.type === "SHARED" && ride?.occupancy === 1;
+
+  // ── Actions ─────────────────────────────────────────────────────────────────
   async function handleSubmit() {
     if (!params.pickupZoneId || !params.dropoffZoneId) return;
-
     setSubmitting(true);
     try {
-      const ride = await createRide({
+      const created = await createRide({
         pickupZoneId: params.pickupZoneId,
         dropoffZoneId: params.dropoffZoneId,
         type: selectedType,
       });
-
-      router.push({
-        pathname: "/ride/searching",
-        params: {
-          rideId: ride.id,
-          type: selectedType,
-          pickupZoneName: params.pickupZoneName,
-          dropoffZoneName: params.dropoffZoneName,
-          priceLabel:
-            selectedType === "SHARED"
-              ? `${formatGhs(sharedRange.min)} - ${formatGhs(sharedRange.max)}`
-              : formatGhs(loneFare),
-        },
-      });
+      setActiveRideId(created.id);
     } catch (err) {
       if (err instanceof ActiveRideExistsError) {
         Alert.alert("Ride in progress", "You already have an active ride request.");
@@ -138,6 +188,33 @@ export default function RideTypeScreen() {
     }
   }
 
+  async function handleDecision(action: "KEEP_WAITING" | "SWITCH_TO_LONE" | "CANCEL") {
+    if (!activeRideId) return;
+    setDecisionSubmitting(true);
+    try {
+      await submitRideDecision(activeRideId, action);
+      if (action === "CANCEL") router.replace("/");
+    } catch {
+      Alert.alert("Something went wrong", "Please try again.");
+    } finally {
+      setDecisionSubmitting(false);
+    }
+  }
+
+  async function handleCancel() {
+    if (!activeRideId) return;
+    setCancelling(true);
+    try {
+      await cancelRide(activeRideId);
+      router.replace("/");
+    } catch {
+      Alert.alert("Couldn't cancel", "Please try again.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       <CampusMapView
@@ -157,84 +234,528 @@ export default function RideTypeScreen() {
         handleIndicatorStyle={styles.sheetHandle}
       >
         <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
-          <Text variant="h1">Choose your ride</Text>
+          {activeRideId === null && (
+            <OptionsContent
+              options={options}
+              selectedType={selectedType}
+              expandedType={expandedType}
+              onSelectType={setSelectedType}
+              onToggleExpand={(t) => setExpandedType((e) => (e === t ? null : t))}
+              pickupZoneName={params.pickupZoneName}
+              dropoffZoneName={params.dropoffZoneName}
+              submitting={submitting}
+              onSubmit={() => void handleSubmit()}
+            />
+          )}
 
-          <View style={styles.route}>
-            <Text variant="bodySmall" color="muted">
-              {params.pickupZoneName} → {params.dropoffZoneName}
-            </Text>
-          </View>
+          {activeRideId !== null && (
+            <>
+              {(!ride || ride.status === "REQUESTED") && (
+                <SearchingContent
+                  pickupZoneName={params.pickupZoneName}
+                  dropoffZoneName={params.dropoffZoneName}
+                  priceLabel={priceLabel}
+                  rideType={selectedType}
+                  progress={ride ? searchProgress : 1}
+                  canSwitchToLone={canSwitchToLone ?? false}
+                  onSwitchToLone={() => void handleDecision("SWITCH_TO_LONE")}
+                  switching={decisionSubmitting}
+                  onCancel={() => void handleCancel()}
+                  cancelling={cancelling}
+                />
+              )}
 
-          {options.map((option) => {
-            const isSelected = selectedType === option.type;
-            const isExpanded = expandedType === option.type;
-            return (
-              <Pressable
-                key={option.type}
-                accessibilityRole="button"
-                onPress={() => setSelectedType(option.type)}
-              >
-                <Card style={[styles.option, isSelected && styles.optionSelected]}>
-                  <View style={styles.optionRow}>
-                    <ServiceIcon
-                      name={option.icon}
-                      size={52}
-                      iconSize={26}
-                      background={isSelected ? colors.primary[50] : colors.surface}
-                      color={isSelected ? colors.primary[600] : colors.ink[500]}
-                    />
-                    <View style={styles.optionInfo}>
-                      <View style={styles.optionHeader}>
-                        <Text variant="h3">{option.title}</Text>
-                        {option.type === "SHARED" ? (
-                          <Badge label="Recommended" variant="success" />
-                        ) : null}
-                      </View>
-                      <Text variant="h2" color={isSelected ? "primary" : undefined} style={styles.price}>
-                        {option.priceLabel}
-                      </Text>
-                      <Text variant="bodySmall" color="muted">
-                        {option.summary}
-                      </Text>
-                    </View>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={isExpanded ? "Hide details" : "Show details"}
-                      onPress={() => setExpandedType(isExpanded ? null : option.type)}
-                      style={styles.chevron}
-                    >
-                      <Ionicons
-                        name={isExpanded ? "chevron-up" : "chevron-down"}
-                        size={20}
-                        color={colors.ink[400]}
-                      />
-                    </Pressable>
-                  </View>
-                  {isExpanded ? (
-                    <Text variant="bodySmall" color="muted" style={styles.details}>
-                      {option.details}
-                    </Text>
-                  ) : null}
-                </Card>
-              </Pressable>
-            );
-          })}
+              {ride?.status === "AWAITING_RIDER_DECISION" && (
+                <NoDriverContent
+                  canSwitchToLone={canSwitchToLone ?? false}
+                  submitting={decisionSubmitting}
+                  onAction={(action) => void handleDecision(action)}
+                />
+              )}
 
-          <View style={styles.footer}>
-            {submitting ? (
-              <LoadingState message="Requesting your ride..." />
-            ) : (
-              <Button
-                label={selectedType === "SHARED" ? "Request shared ride" : "Request solo ride"}
-                onPress={() => void handleSubmit()}
-              />
-            )}
-          </View>
+              {(ride?.status === "MATCHED" || ride?.status === "ARRIVED") && driver && (
+                <DriverFoundContent
+                  status={ride.status}
+                  driver={driver}
+                  hasLocation={!!driverLocation}
+                  onCancel={() => void handleCancel()}
+                  cancelling={cancelling}
+                />
+              )}
+
+              {ride?.status === "IN_PROGRESS" && driver && (
+                <InProgressContent driver={driver} dropoffZoneName={params.dropoffZoneName} />
+              )}
+
+              {ride?.status === "COMPLETED" && (
+                <CompletedContent
+                  rideId={ride.id}
+                  fareSummary={trackingData?.fareSummary}
+                  onDone={() => router.replace("/")}
+                />
+              )}
+
+              {ride?.status === "CANCELLED" && <CancelledContent onDone={() => router.replace("/")} />}
+            </>
+          )}
         </BottomSheetScrollView>
       </BottomSheet>
     </View>
   );
 }
+
+// ── Options phase ─────────────────────────────────────────────────────────────
+
+function OptionsContent({
+  options,
+  selectedType,
+  expandedType,
+  onSelectType,
+  onToggleExpand,
+  pickupZoneName,
+  dropoffZoneName,
+  submitting,
+  onSubmit,
+}: {
+  options: RideOption[];
+  selectedType: RideType;
+  expandedType: RideType | null;
+  onSelectType: (t: RideType) => void;
+  onToggleExpand: (t: RideType) => void;
+  pickupZoneName: string;
+  dropoffZoneName: string;
+  submitting: boolean;
+  onSubmit: () => void;
+}) {
+  return (
+    <>
+      <Text variant="h1">Choose your ride</Text>
+
+      <View style={styles.route}>
+        <Text variant="bodySmall" color="muted">
+          {pickupZoneName} → {dropoffZoneName}
+        </Text>
+      </View>
+
+      {options.map((option) => {
+        const isSelected = selectedType === option.type;
+        const isExpanded = expandedType === option.type;
+        return (
+          <Pressable
+            key={option.type}
+            accessibilityRole="button"
+            onPress={() => onSelectType(option.type)}
+          >
+            <Card style={[styles.option, isSelected && styles.optionSelected]}>
+              <View style={styles.optionRow}>
+                <ServiceIcon
+                  name={option.icon}
+                  size={52}
+                  iconSize={26}
+                  background={isSelected ? colors.primary[50] : colors.surface}
+                  color={isSelected ? colors.primary[600] : colors.ink[500]}
+                />
+                <View style={styles.optionInfo}>
+                  <View style={styles.optionHeader}>
+                    <Text variant="h3">{option.title}</Text>
+                    {option.type === "SHARED" ? (
+                      <Badge label="Recommended" variant="success" />
+                    ) : null}
+                  </View>
+                  <Text variant="h2" color={isSelected ? "primary" : undefined} style={styles.price}>
+                    {option.priceLabel}
+                  </Text>
+                  <Text variant="bodySmall" color="muted">
+                    {option.summary}
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={isExpanded ? "Hide details" : "Show details"}
+                  onPress={() => onToggleExpand(option.type)}
+                  style={styles.chevron}
+                >
+                  <Ionicons
+                    name={isExpanded ? "chevron-up" : "chevron-down"}
+                    size={20}
+                    color={colors.ink[400]}
+                  />
+                </Pressable>
+              </View>
+              {isExpanded ? (
+                <Text variant="bodySmall" color="muted" style={styles.details}>
+                  {option.details}
+                </Text>
+              ) : null}
+            </Card>
+          </Pressable>
+        );
+      })}
+
+      <View style={styles.footer}>
+        {submitting ? (
+          <LoadingState message="Requesting your ride..." />
+        ) : (
+          <Button
+            label={selectedType === "SHARED" ? "Request shared ride" : "Request solo ride"}
+            onPress={onSubmit}
+          />
+        )}
+      </View>
+    </>
+  );
+}
+
+// ── Tracking phase content ────────────────────────────────────────────────────
+
+function SearchingContent({
+  pickupZoneName,
+  dropoffZoneName,
+  priceLabel,
+  rideType,
+  progress,
+  canSwitchToLone,
+  onSwitchToLone,
+  switching,
+  onCancel,
+  cancelling,
+}: {
+  pickupZoneName: string;
+  dropoffZoneName: string;
+  priceLabel: string;
+  rideType: RideType;
+  progress: number;
+  canSwitchToLone: boolean;
+  onSwitchToLone: () => void;
+  switching: boolean;
+  onCancel: () => void;
+  cancelling: boolean;
+}) {
+  const [msgIdx, setMsgIdx] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(
+      () => setMsgIdx((i) => (i + 1) % SEARCHING_MESSAGES.length),
+      3000,
+    );
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.stateHeader}>
+        <ServiceIcon name="search" size={48} iconSize={22} />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">{SEARCHING_MESSAGES[msgIdx]}</Text>
+          <Text variant="bodySmall" color="muted">
+            {pickupZoneName} → {dropoffZoneName}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.progressSection}>
+        <ProgressBar progress={progress} />
+        <Text variant="caption" color="subtle" style={styles.progressLabel}>
+          Contacting available drivers nearby
+        </Text>
+      </View>
+
+      <Card style={styles.infoCard}>
+        <View style={styles.infoRow}>
+          <Ionicons name="car-outline" size={16} color={colors.ink[400]} />
+          <Text variant="bodySmall" color="muted" style={styles.infoLabel}>
+            {rideType === "SHARED" ? "Shared ride" : "Solo ride"}
+          </Text>
+          <Text variant="bodySmall">{priceLabel}</Text>
+        </View>
+      </Card>
+
+      <View style={styles.buttonGroup}>
+        {canSwitchToLone && (
+          <Button
+            label="Switch to solo ride"
+            variant="secondary"
+            onPress={onSwitchToLone}
+            loading={switching}
+          />
+        )}
+        <Button label="Cancel request" variant="ghost" onPress={onCancel} loading={cancelling} />
+      </View>
+    </View>
+  );
+}
+
+function NoDriverContent({
+  canSwitchToLone,
+  submitting,
+  onAction,
+}: {
+  canSwitchToLone: boolean;
+  submitting: boolean;
+  onAction: (action: "KEEP_WAITING" | "SWITCH_TO_LONE" | "CANCEL") => void;
+}) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.stateHeader}>
+        <ServiceIcon
+          name="alert-circle-outline"
+          size={48}
+          iconSize={22}
+          background={colors.warningSurface}
+          color={colors.warning}
+        />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">No drivers available right now</Text>
+          <Text variant="bodySmall" color="muted">
+            Try again — campus driver availability changes quickly.
+          </Text>
+        </View>
+      </View>
+
+      {submitting ? (
+        <LoadingState message="Updating your ride..." />
+      ) : (
+        <View style={styles.buttonGroup}>
+          <Button label="Search again" onPress={() => onAction("KEEP_WAITING")} />
+          {canSwitchToLone && (
+            <Button
+              label="Switch to solo ride"
+              variant="secondary"
+              onPress={() => onAction("SWITCH_TO_LONE")}
+            />
+          )}
+          <Button label="Cancel" variant="ghost" onPress={() => onAction("CANCEL")} />
+        </View>
+      )}
+    </View>
+  );
+}
+
+function DriverAvatar({ name }: { name: string }) {
+  const initials = name
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((w) => w[0] ?? "")
+    .join("")
+    .toUpperCase();
+  return (
+    <View style={styles.avatar}>
+      <Text variant="h3" color="inverse">
+        {initials}
+      </Text>
+    </View>
+  );
+}
+
+function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
+  const car = [driver.carColor, driver.carMake, driver.carModel].filter(Boolean).join(" ");
+  return (
+    <Card style={styles.driverCard}>
+      <View style={styles.driverRow}>
+        <DriverAvatar name={driver.name} />
+        <View style={styles.driverInfo}>
+          <Text variant="h3">{driver.name}</Text>
+          {driver.rating != null && (
+            <View style={styles.ratingRow}>
+              <Ionicons name="star" size={13} color={colors.accent[500]} />
+              <Text variant="bodySmall" color="muted">
+                {" "}
+                {driver.rating.toFixed(1)}
+              </Text>
+            </View>
+          )}
+          {car ? (
+            <Text variant="bodySmall" color="muted">
+              {car}
+            </Text>
+          ) : null}
+        </View>
+        {driver.plate ? (
+          <View style={styles.plateBadge}>
+            <Text variant="caption">{driver.plate}</Text>
+          </View>
+        ) : null}
+      </View>
+    </Card>
+  );
+}
+
+function DriverFoundContent({
+  status,
+  driver,
+  hasLocation,
+  onCancel,
+  cancelling,
+}: {
+  status: "MATCHED" | "ARRIVED";
+  driver: RideDriverInfo;
+  hasLocation: boolean;
+  onCancel: () => void;
+  cancelling: boolean;
+}) {
+  const arrived = status === "ARRIVED";
+  return (
+    <View style={styles.section}>
+      <View style={styles.stateHeader}>
+        <ServiceIcon
+          name={arrived ? "flag" : "car"}
+          size={48}
+          iconSize={22}
+          background={arrived ? colors.successSurface : colors.primary[50]}
+          color={arrived ? colors.success : colors.primary[600]}
+        />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">{arrived ? "Your driver is here" : "Driver on the way"}</Text>
+          <Text variant="bodySmall" color="muted">
+            {arrived
+              ? "Head to your pickup point — your driver is waiting."
+              : hasLocation
+                ? `About ${DUMMY_ETA_MINUTES} min away`
+                : "Your driver is getting ready"}
+          </Text>
+        </View>
+      </View>
+
+      <PremiumDriverCard driver={driver} />
+
+      <Button label="Cancel ride" variant="secondary" onPress={onCancel} loading={cancelling} />
+    </View>
+  );
+}
+
+function InProgressContent({
+  driver,
+  dropoffZoneName,
+}: {
+  driver: RideDriverInfo;
+  dropoffZoneName: string;
+}) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.stateHeader}>
+        <ServiceIcon name="navigate" size={48} iconSize={22} />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">On your way</Text>
+          <Text variant="bodySmall" color="muted">
+            Heading to {dropoffZoneName} · ~{DUMMY_ETA_MINUTES} min
+          </Text>
+        </View>
+      </View>
+
+      <PremiumDriverCard driver={driver} />
+    </View>
+  );
+}
+
+function CompletedContent({
+  rideId,
+  fareSummary,
+  onDone,
+}: {
+  rideId: string;
+  fareSummary: { yourFarePesewas: number; totalFarePesewas: number } | undefined;
+  onDone: () => void;
+}) {
+  const [stars, setStars] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+
+  async function handleSubmitRating() {
+    if (stars === 0) return;
+    setSubmitting(true);
+    try {
+      await submitRating({ rideId, stars });
+      setSubmitted(true);
+    } catch {
+      Alert.alert("Couldn't submit rating", "Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.stateHeader}>
+        <ServiceIcon
+          name="checkmark-circle"
+          size={48}
+          iconSize={22}
+          background={colors.successSurface}
+          color={colors.success}
+        />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">Ride completed</Text>
+          {fareSummary ? (
+            <Text variant="bodySmall" color="muted">
+              Your fare: {(fareSummary.yourFarePesewas / 100).toFixed(2)} GHS
+            </Text>
+          ) : null}
+        </View>
+      </View>
+
+      {!submitted ? (
+        <>
+          <View style={styles.ratingSection}>
+            <Text variant="bodyMedium">How was your ride?</Text>
+            <View style={styles.starsRow}>
+              {STARS.map((value) => (
+                <Pressable key={value} accessibilityRole="button" onPress={() => setStars(value)}>
+                  <Ionicons
+                    name={value <= stars ? "star" : "star-outline"}
+                    size={36}
+                    color={value <= stars ? colors.accent[500] : colors.ink[200]}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          <View style={styles.buttonGroup}>
+            <Button
+              label="Submit rating"
+              onPress={() => void handleSubmitRating()}
+              loading={submitting}
+              disabled={stars === 0}
+            />
+            <Button label="Skip" variant="ghost" onPress={onDone} />
+          </View>
+        </>
+      ) : (
+        <>
+          <Text variant="body" color="muted">
+            Thanks for rating your driver!
+          </Text>
+          <Button label="Back to home" onPress={onDone} />
+        </>
+      )}
+    </View>
+  );
+}
+
+function CancelledContent({ onDone }: { onDone: () => void }) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.stateHeader}>
+        <ServiceIcon
+          name="close-circle"
+          size={48}
+          iconSize={22}
+          background={colors.errorSurface}
+          color={colors.error}
+        />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">Ride cancelled</Text>
+          <Text variant="bodySmall" color="muted">
+            Your request has been cancelled.
+          </Text>
+        </View>
+      </View>
+      <Button label="Back to home" variant="secondary" onPress={onDone} />
+    </View>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -243,14 +764,13 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radii["2xl"],
     borderTopRightRadius: radii["2xl"],
   },
-  sheetHandle: {
-    backgroundColor: colors.border,
-    width: 40,
-  },
+  sheetHandle: { backgroundColor: colors.border, width: 40 },
   sheetContent: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xl,
+    gap: spacing.lg,
   },
+  // ── Options
   route: { marginTop: spacing.xs, marginBottom: spacing.lg },
   option: { marginBottom: spacing.lg, borderWidth: 2, borderColor: "transparent" },
   optionSelected: { borderColor: colors.primary[500] },
@@ -261,4 +781,36 @@ const styles = StyleSheet.create({
   chevron: { padding: spacing.xs },
   details: { marginTop: spacing.md },
   footer: { marginTop: spacing.sm, marginBottom: spacing.xl, minHeight: 80 },
+  // ── State panels
+  section: { gap: spacing.md },
+  stateHeader: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
+  stateHeading: { flex: 1, gap: 4 },
+  progressSection: { gap: spacing.xs },
+  progressLabel: { textAlign: "center" },
+  infoCard: { gap: spacing.sm },
+  infoRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
+  infoLabel: { flex: 1 },
+  buttonGroup: { gap: spacing.md },
+  // ── Driver card
+  driverCard: {},
+  driverRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  driverInfo: { flex: 1, gap: 2 },
+  ratingRow: { flexDirection: "row", alignItems: "center" },
+  plateBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.sm,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.full,
+    backgroundColor: colors.primary[500],
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  // ── Rating
+  ratingSection: { alignItems: "center", gap: spacing.sm },
+  starsRow: { flexDirection: "row", gap: spacing.sm },
 });

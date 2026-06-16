@@ -99,7 +99,25 @@ export default function RidesTab() {
             <View key={ride.id}>
               <Pressable
                 style={({ pressed }) => [styles.row, pressed && isActive && styles.pressed]}
-                onPress={isActive ? () => router.push(`/ride/searching?rideId=${ride.id}`) : undefined}
+                onPress={
+                  isActive
+                    ? () =>
+                        router.push({
+                          pathname: "/ride/type",
+                          params: {
+                            rideId: ride.id,
+                            pickupZoneId: ride.pickupZoneId,
+                            dropoffZoneId: ride.dropoffZoneId,
+                            pickupZoneName: ride.pickupZone.name,
+                            dropoffZoneName: ride.dropoffZone.name,
+                            pickupLat: String(ride.pickupZone.latitude),
+                            pickupLng: String(ride.pickupZone.longitude),
+                            dropoffLat: String(ride.dropoffZone.latitude),
+                            dropoffLng: String(ride.dropoffZone.longitude),
+                          },
+                        })
+                    : undefined
+                }
                 accessibilityRole={isActive ? "button" : undefined}
               >
                 <ListRow.Icon
