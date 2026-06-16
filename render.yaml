@@ -1,0 +1,58 @@
+services:
+  - type: web
+    name: campusride-server
+    runtime: node
+    # Change region to match your Neon database region for lowest latency.
+    # Options: oregon, frankfurt, singapore, ohio, virginia
+    region: oregon
+    plan: free
+
+    # Render runs `npm install` (the install command) before the build command.
+    # npm install at the workspace root installs all workspace dependencies,
+    # including devDependencies needed for the TypeScript compilation step.
+    buildCommand: npm install && npm run build --workspace=apps/server
+    startCommand: npm run start --workspace=apps/server
+
+    # Render polls this path to confirm the service is healthy.
+    healthCheckPath: /health
+
+    envVars:
+      # ── Runtime (set values in Render dashboard — never commit secrets) ────
+
+      - key: NODE_ENV
+        value: production
+
+      # Neon POOLED connection string. Must include pgbouncer=true and
+      # connection_limit=5 (see DEPLOY.md for the exact format).
+      # Set this in the Render dashboard → Environment tab.
+      - key: DATABASE_URL
+        sync: false
+
+      # Neon DIRECT (non-pooled) connection string — used by Prisma for
+      # migrations. Set this in the Render dashboard → Environment tab.
+      - key: DIRECT_URL
+        sync: false
+
+      # Long random secret for JWT signing.
+      # Generate with: openssl rand -hex 32
+      - key: JWT_SECRET
+        sync: false
+
+      # Render injects PORT automatically — do not set this manually.
+      # Listed here for visibility; the server reads process.env.PORT.
+      # - key: PORT   (Render-injected, do not override)
+
+      # ── Feature flags (safe defaults for first deploy) ──────────────────────
+
+      # Keep false until Moolre payment integration is wired and tested.
+      - key: MOOLRE_ENABLED
+        value: "false"
+
+      # "dummy" logs OTPs to the server console instead of sending real SMS.
+      # Switch to "moolre" or "mnotify" once SMS is configured.
+      - key: OTP_PROVIDER
+        value: dummy
+
+      # Never enable on production.
+      - key: ENABLE_MOCK_DRIVER
+        value: "false"
