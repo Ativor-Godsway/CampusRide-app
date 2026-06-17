@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
@@ -166,8 +166,7 @@ export default function DriverHomeScreen() {
   }
 
   if (!isAuthenticated || !user) {
-    router.replace("/auth/phone");
-    return null;
+    return <Redirect href="/auth/phone" />;
   }
 
   const firstName = user.name?.split(" ")[0] ?? "Driver";

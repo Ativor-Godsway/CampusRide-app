@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Dimensions, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
@@ -159,8 +159,7 @@ export default function ActiveRideScreen() {
   }, [router]);
 
   if (!isAuthenticated || !user) {
-    router.replace("/auth/phone");
-    return null;
+    return <Redirect href="/auth/phone" />;
   }
 
   if (loading || !ride) {
