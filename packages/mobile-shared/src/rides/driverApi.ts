@@ -18,6 +18,19 @@ export interface RideWithZones extends Ride {
   dropoffZone: Zone;
 }
 
+export interface SubmitDriverProfileInput {
+  carMake: string;
+  carModel: string;
+  carColor: string;
+  plate: string;
+}
+
+/** Submit / update the driver's car details (POST /driver/profile). */
+export async function submitDriverProfile(input: SubmitDriverProfileInput): Promise<DriverProfile> {
+  const res = await api.post<{ driver: DriverProfile }>("/driver/profile", input);
+  return res.data.driver;
+}
+
 /** Set the driver online/offline and optionally update their current zone. */
 export async function setDriverAvailability(
   isOnline: boolean,

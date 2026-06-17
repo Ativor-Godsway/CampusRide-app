@@ -210,12 +210,11 @@ export function registerAuthRoutes(
       !isNonEmptyString(body.carMake) ||
       !isNonEmptyString(body.carModel) ||
       !isNonEmptyString(body.carColor) ||
-      !isNonEmptyString(body.plate) ||
-      !isNonEmptyString(body.photoUrl)
+      !isNonEmptyString(body.plate)
     ) {
       return reply
         .code(400)
-        .send({ error: "carMake, carModel, carColor, plate, and photoUrl are required" });
+        .send({ error: "carMake, carModel, carColor, and plate are required" });
     }
 
     if (request.user!.role !== "DRIVER") {
@@ -227,7 +226,7 @@ export function registerAuthRoutes(
       carModel: body.carModel,
       carColor: body.carColor,
       plate: body.plate,
-      photoUrl: body.photoUrl,
+      ...(isNonEmptyString(body.photoUrl) ? { photoUrl: body.photoUrl } : {}),
     });
 
     return reply.code(200).send({ driver });

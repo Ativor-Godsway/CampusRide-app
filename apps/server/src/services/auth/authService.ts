@@ -160,11 +160,8 @@ export interface CompleteDriverProfileInput {
   carModel: string;
   carColor: string;
   plate: string;
-  /**
-   * Phase 3: a placeholder/stubbed URL is acceptable here. Real Cloudinary
-   * upload wiring is deferred to a later phase.
-   */
-  photoUrl: string;
+  /** Optional — Cloudinary upload deferred to a future pass. */
+  photoUrl?: string;
 }
 
 /** Fills in the driver profile fields created (empty) at DRIVER signup. */
@@ -180,7 +177,7 @@ export async function completeDriverProfile(
       carModel: input.carModel,
       carColor: input.carColor,
       plate: input.plate,
-      photoUrl: input.photoUrl,
+      ...(input.photoUrl !== undefined ? { photoUrl: input.photoUrl } : {}),
     },
   });
 }

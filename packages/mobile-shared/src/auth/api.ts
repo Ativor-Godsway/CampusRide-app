@@ -3,11 +3,24 @@ import { api, rawApi } from "./apiClient";
 
 export type OtpPurpose = "SIGNUP" | "LOGIN";
 
+export interface AuthDriverProfile {
+  id: string;
+  carMake: string | null;
+  carModel: string | null;
+  carColor: string | null;
+  plate: string | null;
+  photoUrl: string | null;
+  isApproved: boolean;
+  isOnline: boolean;
+}
+
 export interface AuthUser {
   id: string;
   phone: string;
   name: string;
   role: UserRole;
+  /** Populated for DRIVER accounts (from /me with include: { driver: true }). */
+  driver?: AuthDriverProfile | null;
 }
 
 export interface AuthTokens {

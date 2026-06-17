@@ -55,6 +55,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     if (!driver) {
       return reply.code(404).send({ error: "Driver profile not found" });
     }
+    if (body.isOnline && (!driver.carMake || !driver.carModel || !driver.carColor || !driver.plate)) {
+      return reply.code(403).send({ error: "Complete your driver profile before going online" });
+    }
+
     if (!driver.isApproved) {
       return reply.code(403).send({ error: "Driver account is not approved yet" });
     }

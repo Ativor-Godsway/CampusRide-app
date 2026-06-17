@@ -169,6 +169,13 @@ export default function DriverHomeScreen() {
     return <Redirect href="/auth/phone" />;
   }
 
+  // Gate: driver must complete car details before seeing the home screen.
+  // user.driver is undefined right after signup (not yet refreshed from /me);
+  // user.driver.carMake === null means they signed up but never filled in the form.
+  if (!user.driver || !user.driver.carMake) {
+    return <Redirect href="/onboarding" />;
+  }
+
   const firstName = user.name?.split(" ")[0] ?? "Driver";
   const isOnline = status === "online" || status === "on_ride";
   const toggling = availabilityMutation.isPending;
