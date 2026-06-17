@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
+import type { PaymentMethod } from "@rida/shared";
 import { getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { claimRide } from "../services/ride/dispatch";
@@ -201,11 +202,30 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
       const summary = await getRidePaymentSummary(prisma, rideId);
       const yourShare = summary.perPassenger.find((p) => p.riderId === ride.riderId);
+
+      const paymentMethod = ride.paymentMethod as PaymentMethod;
+
+      // For CASH rides, record the platform's 15% commission as a debt entry.
+      if (paymentMethod === "CASH") {
+        const farePesewasForLedger =
+          ride.type === "LONE"
+            ? getLoneFare()
+            : getSharedFarePerRider(ride.occupancy) * ride.occupancy;
+        const { commission } = splitFare(farePesewasForLedger);
+        await prisma.commissionLedger.upsert({
+          where: { rideId },
+          update: {},
+          create: { driverUserId: userId, rideId, amountPesewas: commission },
+        });
+      }
+
       emitRideEvent(rideId, "ride:completed", {
         rideId,
         fareSummary: {
           yourFarePesewas: yourShare?.farePesewas ?? 0,
           totalFarePesewas: summary.totalExpectedPesewas,
+          paymentMethod,
+          paymentStatus: yourShare?.status ?? "PENDING",
         },
       });
 

@@ -11,6 +11,8 @@ export type RideStatus =
 
 export type PaymentStatus = "PENDING" | "COLLECTED" | "DISBURSED" | "FAILED";
 
+export type PaymentMethod = "CASH" | "MOMO";
+
 export type PassengerStatus =
   | "WAITING"
   | "PICKED_UP"
@@ -37,6 +39,7 @@ export interface Ride {
   fareTotal: number | null;
   driverShare: number | null;
   paymentStatus: PaymentStatus;
+  paymentMethod: PaymentMethod;
   cancelReason: RideCancelReason | null;
   createdAt: Date;
   departedAt: Date | null;

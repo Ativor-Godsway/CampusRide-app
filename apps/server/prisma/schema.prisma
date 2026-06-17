@@ -71,6 +71,11 @@ enum OtpPurpose {
   LOGIN
 }
 
+enum PaymentMethod {
+  CASH
+  MOMO
+}
+
 model User {
   id        String   @id @default(cuid())
   phone     String   @unique
@@ -85,8 +90,9 @@ model User {
   ridePassengers  RidePassenger[]
   payments        Payment[]
   refreshTokens   RefreshToken[]
-  ratingsGiven    Rating[]        @relation("RatingsGiven")
-  ratingsReceived Rating[]        @relation("RatingsReceived")
+  ratingsGiven              Rating[]           @relation("RatingsGiven")
+  ratingsReceived           Rating[]           @relation("RatingsReceived")
+  driverCommissionLedger    CommissionLedger[] @relation("DriverCommission")
 }
 
 model Driver {
@@ -155,6 +161,7 @@ model Ride {
   /// Driver's share in pesewas — computed at completion, null until then
   driverShare   Int?
   paymentStatus PaymentStatus @default(PENDING)
+  paymentMethod PaymentMethod @default(MOMO)
   /// Reason recorded on every CANCELLED transition; null otherwise
   cancelReason  RideCancelReason?
   createdAt     DateTime      @default(now())
@@ -176,11 +183,12 @@ model Ride {
   driver      User?           @relation("DriverRides", fields: [driverId], references: [id], onDelete: Restrict)
   pickupZone  Zone            @relation("PickupZone", fields: [pickupZoneId], references: [id], onDelete: Restrict)
   dropoffZone Zone            @relation("DropoffZone", fields: [dropoffZoneId], references: [id], onDelete: Restrict)
-  passengers  RidePassenger[]
-  payments    Payment[]
-  mergedInto  Ride?           @relation("RideMerge", fields: [mergedIntoRideId], references: [id], onDelete: SetNull)
-  mergedRides Ride[]          @relation("RideMerge")
-  ratings     Rating[]
+  passengers       RidePassenger[]
+  payments         Payment[]
+  mergedInto       Ride?             @relation("RideMerge", fields: [mergedIntoRideId], references: [id], onDelete: SetNull)
+  mergedRides      Ride[]            @relation("RideMerge")
+  ratings          Rating[]
+  commissionLedger CommissionLedger?
 
   @@index([status])
   @@index([riderId])
@@ -276,4 +284,19 @@ model Rating {
 
   @@unique([rideId, raterId, rateeId])
   @@index([rateeId])
+}
+
+/// Tracks the 15% platform commission owed on CASH rides.
+/// One row per CASH ride; created when the driver marks the ride complete.
+model CommissionLedger {
+  id            String   @id @default(cuid())
+  driverUserId  String
+  rideId        String   @unique
+  amountPesewas Int
+  createdAt     DateTime @default(now())
+
+  driver User @relation("DriverCommission", fields: [driverUserId], references: [id], onDelete: Restrict)
+  ride   Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
+
+  @@index([driverUserId])
 }

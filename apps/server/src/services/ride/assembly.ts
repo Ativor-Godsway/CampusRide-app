@@ -10,8 +10,6 @@ import {
 } from "./errors";
 import { applyRideTransition } from "./rideService";
 import { joinSharedRideTx } from "./rideService";
-import { paymentService } from "../active";
-import { initiateRideCollections, resolveRiderPayer } from "../payment/paymentFlow";
 
 /**
  * `maxWait` (time allowed to acquire a pooled connection before the
@@ -124,15 +122,6 @@ export async function addRiderToCar(
  * permanently — `addRiderToCar` rejects any ride that isn't MATCHED/ARRIVED,
  * so no recompute can run on an IN_PROGRESS ride.
  *
- * Phase 4c: once the transition commits, initiates collection for every
- * active passenger's now-frozen `lockedFare` via
- * `initiateRideCollections`/`resolveRiderPayer`. This is a separate,
- * best-effort step AFTER the ride-state transition — payment is a
- * webhook-driven concern that must never block or fail departure, so any
- * error here is swallowed (logged) rather than propagated. The full
- * collect -> webhook -> disburse -> Payment-record flow is implemented and
- * tested end-to-end against DummyPaymentService in
- * src/services/payment/paymentFlow.test.ts.
  */
 export async function departRide(
   prisma: PrismaClient,
@@ -149,16 +138,5 @@ export async function departRide(
     throw new RideNotReadyToDepartError(rideId, ride.status);
   }
 
-  const result = await applyRideTransition(prisma, rideId, "IN_PROGRESS", {}, now);
-
-  try {
-    await initiateRideCollections(prisma, paymentService, rideId, (riderId) => resolveRiderPayer(prisma, riderId));
-  } catch (err) {
-    // Payment is decoupled from ride state — a failed/erroring collection
-    // kickoff must never undo or block departure. Pending collections can be
-    // retried separately; this is surfaced via getRidePaymentSummary, not here.
-    console.error(`[departRide] failed to initiate ride collections for ${rideId}:`, err);
-  }
-
-  return result;
+  return applyRideTransition(prisma, rideId, "IN_PROGRESS", {}, now);
 }

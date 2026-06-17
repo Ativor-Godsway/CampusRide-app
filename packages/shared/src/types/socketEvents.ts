@@ -1,4 +1,4 @@
-import type { RideStatus, RideType } from "./ride";
+import type { PaymentMethod, PaymentStatus, RideStatus, RideType } from "./ride";
 
 /**
  * Real-time event contract for rider-facing ride tracking (Phase 5c).
@@ -45,6 +45,9 @@ export interface RideCompletedFareSummary {
   yourFarePesewas: number;
   /** Total fare collected across all passengers, in integer pesewas. */
   totalFarePesewas: number;
+  paymentMethod: PaymentMethod;
+  /** Moolre collection status for this rider (PENDING until webhook confirms). */
+  paymentStatus: PaymentStatus;
 }
 
 export interface RideCompletedPayload {

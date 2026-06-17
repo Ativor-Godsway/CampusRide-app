@@ -173,6 +173,8 @@ async function simulate(prisma: PrismaClient, rideId: string): Promise<void> {
     fareSummary: {
       yourFarePesewas: yourShare?.farePesewas ?? 0,
       totalFarePesewas: summary.totalExpectedPesewas,
+      paymentMethod: (withZones.paymentMethod ?? "MOMO") as "CASH" | "MOMO",
+      paymentStatus: yourShare?.status ?? "PENDING",
     },
   });
 }
