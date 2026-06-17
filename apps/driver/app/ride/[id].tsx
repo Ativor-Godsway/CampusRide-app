@@ -3,8 +3,8 @@ import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Dimensions, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { DRIVER_CLIENT_EVENTS } from "@rida/shared";
-import type { RideStatus } from "@rida/shared";
+import { DRIVER_CLIENT_EVENTS, getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
+import type { PaymentMethod, RideStatus } from "@rida/shared";
 import {
   Button,
   CampusMapView,
@@ -66,6 +66,8 @@ export default function ActiveRideScreen() {
   const [step, setStep] = useState<ActionStep>("navigate");
   const [driverCoords, setDriverCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [earnedPesewas, setEarnedPesewas] = useState<number | null>(null);
+  const [completedPaymentMethod, setCompletedPaymentMethod] = useState<PaymentMethod>("MOMO");
+  const [commissionPesewas, setCommissionPesewas] = useState<number>(0);
 
   const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -144,6 +146,17 @@ export default function ActiveRideScreen() {
       } else if (step === "complete") {
         const result = await driverComplete(rideId);
         setEarnedPesewas(result.driverSharePesewas);
+        if (ride) {
+          const method = ride.paymentMethod as PaymentMethod;
+          setCompletedPaymentMethod(method);
+          if (method === "CASH") {
+            const totalFare =
+              ride.type === "LONE"
+                ? getLoneFare()
+                : getSharedFarePerRider(ride.occupancy) * ride.occupancy;
+            setCommissionPesewas(splitFare(totalFare).commission);
+          }
+        }
         setStep("done");
         stopLocationStreaming();
       }
@@ -193,14 +206,36 @@ export default function ActiveRideScreen() {
           <Text variant="h1" style={styles.doneTitle}>
             Ride Complete
           </Text>
-          {earnedPesewas !== null && (
+
+          {earnedPesewas !== null && completedPaymentMethod === "MOMO" && (
             <Card style={styles.earnCard}>
-              <Text variant="label" color="muted">YOUR EARNINGS</Text>
+              <Text variant="label" color="muted">YOUR EARNINGS (85%)</Text>
               <Text variant="h1" style={styles.earnAmount}>
                 {formatGhs(earnedPesewas)}
               </Text>
+              <Text variant="caption" color="muted">
+                MoMo payout follows once the rider's payment clears.
+              </Text>
             </Card>
           )}
+
+          {earnedPesewas !== null && completedPaymentMethod === "CASH" && (
+            <Card style={styles.earnCard}>
+              <Text variant="label" color="muted">COLLECT FROM RIDER</Text>
+              <Text variant="h1" style={styles.earnAmount}>
+                {formatGhs(earnedPesewas + commissionPesewas)}
+              </Text>
+              <View style={styles.cashBreakdown}>
+                <Text variant="bodySmall" color="muted">
+                  Your share: {formatGhs(earnedPesewas)}
+                </Text>
+                <Text variant="bodySmall" color="muted">
+                  Platform fee owed: {formatGhs(commissionPesewas)}
+                </Text>
+              </View>
+            </Card>
+          )}
+
           <Text variant="bodySmall" color="muted" style={styles.doneBody}>
             {ride.pickupZone.name} → {ride.dropoffZone.name}
           </Text>
@@ -348,6 +383,11 @@ const styles = StyleSheet.create({
   },
   earnAmount: {
     color: colors.primary[600],
+  },
+  cashBreakdown: {
+    marginTop: spacing.xs,
+    gap: 2,
+    alignItems: "center",
   },
   doneBody: {
     textAlign: "center",
