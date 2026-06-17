@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Redirect } from "expo-router";
+import { useEffect, useState } from "react";
+import { Redirect, useRouter } from "expo-router";
 import { Alert, StyleSheet, View } from "react-native";
 import {
   Button,
@@ -15,6 +15,7 @@ import {
 } from "@rida/mobile-shared";
 
 export default function OnboardingScreen() {
+  const router = useRouter();
   const { isLoading, isAuthenticated, user, refreshMe } = useAuth();
 
   const [carMake, setCarMake] = useState("");
@@ -22,6 +23,16 @@ export default function OnboardingScreen() {
   const [carColor, setCarColor] = useState("");
   const [plate, setPlate] = useState("");
   const [saving, setSaving] = useState(false);
+  // Set to true after a successful save; the effect below waits until the
+  // AuthContext user state has updated (carMake non-null) before navigating,
+  // preventing a race where index.tsx renders with stale user and bounces back.
+  const [profileSaved, setProfileSaved] = useState(false);
+
+  useEffect(() => {
+    if (profileSaved && user?.driver?.carMake) {
+      router.replace("/");
+    }
+  }, [profileSaved, user?.driver?.carMake, router]);
 
   if (isLoading) {
     return (
@@ -48,10 +59,9 @@ export default function OnboardingScreen() {
         carColor: carColor.trim(),
         plate: plate.trim().toUpperCase(),
       });
-      // Refresh the auth context so index.tsx sees the updated profile.
       await refreshMe();
-      // Navigation handled by index.tsx redirecting away from /onboarding once
-      // user.driver.carMake is non-null.
+      // Signal the useEffect above; it navigates once user state has updated.
+      setProfileSaved(true);
     } catch {
       Alert.alert("Couldn't save profile", "Please check your connection and try again.");
     } finally {
