@@ -4,7 +4,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Ionicons } from "@expo/vector-icons";
-import type { RideType } from "@rida/shared";
+import type { PaymentMethod, RideCompletedFareSummary, RideType } from "@rida/shared";
 import { getSharedFarePerRider, priceLoneRide } from "@rida/shared";
 import {
   ActiveRideExistsError,
@@ -13,7 +13,9 @@ import {
   Card,
   CampusMapView,
   type CampusMapZone,
+  Input,
   LoadingState,
+  type MoolreNetwork,
   ProgressBar,
   ServiceIcon,
   Text,
@@ -21,6 +23,8 @@ import {
   colors,
   createRide,
   formatGhs,
+  initiateRidePayment,
+  pollPaymentStatus,
   radii,
   regionForCoordinates,
   rideQueryKey,
@@ -71,6 +75,7 @@ export default function RideTypeScreen() {
   // ── Options phase ───────────────────────────────────────────────────────────
   const [selectedType, setSelectedType] = useState<RideType>("SHARED");
   const [expandedType, setExpandedType] = useState<RideType | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>("MOMO");
   const [submitting, setSubmitting] = useState(false);
 
   // ── Tracking phase (null = options phase, string = post-request or resume) ───
@@ -178,6 +183,7 @@ export default function RideTypeScreen() {
         pickupZoneId: params.pickupZoneId,
         dropoffZoneId: params.dropoffZoneId,
         type: selectedType,
+        paymentMethod: selectedPaymentMethod,
       });
       setActiveRideId(created.id);
     } catch (err) {
@@ -249,6 +255,8 @@ export default function RideTypeScreen() {
               expandedType={expandedType}
               onSelectType={setSelectedType}
               onToggleExpand={(t) => setExpandedType((e) => (e === t ? null : t))}
+              selectedPaymentMethod={selectedPaymentMethod}
+              onSelectPaymentMethod={setSelectedPaymentMethod}
               pickupZoneName={params.pickupZoneName}
               dropoffZoneName={params.dropoffZoneName}
               submitting={submitting}
@@ -311,12 +319,19 @@ export default function RideTypeScreen() {
 
 // ── Options phase ─────────────────────────────────────────────────────────────
 
+const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { value: "MOMO", label: "MoMo", icon: "phone-portrait-outline" },
+  { value: "CASH", label: "Cash", icon: "cash-outline" },
+];
+
 function OptionsContent({
   options,
   selectedType,
   expandedType,
   onSelectType,
   onToggleExpand,
+  selectedPaymentMethod,
+  onSelectPaymentMethod,
   pickupZoneName,
   dropoffZoneName,
   submitting,
@@ -327,6 +342,8 @@ function OptionsContent({
   expandedType: RideType | null;
   onSelectType: (t: RideType) => void;
   onToggleExpand: (t: RideType) => void;
+  selectedPaymentMethod: PaymentMethod;
+  onSelectPaymentMethod: (m: PaymentMethod) => void;
   pickupZoneName: string;
   dropoffZoneName: string;
   submitting: boolean;
@@ -396,6 +413,34 @@ function OptionsContent({
           </Pressable>
         );
       })}
+
+      <View style={styles.paymentSection}>
+        <Text variant="label" color="muted">
+          PAYMENT METHOD
+        </Text>
+        <View style={styles.paymentRow}>
+          {PAYMENT_METHOD_OPTIONS.map((opt) => {
+            const selected = selectedPaymentMethod === opt.value;
+            return (
+              <Pressable
+                key={opt.value}
+                accessibilityRole="button"
+                onPress={() => onSelectPaymentMethod(opt.value)}
+                style={[styles.paymentOption, selected && styles.paymentOptionSelected]}
+              >
+                <Ionicons
+                  name={opt.icon}
+                  size={18}
+                  color={selected ? colors.primary[600] : colors.ink[400]}
+                />
+                <Text variant="bodySmall" color={selected ? "primary" : "muted"}>
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
 
       <View style={styles.footer}>
         {submitting ? (
@@ -639,20 +684,20 @@ function InProgressContent({
   );
 }
 
-function CompletedContent({
+type MomoPhase = "form" | "waiting" | "confirmed" | "failed";
+
+function RatingPanel({
   rideId,
-  fareSummary,
   onDone,
 }: {
   rideId: string;
-  fareSummary: { yourFarePesewas: number; totalFarePesewas: number } | undefined;
   onDone: () => void;
 }) {
   const [stars, setStars] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
 
-  async function handleSubmitRating() {
+  async function handleSubmit() {
     if (stars === 0) return;
     setSubmitting(true);
     try {
@@ -665,6 +710,246 @@ function CompletedContent({
     }
   }
 
+  if (submitted) {
+    return (
+      <>
+        <Text variant="body" color="muted">
+          Thanks for rating your driver!
+        </Text>
+        <Button label="Back to home" onPress={onDone} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <View style={styles.ratingSection}>
+        <Text variant="bodyMedium">How was your ride?</Text>
+        <View style={styles.starsRow}>
+          {STARS.map((value) => (
+            <Pressable key={value} accessibilityRole="button" onPress={() => setStars(value)}>
+              <Ionicons
+                name={value <= stars ? "star" : "star-outline"}
+                size={36}
+                color={value <= stars ? colors.accent[500] : colors.ink[200]}
+              />
+            </Pressable>
+          ))}
+        </View>
+      </View>
+      <View style={styles.buttonGroup}>
+        <Button
+          label="Submit rating"
+          onPress={() => void handleSubmit()}
+          loading={submitting}
+          disabled={stars === 0}
+        />
+        <Button label="Skip" variant="ghost" onPress={onDone} />
+      </View>
+    </>
+  );
+}
+
+function CompletedContent({
+  rideId,
+  fareSummary,
+  onDone,
+}: {
+  rideId: string;
+  fareSummary: RideCompletedFareSummary | undefined;
+  onDone: () => void;
+}) {
+  const [momoPhase, setMomoPhase] = useState<MomoPhase>("form");
+  const [phone, setPhone] = useState("");
+  const [network, setNetwork] = useState<MoolreNetwork>("MTN");
+  const [paying, setPaying] = useState(false);
+  const [ratingReady, setRatingReady] = useState(false);
+
+  // Sync momo phase from server-provided status when fareSummary arrives
+  useEffect(() => {
+    if (!fareSummary || fareSummary.paymentMethod !== "MOMO") return;
+    if (fareSummary.paymentStatus === "COLLECTED" || fareSummary.paymentStatus === "DISBURSED") {
+      setMomoPhase("confirmed");
+    } else if (fareSummary.paymentStatus === "FAILED") {
+      setMomoPhase("failed");
+    }
+  }, [fareSummary?.paymentStatus, fareSummary?.paymentMethod]);
+
+  // Poll Moolre while waiting for the push-prompt approval
+  useEffect(() => {
+    if (momoPhase !== "waiting") return;
+    const interval = setInterval(() => {
+      void pollPaymentStatus(rideId).then(({ paymentStatus }) => {
+        if (paymentStatus === "COLLECTED" || paymentStatus === "DISBURSED") {
+          setMomoPhase("confirmed");
+        } else if (paymentStatus === "FAILED") {
+          setMomoPhase("failed");
+        }
+      });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [momoPhase, rideId]);
+
+  async function handlePay() {
+    if (!phone.trim()) {
+      Alert.alert("Phone required", "Enter your MoMo number to continue.");
+      return;
+    }
+    setPaying(true);
+    try {
+      await initiateRidePayment(rideId, phone.trim(), network);
+      setMomoPhase("waiting");
+    } catch {
+      Alert.alert("Couldn't initiate payment", "Please check your connection and try again.");
+    } finally {
+      setPaying(false);
+    }
+  }
+
+  if (!fareSummary) {
+    return (
+      <View style={styles.section}>
+        <LoadingState />
+      </View>
+    );
+  }
+
+  const { yourFarePesewas, paymentMethod } = fareSummary;
+
+  // ── Rating screen (shared by both paths after payment) ───────────────────────
+  if (ratingReady) {
+    return (
+      <View style={styles.section}>
+        <View style={styles.stateHeader}>
+          <ServiceIcon
+            name="checkmark-circle"
+            size={48}
+            iconSize={22}
+            background={colors.successSurface}
+            color={colors.success}
+          />
+          <View style={styles.stateHeading}>
+            <Text variant="h2">Ride completed</Text>
+          </View>
+        </View>
+        <RatingPanel rideId={rideId} onDone={onDone} />
+      </View>
+    );
+  }
+
+  // ── CASH path ────────────────────────────────────────────────────────────────
+  if (paymentMethod === "CASH") {
+    return (
+      <View style={styles.section}>
+        <View style={styles.stateHeader}>
+          <ServiceIcon
+            name="checkmark-circle"
+            size={48}
+            iconSize={22}
+            background={colors.successSurface}
+            color={colors.success}
+          />
+          <View style={styles.stateHeading}>
+            <Text variant="h2">Ride completed</Text>
+            <Text variant="bodySmall" color="muted">
+              Your fare: {formatGhs(yourFarePesewas)}
+            </Text>
+          </View>
+        </View>
+        <Card style={styles.infoCard}>
+          <View style={styles.infoRow}>
+            <Ionicons name="cash-outline" size={16} color={colors.ink[400]} />
+            <Text variant="bodySmall" style={styles.infoLabel}>
+              Please pay {formatGhs(yourFarePesewas)} to your driver in cash.
+            </Text>
+          </View>
+        </Card>
+        <Button label="Done — rate your driver" onPress={() => setRatingReady(true)} />
+      </View>
+    );
+  }
+
+  // ── MOMO path — payment form ─────────────────────────────────────────────────
+  if (momoPhase === "form" || momoPhase === "failed") {
+    return (
+      <View style={styles.section}>
+        <View style={styles.stateHeader}>
+          <ServiceIcon
+            name="phone-portrait-outline"
+            size={48}
+            iconSize={22}
+            background={colors.primary[50]}
+            color={colors.primary[600]}
+          />
+          <View style={styles.stateHeading}>
+            <Text variant="h2">Pay with MoMo</Text>
+            <Text variant="bodySmall" color="muted">
+              {formatGhs(yourFarePesewas)} will be charged to your wallet.
+            </Text>
+          </View>
+        </View>
+        {momoPhase === "failed" && (
+          <Card style={styles.errorCard}>
+            <Text variant="bodySmall" color="error">
+              Payment failed. Check your balance and try again.
+            </Text>
+          </Card>
+        )}
+        <Input
+          label="MoMo phone number"
+          placeholder="+233..."
+          value={phone}
+          onChangeText={setPhone}
+          returnKeyType="done"
+        />
+        <View style={styles.networkRow}>
+          {(["MTN", "TELECEL", "AT"] as MoolreNetwork[]).map((n) => (
+            <Pressable
+              key={n}
+              accessibilityRole="button"
+              onPress={() => setNetwork(n)}
+              style={[styles.networkOption, network === n && styles.networkOptionSelected]}
+            >
+              <Text variant="bodySmall" color={network === n ? "primary" : "muted"}>
+                {n}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <Button
+          label={`Pay ${formatGhs(yourFarePesewas)}`}
+          onPress={() => void handlePay()}
+          loading={paying}
+        />
+      </View>
+    );
+  }
+
+  // ── MOMO path — waiting for push-prompt approval ─────────────────────────────
+  if (momoPhase === "waiting") {
+    return (
+      <View style={styles.section}>
+        <View style={styles.stateHeader}>
+          <ServiceIcon
+            name="time-outline"
+            size={48}
+            iconSize={22}
+            background={colors.primary[50]}
+            color={colors.primary[600]}
+          />
+          <View style={styles.stateHeading}>
+            <Text variant="h2">Approve the prompt</Text>
+            <Text variant="bodySmall" color="muted">
+              Check your phone and approve the MoMo payment request.
+            </Text>
+          </View>
+        </View>
+        <LoadingState message="Waiting for confirmation…" />
+      </View>
+    );
+  }
+
+  // ── MOMO path — confirmed ────────────────────────────────────────────────────
   return (
     <View style={styles.section}>
       <View style={styles.stateHeader}>
@@ -676,49 +961,13 @@ function CompletedContent({
           color={colors.success}
         />
         <View style={styles.stateHeading}>
-          <Text variant="h2">Ride completed</Text>
-          {fareSummary ? (
-            <Text variant="bodySmall" color="muted">
-              Your fare: {(fareSummary.yourFarePesewas / 100).toFixed(2)} GHS
-            </Text>
-          ) : null}
+          <Text variant="h2">Payment confirmed</Text>
+          <Text variant="bodySmall" color="muted">
+            {formatGhs(yourFarePesewas)} received — thanks!
+          </Text>
         </View>
       </View>
-
-      {!submitted ? (
-        <>
-          <View style={styles.ratingSection}>
-            <Text variant="bodyMedium">How was your ride?</Text>
-            <View style={styles.starsRow}>
-              {STARS.map((value) => (
-                <Pressable key={value} accessibilityRole="button" onPress={() => setStars(value)}>
-                  <Ionicons
-                    name={value <= stars ? "star" : "star-outline"}
-                    size={36}
-                    color={value <= stars ? colors.accent[500] : colors.ink[200]}
-                  />
-                </Pressable>
-              ))}
-            </View>
-          </View>
-          <View style={styles.buttonGroup}>
-            <Button
-              label="Submit rating"
-              onPress={() => void handleSubmitRating()}
-              loading={submitting}
-              disabled={stars === 0}
-            />
-            <Button label="Skip" variant="ghost" onPress={onDone} />
-          </View>
-        </>
-      ) : (
-        <>
-          <Text variant="body" color="muted">
-            Thanks for rating your driver!
-          </Text>
-          <Button label="Back to home" onPress={onDone} />
-        </>
-      )}
+      <Button label="Rate your driver" onPress={() => setRatingReady(true)} />
     </View>
   );
 }
@@ -804,4 +1053,44 @@ const styles = StyleSheet.create({
   // ── Rating
   ratingSection: { alignItems: "center", gap: spacing.sm },
   starsRow: { flexDirection: "row", gap: spacing.sm },
+  // ── Payment method selector (options screen)
+  paymentSection: { gap: spacing.sm },
+  paymentRow: { flexDirection: "row", gap: spacing.sm },
+  paymentOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  paymentOptionSelected: {
+    borderColor: colors.primary[500],
+    backgroundColor: colors.primary[50],
+  },
+  // ── MOMO network pill row (completed screen)
+  networkRow: { flexDirection: "row", gap: spacing.sm },
+  networkOption: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  networkOptionSelected: {
+    borderColor: colors.primary[500],
+    backgroundColor: colors.primary[50],
+  },
+  // ── Error card (MOMO failed state)
+  errorCard: {
+    backgroundColor: colors.errorSurface,
+    borderColor: colors.error,
+    borderWidth: 1,
+  },
 });

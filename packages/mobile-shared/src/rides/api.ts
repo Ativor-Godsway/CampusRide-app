@@ -1,5 +1,7 @@
 import type {
   DriverAssignedPayload,
+  PaymentMethod,
+  PaymentStatus,
   Ride,
   RideCompletedFareSummary,
   RidePassenger,
@@ -18,6 +20,7 @@ export interface CreateRideInput {
   pickupZoneId: string;
   dropoffZoneId: string;
   type: RideType;
+  paymentMethod?: PaymentMethod;
 }
 
 export interface CreateRideConflictError extends Error {
@@ -94,4 +97,30 @@ export interface SubmitRatingInput {
 
 export async function submitRating(input: SubmitRatingInput): Promise<void> {
   await api.post("/ratings", input);
+}
+
+export type MoolreNetwork = "MTN" | "TELECEL" | "AT";
+
+/** Initiate MOMO collection for the rider's completed ride leg. Idempotent. */
+export async function initiateRidePayment(
+  rideId: string,
+  phone: string,
+  network: MoolreNetwork,
+): Promise<{ paymentStatus: PaymentStatus }> {
+  const res = await api.post<{ paymentStatus: PaymentStatus }>(
+    `/rides/${rideId}/initiate-payment`,
+    { phone, network },
+  );
+  return res.data;
+}
+
+/** Poll the rider's Moolre payment status for a completed MOMO ride. */
+export async function pollPaymentStatus(rideId: string): Promise<{
+  paymentStatus: PaymentStatus;
+  paymentMethod: PaymentMethod;
+}> {
+  const res = await api.get<{ paymentStatus: PaymentStatus; paymentMethod: PaymentMethod }>(
+    `/rides/${rideId}/payment-status`,
+  );
+  return res.data;
 }
