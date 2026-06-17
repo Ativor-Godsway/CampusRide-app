@@ -8,6 +8,7 @@ import { riderDecision, type RiderDecisionAction } from "../services/ride/riderD
 import { InvalidSwitchToLoneError, InvalidTransitionError } from "../services/ride/errors";
 import { emitRideEvent } from "../realtime/rideSocket";
 import { broadcastRide } from "../services/ride/dispatch";
+import { getRidePaymentSummary } from "../services/payment/paymentFlow";
 import { config } from "../config";
 import { startMockDriverForRide } from "../dev/mockDriver";
 
@@ -186,7 +187,19 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
     const driver = ride.driverId ? await getDriverInfo(prisma, ride.driverId) : null;
 
-    return reply.code(200).send({ ride, driver });
+    // Include fare summary when COMPLETED so polling self-contains the full
+    // completion signal (no socket required to show the rating/fare screen).
+    let fareSummary: { yourFarePesewas: number; totalFarePesewas: number } | undefined;
+    if (ride.status === "COMPLETED") {
+      const summary = await getRidePaymentSummary(prisma, id);
+      const yourShare = summary.perPassenger.find((p) => p.riderId === userId);
+      fareSummary = {
+        yourFarePesewas: yourShare?.farePesewas ?? 0,
+        totalFarePesewas: summary.totalExpectedPesewas,
+      };
+    }
+
+    return reply.code(200).send({ ride, driver, ...(fareSummary ? { fareSummary } : {}) });
   });
 
   app.post("/rides/:id/decision", { preHandler: requireAuth }, async (request, reply) => {

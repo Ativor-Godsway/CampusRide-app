@@ -34,7 +34,11 @@ export function useRideTracking(rideId: string | undefined) {
     // (e.g. timeout-driven transitions from processTimeouts).
     refetchInterval: (q) => {
       const s = q.state.data?.ride?.status;
-      return s === "REQUESTED" || s === "AWAITING_RIDER_DECISION" || s === "MATCHED" || s === "ARRIVED"
+      return s === "REQUESTED" ||
+        s === "AWAITING_RIDER_DECISION" ||
+        s === "MATCHED" ||
+        s === "ARRIVED" ||
+        s === "IN_PROGRESS"
         ? 12_000
         : false;
     },
