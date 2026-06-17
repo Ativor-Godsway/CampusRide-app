@@ -29,7 +29,15 @@ export function useRideTracking(rideId: string | undefined) {
     queryKey,
     queryFn: () => getRide(rideId!),
     enabled: !!rideId,
-    refetchInterval: false,
+    // Poll every 12 s while the ride is in a non-terminal transitioning state so
+    // the UI converges on true backend state even when a socket event is missed
+    // (e.g. timeout-driven transitions from processTimeouts).
+    refetchInterval: (q) => {
+      const s = q.state.data?.ride?.status;
+      return s === "REQUESTED" || s === "AWAITING_RIDER_DECISION" || s === "MATCHED" || s === "ARRIVED"
+        ? 12_000
+        : false;
+    },
   });
 
   useEffect(() => {

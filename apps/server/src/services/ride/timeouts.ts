@@ -1,5 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
+import { RIDE_EVENTS } from "@rida/shared";
 import { applyRideTransition } from "./rideService";
+import { emitRideEvent } from "../../realtime/rideSocket";
 
 const BROADCAST_TIMEOUT_MS = 90_000;
 const DECISION_GRACE_MS = 90_000;
@@ -33,6 +35,7 @@ export function shouldExpireDecision(ride: RideTimeoutFields, now: Date): boolea
 }
 
 interface TimeoutLogger {
+  info: (obj: unknown, msg?: string) => void;
   warn: (obj: unknown, msg?: string) => void;
 }
 
@@ -86,6 +89,8 @@ export async function processTimeouts(
     try {
       if (shouldTimeout(ride, now)) {
         await applyRideTransition(prisma, ride.id, "AWAITING_RIDER_DECISION", {}, now);
+        emitRideEvent(ride.id, RIDE_EVENTS.STATUS, { rideId: ride.id, status: "AWAITING_RIDER_DECISION" });
+        logger.info({ rideId: ride.id }, "[timeout] REQUESTED → AWAITING_RIDER_DECISION");
         transitioned.push({ rideId: ride.id, from: ride.status, to: "AWAITING_RIDER_DECISION" });
       } else if (shouldExpireDecision(ride, now)) {
         await applyRideTransition(
@@ -95,6 +100,8 @@ export async function processTimeouts(
           { cancelReason: "NO_DRIVERS_AVAILABLE" },
           now,
         );
+        emitRideEvent(ride.id, RIDE_EVENTS.STATUS, { rideId: ride.id, status: "CANCELLED" });
+        logger.info({ rideId: ride.id }, "[timeout] AWAITING_RIDER_DECISION → CANCELLED (no rider action)");
         transitioned.push({ rideId: ride.id, from: ride.status, to: "CANCELLED" });
       }
     } catch (err) {

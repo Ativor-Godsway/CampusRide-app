@@ -14,8 +14,25 @@ export function getRideSocket(): Socket {
   if (!socket) {
     socket = io(getServerUrl(), {
       auth: { token: getAccessToken() },
-      transports: ["websocket"],
+      // Allow polling fallback — Render's proxy may not complete the WS upgrade
+      // on the first attempt. Socket.io will try WebSocket first then fall back.
+      transports: ["websocket", "polling"],
       autoConnect: true,
+    });
+
+    socket.on("connect", () => {
+      console.log(
+        "[Socket.io] connected",
+        socket?.id,
+        "transport:",
+        (socket as Socket & { io: { engine: { transport: { name: string } } } }).io.engine.transport.name,
+      );
+    });
+    socket.on("connect_error", (err: Error) => {
+      console.warn("[Socket.io] connect_error:", err.message);
+    });
+    socket.on("disconnect", (reason: string) => {
+      console.log("[Socket.io] disconnected:", reason);
     });
   }
   return socket;
