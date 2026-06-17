@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
@@ -22,6 +23,7 @@ import {
   formatGhs,
   radii,
   regionForCoordinates,
+  rideQueryKey,
   spacing,
   submitRating,
   submitRideDecision,
@@ -78,6 +80,7 @@ export default function RideTypeScreen() {
   const [cancelling, setCancelling] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
+  const queryClient = useQueryClient();
   const { data: trackingData } = useRideTracking(activeRideId ?? undefined);
 
   useDriverLocation(activeRideId ?? undefined, (payload) => {
@@ -193,7 +196,12 @@ export default function RideTypeScreen() {
     setDecisionSubmitting(true);
     try {
       await submitRideDecision(activeRideId, action);
-      if (action === "CANCEL") router.replace("/");
+      if (action === "CANCEL") {
+        router.replace("/");
+      } else {
+        // Refetch so broadcastStartedAt is fresh for the restarted slider.
+        await queryClient.invalidateQueries({ queryKey: rideQueryKey(activeRideId) });
+      }
     } catch {
       Alert.alert("Something went wrong", "Please try again.");
     } finally {
@@ -257,9 +265,6 @@ export default function RideTypeScreen() {
                   priceLabel={priceLabel}
                   rideType={selectedType}
                   progress={ride ? searchProgress : 1}
-                  canSwitchToLone={canSwitchToLone ?? false}
-                  onSwitchToLone={() => void handleDecision("SWITCH_TO_LONE")}
-                  switching={decisionSubmitting}
                   onCancel={() => void handleCancel()}
                   cancelling={cancelling}
                 />
@@ -414,9 +419,6 @@ function SearchingContent({
   priceLabel,
   rideType,
   progress,
-  canSwitchToLone,
-  onSwitchToLone,
-  switching,
   onCancel,
   cancelling,
 }: {
@@ -425,9 +427,6 @@ function SearchingContent({
   priceLabel: string;
   rideType: RideType;
   progress: number;
-  canSwitchToLone: boolean;
-  onSwitchToLone: () => void;
-  switching: boolean;
   onCancel: () => void;
   cancelling: boolean;
 }) {
@@ -436,7 +435,7 @@ function SearchingContent({
   useEffect(() => {
     const timer = setInterval(
       () => setMsgIdx((i) => (i + 1) % SEARCHING_MESSAGES.length),
-      3000,
+      20000,
     );
     return () => clearInterval(timer);
   }, []);
@@ -471,14 +470,6 @@ function SearchingContent({
       </Card>
 
       <View style={styles.buttonGroup}>
-        {canSwitchToLone && (
-          <Button
-            label="Switch to solo ride"
-            variant="secondary"
-            onPress={onSwitchToLone}
-            loading={switching}
-          />
-        )}
         <Button label="Cancel request" variant="ghost" onPress={onCancel} loading={cancelling} />
       </View>
     </View>
