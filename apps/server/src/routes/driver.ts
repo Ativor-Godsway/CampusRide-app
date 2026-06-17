@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod } from "@rida/shared";
-import { getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
+import { getLoneFare, getSharedFarePerRider, splitFare, designateBestFit } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { claimRide } from "../services/ride/dispatch";
 import { departRide } from "../services/ride/assembly";
@@ -9,6 +9,21 @@ import { applyRideTransition } from "../services/ride/rideService";
 import { RideAlreadyClaimedError, InvalidTransitionError } from "../services/ride/errors";
 import { emitRideEvent } from "../realtime/rideSocket";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
+
+/** Returns the set of zone IDs a driver in `zoneId` is eligible to serve (same zone + 1 hop). */
+function computeEligibleZoneSet(
+  zoneId: string,
+  adjacencies: Array<{ zoneId: string; adjacentZoneId: string }>,
+): Set<string> {
+  const zones = new Set<string>([zoneId]);
+  for (const adj of adjacencies) {
+    if (adj.zoneId === zoneId || adj.adjacentZoneId === zoneId) {
+      zones.add(adj.zoneId);
+      zones.add(adj.adjacentZoneId);
+    }
+  }
+  return zones;
+}
 
 const ACTIVE_DRIVER_STATUSES = ["MATCHED", "ARRIVED", "IN_PROGRESS"] as const;
 
@@ -180,6 +195,103 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       }
       throw err;
     }
+  });
+
+  /**
+   * Returns the list of REQUESTED rides this driver is currently eligible to claim.
+   * Eligible = ride's pickupZone is in the driver's zone or an adjacent zone, ride is
+   * unclaimed, and the broadcast window (90 s) hasn't expired. Each ride includes a
+   * `bestFit` flag derived from the existing Phase-2e bestFit scoring logic.
+   */
+  app.get("/driver/rides/eligible", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+
+    const userId = request.user!.userId;
+
+    const driver = await prisma.driver.findUnique({ where: { userId } });
+    if (!driver || !driver.isOnline || !driver.isApproved || !driver.currentZoneId) {
+      return reply.code(200).send({ rides: [] });
+    }
+
+    // Full adjacency graph — small table (~30 edges for 15 zones), fetched once.
+    const allAdjacencies = await prisma.zoneAdjacency.findMany();
+
+    // Zones where this driver is eligible to pick up.
+    const driverEligibleZones = computeEligibleZoneSet(driver.currentZoneId, allAdjacencies);
+
+    // All unclaimed REQUESTED rides whose pickup is in those zones and are still within
+    // the 90-second broadcast window.
+    const BROADCAST_WINDOW_MS = 90_000;
+    const cutoff = new Date(Date.now() - BROADCAST_WINDOW_MS);
+
+    const rides = await prisma.ride.findMany({
+      where: {
+        status: "REQUESTED",
+        driverId: null,
+        pickupZoneId: { in: Array.from(driverEligibleZones) },
+        broadcastStartedAt: { gte: cutoff },
+      },
+      include: { pickupZone: true, dropoffZone: true },
+      orderBy: { createdAt: "desc" },
+    });
+
+    if (rides.length === 0) {
+      return reply.code(200).send({ rides: [] });
+    }
+
+    // Compute the union of all zones eligible for any of these rides — lets us fetch
+    // all potentially-eligible drivers in a single query.
+    const allRideEligibleZones = new Set<string>();
+    const rideZoneMap = new Map<string, Set<string>>();
+
+    for (const ride of rides) {
+      const zones = computeEligibleZoneSet(ride.pickupZoneId, allAdjacencies);
+      rideZoneMap.set(ride.id, zones);
+      for (const z of zones) allRideEligibleZones.add(z);
+    }
+
+    const allEligibleDrivers = await prisma.driver.findMany({
+      where: {
+        isOnline: true,
+        isApproved: true,
+        currentZoneId: { in: Array.from(allRideEligibleZones) },
+      },
+      select: { userId: true, currentZoneId: true },
+    });
+
+    const result = rides.map((ride) => {
+      const eligibleZones = rideZoneMap.get(ride.id)!;
+      const rideDrivers = allEligibleDrivers.filter(
+        (d) => d.currentZoneId !== null && eligibleZones.has(d.currentZoneId),
+      );
+
+      const bestFitResults = designateBestFit(
+        { pickupZoneId: ride.pickupZoneId, dropoffZoneId: ride.dropoffZoneId },
+        rideDrivers.map((d) => ({ driverUserId: d.userId, currentZoneId: d.currentZoneId })),
+        allAdjacencies,
+      );
+
+      const myResult = bestFitResults.find((r) => r.driverUserId === userId);
+
+      const farePesewas =
+        ride.type === "LONE" ? getLoneFare() : getSharedFarePerRider(ride.occupancy);
+      const { driverShare } = splitFare(farePesewas);
+
+      return {
+        rideId: ride.id,
+        pickupZoneName: ride.pickupZone.name,
+        pickupZoneId: ride.pickupZoneId,
+        dropoffZoneName: ride.dropoffZone.name,
+        dropoffZoneId: ride.dropoffZoneId,
+        type: ride.type as "LONE" | "SHARED",
+        farePesewas,
+        driverSharePesewas: driverShare,
+        createdAt: ride.createdAt.toISOString(),
+        bestFit: myResult?.bestFit ?? false,
+      };
+    });
+
+    return reply.code(200).send({ rides: result });
   });
 
   /** Driver completes the ride — transitions IN_PROGRESS → COMPLETED and emits fare summary. */
