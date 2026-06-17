@@ -1,4 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
+import { getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
+import { emitDriverBroadcast } from "../../realtime/rideSocket";
 import { RideAlreadyClaimedError } from "./errors";
 
 /**
@@ -33,29 +35,38 @@ export async function getEligibleDrivers(
 }
 
 /**
- * Hook for pushing a "new ride available" event to eligible drivers.
- *
- * TODO(Phase 5): wire this to Socket.io — emit a "ride:broadcast" event to
- * each driverId's socket room so their client shows the incoming ride.
- * For now this is a no-op so dispatch logic can be exercised headlessly.
- */
-export function notifyEligibleDrivers(rideId: string, driverIds: readonly string[]): void {
-  void rideId;
-  void driverIds;
-}
-
-/**
- * Computes the eligible-driver set for a ride and invokes the
- * notifyEligibleDrivers hook. Does not change ride state — call this after
- * a ride enters (or re-enters) REQUESTED.
+ * Computes the eligible-driver set for a ride, builds the broadcast payload,
+ * and emits ride:broadcast to each eligible driver's personal socket room.
+ * Does not change ride state — call this after a ride enters (or re-enters)
+ * REQUESTED.
  */
 export async function broadcastRide(prisma: PrismaClient, rideId: string) {
-  const ride = await prisma.ride.findUniqueOrThrow({ where: { id: rideId } });
+  const ride = await prisma.ride.findUniqueOrThrow({
+    where: { id: rideId },
+    include: { pickupZone: true, dropoffZone: true },
+  });
   const eligible = await getEligibleDrivers(prisma, ride);
-  notifyEligibleDrivers(
-    rideId,
-    eligible.map((d) => d.id),
-  );
+
+  if (eligible.length > 0) {
+    const farePesewas =
+      ride.type === "LONE" ? getLoneFare() : getSharedFarePerRider(ride.occupancy);
+    const { driverShare } = splitFare(farePesewas);
+    const expiresAt = (ride.broadcastStartedAt?.getTime() ?? Date.now()) + 90_000;
+
+    emitDriverBroadcast(
+      eligible.map((d) => d.userId),
+      {
+        rideId: ride.id,
+        pickupZoneName: ride.pickupZone.name,
+        dropoffZoneName: ride.dropoffZone.name,
+        type: ride.type,
+        farePesewas,
+        driverSharePesewas: driverShare,
+        expiresAt,
+      },
+    );
+  }
+
   return eligible;
 }
 

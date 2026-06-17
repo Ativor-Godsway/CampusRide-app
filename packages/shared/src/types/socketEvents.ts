@@ -1,4 +1,4 @@
-import type { RideStatus } from "./ride";
+import type { RideStatus, RideType } from "./ride";
 
 /**
  * Real-time event contract for rider-facing ride tracking (Phase 5c).
@@ -66,3 +66,41 @@ export const RIDE_CLIENT_EVENTS = {
 } as const;
 
 export type RideClientEvent = (typeof RIDE_CLIENT_EVENTS)[keyof typeof RIDE_CLIENT_EVENTS];
+
+// ─── Driver ──────────────────────────────────────────────────────────────────
+
+/** Server → driver events emitted to the driver's personal socket room. */
+export const DRIVER_EVENTS = {
+  RIDE_BROADCAST: "ride:broadcast",
+} as const;
+
+export type DriverServerEvent = (typeof DRIVER_EVENTS)[keyof typeof DRIVER_EVENTS];
+
+/** Payload emitted to eligible drivers when a new ride enters REQUESTED. */
+export interface RideBroadcastPayload {
+  rideId: string;
+  pickupZoneName: string;
+  dropoffZoneName: string;
+  type: RideType;
+  /** Total locked fare for the ride in integer pesewas. */
+  farePesewas: number;
+  /** Driver's 85% share in integer pesewas. */
+  driverSharePesewas: number;
+  /** Unix ms timestamp when the 90s broadcast window expires. */
+  expiresAt: number;
+}
+
+/** Driver → server events. */
+export const DRIVER_CLIENT_EVENTS = {
+  /** Driver streams their GPS location during an active ride. */
+  LOCATION_UPDATE: "driver:location",
+} as const;
+
+export type DriverClientEvent = (typeof DRIVER_CLIENT_EVENTS)[keyof typeof DRIVER_CLIENT_EVENTS];
+
+/** Payload sent driver→server on every location ping during an active ride. */
+export interface DriverLocationUpdatePayload {
+  rideId: string;
+  lat: number;
+  lng: number;
+}

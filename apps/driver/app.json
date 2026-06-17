@@ -19,6 +19,12 @@
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "CampusRide Driver uses your location to show riders where you are and to match you with nearby rides."
+        }
+      ],
       "expo-asset",
       "expo-font"
     ],

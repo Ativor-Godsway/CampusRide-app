@@ -10,6 +10,7 @@ import { registerWebhookRoutes } from "./routes/webhooks";
 import { registerZoneRoutes } from "./routes/zones";
 import { registerRideRoutes } from "./routes/rides";
 import { registerRatingRoutes } from "./routes/ratings";
+import { registerDriverRoutes } from "./routes/driver";
 import { initRideSocket } from "./realtime/rideSocket";
 
 // 15s was too aggressive for Neon's pooled connection budget alongside
@@ -33,6 +34,7 @@ async function bootstrap() {
   registerZoneRoutes(app, prisma);
   registerRideRoutes(app, prisma);
   registerRatingRoutes(app, prisma);
+  registerDriverRoutes(app, prisma);
 
   // app.server is the underlying http.Server — attach Socket.io to it directly
   await app.ready();

@@ -2,8 +2,13 @@ import type { Server as SocketIOServer, Socket } from "socket.io";
 import type { PrismaClient } from "@prisma/client";
 import {
   RIDE_CLIENT_EVENTS,
+  DRIVER_CLIENT_EVENTS,
+  DRIVER_EVENTS,
+  RIDE_EVENTS,
   type RideServerEvent,
   type RideServerEventPayloads,
+  type RideBroadcastPayload,
+  type DriverLocationUpdatePayload,
 } from "@rida/shared";
 import { verifyAccessToken } from "../services/auth/tokens";
 
@@ -13,17 +18,22 @@ function roomForRide(rideId: string): string {
   return `ride:${rideId}`;
 }
 
+function roomForDriver(userId: string): string {
+  return `driver:${userId}`;
+}
+
 /**
- * Wires up the rider-facing real-time layer (Phase 5c):
- * - On connect, verifies the access token passed as `socket.handshake.auth.token`
- *   (the same token used for HTTP requests). Disconnects unauthenticated sockets.
- * - `ride:subscribe` / `ride:unsubscribe` join/leave the `ride:{rideId}` room,
- *   after confirming the authenticated user is the ride's rider or one of its
- *   SHARED-ride passengers.
+ * Wires up the real-time layer (Phase 5c + 6a):
  *
- * Emitting is done via `emitRideEvent`, called from route handlers and the
- * dev mock driver after a ride transition commits — this module never
- * mutates ride state itself.
+ * Rider side (Phase 5c):
+ * - `ride:subscribe` / `ride:unsubscribe` join/leave the `ride:{rideId}` room,
+ *   after confirming the authenticated user is the ride's rider or passenger.
+ *
+ * Driver side (Phase 6a):
+ * - Every authenticated driver is automatically joined to `driver:{userId}` so
+ *   the server can push `ride:broadcast` events to them.
+ * - `driver:location` events from the driver are re-emitted as
+ *   `ride:driver_location` to the ride's room (riders see live GPS).
  */
 export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
   ioRef = io;
@@ -32,12 +42,21 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
     const token = socket.handshake.auth?.token as string | undefined;
 
     let userId: string;
+    let userRole: string;
     try {
       if (!token) throw new Error("missing token");
-      userId = verifyAccessToken(token).userId;
+      const payload = verifyAccessToken(token);
+      userId = payload.userId;
+      userRole = payload.role ?? "RIDER";
     } catch {
       socket.disconnect(true);
       return;
+    }
+
+    // Every driver joins their personal room immediately on connect so they
+    // receive ride:broadcast events pushed by broadcastRide.
+    if (userRole === "DRIVER") {
+      void socket.join(roomForDriver(userId));
     }
 
     socket.on(RIDE_CLIENT_EVENTS.SUBSCRIBE, (rideId: unknown) => {
@@ -51,7 +70,31 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
       if (typeof rideId !== "string") return;
       socket.leave(roomForRide(rideId));
     });
+
+    // Driver streams GPS during an active ride; server re-emits to the ride room.
+    socket.on(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, (data: unknown) => {
+      if (!isDriverLocationUpdate(data)) return;
+      void authorizeDriverRide(prisma, data.rideId, userId).then((allowed) => {
+        if (!allowed) return;
+        ioRef?.to(roomForRide(data.rideId)).emit(RIDE_EVENTS.DRIVER_LOCATION, {
+          rideId: data.rideId,
+          lat: data.lat,
+          lng: data.lng,
+          ts: Date.now(),
+        });
+      });
+    });
   });
+}
+
+function isDriverLocationUpdate(v: unknown): v is DriverLocationUpdatePayload {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    typeof (v as Record<string, unknown>).rideId === "string" &&
+    typeof (v as Record<string, unknown>).lat === "number" &&
+    typeof (v as Record<string, unknown>).lng === "number"
+  );
 }
 
 async function authorizeRideAccess(
@@ -67,6 +110,20 @@ async function authorizeRideAccess(
   return ride.riderId === userId || ride.passengers.length > 0;
 }
 
+/** Allows a location update only if the user is the active driver of the ride. */
+async function authorizeDriverRide(
+  prisma: PrismaClient,
+  rideId: string,
+  userId: string,
+): Promise<boolean> {
+  const ride = await prisma.ride.findUnique({
+    where: { id: rideId },
+    select: { driverId: true, status: true },
+  });
+  if (!ride) return false;
+  return ride.driverId === userId && ride.status === "IN_PROGRESS";
+}
+
 /** Emits a contract event to everyone subscribed to a ride's room. No-op if the socket server isn't initialized (e.g. tests). */
 export function emitRideEvent<E extends RideServerEvent>(
   rideId: string,
@@ -74,4 +131,14 @@ export function emitRideEvent<E extends RideServerEvent>(
   payload: RideServerEventPayloads[E],
 ): void {
   ioRef?.to(roomForRide(rideId)).emit(event, payload);
+}
+
+/** Emits a ride:broadcast event to all specified driver user rooms. */
+export function emitDriverBroadcast(
+  driverUserIds: string[],
+  payload: RideBroadcastPayload,
+): void {
+  if (!ioRef || driverUserIds.length === 0) return;
+  const rooms = driverUserIds.map(roomForDriver);
+  ioRef.to(rooms).emit(DRIVER_EVENTS.RIDE_BROADCAST, payload);
 }

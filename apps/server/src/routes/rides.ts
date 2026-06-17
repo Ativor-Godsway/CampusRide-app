@@ -7,6 +7,7 @@ import { applyRideTransition } from "../services/ride/rideService";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
 import { InvalidSwitchToLoneError, InvalidTransitionError } from "../services/ride/errors";
 import { emitRideEvent } from "../realtime/rideSocket";
+import { broadcastRide } from "../services/ride/dispatch";
 import { config } from "../config";
 import { startMockDriverForRide } from "../dev/mockDriver";
 
@@ -138,6 +139,11 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       include: { passengers: true },
     });
 
+    // Notify eligible real drivers via socket (Phase 6a). Fire-and-forget.
+    broadcastRide(prisma, ride.id).catch((err) => {
+      console.error(`[broadcastRide] failed for ride ${ride.id}:`, err);
+    });
+
     if (config.enableMockDriver) {
       startMockDriverForRide(prisma, ride.id);
     }
@@ -208,8 +214,13 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       const updated = await riderDecision(prisma, id, body.action);
       emitRideEvent(id, "ride:status", { rideId: id, status: updated.status });
 
-      if (config.enableMockDriver && updated.status === "REQUESTED") {
-        startMockDriverForRide(prisma, id);
+      if (updated.status === "REQUESTED") {
+        broadcastRide(prisma, id).catch((err) => {
+          console.error(`[broadcastRide] failed for ride ${id}:`, err);
+        });
+        if (config.enableMockDriver) {
+          startMockDriverForRide(prisma, id);
+        }
       }
 
       return reply.code(200).send({ ride: updated });
