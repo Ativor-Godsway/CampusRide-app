@@ -37,15 +37,17 @@ apps/driver) are distributed via Expo Go / EAS and connect to this server.
 |---|---|
 | **Root Directory** | *(leave blank — repo root)* |
 | **Runtime** | Node |
-| **Build Command** | `npm install && npm run build --workspace=apps/server` |
+| **Build Command** | `npm install && npm run build:server` |
 | **Start Command** | `npm run start --workspace=apps/server` |
 | **Node Version** | 20 (set in `.node-version` at repo root, or pin in Render) |
 
-> The build command does three things in order:
+> The build command does four things in order:
 > 1. `npm install` — installs all workspace dependencies at repo root.
-> 2. `prisma generate` (part of the `build` script) — generates the Prisma
+> 2. `tsc -p tsconfig.build.json` (builds `packages/shared`) — emits
+>    `packages/shared/dist/` so the server can resolve `@rida/shared` at runtime.
+> 3. `prisma generate` (part of the server `build` script) — generates the Prisma
 >    client from `apps/server/prisma/schema.prisma`.
-> 3. `tsc` (part of the `build` script) — compiles TypeScript to
+> 4. `tsc -p tsconfig.build.json` (builds `apps/server`) — compiles TypeScript to
 >    `apps/server/dist/`.
 
 ### Health Check tab

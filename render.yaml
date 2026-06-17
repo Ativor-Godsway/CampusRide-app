@@ -7,10 +7,9 @@ services:
     region: oregon
     plan: free
 
-    # Render runs `npm install` (the install command) before the build command.
-    # npm install at the workspace root installs all workspace dependencies,
-    # including devDependencies needed for the TypeScript compilation step.
-    buildCommand: npm install && npm run build --workspace=apps/server
+    # Builds packages/shared first (apps/server needs its dist/ at runtime),
+    # then builds apps/server (prisma generate + tsc).
+    buildCommand: npm install && npm run build:server
     startCommand: npm run start --workspace=apps/server
 
     # Render polls this path to confirm the service is healthy.

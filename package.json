@@ -11,6 +11,7 @@
     "dev:rider": "npm run start --workspace=apps/rider",
     "dev:driver": "npm run start --workspace=apps/driver",
     "build:shared": "npm run build --workspace=packages/shared",
+    "build:server": "npm run build --workspace=packages/shared && npm run build --workspace=apps/server",
     "db:migrate": "npm run db:migrate --workspace=apps/server",
     "db:seed": "npm run db:seed --workspace=apps/server",
     "db:generate": "npm run db:generate --workspace=apps/server"
