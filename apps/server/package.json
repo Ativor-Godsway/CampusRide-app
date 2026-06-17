@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only -r tsconfig-paths/register src/index.ts",
-    "build": "prisma generate && tsc",
+    "build": "prisma generate && tsc -p tsconfig.build.json",
     "start": "node dist/apps/server/src/index.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
