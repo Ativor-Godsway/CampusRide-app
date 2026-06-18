@@ -1,12 +1,11 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
-import { PRICING, areCombinable } from "@rida/shared";
+import { PRICING } from "@rida/shared";
 import {
   NoSeatsAvailableError,
   NotRideOwnerError,
   RequestRideUnavailableError,
   RideNotFillableError,
   RideNotReadyToDepartError,
-  RidesNotCombinableError,
 } from "./errors";
 import { applyRideTransition } from "./rideService";
 import { joinSharedRideTx } from "./rideService";
@@ -40,12 +39,17 @@ export type RideWithPassengers = Prisma.RideGetPayload<{ include: { passengers: 
  * 1. Load the anchor ride; verify `driverId` owns it and it's MATCHED or
  *    ARRIVED (claimed, not yet departed) with a free seat (occupancy < 4).
  * 2. Load the request ride; verify it's still REQUESTED, unclaimed, SHARED.
- * 3. Verify `areCombinable(anchor, request, adjacency)`.
- * 4. Atomically absorb the request ride — a conditional UPDATE
+ * 3. Atomically absorb the request ride — a conditional UPDATE
  *    (`WHERE status = 'REQUESTED' AND driverId IS NULL`) that only one
  *    concurrent caller can win, mirroring claimRide's atomic-claim pattern.
  *    If it affects 0 rows, another driver already absorbed it.
- * 5. Move the request's rider onto the anchor via `joinSharedRideTx`.
+ * 4. Move the request's rider onto the anchor via `joinSharedRideTx`.
+ *
+ * No route/zone compatibility check: a driver may combine ANY pending SHARED
+ * request into their car (product decision — compatibility is surfaced to the
+ * driver as a sort hint in `/rides/:id/fill-suggestions`, not enforced as a
+ * guardrail here). This previously threw `RidesNotCombinableError` via
+ * `areCombinable`; that check is intentionally removed.
  *
  * Throws (no DB writes on any of these):
  * - NotRideOwnerError: anchor.driverId !== driverId
@@ -53,7 +57,6 @@ export type RideWithPassengers = Prisma.RideGetPayload<{ include: { passengers: 
  * - NoSeatsAvailableError: anchor.occupancy >= 4
  * - RequestRideUnavailableError: request not REQUESTED/unclaimed/SHARED
  *   (checked up front, and again via the atomic absorb for races)
- * - RidesNotCombinableError: zones don't line up (areCombinable false)
  */
 export async function addRiderToCar(
   prisma: PrismaClient,
@@ -81,11 +84,6 @@ export async function addRiderToCar(
 
     if (request.status !== "REQUESTED" || request.driverId !== null || request.type !== "SHARED") {
       throw new RequestRideUnavailableError(requestRideId);
-    }
-
-    const adjacency = await tx.zoneAdjacency.findMany();
-    if (!areCombinable(anchor, request, adjacency)) {
-      throw new RidesNotCombinableError(anchorRideId, requestRideId);
     }
 
     const absorbed = await tx.ride.updateMany({

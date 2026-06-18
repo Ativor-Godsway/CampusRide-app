@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, PassengerStatus } from "@rida/shared";
-import { getLoneFare, getSharedFarePerRider, splitFare, designateBestFit } from "@rida/shared";
+import { getLoneFare, getSharedFarePerRider, splitFare, designateBestFit, PRICING } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { claimRide } from "../services/ride/dispatch";
 import { departRide, addRiderToCar } from "../services/ride/assembly";
@@ -16,7 +16,6 @@ import {
   RideNotFillableError,
   NoSeatsAvailableError,
   RequestRideUnavailableError,
-  RidesNotCombinableError,
 } from "../services/ride/errors";
 import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
@@ -386,10 +385,17 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   });
 
   /**
-   * Returns ranked compatible SHARED requests that can be added to the driver's
-   * claimed SHARED anchor ride (MATCHED or ARRIVED), plus a fare-impact preview
-   * for each showing how fares would change at the new occupancy.
-   * Wraps the existing read-only `suggestFillsForRide` — no DB writes.
+   * Returns ALL pending, addable SHARED requests for the driver's claimed
+   * anchor ride (MATCHED or ARRIVED) — compatible ones (per the existing
+   * Phase-2c `suggestFillsForRide` ranking) first, flagged `compatible: true`
+   * (badge-eligible), every other still-pending SHARED request after,
+   * flagged `compatible: false`, ordered by createdAt desc. Compatibility is
+   * a SORT HINT only, not a filter — the driver may add any of them.
+   *
+   * Hard addable boundary (the only real filter): status REQUESTED, unclaimed,
+   * SHARED, anchor has a free seat (occupancy < 4), anchor still assembling
+   * (MATCHED/ARRIVED, checked above). No fare-impact preview — shared fare
+   * is flat per rider, unaffected by who's added.
    */
   app.get("/rides/:id/fill-suggestions", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
@@ -417,50 +423,50 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       prisma.zoneAdjacency.findMany(),
       prisma.ride.findMany({
         where: { status: "REQUESTED", driverId: null, type: "SHARED" },
+        include: { pickupZone: true, dropoffZone: true },
+        orderBy: { createdAt: "desc" },
       }),
     ]);
 
     // suggestFillsForRide needs RideWithPassengers (plain passengers include, no zone nesting).
-    // anchor satisfies this structurally — cast is safe.
-    const ranked = suggestFillsForRide(
+    // anchor satisfies this structurally — cast is safe. Its own internal
+    // areCombinable filter is exactly what makes this the "compatible,
+    // ranked" subset — left untouched, its contract/tests stay as-is.
+    const compatibleRanked = suggestFillsForRide(
       anchor as unknown as RideWithPassengers,
       allCandidates,
       adjacency,
       new Date(),
     );
+    const compatibleIds = new Set(compatibleRanked.map((r) => r.id));
+    const zoneMap = new Map(allCandidates.map((r) => [r.id, r]));
+    const existingRiderIds = new Set(anchor.passengers.map((p) => p.riderId));
+    const isFull = anchor.occupancy >= PRICING.MAX_SHARED_OCCUPANCY;
 
-    // Fetch zone names for the ranked suggestions in one query.
-    const rankedIds = ranked.map((r) => r.id);
-    const suggestionsWithZones = await prisma.ride.findMany({
-      where: { id: { in: rankedIds } },
-      include: { pickupZone: true, dropoffZone: true },
+    const toSuggestion = (r: (typeof allCandidates)[number], compatible: boolean) => ({
+      requestRideId: r.id,
+      pickupZoneName: r.pickupZone.name,
+      pickupZoneId: r.pickupZoneId,
+      dropoffZoneName: r.dropoffZone.name,
+      dropoffZoneId: r.dropoffZoneId,
+      createdAt: r.createdAt.toISOString(),
+      compatible,
     });
-    const zoneMap = new Map(suggestionsWithZones.map((r) => [r.id, r]));
 
-    const currentFarePerRider = getSharedFarePerRider(anchor.occupancy);
+    const compatibleSuggestions = isFull
+      ? []
+      : compatibleRanked
+          .map((r) => zoneMap.get(r.id))
+          .filter((r): r is NonNullable<typeof r> => r !== undefined)
+          .map((r) => toSuggestion(r, true));
 
-    const suggestions = ranked
-      .map((r) => {
-        const withZones = zoneMap.get(r.id);
-        if (!withZones) return null;
-        const newOccupancy = anchor.occupancy + 1;
-        const newFarePerRider = getSharedFarePerRider(newOccupancy);
-        return {
-          requestRideId: r.id,
-          pickupZoneName: withZones.pickupZone.name,
-          pickupZoneId: r.pickupZoneId,
-          dropoffZoneName: withZones.dropoffZone.name,
-          dropoffZoneId: r.dropoffZoneId,
-          createdAt: r.createdAt.toISOString(),
-          fareImpact: {
-            currentOccupancy: anchor.occupancy,
-            newOccupancy,
-            currentFarePerRider,
-            newFarePerRider,
-          },
-        };
-      })
-      .filter((s): s is NonNullable<typeof s> => s !== null);
+    const restSuggestions = isFull
+      ? []
+      : allCandidates
+          .filter((r) => !compatibleIds.has(r.id) && !existingRiderIds.has(r.riderId))
+          .map((r) => toSuggestion(r, false));
+
+    const suggestions = [...compatibleSuggestions, ...restSuggestions];
 
     // isActivePassengerStatus (WAITING/ARRIVED/PICKED_UP) — NOT a hardcoded
     // WAITING||PICKED_UP list, which would silently drop a passenger the
@@ -528,8 +534,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       if (
         err instanceof RideNotFillableError ||
         err instanceof NoSeatsAvailableError ||
-        err instanceof RequestRideUnavailableError ||
-        err instanceof RidesNotCombinableError
+        err instanceof RequestRideUnavailableError
       ) {
         return reply.code(409).send({ error: (err as Error).message });
       }

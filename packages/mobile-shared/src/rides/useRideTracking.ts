@@ -4,6 +4,7 @@ import {
   RIDE_EVENTS,
   type DriverAssignedPayload,
   type DriverLocationPayload,
+  type PassengerStatusPayload,
   type RideCompletedPayload,
   type RideStatusPayload,
 } from "@rida/shared";
@@ -18,7 +19,10 @@ export function rideQueryKey(rideId: string) {
  * Drives the rider tracking screen: fetches the ride once via TanStack Query,
  * then subscribes to its `ride:{rideId}` socket room and patches the cached
  * query data as `ride:status` / `ride:driver_assigned` / `ride:completed`
- * events arrive. `ride:driver_location` pings are NOT cached (too frequent) —
+ * events arrive. Also listens for `ride:passenger_status` (Phase 6b-3,
+ * delivered to this rider's personal `rider:{userId}` room, not the ride
+ * room) to patch this rider's own passenger row the moment the driver acts
+ * on it. `ride:driver_location` pings are NOT cached (too frequent) —
  * consumers should subscribe to them separately via `useDriverLocation`.
  */
 export function useRideTracking(rideId: string | undefined) {
@@ -74,14 +78,43 @@ export function useRideTracking(rideId: string | undefined) {
       );
     };
 
+    /**
+     * Phase 6b-3: per-passenger lifecycle updates (arrived/pickup/dropoff) are
+     * emitted ONLY to this rider's personal room, never the whole ride room —
+     * this is the one place that patches `ride.passengers[]` from them, so a
+     * driver tapping a per-passenger action reaches this rider in ~1-2s
+     * instead of waiting for the 12s poll safety net. Matches by
+     * ridePassengerId first, falling back to riderId.
+     */
+    const onPassengerStatus = (payload: PassengerStatusPayload) => {
+      if (payload.rideId !== rideId) return;
+      queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current?: GetRideResult) =>
+        current
+          ? {
+              ...current,
+              ride: {
+                ...current.ride,
+                passengers: current.ride.passengers.map((p) =>
+                  p.id === payload.ridePassengerId || p.riderId === payload.riderId
+                    ? { ...p, status: payload.status }
+                    : p,
+                ),
+              },
+            }
+          : current,
+      );
+    };
+
     socket.on(RIDE_EVENTS.STATUS, onStatus);
     socket.on(RIDE_EVENTS.DRIVER_ASSIGNED, onDriverAssigned);
     socket.on(RIDE_EVENTS.COMPLETED, onCompleted);
+    socket.on(RIDE_EVENTS.PASSENGER_STATUS, onPassengerStatus);
 
     return () => {
       socket.off(RIDE_EVENTS.STATUS, onStatus);
       socket.off(RIDE_EVENTS.DRIVER_ASSIGNED, onDriverAssigned);
       socket.off(RIDE_EVENTS.COMPLETED, onCompleted);
+      socket.off(RIDE_EVENTS.PASSENGER_STATUS, onPassengerStatus);
       unsubscribeFromRide(rideId);
     };
   }, [rideId, queryClient, queryKey]);

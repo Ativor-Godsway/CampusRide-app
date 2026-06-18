@@ -11,7 +11,6 @@ import {
   RequestRideUnavailableError,
   RideNotFillableError,
   RideNotReadyToDepartError,
-  RidesNotCombinableError,
 } from "./errors";
 import {
   createTestRide,
@@ -288,14 +287,19 @@ describe("addRiderToCar — guard rails", () => {
     );
   });
 
-  it("throws RidesNotCombinableError when the request's zones don't line up with the anchor's", async () => {
+  it("adds a request whose zones don't line up with the anchor's — compatibility is a sort hint, not a guardrail here", async () => {
     const { pickup, adjacent, distant } = await getThreeTestZones();
     void adjacent;
 
     const driver = await createTestDriver({ isOnline: true, isApproved: true });
     createdDriverUserIds.push(driver.user.id);
 
-    const { ride: anchor } = await createTestRide({
+    // This test merges `rider`'s RidePassenger row onto the anchor, which —
+    // same as the Phase 2d e2e test above — creates a cross-ride user
+    // reference cleanupRide (one ride at a time) can't unwind via the shared
+    // createdRideIds array. Clean up manually: delete the anchor first so
+    // its cascade removes the merged RidePassenger row, then the request.
+    const { ride: anchor, rider: anchorRider } = await createTestRide({
       type: "SHARED",
       status: "MATCHED",
       driverId: driver.user.id,
@@ -304,21 +308,34 @@ describe("addRiderToCar — guard rails", () => {
       pickupZoneId: pickup.id,
       dropoffZoneId: pickup.id,
     });
-    createdRideIds.push(anchor.id);
 
-    // Far-away zones, no adjacency configured -> not combinable.
-    const { ride: request } = await createTestRide({
+    // Far-away zones, no adjacency configured -> not combinable — but
+    // addRiderToCar no longer rejects on this (product decision: a driver
+    // may combine any pending request; compatibility is surfaced only as a
+    // sort/badge hint in the fill-suggestions list, never enforced here).
+    const { ride: request, rider } = await createTestRide({
       type: "SHARED",
       status: "REQUESTED",
       occupancy: 1,
       pickupZoneId: distant.id,
       dropoffZoneId: distant.id,
     });
-    createdRideIds.push(request.id);
 
-    await expect(addRiderToCar(prisma, driver.user.id, anchor.id, request.id)).rejects.toThrow(
-      RidesNotCombinableError,
-    );
+    try {
+      const updatedAnchor = await addRiderToCar(prisma, driver.user.id, anchor.id, request.id);
+
+      expect(updatedAnchor.occupancy).toBe(1);
+      expect(updatedAnchor.passengers).toHaveLength(1);
+      expect(updatedAnchor.passengers[0]!.riderId).toBe(rider.id);
+
+      const mergedRequest = await prisma.ride.findUniqueOrThrow({ where: { id: request.id } });
+      expect(mergedRequest.status).toBe("CANCELLED");
+      expect(mergedRequest.cancelReason).toBe("MERGED_INTO_ANOTHER_RIDE");
+    } finally {
+      await prisma.ride.delete({ where: { id: anchor.id } }).catch(() => undefined);
+      await cleanupRide(request.id);
+      await prisma.user.deleteMany({ where: { id: anchorRider.id } });
+    }
   });
 
   it("throws RideNotFillableError for a REQUESTED (unclaimed) anchor ride", async () => {

@@ -96,14 +96,29 @@ export default function RideTypeScreen() {
 
   const ride = trackingData?.ride;
   const driver = trackingData?.driver;
-  // Phase 6b-3: this rider's own RidePassenger row — on a SHARED ride,
-  // ride.status reflects the WHOLE car (e.g. IN_PROGRESS once anyone's been
-  // picked up), so per-rider copy needs this rider's own leg, not just the
-  // ride-level status. Always present for LONE too (created at request time),
-  // but LONE never writes per-passenger status, so it stays WAITING there —
-  // ride-level status remains the source of truth for LONE.
+  // Phase 6b-3: this rider's own RidePassenger row.
   const myPassenger = ride?.passengers.find((p) => p.riderId === user?.id);
-  const myArrived = ride?.status === "ARRIVED" || myPassenger?.status === "ARRIVED";
+  /**
+   * The rider's own leg status, purely own-trip — never derived from
+   * co-passengers or any "another passenger" concept. For SHARED rides this
+   * is exactly `myPassenger.status` (the driver app writes WAITING -> ARRIVED
+   * -> PICKED_UP -> DROPPED_OFF independently per passenger). LONE rides
+   * never write per-passenger status (it stays WAITING forever in the DB) —
+   * for LONE only, this is derived from the ride-level status instead, which
+   * remains the correct source of truth there.
+   */
+  const myLegStatus: "WAITING" | "ARRIVED" | "PICKED_UP" | "DROPPED_OFF" =
+    ride?.type === "LONE"
+      ? ride.status === "ARRIVED"
+        ? "ARRIVED"
+        : ride.status === "IN_PROGRESS"
+          ? "PICKED_UP"
+          : "WAITING"
+      : myPassenger?.status === "ARRIVED" ||
+          myPassenger?.status === "PICKED_UP" ||
+          myPassenger?.status === "DROPPED_OFF"
+        ? myPassenger.status
+        : "WAITING";
 
   useEffect(() => {
     if (ride?.status !== "REQUESTED") return;
@@ -296,25 +311,23 @@ export default function RideTypeScreen() {
                 />
               )}
 
-              {(ride?.status === "MATCHED" || ride?.status === "ARRIVED") && driver && (
-                <DriverFoundContent
-                  arrived={myArrived}
-                  driver={driver}
-                  hasLocation={!!driverLocation}
-                  onCancel={() => void handleCancel()}
-                  cancelling={cancelling}
-                />
-              )}
-
-              {ride?.status === "IN_PROGRESS" && driver && (
-                myPassenger?.status === "DROPPED_OFF" ? (
+              {(ride?.status === "MATCHED" ||
+                ride?.status === "ARRIVED" ||
+                ride?.status === "IN_PROGRESS") &&
+                driver &&
+                (myLegStatus === "DROPPED_OFF" ? (
                   <MyLegDoneContent dropoffZoneName={params.dropoffZoneName} />
-                ) : myPassenger?.status === "WAITING" || myPassenger?.status === "ARRIVED" ? (
-                  <WaitingForOtherPassengerContent />
-                ) : (
+                ) : myLegStatus === "PICKED_UP" ? (
                   <InProgressContent driver={driver} dropoffZoneName={params.dropoffZoneName} />
-                )
-              )}
+                ) : (
+                  <DriverFoundContent
+                    arrived={myLegStatus === "ARRIVED"}
+                    driver={driver}
+                    hasLocation={!!driverLocation}
+                    onCancel={() => void handleCancel()}
+                    cancelling={cancelling}
+                  />
+                ))}
 
               {ride?.status === "COMPLETED" && (
                 <CompletedContent
@@ -660,7 +673,7 @@ function DriverFoundContent({
           color={arrived ? colors.success : colors.primary[600]}
         />
         <View style={styles.stateHeading}>
-          <Text variant="h2">{arrived ? "Your driver is here" : "Driver on the way"}</Text>
+          <Text variant="h2">{arrived ? "Your driver has arrived" : "Driver is on the way to you"}</Text>
           <Text variant="bodySmall" color="muted">
             {arrived
               ? "Head to your pickup point — your driver is waiting."
@@ -698,35 +711,6 @@ function InProgressContent({
       </View>
 
       <PremiumDriverCard driver={driver} />
-    </View>
-  );
-}
-
-/**
- * Phase 6b-3: shown on a SHARED ride when the car is moving
- * (ride.status === IN_PROGRESS) but THIS rider's own passenger row is still
- * WAITING or ARRIVED — the driver picked up someone else first. Without
- * this, the rider would otherwise see a stale "on the way" message that
- * doesn't apply to them yet.
- */
-function WaitingForOtherPassengerContent() {
-  return (
-    <View style={styles.section}>
-      <View style={styles.stateHeader}>
-        <ServiceIcon
-          name="people"
-          size={48}
-          iconSize={22}
-          background={colors.primary[50]}
-          color={colors.primary[600]}
-        />
-        <View style={styles.stateHeading}>
-          <Text variant="h2">Almost your turn</Text>
-          <Text variant="bodySmall" color="muted">
-            Your driver is picking up / dropping off another passenger.
-          </Text>
-        </View>
-      </View>
     </View>
   );
 }

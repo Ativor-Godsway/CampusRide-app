@@ -116,7 +116,12 @@ export interface PassengerInCar {
   status: PassengerStatus;
 }
 
-/** A compatible SHARED request the driver can add to their car. */
+/**
+ * A pending SHARED request the driver can add to their car. ALL pending
+ * addable requests are returned (not just compatible ones) — `compatible`
+ * is a sort-order/badge hint only, never a filter; the driver may add any of
+ * them. No fare-impact preview — shared fare is flat per rider.
+ */
 export interface FillSuggestion {
   requestRideId: string;
   pickupZoneName: string;
@@ -124,15 +129,8 @@ export interface FillSuggestion {
   dropoffZoneName: string;
   dropoffZoneId: string;
   createdAt: string;
-  /** How per-rider fares would change if this passenger is added. */
-  fareImpact: {
-    currentOccupancy: number;
-    newOccupancy: number;
-    /** Current standard rate per rider at currentOccupancy (pesewas). */
-    currentFarePerRider: number;
-    /** New standard rate per rider at newOccupancy after adding (pesewas). */
-    newFarePerRider: number;
-  };
+  /** True for requests ranked compatible by the existing Phase-2c scoring — badge-eligible, sorted first. */
+  compatible: boolean;
 }
 
 export interface FillSuggestionsResult {

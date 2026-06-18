@@ -143,11 +143,11 @@ interface SuggestionCardProps {
 }
 
 function SuggestionCard({ suggestion, adding, onAdd }: SuggestionCardProps) {
-  const { fareImpact } = suggestion;
-  const fareDrops = fareImpact.newFarePerRider < fareImpact.currentFarePerRider;
-
   return (
     <Card style={fillStyles.suggestionCard}>
+      {suggestion.compatible && (
+        <Badge variant="accent" label="★  Best match" style={fillStyles.suggBadge} />
+      )}
       {/* Route */}
       <View style={fillStyles.suggRouteRow}>
         <View style={fillStyles.suggMarkerCol}>
@@ -163,23 +163,7 @@ function SuggestionCard({ suggestion, adding, onAdd }: SuggestionCardProps) {
         </View>
       </View>
 
-      {/* Fare impact + time */}
-      <View style={fillStyles.suggMeta}>
-        {fareDrops && (
-          <View style={fillStyles.fareImpactRow}>
-            <Ionicons name="arrow-down-circle" size={14} color={colors.primary[500]} />
-            <Text variant="caption" style={fillStyles.fareImpactText}>
-              Each rider: {formatGhs(fareImpact.currentFarePerRider)} → {formatGhs(fareImpact.newFarePerRider)}
-            </Text>
-          </View>
-        )}
-        {!fareDrops && (
-          <Text variant="caption" color="muted">
-            Each rider pays {formatGhs(fareImpact.newFarePerRider)}
-          </Text>
-        )}
-        <Text variant="caption" color="muted">{timeAgo(suggestion.createdAt)}</Text>
-      </View>
+      <Text variant="caption" color="muted">{timeAgo(suggestion.createdAt)}</Text>
 
       <Button label={adding ? "Adding…" : "Add to car"} loading={adding} onPress={onAdd} fullWidth />
     </Card>
@@ -269,7 +253,7 @@ function FillYourCarView({
       {isAssembling && (
         <View style={fillStyles.suggestionsSection}>
           <View style={fillStyles.sectionHeader}>
-            <Text variant="label" color="muted">COMPATIBLE PASSENGERS</Text>
+            <Text variant="label" color="muted">NEARBY REQUESTS</Text>
             {!isFull && (
               <View style={fillStyles.sectionCount}>
                 <Text variant="caption" color="muted">{suggestions.length}</Text>
@@ -1027,6 +1011,7 @@ const fillStyles = StyleSheet.create({
   },
   // Suggestion card
   suggestionCard: { gap: spacing.sm, marginBottom: spacing.md },
+  suggBadge: { alignSelf: "flex-start" },
   suggRouteRow: { flexDirection: "row", gap: spacing.sm },
   suggMarkerCol: { width: 16, alignItems: "center", gap: 1, paddingTop: 2 },
   suggPickupDot: {
@@ -1035,7 +1020,4 @@ const fillStyles = StyleSheet.create({
   suggConnector: { width: 1, height: 28, backgroundColor: colors.border },
   suggTextCol: { flex: 1, gap: 1 },
   suggDropoffLabel: { marginTop: spacing.xs },
-  suggMeta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  fareImpactRow: { flexDirection: "row", alignItems: "center", gap: 4 },
-  fareImpactText: { color: colors.primary[600] },
 });
