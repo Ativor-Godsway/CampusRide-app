@@ -1,4 +1,4 @@
-import type { PaymentMethod, PaymentStatus, RideStatus, RideType } from "./ride";
+import type { PassengerStatus, PaymentMethod, PaymentStatus, RideStatus, RideType } from "./ride";
 
 /**
  * Real-time event contract for rider-facing ride tracking (Phase 5c).
@@ -12,6 +12,7 @@ export const RIDE_EVENTS = {
   DRIVER_LOCATION: "ride:driver_location",
   STATUS: "ride:status",
   COMPLETED: "ride:completed",
+  PASSENGER_STATUS: "ride:passenger_status",
 } as const;
 
 export type RideServerEvent = (typeof RIDE_EVENTS)[keyof typeof RIDE_EVENTS];
@@ -55,11 +56,24 @@ export interface RideCompletedPayload {
   fareSummary: RideCompletedFareSummary;
 }
 
+/**
+ * Per-passenger lifecycle update (Phase 6b-3) — sent ONLY to the affected
+ * rider's personal room (`emitToRider`), never broadcast to the whole ride
+ * room, so other passengers on the same SHARED ride never see it.
+ */
+export interface PassengerStatusPayload {
+  rideId: string;
+  ridePassengerId: string;
+  riderId: string;
+  status: PassengerStatus;
+}
+
 export interface RideServerEventPayloads {
   "ride:driver_assigned": DriverAssignedPayload;
   "ride:driver_location": DriverLocationPayload;
   "ride:status": RideStatusPayload;
   "ride:completed": RideCompletedPayload;
+  "ride:passenger_status": PassengerStatusPayload;
 }
 
 /** Client -> server events: subscribe/unsubscribe to a ride's room. */

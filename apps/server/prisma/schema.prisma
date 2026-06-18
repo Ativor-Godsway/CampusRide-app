@@ -41,6 +41,7 @@ enum PaymentStatus {
 
 enum PassengerStatus {
   WAITING
+  ARRIVED
   PICKED_UP
   DROPPED_OFF
   CANCELLED

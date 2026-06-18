@@ -45,75 +45,127 @@ export async function applyRideTransition(
   ctx: RideTransitionContext = {},
   now: Date = new Date(),
 ) {
-  return prisma.$transaction(async (tx) => {
-    const ride = await tx.ride.findUniqueOrThrow({ where: { id: rideId } });
-    const result = transitionRide(ride, toStatus, ctx);
+  return prisma.$transaction((tx) => transitionRideTx(tx, rideId, toStatus, ctx, now), TX_OPTIONS);
+}
 
-    const data: Prisma.RideUpdateInput = {
-      status: result.status,
-      cancelReason: result.cancelReason,
-    };
+/**
+ * Core of `applyRideTransition`, factored out so it can be composed inside a
+ * larger transaction (Phase 6b-3: `applyPassengerTransition` walks the ride
+ * forward on first-pickup/last-dropoff without opening a second, nested
+ * transaction — `tx` here is already an open transaction client).
+ */
+async function transitionRideTx(
+  tx: Tx,
+  rideId: string,
+  toStatus: RideStatus,
+  ctx: RideTransitionContext = {},
+  now: Date = new Date(),
+) {
+  const ride = await tx.ride.findUniqueOrThrow({ where: { id: rideId } });
+  const result = transitionRide(ride, toStatus, ctx);
 
-    if (ride.status === "MATCHED" && toStatus === "REQUESTED" && ride.driverId) {
-      data.driver = { disconnect: true };
-    }
-    if (toStatus === "IN_PROGRESS") {
-      data.departedAt = new Date();
-    }
-    if (toStatus === "COMPLETED") {
-      data.completedAt = new Date();
-    }
-    if (toStatus === "REQUESTED") {
-      data.broadcastStartedAt = now;
-      data.decisionStartedAt = null;
-    }
-    if (toStatus === "AWAITING_RIDER_DECISION") {
-      data.decisionStartedAt = now;
-    }
+  const data: Prisma.RideUpdateInput = {
+    status: result.status,
+    cancelReason: result.cancelReason,
+  };
 
-    return tx.ride.update({ where: { id: rideId }, data });
-  }, TX_OPTIONS);
+  if (ride.status === "MATCHED" && toStatus === "REQUESTED" && ride.driverId) {
+    data.driver = { disconnect: true };
+  }
+  if (toStatus === "IN_PROGRESS") {
+    data.departedAt = new Date();
+  }
+  if (toStatus === "COMPLETED") {
+    data.completedAt = new Date();
+  }
+  if (toStatus === "REQUESTED") {
+    data.broadcastStartedAt = now;
+    data.decisionStartedAt = null;
+  }
+  if (toStatus === "AWAITING_RIDER_DECISION") {
+    data.decisionStartedAt = now;
+  }
+
+  return tx.ride.update({ where: { id: rideId }, data });
 }
 
 export interface PassengerTransitionResult {
   passenger: Awaited<ReturnType<Tx["ridePassenger"]["update"]>>;
-  ride: Awaited<ReturnType<Tx["ride"]["findUniqueOrThrow"]>>;
+  /** Always re-fetched with passengers included, regardless of which side
+   * effect branch fired, so callers get a consistent shape every time. */
+  ride: Prisma.RideGetPayload<{ include: { passengers: true } }>;
 }
 
 /**
  * Validates and applies a RidePassenger status transition inside a transaction.
+ * Side effects, all computed from a fresh read of sibling passengers taken
+ * AFTER locking the parent Ride row (see below) — never from a snapshot taken
+ * before the lock, which could be stale under concurrent calls:
  *
- * On WAITING/PICKED_UP -> CANCELLED:
- * - Recomputes the ride's occupancy from the remaining active passengers.
- * - If no active passengers remain, cancels the ride with reason
+ * - WAITING/ARRIVED -> CANCELLED: recomputes the ride's occupancy from the
+ *   remaining active passengers; if none remain, cancels the ride with reason
  *   ALL_PASSENGERS_LEFT (via transitionRide — throws InvalidTransitionError,
  *   rolling back the whole transaction, if the ride is already terminal).
- * - lockedFares of remaining passengers are left unchanged (downward-only ratchet).
+ *   lockedFares of remaining passengers are left unchanged (downward-only ratchet).
+ * - ARRIVED -> PICKED_UP (Phase 6b-3, "Option B" auto-walk): if no sibling is
+ *   already PICKED_UP/DROPPED_OFF (i.e. this is the ride's first pickup), the
+ *   RIDE is walked forward to IN_PROGRESS in this same transaction — through
+ *   ARRIVED first if it's still MATCHED, since `RIDE_TRANSITIONS` requires
+ *   that hop and this auto-walk intentionally does NOT add a direct
+ *   MATCHED -> IN_PROGRESS edge to the general map (that would let any caller
+ *   skip ARRIVED, not just this one). If the ride is already IN_PROGRESS
+ *   (a later passenger's first pickup), nothing ride-level happens. There is
+ *   no fare-lock or payment-initiation side effect here — Phase 7a decoupled
+ *   payment from departure, and `addRiderToCar` already refuses new adds once
+ *   the ride leaves MATCHED/ARRIVED, so fares are already frozen by then.
+ * - PICKED_UP -> DROPPED_OFF: stamps `fareCharged` from the frozen
+ *   `lockedFare`. If no sibling remains WAITING/ARRIVED/PICKED_UP (this was
+ *   the last active passenger), the RIDE is walked forward to COMPLETED in
+ *   this same transaction. Per-rider fare-summary emission and the CASH
+ *   CommissionLedger upsert are NOT done here (no socket/payment imports in
+ *   this module) — the caller (driver.ts route) does that after this
+ *   transaction commits, using the returned `ride.status` to decide whether
+ *   completion just happened.
  */
 export async function applyPassengerTransition(
   prisma: PrismaClient,
   passengerId: string,
   toStatus: PassengerStatus,
-) {
+  now: Date = new Date(),
+): Promise<PassengerTransitionResult> {
   return prisma.$transaction(async (tx) => {
-    const passenger = await tx.ridePassenger.findUniqueOrThrow({
-      where: { id: passengerId },
-      include: { ride: { include: { passengers: true } } },
-    });
-
+    const passenger = await tx.ridePassenger.findUniqueOrThrow({ where: { id: passengerId } });
     const result = transitionPassenger(passenger, toStatus);
+
+    /**
+     * Lock the parent Ride row before reading any sibling passenger so that
+     * concurrent per-passenger actions on the SAME ride (two near-
+     * simultaneous "last dropoff" taps, a cancel racing a pickup, etc.)
+     * serialize against each other. Mirrors `addRiderToCar`'s atomic-claim
+     * pattern but via row lock rather than a conditional `updateMany` — the
+     * decision here ("is this the first pickup / last dropoff?") depends on
+     * the aggregate state of every sibling row, which a conditional update on
+     * a single row can't express. Without this, two transactions reading
+     * siblings before either commits could each conclude they are NOT last
+     * and the ride would never auto-complete.
+     */
+    await tx.$queryRaw`SELECT id FROM "Ride" WHERE id = ${passenger.rideId} FOR UPDATE`;
 
     const updatedPassenger = await tx.ridePassenger.update({
       where: { id: passengerId },
-      data: { status: result.status },
+      data: {
+        status: result.status,
+        ...(toStatus === "DROPPED_OFF" ? { fareCharged: passenger.lockedFare } : {}),
+      },
     });
 
-    let ride = passenger.ride;
+    let ride = await tx.ride.findUniqueOrThrow({ where: { id: passenger.rideId } });
+    const siblings = await tx.ridePassenger.findMany({
+      where: { rideId: passenger.rideId, id: { not: passengerId } },
+    });
 
     if (toStatus === "CANCELLED") {
-      const remainingActive = passenger.ride.passengers.filter(
-        (p) => p.id !== passengerId && isActivePassengerStatus(p.status),
-      );
+      const remainingActive = siblings.filter((p) => isActivePassengerStatus(p.status));
 
       if (remainingActive.length === 0) {
         const rideResult = transitionRide(ride, "CANCELLED", {
@@ -126,18 +178,43 @@ export async function applyPassengerTransition(
             cancelReason: rideResult.cancelReason,
             occupancy: 0,
           },
-          include: { passengers: true },
         });
       } else {
         ride = await tx.ride.update({
           where: { id: ride.id },
           data: { occupancy: remainingActive.length },
-          include: { passengers: true },
         });
       }
     }
 
-    return { passenger: updatedPassenger, ride };
+    if (toStatus === "PICKED_UP" && ride.status !== "IN_PROGRESS") {
+      const someoneAlreadyMoving = siblings.some(
+        (p) => p.status === "PICKED_UP" || p.status === "DROPPED_OFF",
+      );
+      if (!someoneAlreadyMoving) {
+        if (ride.status === "MATCHED") {
+          ride = await transitionRideTx(tx, ride.id, "ARRIVED", {}, now);
+        }
+        ride = await transitionRideTx(tx, ride.id, "IN_PROGRESS", {}, now);
+      }
+    }
+
+    if (toStatus === "DROPPED_OFF") {
+      const anyoneStillActive = siblings.some((p) => isActivePassengerStatus(p.status));
+      if (!anyoneStillActive) {
+        ride = await transitionRideTx(tx, ride.id, "COMPLETED", {}, now);
+      }
+    }
+
+    // Re-fetch once at the end with passengers included so every branch
+    // (and every caller) gets the same consistent shape, regardless of which
+    // side effect (if any) fired above.
+    const finalRide = await tx.ride.findUniqueOrThrow({
+      where: { id: ride.id },
+      include: { passengers: true },
+    });
+
+    return { passenger: updatedPassenger, ride: finalRide };
   }, TX_OPTIONS);
 }
 

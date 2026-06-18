@@ -65,7 +65,7 @@ export function transitionRide(
 // ─── Passenger state machine ────────────────────────────────────────────────
 
 /**
- * Legal RidePassenger status transitions.
+ * Legal RidePassenger status transitions (Phase 6b-3: per-passenger lifecycle).
  * DROPPED_OFF and CANCELLED are terminal.
  * PICKED_UP -> CANCELLED is illegal (a picked-up passenger can't "cancel").
  */
@@ -73,7 +73,8 @@ export const PASSENGER_TRANSITIONS: Record<
   PassengerStatus,
   readonly PassengerStatus[]
 > = {
-  WAITING: ["PICKED_UP", "CANCELLED"],
+  WAITING: ["ARRIVED", "CANCELLED"],
+  ARRIVED: ["PICKED_UP", "CANCELLED"],
   PICKED_UP: ["DROPPED_OFF"],
   DROPPED_OFF: [],
   CANCELLED: [],
@@ -104,7 +105,12 @@ export function transitionPassenger(
   return { status: toStatus };
 }
 
-/** True if a passenger in this status counts toward a ride's occupancy. */
+/**
+ * True if a passenger in this status counts toward a ride's occupancy —
+ * i.e. they haven't cancelled and haven't been dropped off yet. Phase 6b-3
+ * added ARRIVED between WAITING and PICKED_UP; a passenger waiting at the
+ * curb for pickup still occupies a seat, so it counts here.
+ */
 export function isActivePassengerStatus(status: PassengerStatus): boolean {
-  return status === "WAITING" || status === "PICKED_UP";
+  return status === "WAITING" || status === "ARRIVED" || status === "PICKED_UP";
 }

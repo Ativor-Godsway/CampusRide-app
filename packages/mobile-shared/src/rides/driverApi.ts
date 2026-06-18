@@ -16,6 +16,8 @@ export interface DriverProfile {
 export interface RideWithZones extends Ride {
   pickupZone: Zone;
   dropoffZone: Zone;
+  /** Phase 6b-3: each passenger's own zone names, for the per-passenger driving view. */
+  passengers: PassengerInCar[];
 }
 
 export interface SubmitDriverProfileInput {
@@ -164,5 +166,66 @@ export async function addPassenger(
   const res = await api.post<AddPassengerResult>(`/rides/${rideId}/add-passenger`, {
     requestRideId,
   });
+  return res.data;
+}
+
+// ─── Per-passenger lifecycle (Phase 6b-3) ────────────────────────────────────
+
+export interface RidePassengerRecord {
+  id: string;
+  rideId: string;
+  riderId: string;
+  pickupZoneId: string;
+  dropoffZoneId: string;
+  fareCharged: number | null;
+  lockedFare: number | null;
+  status: PassengerStatus;
+}
+
+export interface PassengerLifecycleResult {
+  passenger: RidePassengerRecord;
+  /** The anchor ride, including ALL passengers — its status may have changed
+   * as a side effect (first pickup -> IN_PROGRESS, last dropoff -> COMPLETED). */
+  ride: Ride & { passengers: RidePassengerRecord[] };
+}
+
+/** Driver has arrived at this one passenger's pickup point. WAITING -> ARRIVED. No ride-level effect. */
+export async function passengerArrived(
+  rideId: string,
+  passengerId: string,
+): Promise<PassengerLifecycleResult> {
+  const res = await api.post<PassengerLifecycleResult>(
+    `/rides/${rideId}/passengers/${passengerId}/arrived`,
+  );
+  return res.data;
+}
+
+/**
+ * Driver has picked up this one passenger. ARRIVED -> PICKED_UP. If this is
+ * the ride's first pickup, the ride itself walks to IN_PROGRESS as a side
+ * effect — check the returned `ride.status` to detect that.
+ */
+export async function passengerPickup(
+  rideId: string,
+  passengerId: string,
+): Promise<PassengerLifecycleResult> {
+  const res = await api.post<PassengerLifecycleResult>(
+    `/rides/${rideId}/passengers/${passengerId}/pickup`,
+  );
+  return res.data;
+}
+
+/**
+ * Driver has dropped off this one passenger. PICKED_UP -> DROPPED_OFF. If no
+ * passenger remains active, the ride itself completes as a side effect —
+ * check the returned `ride.status` to detect that.
+ */
+export async function passengerDropoff(
+  rideId: string,
+  passengerId: string,
+): Promise<PassengerLifecycleResult> {
+  const res = await api.post<PassengerLifecycleResult>(
+    `/rides/${rideId}/passengers/${passengerId}/dropoff`,
+  );
   return res.data;
 }

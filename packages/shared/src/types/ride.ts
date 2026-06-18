@@ -15,6 +15,7 @@ export type PaymentMethod = "CASH" | "MOMO";
 
 export type PassengerStatus =
   | "WAITING"
+  | "ARRIVED"
   | "PICKED_UP"
   | "DROPPED_OFF"
   | "CANCELLED";

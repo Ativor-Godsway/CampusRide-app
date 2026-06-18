@@ -31,6 +31,7 @@ import {
   spacing,
   submitRating,
   submitRideDecision,
+  useAuth,
   useDriverLocation,
   useRideTracking,
   type RideDriverInfo,
@@ -86,6 +87,7 @@ export default function RideTypeScreen() {
   const [now, setNow] = useState(() => Date.now());
 
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { data: trackingData } = useRideTracking(activeRideId ?? undefined);
 
   useDriverLocation(activeRideId ?? undefined, (payload) => {
@@ -94,6 +96,14 @@ export default function RideTypeScreen() {
 
   const ride = trackingData?.ride;
   const driver = trackingData?.driver;
+  // Phase 6b-3: this rider's own RidePassenger row — on a SHARED ride,
+  // ride.status reflects the WHOLE car (e.g. IN_PROGRESS once anyone's been
+  // picked up), so per-rider copy needs this rider's own leg, not just the
+  // ride-level status. Always present for LONE too (created at request time),
+  // but LONE never writes per-passenger status, so it stays WAITING there —
+  // ride-level status remains the source of truth for LONE.
+  const myPassenger = ride?.passengers.find((p) => p.riderId === user?.id);
+  const myArrived = ride?.status === "ARRIVED" || myPassenger?.status === "ARRIVED";
 
   useEffect(() => {
     if (ride?.status !== "REQUESTED") return;
@@ -288,7 +298,7 @@ export default function RideTypeScreen() {
 
               {(ride?.status === "MATCHED" || ride?.status === "ARRIVED") && driver && (
                 <DriverFoundContent
-                  status={ride.status}
+                  arrived={myArrived}
                   driver={driver}
                   hasLocation={!!driverLocation}
                   onCancel={() => void handleCancel()}
@@ -297,7 +307,13 @@ export default function RideTypeScreen() {
               )}
 
               {ride?.status === "IN_PROGRESS" && driver && (
-                <InProgressContent driver={driver} dropoffZoneName={params.dropoffZoneName} />
+                myPassenger?.status === "DROPPED_OFF" ? (
+                  <MyLegDoneContent dropoffZoneName={params.dropoffZoneName} />
+                ) : myPassenger?.status === "WAITING" || myPassenger?.status === "ARRIVED" ? (
+                  <WaitingForOtherPassengerContent />
+                ) : (
+                  <InProgressContent driver={driver} dropoffZoneName={params.dropoffZoneName} />
+                )
               )}
 
               {ride?.status === "COMPLETED" && (
@@ -618,19 +634,21 @@ function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
 }
 
 function DriverFoundContent({
-  status,
+  arrived,
   driver,
   hasLocation,
   onCancel,
   cancelling,
 }: {
-  status: "MATCHED" | "ARRIVED";
+  /** Ride-level ARRIVED (LONE) OR this rider's own passenger row is ARRIVED
+   * (SHARED, Phase 6b-3 — the ride itself may still be MATCHED if this
+   * passenger's pickup is the car's first). */
+  arrived: boolean;
   driver: RideDriverInfo;
   hasLocation: boolean;
   onCancel: () => void;
   cancelling: boolean;
 }) {
-  const arrived = status === "ARRIVED";
   return (
     <View style={styles.section}>
       <View style={styles.stateHeader}>
@@ -680,6 +698,64 @@ function InProgressContent({
       </View>
 
       <PremiumDriverCard driver={driver} />
+    </View>
+  );
+}
+
+/**
+ * Phase 6b-3: shown on a SHARED ride when the car is moving
+ * (ride.status === IN_PROGRESS) but THIS rider's own passenger row is still
+ * WAITING or ARRIVED — the driver picked up someone else first. Without
+ * this, the rider would otherwise see a stale "on the way" message that
+ * doesn't apply to them yet.
+ */
+function WaitingForOtherPassengerContent() {
+  return (
+    <View style={styles.section}>
+      <View style={styles.stateHeader}>
+        <ServiceIcon
+          name="people"
+          size={48}
+          iconSize={22}
+          background={colors.primary[50]}
+          color={colors.primary[600]}
+        />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">Almost your turn</Text>
+          <Text variant="bodySmall" color="muted">
+            Your driver is picking up / dropping off another passenger.
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Phase 6b-3: shown once THIS rider's own passenger row is DROPPED_OFF, even
+ * if the overall ride isn't COMPLETED yet (other passengers may still be
+ * riding). No fare/rating here — that needs the ride-level fareSummary,
+ * which the backend only computes once the whole ride completes; this is
+ * purely a "your leg is done" acknowledgement in the meantime.
+ */
+function MyLegDoneContent({ dropoffZoneName }: { dropoffZoneName: string }) {
+  return (
+    <View style={styles.section}>
+      <View style={styles.stateHeader}>
+        <ServiceIcon
+          name="checkmark-circle"
+          size={48}
+          iconSize={22}
+          background={colors.successSurface}
+          color={colors.success}
+        />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">You're at {dropoffZoneName}</Text>
+          <Text variant="bodySmall" color="muted">
+            Wrapping up the rest of the trip — your fare summary will appear shortly.
+          </Text>
+        </View>
+      </View>
     </View>
   );
 }

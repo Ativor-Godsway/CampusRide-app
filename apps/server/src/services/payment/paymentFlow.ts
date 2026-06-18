@@ -191,9 +191,18 @@ export async function getRidePaymentSummary(prisma: PrismaClient, rideId: string
   });
   const payments = await prisma.payment.findMany({ where: { rideId } });
 
-  const activePassengers = ride.passengers.filter((p) => isActivePassengerStatus(p.status) && p.lockedFare != null);
+  // Billable = was actually carried (or still is), regardless of how far along
+  // their per-passenger lifecycle is — WAITING/ARRIVED/PICKED_UP (mid-ride) and
+  // DROPPED_OFF (finished their leg) all owe their locked fare. Only CANCELLED
+  // passengers are excluded. This is deliberately broader than
+  // isActivePassengerStatus (which means "still occupies a seat right now" and
+  // excludes DROPPED_OFF) — using that here would make a SHARED ride's payment
+  // summary go empty the moment everyone has been dropped off.
+  const billablePassengers = ride.passengers.filter(
+    (p) => p.status !== "CANCELLED" && p.lockedFare != null,
+  );
 
-  const perPassenger: PassengerPaymentSummary[] = activePassengers.map((p) => {
+  const perPassenger: PassengerPaymentSummary[] = billablePassengers.map((p) => {
     const collection = payments.find((pay) => pay.type === "COLLECTION" && pay.riderId === p.riderId);
     const disbursement = ride.driverId
       ? payments.find(

@@ -1,13 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import type { PaymentMethod } from "@rida/shared";
+import type { PaymentMethod, PassengerStatus } from "@rida/shared";
 import { getLoneFare, getSharedFarePerRider, splitFare, designateBestFit } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { claimRide } from "../services/ride/dispatch";
 import { departRide, addRiderToCar } from "../services/ride/assembly";
 import type { RideWithPassengers } from "../services/ride/assembly";
 import { suggestFillsForRide } from "../services/ride/ranking";
-import { applyRideTransition } from "../services/ride/rideService";
+import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
 import {
   RideAlreadyClaimedError,
   InvalidTransitionError,
@@ -17,7 +17,7 @@ import {
   RequestRideUnavailableError,
   RidesNotCombinableError,
 } from "../services/ride/errors";
-import { emitRideEvent } from "../realtime/rideSocket";
+import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
 
 /** Returns the set of zone IDs a driver in `zoneId` is eligible to serve (same zone + 1 hop). */
@@ -43,6 +43,52 @@ async function requireDriver(request: Parameters<typeof requireAuth>[0], reply: 
     return false;
   }
   return true;
+}
+
+/**
+ * Finalizes a COMPLETED ride's payment side: a CASH CommissionLedger upsert,
+ * and a per-rider `ride:completed` fare summary emitted via `emitToRider` to
+ * EACH billable passenger individually — not one ride-room broadcast carrying
+ * a single fare. Shared by the ride-level `/complete` route (LONE rides) and
+ * the per-passenger last-dropoff auto-completion path (SHARED rides, in the
+ * new `/passengers/:passengerId/dropoff` route below). Previously `/complete`
+ * emitted ONE `ride:completed` event to the whole ride room using only
+ * `ride.riderId`'s fare — correct for LONE (single passenger) but wrong for
+ * every other SHARED passenger (masked only by the rider app's poll
+ * fallback, which computes its own fareSummary per-requester).
+ */
+async function finalizeRideCompletion(
+  prisma: PrismaClient,
+  ride: { id: string; type: "LONE" | "SHARED"; occupancy: number; paymentMethod: string },
+  driverUserId: string,
+): Promise<void> {
+  const paymentMethod = ride.paymentMethod as PaymentMethod;
+
+  if (paymentMethod === "CASH") {
+    const farePesewasForLedger =
+      ride.type === "LONE"
+        ? getLoneFare()
+        : getSharedFarePerRider(ride.occupancy) * ride.occupancy;
+    const { commission } = splitFare(farePesewasForLedger);
+    await prisma.commissionLedger.upsert({
+      where: { rideId: ride.id },
+      update: {},
+      create: { driverUserId, rideId: ride.id, amountPesewas: commission },
+    });
+  }
+
+  const summary = await getRidePaymentSummary(prisma, ride.id);
+  for (const p of summary.perPassenger) {
+    emitToRider(p.riderId, "ride:completed", {
+      rideId: ride.id,
+      fareSummary: {
+        yourFarePesewas: p.farePesewas,
+        totalFarePesewas: summary.totalExpectedPesewas,
+        paymentMethod,
+        paymentStatus: p.status,
+      },
+    });
+  }
 }
 
 async function getDriverInfo(prisma: PrismaClient, driverId: string) {
@@ -121,11 +167,34 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         driverId: userId,
         status: { in: [...ACTIVE_DRIVER_STATUSES] },
       },
-      include: { pickupZone: true, dropoffZone: true, passengers: true },
+      include: {
+        pickupZone: true,
+        dropoffZone: true,
+        // Zone names nested per-passenger (Phase 6b-3) — the driving view of a
+        // SHARED ride (IN_PROGRESS) needs each passenger's own pickup/dropoff
+        // for the per-passenger pickup/dropoff list, same shape as
+        // fill-suggestions' PassengerInCar.
+        passengers: { include: { pickupZone: true, dropoffZone: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
 
-    return reply.code(200).send({ ride: ride ?? null });
+    if (!ride) return reply.code(200).send({ ride: null });
+
+    const { passengers, ...rideFields } = ride;
+    return reply.code(200).send({
+      ride: {
+        ...rideFields,
+        passengers: passengers.map((p) => ({
+          id: p.id,
+          riderId: p.riderId,
+          pickupZoneName: p.pickupZone.name,
+          dropoffZoneName: p.dropoffZone.name,
+          lockedFare: p.lockedFare,
+          status: p.status,
+        })),
+      },
+    });
   });
 
   /**
@@ -187,13 +256,24 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
   /**
    * Driver departs with the rider — transitions ARRIVED → IN_PROGRESS.
-   * Also initiates payment collection (departRide handles that internally).
+   * LONE rides only: a SHARED ride now departs automatically on its first
+   * passenger pickup (see /rides/:id/passengers/:passengerId/pickup below) —
+   * calling this on a SHARED ride would skip the per-passenger flow entirely
+   * and leave passengers stuck at WAITING/ARRIVED while the ride itself
+   * reports IN_PROGRESS, so it's rejected here.
    */
   app.post("/rides/:id/depart", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
+
+    const existingRide = await prisma.ride.findUnique({ where: { id: rideId } });
+    if (existingRide?.type === "SHARED") {
+      return reply
+        .code(409)
+        .send({ error: "SHARED rides depart automatically on the first passenger pickup" });
+    }
 
     try {
       const updated = await departRide(prisma, userId, rideId);
@@ -454,7 +534,13 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     }
   });
 
-  /** Driver completes the ride — transitions IN_PROGRESS → COMPLETED and emits fare summary. */
+  /**
+   * Driver completes the ride — transitions IN_PROGRESS → COMPLETED and emits fare summary.
+   * LONE rides only: a SHARED ride now completes automatically when its last
+   * active passenger is dropped off (see /rides/:id/passengers/:passengerId/dropoff
+   * below) — calling this directly on a SHARED ride could complete it while
+   * passengers are still WAITING/ARRIVED/PICKED_UP, so it's rejected here.
+   */
   app.post("/rides/:id/complete", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
@@ -467,39 +553,17 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     });
     if (!ride) return reply.code(404).send({ error: "Ride not found" });
     if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+    if (ride.type === "SHARED") {
+      return reply
+        .code(409)
+        .send({ error: "SHARED rides complete automatically when the last passenger is dropped off" });
+    }
 
     try {
       const updated = await applyRideTransition(prisma, rideId, "COMPLETED");
       emitRideEvent(rideId, "ride:status", { rideId, status: updated.status });
 
-      const summary = await getRidePaymentSummary(prisma, rideId);
-      const yourShare = summary.perPassenger.find((p) => p.riderId === ride.riderId);
-
-      const paymentMethod = ride.paymentMethod as PaymentMethod;
-
-      // For CASH rides, record the platform's 15% commission as a debt entry.
-      if (paymentMethod === "CASH") {
-        const farePesewasForLedger =
-          ride.type === "LONE"
-            ? getLoneFare()
-            : getSharedFarePerRider(ride.occupancy) * ride.occupancy;
-        const { commission } = splitFare(farePesewasForLedger);
-        await prisma.commissionLedger.upsert({
-          where: { rideId },
-          update: {},
-          create: { driverUserId: userId, rideId, amountPesewas: commission },
-        });
-      }
-
-      emitRideEvent(rideId, "ride:completed", {
-        rideId,
-        fareSummary: {
-          yourFarePesewas: yourShare?.farePesewas ?? 0,
-          totalFarePesewas: summary.totalExpectedPesewas,
-          paymentMethod,
-          paymentStatus: yourShare?.status ?? "PENDING",
-        },
-      });
+      await finalizeRideCompletion(prisma, updated, userId);
 
       // Compute driver's earnings from the completed ride
       const farePesewas =
@@ -517,4 +581,155 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       throw err;
     }
   });
+
+  /**
+   * Per-passenger lifecycle (Phase 6b-3): driver has arrived at THIS
+   * passenger's pickup point. WAITING -> ARRIVED only — no ride-level effect,
+   * no effect on any other passenger on the same car.
+   */
+  app.post(
+    "/rides/:id/passengers/:passengerId/arrived",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      if (!(await requireDriver(request, reply))) return;
+
+      const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
+      const userId = request.user!.userId;
+
+      const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+      if (!ride) return reply.code(404).send({ error: "Ride not found" });
+      if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+
+      const passenger = await prisma.ridePassenger.findUnique({ where: { id: passengerId } });
+      if (!passenger || passenger.rideId !== rideId) {
+        return reply.code(404).send({ error: "Passenger not found on this ride" });
+      }
+
+      try {
+        const result = await applyPassengerTransition(prisma, passengerId, "ARRIVED");
+
+        emitToRider(passenger.riderId, "ride:passenger_status", {
+          rideId,
+          ridePassengerId: passengerId,
+          riderId: passenger.riderId,
+          status: result.passenger.status as PassengerStatus,
+        });
+
+        return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          return reply.code(409).send({ error: "Invalid transition from current passenger status" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  /**
+   * Per-passenger lifecycle (Phase 6b-3): driver has picked up THIS
+   * passenger. ARRIVED -> PICKED_UP. If this is the ride's first pickup, the
+   * ride itself is walked forward to IN_PROGRESS as a side effect inside the
+   * same transaction (see applyPassengerTransition) — no separate
+   * ride-level "depart" call is needed or allowed for SHARED rides anymore.
+   */
+  app.post(
+    "/rides/:id/passengers/:passengerId/pickup",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      if (!(await requireDriver(request, reply))) return;
+
+      const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
+      const userId = request.user!.userId;
+
+      const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+      if (!ride) return reply.code(404).send({ error: "Ride not found" });
+      if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+
+      const passenger = await prisma.ridePassenger.findUnique({ where: { id: passengerId } });
+      if (!passenger || passenger.rideId !== rideId) {
+        return reply.code(404).send({ error: "Passenger not found on this ride" });
+      }
+
+      try {
+        const result = await applyPassengerTransition(prisma, passengerId, "PICKED_UP");
+
+        emitToRider(passenger.riderId, "ride:passenger_status", {
+          rideId,
+          ridePassengerId: passengerId,
+          riderId: passenger.riderId,
+          status: result.passenger.status as PassengerStatus,
+        });
+
+        // First pickup may have just walked the ride to IN_PROGRESS — tell
+        // everyone in the ride room once (map/location consumers, other
+        // passengers' "car is moving" state), ride-wide and exactly once.
+        if (result.ride.status === "IN_PROGRESS" && ride.status !== "IN_PROGRESS") {
+          emitRideEvent(rideId, "ride:status", { rideId, status: result.ride.status });
+        }
+
+        return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          return reply.code(409).send({ error: "Invalid transition from current passenger status" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  /**
+   * Per-passenger lifecycle (Phase 6b-3): driver has dropped off THIS
+   * passenger. PICKED_UP -> DROPPED_OFF, stamping fareCharged from their
+   * frozen lockedFare. If no passenger remains WAITING/ARRIVED/PICKED_UP, the
+   * ride itself completes as a side effect (same transaction) and
+   * finalizeRideCompletion runs the same CommissionLedger + per-rider fare
+   * summary logic the ride-level /complete route uses for LONE rides.
+   */
+  app.post(
+    "/rides/:id/passengers/:passengerId/dropoff",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      if (!(await requireDriver(request, reply))) return;
+
+      const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
+      const userId = request.user!.userId;
+
+      const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+      if (!ride) return reply.code(404).send({ error: "Ride not found" });
+      if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+
+      const passenger = await prisma.ridePassenger.findUnique({ where: { id: passengerId } });
+      if (!passenger || passenger.rideId !== rideId) {
+        return reply.code(404).send({ error: "Passenger not found on this ride" });
+      }
+
+      try {
+        const result = await applyPassengerTransition(prisma, passengerId, "DROPPED_OFF");
+
+        emitToRider(passenger.riderId, "ride:passenger_status", {
+          rideId,
+          ridePassengerId: passengerId,
+          riderId: passenger.riderId,
+          status: result.passenger.status as PassengerStatus,
+        });
+
+        const justCompleted = result.ride.status === "COMPLETED" && ride.status !== "COMPLETED";
+        if (justCompleted) {
+          emitRideEvent(rideId, "ride:status", { rideId, status: result.ride.status });
+          await finalizeRideCompletion(
+            prisma,
+            { id: result.ride.id, type: ride.type, occupancy: result.ride.occupancy, paymentMethod: result.ride.paymentMethod },
+            userId,
+          );
+        }
+
+        return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          return reply.code(409).send({ error: "Invalid transition from current passenger status" });
+        }
+        throw err;
+      }
+    },
+  );
 }

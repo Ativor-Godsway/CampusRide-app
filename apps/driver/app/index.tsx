@@ -27,12 +27,13 @@ import {
   radii,
   setDriverAvailability,
   driverClaimRide,
-  driverMarkArrived,
-  driverDepart,
   getDriverActiveRide,
   getEligibleRides,
   getFillSuggestions,
   addPassenger,
+  passengerArrived,
+  passengerPickup,
+  passengerDropoff,
   shadows,
   spacing,
   useAuth,
@@ -54,13 +55,18 @@ function timeAgo(isoDate: string): string {
   return `${Math.floor(diffSecs / 60)}m ago`;
 }
 
-/** True when the driver is assembling this shared ride (MATCHED or ARRIVED). */
+/**
+ * True whenever a SHARED ride is this driver's active car — assembling
+ * (MATCHED/ARRIVED) or already driving (IN_PROGRESS). Unlike LONE, a SHARED
+ * ride never redirects to /ride/:id: the whole lifecycle, including driving
+ * and per-passenger pickup/dropoff, lives on this screen.
+ */
 function isFillingCar(ride: RideWithZones | null | undefined): boolean {
   return (
     ride !== null &&
     ride !== undefined &&
     ride.type === "SHARED" &&
-    (ride.status === "MATCHED" || ride.status === "ARRIVED")
+    (ride.status === "MATCHED" || ride.status === "ARRIVED" || ride.status === "IN_PROGRESS")
   );
 }
 
@@ -82,7 +88,17 @@ function OccupancyStepper({ current, max }: { current: number; max: number }) {
   );
 }
 
-function PassengerRow({ passenger }: { passenger: PassengerInCar }) {
+interface PassengerRowProps {
+  passenger: PassengerInCar;
+  /** Independent per-row loading state, keyed by passengerId by the caller —
+   * never a single shared boolean, so multiple rows stay tappable at once. */
+  acting: boolean;
+  onArrived: () => void;
+  onPickup: () => void;
+  onDropoff: () => void;
+}
+
+function PassengerRow({ passenger, acting, onArrived, onPickup, onDropoff }: PassengerRowProps) {
   return (
     <View style={fillStyles.passengerRow}>
       <View style={fillStyles.passengerMarkerCol}>
@@ -93,12 +109,29 @@ function PassengerRow({ passenger }: { passenger: PassengerInCar }) {
       <View style={fillStyles.passengerTextCol}>
         <Text variant="bodySmall">{passenger.pickupZoneName}</Text>
         <Text variant="bodySmall">{passenger.dropoffZoneName}</Text>
+        {passenger.lockedFare !== null && (
+          <Text variant="caption" color="muted">{formatGhs(passenger.lockedFare)}</Text>
+        )}
       </View>
-      {passenger.lockedFare !== null && (
-        <Text variant="bodySmall" style={fillStyles.passengerFare}>
-          {formatGhs(passenger.lockedFare)}
-        </Text>
-      )}
+      <View style={fillStyles.passengerActionCol}>
+        {passenger.status === "WAITING" && (
+          <Button
+            label={acting ? "…" : "I'm here"}
+            variant="secondary"
+            loading={acting}
+            onPress={onArrived}
+          />
+        )}
+        {passenger.status === "ARRIVED" && (
+          <Button label={acting ? "…" : "Start pickup"} loading={acting} onPress={onPickup} />
+        )}
+        {passenger.status === "PICKED_UP" && (
+          <Button label={acting ? "…" : "Drop off"} loading={acting} onPress={onDropoff} />
+        )}
+        {passenger.status === "DROPPED_OFF" && (
+          <Ionicons name="checkmark-circle" size={24} color={colors.primary[500]} />
+        )}
+      </View>
     </View>
   );
 }
@@ -157,37 +190,47 @@ interface FillYourCarProps {
   ride: RideWithZones;
   fillData: FillSuggestionsResult | undefined;
   addingRideId: string | null;
-  markingArrived: boolean;
-  departing: boolean;
-  onMarkArrived: () => void;
-  onDepart: () => void;
+  /** The one passenger row currently mid-action, if any — independent of
+   * addingRideId so suggestion-adding and passenger actions never block each other. */
+  actingPassengerId: string | null;
   onAddPassenger: (requestRideId: string) => void;
+  onPassengerArrived: (passengerId: string) => void;
+  onPassengerPickup: (passengerId: string) => void;
+  onPassengerDropoff: (passengerId: string) => void;
 }
 
 function FillYourCarView({
   ride,
   fillData,
   addingRideId,
-  markingArrived,
-  departing,
-  onMarkArrived,
-  onDepart,
+  actingPassengerId,
   onAddPassenger,
+  onPassengerArrived,
+  onPassengerPickup,
+  onPassengerDropoff,
 }: FillYourCarProps) {
-  const occupancy = fillData?.occupancy ?? ride.occupancy;
-  const passengers: PassengerInCar[] = fillData?.passengers ?? [];
-  const suggestions: FillSuggestion[] = fillData?.suggestions ?? [];
+  // Assembling = car still open to new adds (MATCHED/ARRIVED). Driving =
+  // IN_PROGRESS, car closed — the first passenger pickup already walked the
+  // ride here automatically, so there is no ride-level "Depart" button.
+  const isAssembling = ride.status === "MATCHED" || ride.status === "ARRIVED";
+
+  // While assembling, fillData (polled) is the live source for passengers +
+  // suggestions. Once driving, fillData stops being fetched (car is closed,
+  // the backend would 400) — fall back to the ride's own passenger list.
+  const passengers: PassengerInCar[] = isAssembling
+    ? fillData?.passengers ?? ride.passengers
+    : ride.passengers;
+  const occupancy = isAssembling ? fillData?.occupancy ?? ride.occupancy : ride.occupancy;
+  const suggestions: FillSuggestion[] = isAssembling ? fillData?.suggestions ?? [] : [];
   const isFull = occupancy >= 4;
-  const isMatched = ride.status === "MATCHED";
-  const isArrived = ride.status === "ARRIVED";
 
   return (
     <>
       {/* Status banner */}
       <View style={fillStyles.statusBanner}>
-        <View style={[fillStyles.bannerDot, isArrived ? fillStyles.bannerDotArrived : fillStyles.bannerDotMatched]} />
+        <View style={[fillStyles.bannerDot, isAssembling ? fillStyles.bannerDotMatched : fillStyles.bannerDotArrived]} />
         <Text variant="bodySmall" style={fillStyles.bannerText}>
-          {isMatched ? "Assembling · On the way to pickup" : "Assembling · At pickup · Ready to depart"}
+          {isAssembling ? "Assembling · On the way to pickups" : "On the road · Picking up & dropping off"}
         </Text>
       </View>
 
@@ -202,81 +245,59 @@ function FillYourCarView({
           <OccupancyStepper current={occupancy} max={4} />
         </View>
 
-        {passengers.length > 0 && (
+        {passengers.length > 0 ? (
           <View style={fillStyles.passengerList}>
             {passengers.map((p) => (
-              <PassengerRow key={p.id} passenger={p} />
+              <PassengerRow
+                key={p.id}
+                passenger={p}
+                acting={actingPassengerId === p.id}
+                onArrived={() => onPassengerArrived(p.id)}
+                onPickup={() => onPassengerPickup(p.id)}
+                onDropoff={() => onPassengerDropoff(p.id)}
+              />
             ))}
           </View>
-        )}
-
-        {passengers.length === 0 && (
+        ) : (
           <Text variant="caption" color="muted" style={fillStyles.noPassengersNote}>
             Passenger details loading…
           </Text>
         )}
       </Card>
 
-      {/* Mark Arrived (only while MATCHED) */}
-      {isMatched && (
-        <View style={fillStyles.actionRow}>
-          <Button
-            label={markingArrived ? "Marking arrived…" : "I'm at the pickup"}
-            variant="secondary"
-            loading={markingArrived}
-            onPress={onMarkArrived}
-            fullWidth
-          />
-        </View>
-      )}
+      {/* Suggestions section — assembling only; the car closes to new adds once driving. */}
+      {isAssembling && (
+        <View style={fillStyles.suggestionsSection}>
+          <View style={fillStyles.sectionHeader}>
+            <Text variant="label" color="muted">COMPATIBLE PASSENGERS</Text>
+            {!isFull && (
+              <View style={fillStyles.sectionCount}>
+                <Text variant="caption" color="muted">{suggestions.length}</Text>
+              </View>
+            )}
+          </View>
 
-      {/* Depart (only while ARRIVED) */}
-      {isArrived && (
-        <View style={fillStyles.departSection}>
-          <Button
-            label={departing ? "Starting ride…" : "Depart — lock fares & start ride"}
-            loading={departing}
-            onPress={onDepart}
-            fullWidth
-          />
-          <Text variant="caption" color="muted" style={fillStyles.departNote}>
-            Fares lock at final occupancy ({occupancy} rider{occupancy !== 1 ? "s" : ""}).
-            No more passengers can be added after departure.
-          </Text>
-        </View>
-      )}
-
-      {/* Suggestions section */}
-      <View style={fillStyles.suggestionsSection}>
-        <View style={fillStyles.sectionHeader}>
-          <Text variant="label" color="muted">COMPATIBLE PASSENGERS</Text>
-          {!isFull && (
-            <View style={fillStyles.sectionCount}>
-              <Text variant="caption" color="muted">{suggestions.length}</Text>
+          {isFull ? (
+            <View style={fillStyles.fullBanner}>
+              <Ionicons name="car" size={22} color={colors.primary[500]} />
+              <Text variant="bodyMedium" style={fillStyles.fullText}>Car is full — 4 / 4</Text>
             </View>
+          ) : suggestions.length === 0 ? (
+            <View style={fillStyles.emptySuggestions}>
+              <Text variant="bodySmall" color="muted">No compatible requests nearby right now.</Text>
+            </View>
+          ) : (
+            suggestions.map((s) => (
+              <SuggestionCard
+                key={s.requestRideId}
+                suggestion={s}
+                adding={addingRideId === s.requestRideId}
+                onAdd={() => onAddPassenger(s.requestRideId)}
+              />
+            ))
           )}
         </View>
-
-        {isFull ? (
-          <View style={fillStyles.fullBanner}>
-            <Ionicons name="car" size={22} color={colors.primary[500]} />
-            <Text variant="bodyMedium" style={fillStyles.fullText}>Car is full — 4 / 4</Text>
-          </View>
-        ) : suggestions.length === 0 ? (
-          <View style={fillStyles.emptySuggestions}>
-            <Text variant="bodySmall" color="muted">No compatible requests nearby right now.</Text>
-          </View>
-        ) : (
-          suggestions.map((s) => (
-            <SuggestionCard
-              key={s.requestRideId}
-              suggestion={s}
-              adding={addingRideId === s.requestRideId}
-              onAdd={() => onAddPassenger(s.requestRideId)}
-            />
-          ))
-        )}
-      </View>
+      )}
     </>
   );
 }
@@ -369,8 +390,8 @@ export default function DriverHomeScreen() {
   const [declinedRideIds, setDeclinedRideIds] = useState<Set<string>>(new Set());
   const [claimingRideId, setClaimingRideId] = useState<string | null>(null);
   const [addingRideId, setAddingRideId] = useState<string | null>(null);
-  const [markingArrived, setMarkingArrived] = useState(false);
-  const [departing, setDeparting] = useState(false);
+  const [actingPassengerId, setActingPassengerId] = useState<string | null>(null);
+  const [completedSummary, setCompletedSummary] = useState<{ occupancy: number } | null>(null);
 
   const isOnline = status === "online" || status === "on_ride";
 
@@ -388,12 +409,15 @@ export default function DriverHomeScreen() {
   });
 
   const filling = isFillingCar(activeRide);
+  // The car is still open to new adds (and fill-suggestions is a valid call)
+  // only while MATCHED/ARRIVED — once IN_PROGRESS the backend would 400.
+  const assembling = filling && activeRide?.status !== "IN_PROGRESS";
 
   // Fill-suggestions — polled every 10 s while assembling a shared car.
   const { data: fillData, refetch: refetchFill } = useQuery({
     queryKey: ["fillSuggestions", activeRide?.id],
     queryFn: () => getFillSuggestions(activeRide!.id),
-    enabled: isAuthenticated && filling,
+    enabled: isAuthenticated && assembling,
     refetchInterval: 10_000,
   });
 
@@ -405,24 +429,27 @@ export default function DriverHomeScreen() {
     refetchInterval: 10_000,
   });
 
-  // Redirect to the driving screen for LONE rides and any IN_PROGRESS ride.
-  // SHARED + MATCHED/ARRIVED stays here for the fill-your-car view.
+  // Redirect to the driving screen for LONE rides only. SHARED rides — every
+  // status including IN_PROGRESS — stay on this screen for the whole
+  // lifecycle: assembling, then per-passenger pickup/dropoff while driving.
   useEffect(() => {
     if (!activeRide) return;
-    if (activeRide.type === "LONE" || activeRide.status === "IN_PROGRESS") {
+    if (activeRide.type === "LONE") {
       router.replace(`/ride/${activeRide.id}`);
     }
   }, [activeRide, router]);
 
   // Socket: refresh the appropriate list when a new broadcast arrives.
+  // While driving (filling but not assembling), the car is closed to new
+  // adds — there is nothing broadcast-relevant to refetch.
   useEffect(() => {
     if (!isAuthenticated) return;
     if (!filling && !isOnline) return;
     const socket = getRideSocket();
     const onBroadcast = () => {
-      if (filling) {
+      if (assembling) {
         void refetchFill();
-      } else {
+      } else if (!filling) {
         void refetchEligible();
       }
     };
@@ -430,7 +457,7 @@ export default function DriverHomeScreen() {
     return () => {
       socket.off(DRIVER_EVENTS.RIDE_BROADCAST, onBroadcast);
     };
-  }, [isAuthenticated, filling, isOnline, refetchFill, refetchEligible]);
+  }, [isAuthenticated, filling, assembling, isOnline, refetchFill, refetchEligible]);
 
   const availabilityMutation = useMutation({
     mutationFn: ({ isOnline: on, zoneId }: { isOnline: boolean; zoneId?: string }) =>
@@ -519,33 +546,70 @@ export default function DriverHomeScreen() {
     [activeRide, addingRideId, queryClient, refetchFill],
   );
 
-  // Fill-your-car: mark arrived at pickup (MATCHED → ARRIVED).
-  const handleMarkArrived = useCallback(async () => {
-    if (!activeRide || markingArrived) return;
-    setMarkingArrived(true);
-    try {
-      await driverMarkArrived(activeRide.id);
-      void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
-    } catch {
-      Alert.alert("Error", "Could not mark arrived. Try again.");
-    } finally {
-      setMarkingArrived(false);
-    }
-  }, [activeRide, markingArrived, queryClient]);
+  // Per-passenger: driver has arrived at this one passenger's pickup. No
+  // ride-level effect — only this row updates.
+  const handlePassengerArrived = useCallback(
+    async (passengerId: string) => {
+      if (!activeRide || actingPassengerId !== null) return;
+      setActingPassengerId(passengerId);
+      try {
+        await passengerArrived(activeRide.id, passengerId);
+        void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
+      } catch {
+        Alert.alert("Error", "Could not mark this passenger arrived. Try again.");
+      } finally {
+        setActingPassengerId(null);
+      }
+    },
+    [activeRide, actingPassengerId, queryClient],
+  );
 
-  // Fill-your-car: depart — locks fares at final occupancy → IN_PROGRESS → /ride/:id.
-  const handleDepart = useCallback(async () => {
-    if (!activeRide || departing) return;
-    setDeparting(true);
-    try {
-      await driverDepart(activeRide.id);
-      void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
-      // Redirect happens automatically: activeRide will now be IN_PROGRESS → useEffect redirect
-    } catch {
-      Alert.alert("Error", "Could not depart. Try again.");
-      setDeparting(false);
-    }
-  }, [activeRide, departing, queryClient]);
+  // Per-passenger: driver has picked up this one passenger. If this is the
+  // ride's first pickup, the ride itself walks to IN_PROGRESS server-side —
+  // invalidating driverActiveRide picks that up on the next read, no
+  // separate "depart" call needed.
+  const handlePassengerPickup = useCallback(
+    async (passengerId: string) => {
+      if (!activeRide || actingPassengerId !== null) return;
+      setActingPassengerId(passengerId);
+      try {
+        await passengerPickup(activeRide.id, passengerId);
+        void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
+      } catch {
+        Alert.alert("Error", "Could not start pickup. Try again.");
+      } finally {
+        setActingPassengerId(null);
+      }
+    },
+    [activeRide, actingPassengerId, queryClient],
+  );
+
+  // Per-passenger: driver has dropped off this one passenger. If no
+  // passenger remains active, the ride completes server-side — show a brief
+  // summary, then let the driver head back to the online list.
+  const handlePassengerDropoff = useCallback(
+    async (passengerId: string) => {
+      if (!activeRide || actingPassengerId !== null) return;
+      setActingPassengerId(passengerId);
+      try {
+        const result = await passengerDropoff(activeRide.id, passengerId);
+        if (result.ride.status === "COMPLETED") {
+          setCompletedSummary({ occupancy: result.ride.occupancy });
+        }
+        void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
+      } catch {
+        Alert.alert("Error", "Could not drop off this passenger. Try again.");
+      } finally {
+        setActingPassengerId(null);
+      }
+    },
+    [activeRide, actingPassengerId, queryClient],
+  );
+
+  const handleDoneWithCompletedRide = useCallback(() => {
+    setCompletedSummary(null);
+    void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
+  }, [queryClient]);
 
   // ─── Auth / loading guards ───────────────────────────────────────────────────
 
@@ -568,14 +632,31 @@ export default function DriverHomeScreen() {
   const firstName = user.name?.split(" ")[0] ?? "Driver";
   const toggling = availabilityMutation.isPending;
 
-  // ─── Fill-your-car mode (SHARED + MATCHED/ARRIVED) ──────────────────────────
+  // ─── Brief completion summary (last dropoff just completed the ride) ───────
+
+  if (completedSummary) {
+    return (
+      <Screen>
+        <View style={fillStyles.completionWrap}>
+          <Ionicons name="checkmark-circle" size={72} color={colors.primary[500]} />
+          <Text variant="h2" style={fillStyles.completionTitle}>Ride complete</Text>
+          <Text variant="bodySmall" color="muted" style={fillStyles.completionBody}>
+            All {completedSummary.occupancy} rider{completedSummary.occupancy !== 1 ? "s" : ""} dropped off.
+          </Text>
+          <Button label="Back to online list" onPress={handleDoneWithCompletedRide} fullWidth />
+        </View>
+      </Screen>
+    );
+  }
+
+  // ─── Fill-your-car mode (SHARED: assembling, then driving) ──────────────────
 
   if (filling && activeRide) {
     return (
       <Screen scroll>
         <View style={styles.header}>
           <View>
-            <Text variant="bodySmall" color="muted">Assembling</Text>
+            <Text variant="bodySmall" color="muted">{assembling ? "Assembling" : "Driving"}</Text>
             <Text variant="h1">Your car</Text>
           </View>
           <Pressable
@@ -597,11 +678,11 @@ export default function DriverHomeScreen() {
           ride={activeRide}
           fillData={fillData}
           addingRideId={addingRideId}
-          markingArrived={markingArrived}
-          departing={departing}
-          onMarkArrived={() => void handleMarkArrived()}
-          onDepart={() => void handleDepart()}
+          actingPassengerId={actingPassengerId}
           onAddPassenger={(rideId) => void handleAddPassenger(rideId)}
+          onPassengerArrived={(passengerId) => void handlePassengerArrived(passengerId)}
+          onPassengerPickup={(passengerId) => void handlePassengerPickup(passengerId)}
+          onPassengerDropoff={(passengerId) => void handlePassengerDropoff(passengerId)}
         />
       </Screen>
     );
@@ -900,12 +981,18 @@ const fillStyles = StyleSheet.create({
   },
   passengerConnector: { width: 1, height: 16, backgroundColor: colors.border },
   passengerTextCol: { flex: 1, gap: 2 },
-  passengerFare: { color: colors.primary[600], alignSelf: "center" },
+  passengerActionCol: { alignItems: "flex-end", justifyContent: "center" },
   noPassengersNote: { textAlign: "center", paddingVertical: spacing.sm },
-  // Actions
-  actionRow: { marginBottom: spacing.md },
-  departSection: { gap: spacing.sm, marginBottom: spacing.xl },
-  departNote: { textAlign: "center" },
+  // Completion summary
+  completionWrap: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
+    paddingHorizontal: spacing.xl,
+  },
+  completionTitle: { textAlign: "center" },
+  completionBody: { textAlign: "center", marginBottom: spacing.md },
   // Suggestions
   suggestionsSection: { marginTop: spacing.sm },
   sectionHeader: {

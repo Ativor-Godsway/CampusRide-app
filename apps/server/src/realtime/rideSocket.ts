@@ -22,6 +22,10 @@ function roomForDriver(userId: string): string {
   return `driver:${userId}`;
 }
 
+function roomForRider(userId: string): string {
+  return `rider:${userId}`;
+}
+
 /**
  * Wires up the real-time layer (Phase 5c + 6a):
  *
@@ -34,6 +38,14 @@ function roomForDriver(userId: string): string {
  *   the server can push `ride:broadcast` events to them.
  * - `driver:location` events from the driver are re-emitted as
  *   `ride:driver_location` to the ride's room (riders see live GPS).
+ *
+ * Per-passenger side (Phase 6b-3):
+ * - Every authenticated user (rider or driver) also joins a personal
+ *   `rider:{userId}` room on connect, mirroring the driver-room pattern, so
+ *   per-passenger driver actions (arrived/pickup/dropoff) can target exactly
+ *   the one affected rider via `emitToRider` instead of broadcasting to the
+ *   whole `ride:{rideId}` room where every passenger would see every other
+ *   passenger's events.
  */
 export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
   ioRef = io;
@@ -58,6 +70,10 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
     if (userRole === "DRIVER") {
       void socket.join(roomForDriver(userId));
     }
+
+    // Every authenticated user joins a personal rider room so per-passenger
+    // events can be targeted to exactly them.
+    void socket.join(roomForRider(userId));
 
     socket.on(RIDE_CLIENT_EVENTS.SUBSCRIBE, (rideId: unknown) => {
       if (typeof rideId !== "string") return;
@@ -131,6 +147,21 @@ export function emitRideEvent<E extends RideServerEvent>(
   payload: RideServerEventPayloads[E],
 ): void {
   ioRef?.to(roomForRide(rideId)).emit(event, payload);
+}
+
+/**
+ * Emits a contract event to exactly one rider's personal room (Phase 6b-3),
+ * not the whole ride room — used for per-passenger driver actions
+ * (arrived/pickup/dropoff) so other passengers on the same SHARED ride never
+ * see an event meant for someone else. No-op if the socket server isn't
+ * initialized (e.g. tests).
+ */
+export function emitToRider<E extends RideServerEvent>(
+  riderId: string,
+  event: E,
+  payload: RideServerEventPayloads[E],
+): void {
+  ioRef?.to(roomForRider(riderId)).emit(event, payload);
 }
 
 /** Emits a ride:broadcast event to all specified driver user rooms. */

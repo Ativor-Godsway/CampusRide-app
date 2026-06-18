@@ -23,6 +23,7 @@ const ALL_RIDE_STATUSES: RideStatus[] = [
 
 const ALL_PASSENGER_STATUSES: PassengerStatus[] = [
   "WAITING",
+  "ARRIVED",
   "PICKED_UP",
   "DROPPED_OFF",
   "CANCELLED",
@@ -223,14 +224,26 @@ describe("canTransitionRide", () => {
 // ─── Passenger transitions ───────────────────────────────────────────────────
 
 describe("Passenger state machine — legal transitions", () => {
-  it("WAITING -> PICKED_UP succeeds", () => {
-    expect(transitionPassenger({ status: "WAITING" }, "PICKED_UP")).toEqual({
+  it("WAITING -> ARRIVED succeeds", () => {
+    expect(transitionPassenger({ status: "WAITING" }, "ARRIVED")).toEqual({
+      status: "ARRIVED",
+    });
+  });
+
+  it("ARRIVED -> PICKED_UP succeeds", () => {
+    expect(transitionPassenger({ status: "ARRIVED" }, "PICKED_UP")).toEqual({
       status: "PICKED_UP",
     });
   });
 
   it("WAITING -> CANCELLED succeeds", () => {
     expect(transitionPassenger({ status: "WAITING" }, "CANCELLED")).toEqual({
+      status: "CANCELLED",
+    });
+  });
+
+  it("ARRIVED -> CANCELLED succeeds", () => {
+    expect(transitionPassenger({ status: "ARRIVED" }, "CANCELLED")).toEqual({
       status: "CANCELLED",
     });
   });
@@ -243,6 +256,12 @@ describe("Passenger state machine — legal transitions", () => {
 });
 
 describe("Passenger state machine — illegal transitions throw InvalidTransitionError", () => {
+  it("WAITING -> PICKED_UP is illegal (must pass through ARRIVED)", () => {
+    expect(() => transitionPassenger({ status: "WAITING" }, "PICKED_UP")).toThrow(
+      InvalidTransitionError,
+    );
+  });
+
   it("PICKED_UP -> CANCELLED is illegal", () => {
     expect(() => transitionPassenger({ status: "PICKED_UP" }, "CANCELLED")).toThrow(
       InvalidTransitionError,
@@ -251,6 +270,12 @@ describe("Passenger state machine — illegal transitions throw InvalidTransitio
 
   it("WAITING -> DROPPED_OFF is illegal (must be picked up first)", () => {
     expect(() => transitionPassenger({ status: "WAITING" }, "DROPPED_OFF")).toThrow(
+      InvalidTransitionError,
+    );
+  });
+
+  it("ARRIVED -> DROPPED_OFF is illegal (must be picked up first)", () => {
+    expect(() => transitionPassenger({ status: "ARRIVED" }, "DROPPED_OFF")).toThrow(
       InvalidTransitionError,
     );
   });
@@ -292,8 +317,9 @@ describe("canTransitionPassenger", () => {
 });
 
 describe("isActivePassengerStatus", () => {
-  it("WAITING and PICKED_UP count toward occupancy", () => {
+  it("WAITING, ARRIVED, and PICKED_UP count toward occupancy", () => {
     expect(isActivePassengerStatus("WAITING")).toBe(true);
+    expect(isActivePassengerStatus("ARRIVED")).toBe(true);
     expect(isActivePassengerStatus("PICKED_UP")).toBe(true);
   });
 

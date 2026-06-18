@@ -178,7 +178,7 @@ describe("applyPassengerTransition — cascade rules", () => {
     expect(result.ride.occupancy).toBe(0);
   });
 
-  it("WAITING -> PICKED_UP -> DROPPED_OFF succeeds and PICKED_UP -> CANCELLED is illegal", async () => {
+  it("WAITING -> ARRIVED -> PICKED_UP -> DROPPED_OFF succeeds and PICKED_UP -> CANCELLED is illegal", async () => {
     const riderA = await createTestUser("RIDER");
     const { ride } = await createTestRide({
       type: "LONE",
@@ -190,6 +190,9 @@ describe("applyPassengerTransition — cascade rules", () => {
 
     const passengerA = ride.passengers[0]!;
 
+    const arrived = await applyPassengerTransition(prisma, passengerA.id, "ARRIVED");
+    expect(arrived.passenger.status).toBe("ARRIVED");
+
     const pickedUp = await applyPassengerTransition(prisma, passengerA.id, "PICKED_UP");
     expect(pickedUp.passenger.status).toBe("PICKED_UP");
 
@@ -199,6 +202,100 @@ describe("applyPassengerTransition — cascade rules", () => {
 
     const droppedOff = await applyPassengerTransition(prisma, passengerA.id, "DROPPED_OFF");
     expect(droppedOff.passenger.status).toBe("DROPPED_OFF");
+    expect(droppedOff.passenger.fareCharged).toBe(1500);
+    // Sole passenger dropped off -> ride auto-completes.
+    expect(droppedOff.ride.status).toBe("COMPLETED");
+    expect(droppedOff.ride.completedAt).not.toBeNull();
+  });
+});
+
+// ─── Phase 6b-3: per-passenger first-pickup / last-dropoff side effects ────
+
+describe("applyPassengerTransition — first pickup / last dropoff drive the ride", () => {
+  it("first pickup walks a MATCHED ride straight to IN_PROGRESS (through ARRIVED) and stamps departedAt", async () => {
+    const driver = await createTestUser("DRIVER");
+    const riderA = await createTestUser("RIDER");
+    const riderB = await createTestUser("RIDER");
+    const { ride } = await createTestRide({
+      type: "SHARED",
+      status: "MATCHED",
+      driverId: driver.id,
+      occupancy: 2,
+      passengers: [
+        { riderId: riderA.id, status: "ARRIVED", lockedFare: 700 },
+        { riderId: riderB.id, status: "WAITING", lockedFare: 700 },
+      ],
+    });
+    createdRideIds.push(ride.id);
+
+    const passengerA = ride.passengers.find((p) => p.riderId === riderA.id)!;
+
+    const result = await applyPassengerTransition(prisma, passengerA.id, "PICKED_UP");
+
+    expect(result.passenger.status).toBe("PICKED_UP");
+    expect(result.ride.status).toBe("IN_PROGRESS");
+    expect(result.ride.departedAt).not.toBeNull();
+
+    // The still-WAITING sibling is untouched.
+    const passengerB = await prisma.ridePassenger.findUniqueOrThrow({
+      where: { id: ride.passengers.find((p) => p.riderId === riderB.id)!.id },
+    });
+    expect(passengerB.status).toBe("WAITING");
+  });
+
+  it("a later passenger's first pickup does not re-walk an already IN_PROGRESS ride", async () => {
+    const driver = await createTestUser("DRIVER");
+    const riderA = await createTestUser("RIDER");
+    const riderB = await createTestUser("RIDER");
+    const { ride } = await createTestRide({
+      type: "SHARED",
+      status: "IN_PROGRESS",
+      driverId: driver.id,
+      occupancy: 2,
+      passengers: [
+        { riderId: riderA.id, status: "PICKED_UP", lockedFare: 700 },
+        { riderId: riderB.id, status: "ARRIVED", lockedFare: 700 },
+      ],
+    });
+    createdRideIds.push(ride.id);
+
+    const passengerB = ride.passengers.find((p) => p.riderId === riderB.id)!;
+    const beforeDepartedAt = ride.departedAt;
+
+    const result = await applyPassengerTransition(prisma, passengerB.id, "PICKED_UP");
+
+    expect(result.passenger.status).toBe("PICKED_UP");
+    expect(result.ride.status).toBe("IN_PROGRESS");
+    expect(result.ride.departedAt).toEqual(beforeDepartedAt);
+  });
+
+  it("dropping off one of two passengers leaves the ride IN_PROGRESS; the last dropoff completes it", async () => {
+    const driver = await createTestUser("DRIVER");
+    const riderA = await createTestUser("RIDER");
+    const riderB = await createTestUser("RIDER");
+    const { ride } = await createTestRide({
+      type: "SHARED",
+      status: "IN_PROGRESS",
+      driverId: driver.id,
+      occupancy: 2,
+      passengers: [
+        { riderId: riderA.id, status: "PICKED_UP", lockedFare: 700 },
+        { riderId: riderB.id, status: "PICKED_UP", lockedFare: 700 },
+      ],
+    });
+    createdRideIds.push(ride.id);
+
+    const passengerA = ride.passengers.find((p) => p.riderId === riderA.id)!;
+    const passengerB = ride.passengers.find((p) => p.riderId === riderB.id)!;
+
+    const firstDrop = await applyPassengerTransition(prisma, passengerA.id, "DROPPED_OFF");
+    expect(firstDrop.passenger.fareCharged).toBe(700);
+    expect(firstDrop.ride.status).toBe("IN_PROGRESS"); // B still active
+
+    const lastDrop = await applyPassengerTransition(prisma, passengerB.id, "DROPPED_OFF");
+    expect(lastDrop.passenger.fareCharged).toBe(700);
+    expect(lastDrop.ride.status).toBe("COMPLETED");
+    expect(lastDrop.ride.completedAt).not.toBeNull();
   });
 });
 
