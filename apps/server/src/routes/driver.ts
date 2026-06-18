@@ -4,9 +4,19 @@ import type { PaymentMethod } from "@rida/shared";
 import { getLoneFare, getSharedFarePerRider, splitFare, designateBestFit } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { claimRide } from "../services/ride/dispatch";
-import { departRide } from "../services/ride/assembly";
+import { departRide, addRiderToCar } from "../services/ride/assembly";
+import type { RideWithPassengers } from "../services/ride/assembly";
+import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition } from "../services/ride/rideService";
-import { RideAlreadyClaimedError, InvalidTransitionError } from "../services/ride/errors";
+import {
+  RideAlreadyClaimedError,
+  InvalidTransitionError,
+  NotRideOwnerError,
+  RideNotFillableError,
+  NoSeatsAvailableError,
+  RequestRideUnavailableError,
+  RidesNotCombinableError,
+} from "../services/ride/errors";
 import { emitRideEvent } from "../realtime/rideSocket";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
 
@@ -292,6 +302,156 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     });
 
     return reply.code(200).send({ rides: result });
+  });
+
+  /**
+   * Returns ranked compatible SHARED requests that can be added to the driver's
+   * claimed SHARED anchor ride (MATCHED or ARRIVED), plus a fare-impact preview
+   * for each showing how fares would change at the new occupancy.
+   * Wraps the existing read-only `suggestFillsForRide` — no DB writes.
+   */
+  app.get("/rides/:id/fill-suggestions", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+
+    const { id: rideId } = request.params as { id: string };
+    const userId = request.user!.userId;
+
+    // Load anchor with passengers (including zone names) for response + suggestFillsForRide
+    const anchor = await prisma.ride.findUnique({
+      where: { id: rideId },
+      include: {
+        passengers: { include: { pickupZone: true, dropoffZone: true } },
+        pickupZone: true,
+        dropoffZone: true,
+      },
+    });
+    if (!anchor) return reply.code(404).send({ error: "Ride not found" });
+    if (anchor.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+    if (anchor.type !== "SHARED") return reply.code(400).send({ error: "Ride is not SHARED" });
+    if (anchor.status !== "MATCHED" && anchor.status !== "ARRIVED") {
+      return reply.code(400).send({ error: "Ride is not in an assembly state" });
+    }
+
+    const [adjacency, allCandidates] = await Promise.all([
+      prisma.zoneAdjacency.findMany(),
+      prisma.ride.findMany({
+        where: { status: "REQUESTED", driverId: null, type: "SHARED" },
+      }),
+    ]);
+
+    // suggestFillsForRide needs RideWithPassengers (plain passengers include, no zone nesting).
+    // anchor satisfies this structurally — cast is safe.
+    const ranked = suggestFillsForRide(
+      anchor as unknown as RideWithPassengers,
+      allCandidates,
+      adjacency,
+      new Date(),
+    );
+
+    // Fetch zone names for the ranked suggestions in one query.
+    const rankedIds = ranked.map((r) => r.id);
+    const suggestionsWithZones = await prisma.ride.findMany({
+      where: { id: { in: rankedIds } },
+      include: { pickupZone: true, dropoffZone: true },
+    });
+    const zoneMap = new Map(suggestionsWithZones.map((r) => [r.id, r]));
+
+    const currentFarePerRider = getSharedFarePerRider(anchor.occupancy);
+
+    const suggestions = ranked
+      .map((r) => {
+        const withZones = zoneMap.get(r.id);
+        if (!withZones) return null;
+        const newOccupancy = anchor.occupancy + 1;
+        const newFarePerRider = getSharedFarePerRider(newOccupancy);
+        return {
+          requestRideId: r.id,
+          pickupZoneName: withZones.pickupZone.name,
+          pickupZoneId: r.pickupZoneId,
+          dropoffZoneName: withZones.dropoffZone.name,
+          dropoffZoneId: r.dropoffZoneId,
+          createdAt: r.createdAt.toISOString(),
+          fareImpact: {
+            currentOccupancy: anchor.occupancy,
+            newOccupancy,
+            currentFarePerRider,
+            newFarePerRider,
+          },
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+
+    const { WAITING, PICKED_UP } = { WAITING: "WAITING", PICKED_UP: "PICKED_UP" };
+    const currentPassengers = anchor.passengers
+      .filter((p) => p.status === WAITING || p.status === PICKED_UP)
+      .map((p) => ({
+        id: p.id,
+        riderId: p.riderId,
+        pickupZoneName: p.pickupZone.name,
+        dropoffZoneName: p.dropoffZone.name,
+        lockedFare: p.lockedFare,
+        status: p.status,
+      }));
+
+    return reply.code(200).send({
+      occupancy: anchor.occupancy,
+      passengers: currentPassengers,
+      suggestions,
+    });
+  });
+
+  /**
+   * Driver adds a compatible SHARED request to their claimed car.
+   * Wraps the existing atomic `addRiderToCar` — no new business logic.
+   * On success returns the updated passenger list with current locked fares.
+   */
+  app.post("/rides/:id/add-passenger", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+
+    const { id: rideId } = request.params as { id: string };
+    const userId = request.user!.userId;
+    const body = request.body as { requestRideId?: unknown };
+
+    if (typeof body.requestRideId !== "string" || body.requestRideId.length === 0) {
+      return reply.code(400).send({ error: "requestRideId (string) is required" });
+    }
+
+    try {
+      const updatedAnchor = await addRiderToCar(prisma, userId, rideId, body.requestRideId);
+
+      // Reload with zone names for the response.
+      const withZones = await prisma.ride.findUniqueOrThrow({
+        where: { id: rideId },
+        include: { passengers: { include: { pickupZone: true, dropoffZone: true } } },
+      });
+
+      const { WAITING, PICKED_UP } = { WAITING: "WAITING", PICKED_UP: "PICKED_UP" };
+      const passengers = withZones.passengers
+        .filter((p) => p.status === WAITING || p.status === PICKED_UP)
+        .map((p) => ({
+          id: p.id,
+          riderId: p.riderId,
+          pickupZoneName: p.pickupZone.name,
+          dropoffZoneName: p.dropoffZone.name,
+          lockedFare: p.lockedFare,
+          status: p.status,
+        }));
+
+      return reply.code(200).send({ occupancy: updatedAnchor.occupancy, passengers });
+    } catch (err) {
+      if (err instanceof NotRideOwnerError) {
+        return reply.code(403).send({ error: "Forbidden" });
+      }
+      if (
+        err instanceof RideNotFillableError ||
+        err instanceof NoSeatsAvailableError ||
+        err instanceof RequestRideUnavailableError ||
+        err instanceof RidesNotCombinableError
+      ) {
+        return reply.code(409).send({ error: (err as Error).message });
+      }
+      throw err;
+    }
   });
 
   /** Driver completes the ride — transitions IN_PROGRESS → COMPLETED and emits fare summary. */

@@ -1,4 +1,4 @@
-import type { Ride, RideType, Zone } from "@rida/shared";
+import type { PassengerStatus, Ride, RideType, Zone } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
 export interface DriverProfile {
@@ -99,4 +99,70 @@ export interface EligibleRideItem {
 export async function getEligibleRides(): Promise<EligibleRideItem[]> {
   const res = await api.get<{ rides: EligibleRideItem[] }>("/driver/rides/eligible");
   return res.data.rides;
+}
+
+// ─── Fill-your-car assembly (Phase 6b-2) ─────────────────────────────────────
+
+/** A passenger already in the driver's shared car. */
+export interface PassengerInCar {
+  id: string;
+  riderId: string;
+  pickupZoneName: string;
+  dropoffZoneName: string;
+  /** The passenger's current downward-ratcheted fare in pesewas. */
+  lockedFare: number | null;
+  status: PassengerStatus;
+}
+
+/** A compatible SHARED request the driver can add to their car. */
+export interface FillSuggestion {
+  requestRideId: string;
+  pickupZoneName: string;
+  pickupZoneId: string;
+  dropoffZoneName: string;
+  dropoffZoneId: string;
+  createdAt: string;
+  /** How per-rider fares would change if this passenger is added. */
+  fareImpact: {
+    currentOccupancy: number;
+    newOccupancy: number;
+    /** Current standard rate per rider at currentOccupancy (pesewas). */
+    currentFarePerRider: number;
+    /** New standard rate per rider at newOccupancy after adding (pesewas). */
+    newFarePerRider: number;
+  };
+}
+
+export interface FillSuggestionsResult {
+  occupancy: number;
+  passengers: PassengerInCar[];
+  suggestions: FillSuggestion[];
+}
+
+export interface AddPassengerResult {
+  occupancy: number;
+  passengers: PassengerInCar[];
+}
+
+/**
+ * Returns ranked compatible SHARED requests that can be added to the anchor
+ * ride, plus a fare-impact preview for each. Read-only — no DB writes.
+ */
+export async function getFillSuggestions(rideId: string): Promise<FillSuggestionsResult> {
+  const res = await api.get<FillSuggestionsResult>(`/rides/${rideId}/fill-suggestions`);
+  return res.data;
+}
+
+/**
+ * Adds a compatible SHARED request to the driver's claimed car.
+ * Returns the updated passenger list with current locked fares.
+ */
+export async function addPassenger(
+  rideId: string,
+  requestRideId: string,
+): Promise<AddPassengerResult> {
+  const res = await api.post<AddPassengerResult>(`/rides/${rideId}/add-passenger`, {
+    requestRideId,
+  });
+  return res.data;
 }
