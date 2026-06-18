@@ -8,6 +8,7 @@ import { departRide, addRiderToCar } from "../services/ride/assembly";
 import type { RideWithPassengers } from "../services/ride/assembly";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
+import { isActivePassengerStatus } from "../services/ride/stateMachine";
 import {
   RideAlreadyClaimedError,
   InvalidTransitionError,
@@ -461,9 +462,12 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
 
-    const { WAITING, PICKED_UP } = { WAITING: "WAITING", PICKED_UP: "PICKED_UP" };
+    // isActivePassengerStatus (WAITING/ARRIVED/PICKED_UP) — NOT a hardcoded
+    // WAITING||PICKED_UP list, which would silently drop a passenger the
+    // moment the driver marks them ARRIVED ("I'm here"), making their row
+    // vanish from this list on the very next poll.
     const currentPassengers = anchor.passengers
-      .filter((p) => p.status === WAITING || p.status === PICKED_UP)
+      .filter((p) => isActivePassengerStatus(p.status))
       .map((p) => ({
         id: p.id,
         riderId: p.riderId,
@@ -505,9 +509,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         include: { passengers: { include: { pickupZone: true, dropoffZone: true } } },
       });
 
-      const { WAITING, PICKED_UP } = { WAITING: "WAITING", PICKED_UP: "PICKED_UP" };
       const passengers = withZones.passengers
-        .filter((p) => p.status === WAITING || p.status === PICKED_UP)
+        .filter((p) => isActivePassengerStatus(p.status))
         .map((p) => ({
           id: p.id,
           riderId: p.riderId,
