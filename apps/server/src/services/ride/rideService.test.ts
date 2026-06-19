@@ -302,7 +302,7 @@ describe("applyPassengerTransition — first pickup / last dropoff drive the rid
 // ─── Price-lock join sequence ───────────────────────────────────────────────
 
 describe("joinSharedRide — price-lock ratchet", () => {
-  it("1 -> 2 -> 3 ratchets fares 1000 -> 700 -> 600; cancel 3 -> 2 leaves remaining at 600", async () => {
+  it("1 -> 2 -> 3 stays at flat 500 throughout; cancel 3 -> 2 and re-fill never move off 500", async () => {
     const riderA = await createTestUser("RIDER");
     const riderB = await createTestUser("RIDER");
     const riderC = await createTestUser("RIDER");
@@ -316,64 +316,64 @@ describe("joinSharedRide — price-lock ratchet", () => {
     });
     createdRideIds.push(ride.id);
 
-    // A joins -> occupancy 1 -> 1000
+    // A joins -> occupancy 1 -> 500 (flat, not occupancy-scaled)
     const joinA = await joinSharedRide(prisma, ride.id, {
       riderId: riderA.id,
       pickupZoneId: ride.pickupZoneId,
       dropoffZoneId: ride.dropoffZoneId,
     });
-    expect(joinA.passenger.lockedFare).toBe(1000);
+    expect(joinA.passenger.lockedFare).toBe(500);
     expect(joinA.ride.occupancy).toBe(1);
 
-    // B joins -> occupancy 2 -> both ratchet to 700
+    // B joins -> occupancy 2 -> both stay at 500 (no ratchet — already flat)
     const joinB = await joinSharedRide(prisma, ride.id, {
       riderId: riderB.id,
       pickupZoneId: ride.pickupZoneId,
       dropoffZoneId: ride.dropoffZoneId,
     });
-    expect(joinB.passenger.lockedFare).toBe(700);
+    expect(joinB.passenger.lockedFare).toBe(500);
     expect(joinB.ride.occupancy).toBe(2);
 
     let passengerA = await prisma.ridePassenger.findUniqueOrThrow({ where: { id: joinA.passenger.id } });
-    expect(passengerA.lockedFare).toBe(700);
+    expect(passengerA.lockedFare).toBe(500);
 
-    // C joins -> occupancy 3 -> all ratchet to 600
+    // C joins -> occupancy 3 -> all still 500
     const joinC = await joinSharedRide(prisma, ride.id, {
       riderId: riderC.id,
       pickupZoneId: ride.pickupZoneId,
       dropoffZoneId: ride.dropoffZoneId,
     });
-    expect(joinC.passenger.lockedFare).toBe(600);
+    expect(joinC.passenger.lockedFare).toBe(500);
     expect(joinC.ride.occupancy).toBe(3);
 
     passengerA = await prisma.ridePassenger.findUniqueOrThrow({ where: { id: joinA.passenger.id } });
     let passengerB = await prisma.ridePassenger.findUniqueOrThrow({ where: { id: joinB.passenger.id } });
-    expect(passengerA.lockedFare).toBe(600);
-    expect(passengerB.lockedFare).toBe(600);
+    expect(passengerA.lockedFare).toBe(500);
+    expect(passengerB.lockedFare).toBe(500);
 
-    // C cancels -> occupancy 2 -> A and B remain at 600 (NOT raised back to 700)
+    // C cancels -> occupancy 2 -> A and B remain at 500
     const cancelC = await applyPassengerTransition(prisma, joinC.passenger.id, "CANCELLED");
     expect(cancelC.ride.occupancy).toBe(2);
 
     passengerA = await prisma.ridePassenger.findUniqueOrThrow({ where: { id: joinA.passenger.id } });
     passengerB = await prisma.ridePassenger.findUniqueOrThrow({ where: { id: joinB.passenger.id } });
-    expect(passengerA.lockedFare).toBe(600);
-    expect(passengerB.lockedFare).toBe(600);
+    expect(passengerA.lockedFare).toBe(500);
+    expect(passengerB.lockedFare).toBe(500);
 
-    // Re-fill: D joins -> occupancy 2 -> 3 again -> new joiner locks at 600,
-    // existing A and B remain at 600 (already at the floor for occupancy 3).
+    // Re-fill: D joins -> occupancy 2 -> 3 again -> new joiner locks at 500,
+    // existing A and B remain at 500 — flat pricing has no floor to climb to.
     const joinD = await joinSharedRide(prisma, ride.id, {
       riderId: riderD.id,
       pickupZoneId: ride.pickupZoneId,
       dropoffZoneId: ride.dropoffZoneId,
     });
-    expect(joinD.passenger.lockedFare).toBe(600);
+    expect(joinD.passenger.lockedFare).toBe(500);
     expect(joinD.ride.occupancy).toBe(3);
 
     passengerA = await prisma.ridePassenger.findUniqueOrThrow({ where: { id: joinA.passenger.id } });
     passengerB = await prisma.ridePassenger.findUniqueOrThrow({ where: { id: joinB.passenger.id } });
-    expect(passengerA.lockedFare).toBe(600);
-    expect(passengerB.lockedFare).toBe(600);
+    expect(passengerA.lockedFare).toBe(500);
+    expect(passengerB.lockedFare).toBe(500);
   });
 
   it("departure (ARRIVED -> IN_PROGRESS) freezes lockedFares permanently", async () => {

@@ -1,104 +1,119 @@
 import { describe, it, expect } from "vitest";
 import { recomputeLockedFares, type LockedFarePassenger } from "./lockedFare";
 
-describe("recomputeLockedFares — JOIN ratchets fares downward", () => {
-  it("1 -> 2: both passengers ratchet from 1000 to 700", () => {
+// Flat SHARED pricing: getSharedFarePerRider always returns 500 regardless
+// of occupancy, so the JOIN branch's "newRate" is invariant — the ratchet
+// mechanism stays in place (kept, not deleted) but self-neutralizes: every
+// active passenger is already at 500, so Math.min(500, 500) is always 500.
+// These tests assert that invariant directly rather than a downward climb.
+
+describe("recomputeLockedFares — JOIN stays at 500 (flat pricing, no ratchet)", () => {
+  it("1 -> 2: both passengers stay at 500", () => {
     const passengers: LockedFarePassenger[] = [
-      { id: "a", status: "WAITING", lockedFare: 1000 },
-      { id: "b", status: "WAITING", lockedFare: 1000 }, // newly joined, pre-recompute
+      { id: "a", status: "WAITING", lockedFare: 500 },
+      { id: "b", status: "WAITING", lockedFare: 500 }, // newly joined, pre-recompute
     ];
 
     const result = recomputeLockedFares(passengers, { type: "JOIN" });
 
-    expect(result.find((p) => p.id === "a")?.lockedFare).toBe(700);
-    expect(result.find((p) => p.id === "b")?.lockedFare).toBe(700);
+    expect(result.find((p) => p.id === "a")?.lockedFare).toBe(500);
+    expect(result.find((p) => p.id === "b")?.lockedFare).toBe(500);
   });
 
-  it("2 -> 3: all three passengers ratchet from 700 to 600", () => {
+  it("2 -> 3: all three passengers stay at 500", () => {
     const passengers: LockedFarePassenger[] = [
-      { id: "a", status: "WAITING", lockedFare: 700 },
-      { id: "b", status: "WAITING", lockedFare: 700 },
-      { id: "c", status: "WAITING", lockedFare: 700 }, // newly joined
+      { id: "a", status: "WAITING", lockedFare: 500 },
+      { id: "b", status: "WAITING", lockedFare: 500 },
+      { id: "c", status: "WAITING", lockedFare: 500 }, // newly joined
     ];
 
     const result = recomputeLockedFares(passengers, { type: "JOIN" });
 
     for (const p of result) {
-      expect(p.lockedFare).toBe(600);
+      expect(p.lockedFare).toBe(500);
     }
   });
 
-  it("full join sequence 1 -> 2 -> 3 ratchets 1000 -> 700 -> 600", () => {
+  it("full join sequence 1 -> 2 -> 3 -> 4 never moves off 500", () => {
     let passengers: LockedFarePassenger[] = [
-      { id: "a", status: "WAITING", lockedFare: 1000 },
+      { id: "a", status: "WAITING", lockedFare: 500 },
     ];
-    expect(passengers[0]!.lockedFare).toBe(1000);
+    expect(passengers[0]!.lockedFare).toBe(500);
 
     // B joins
     passengers = recomputeLockedFares(
-      [...passengers, { id: "b", status: "WAITING", lockedFare: 1000 }],
+      [...passengers, { id: "b", status: "WAITING", lockedFare: 500 }],
       { type: "JOIN" },
     );
-    expect(passengers.map((p) => p.lockedFare)).toEqual([700, 700]);
+    expect(passengers.map((p) => p.lockedFare)).toEqual([500, 500]);
 
     // C joins
     passengers = recomputeLockedFares(
-      [...passengers, { id: "c", status: "WAITING", lockedFare: 700 }],
+      [...passengers, { id: "c", status: "WAITING", lockedFare: 500 }],
       { type: "JOIN" },
     );
-    expect(passengers.map((p) => p.lockedFare)).toEqual([600, 600, 600]);
+    expect(passengers.map((p) => p.lockedFare)).toEqual([500, 500, 500]);
+
+    // D joins (full car)
+    passengers = recomputeLockedFares(
+      [...passengers, { id: "d", status: "WAITING", lockedFare: 500 }],
+      { type: "JOIN" },
+    );
+    expect(passengers.map((p) => p.lockedFare)).toEqual([500, 500, 500, 500]);
   });
 
-  it("never raises a fare (Math.min guard) even if a stale higher rate is passed", () => {
+  it("Math.min guard still clamps a stale higher rate down to 500, never up", () => {
     const passengers: LockedFarePassenger[] = [
-      { id: "a", status: "WAITING", lockedFare: 500 }, // already at the lowest rate
-      { id: "b", status: "WAITING", lockedFare: 1000 },
+      { id: "a", status: "WAITING", lockedFare: 500 }, // already at the flat rate
+      { id: "b", status: "WAITING", lockedFare: 1000 }, // stale pre-migration value
     ];
 
-    // activeCount = 2 -> newRate = 700, but "a" must stay at 500
+    // newRate is always 500 now — "b"'s stale 1000 gets clamped down on the
+    // next join; "a" was already correct and stays put. Confirms the
+    // ratchet self-heals any pre-existing non-flat lockedFare without ever
+    // raising one.
     const result = recomputeLockedFares(passengers, { type: "JOIN" });
 
     expect(result.find((p) => p.id === "a")?.lockedFare).toBe(500);
-    expect(result.find((p) => p.id === "b")?.lockedFare).toBe(700);
+    expect(result.find((p) => p.id === "b")?.lockedFare).toBe(500);
   });
 
-  it("ignores DROPPED_OFF/CANCELLED passengers when computing the new rate", () => {
+  it("ignores DROPPED_OFF/CANCELLED passengers — inactive lockedFare left untouched", () => {
     const passengers: LockedFarePassenger[] = [
-      { id: "a", status: "WAITING", lockedFare: 1000 },
-      { id: "b", status: "CANCELLED", lockedFare: 1000 },
-      { id: "c", status: "WAITING", lockedFare: 1000 }, // newly joined
+      { id: "a", status: "WAITING", lockedFare: 500 },
+      { id: "b", status: "CANCELLED", lockedFare: 1000 }, // stale, inactive
+      { id: "c", status: "WAITING", lockedFare: 500 }, // newly joined
     ];
 
-    // Active count is 2 (a, c) — not 3 — so rate is 700, not 600.
     const result = recomputeLockedFares(passengers, { type: "JOIN" });
 
-    expect(result.find((p) => p.id === "a")?.lockedFare).toBe(700);
-    expect(result.find((p) => p.id === "c")?.lockedFare).toBe(700);
-    // Inactive passenger's lockedFare is left untouched.
+    expect(result.find((p) => p.id === "a")?.lockedFare).toBe(500);
+    expect(result.find((p) => p.id === "c")?.lockedFare).toBe(500);
+    // Inactive passenger's lockedFare is left untouched, even if stale.
     expect(result.find((p) => p.id === "b")?.lockedFare).toBe(1000);
   });
 });
 
-describe("recomputeLockedFares — CANCEL never raises remaining fares", () => {
-  it("3 -> 2 (one cancels): remaining passengers stay at 600, not raised to 700", () => {
+describe("recomputeLockedFares — CANCEL never changes remaining fares", () => {
+  it("3 -> 2 (one cancels): remaining passengers stay at 500", () => {
     const passengers: LockedFarePassenger[] = [
-      { id: "a", status: "WAITING", lockedFare: 600 },
-      { id: "b", status: "WAITING", lockedFare: 600 },
-      { id: "c", status: "CANCELLED", lockedFare: 600 },
+      { id: "a", status: "WAITING", lockedFare: 500 },
+      { id: "b", status: "WAITING", lockedFare: 500 },
+      { id: "c", status: "CANCELLED", lockedFare: 500 },
     ];
 
     const result = recomputeLockedFares(passengers, { type: "CANCEL" });
 
-    expect(result.find((p) => p.id === "a")?.lockedFare).toBe(600);
-    expect(result.find((p) => p.id === "b")?.lockedFare).toBe(600);
+    expect(result.find((p) => p.id === "a")?.lockedFare).toBe(500);
+    expect(result.find((p) => p.id === "b")?.lockedFare).toBe(500);
   });
 });
 
 describe("recomputeLockedFares — DEPARTURE freezes fares", () => {
   it("returns passengers unchanged", () => {
     const passengers: LockedFarePassenger[] = [
-      { id: "a", status: "PICKED_UP", lockedFare: 600 },
-      { id: "b", status: "PICKED_UP", lockedFare: 600 },
+      { id: "a", status: "PICKED_UP", lockedFare: 500 },
+      { id: "b", status: "PICKED_UP", lockedFare: 500 },
     ];
 
     const result = recomputeLockedFares(passengers, { type: "DEPARTURE" });
@@ -110,8 +125,8 @@ describe("recomputeLockedFares — DEPARTURE freezes fares", () => {
 describe("recomputeLockedFares — purity", () => {
   it("does not mutate the input array or its elements", () => {
     const passengers: LockedFarePassenger[] = [
-      { id: "a", status: "WAITING", lockedFare: 1000 },
-      { id: "b", status: "WAITING", lockedFare: 1000 },
+      { id: "a", status: "WAITING", lockedFare: 500 },
+      { id: "b", status: "WAITING", lockedFare: 500 },
     ];
     const snapshot = JSON.parse(JSON.stringify(passengers));
 

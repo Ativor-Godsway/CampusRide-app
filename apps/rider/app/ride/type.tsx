@@ -127,10 +127,9 @@ export default function RideTypeScreen() {
   }, [ride?.status]);
 
   // ── Fares ───────────────────────────────────────────────────────────────────
-  const sharedRange = useMemo(() => {
-    const fares = [1, 2, 3, 4].map((occ) => getSharedFarePerRider(occ));
-    return { min: Math.min(...fares), max: Math.max(...fares) };
-  }, []);
+  // Flat per-rider SHARED fare — getSharedFarePerRider(occupancy) now returns
+  // the same 500 pesewas regardless of which occupancy (1-4) is passed in.
+  const sharedFare = useMemo(() => getSharedFarePerRider(1), []);
   const loneFare = useMemo(() => priceLoneRide().fare, []);
 
   const options: RideOption[] = useMemo(
@@ -138,10 +137,9 @@ export default function RideTypeScreen() {
       {
         type: "SHARED",
         title: "Shared",
-        priceLabel: `${formatGhs(sharedRange.min)} – ${formatGhs(sharedRange.max)}`,
+        priceLabel: formatGhs(sharedFare),
         summary: "Share with others & save",
-        details:
-          "Share & save — the more riders join, the cheaper it gets for everyone. Final price depends on how full the car is when it departs.",
+        details: "GHS 5 each, every time. Share with others heading your way.",
         icon: "people",
       },
       {
@@ -154,7 +152,7 @@ export default function RideTypeScreen() {
         icon: "car-sport",
       },
     ],
-    [sharedRange, loneFare],
+    [sharedFare, loneFare],
   );
 
   // ── Map coords & region ─────────────────────────────────────────────────────
@@ -192,10 +190,7 @@ export default function RideTypeScreen() {
     return Math.max(0, Math.min(1, 1 - elapsed / BROADCAST_WINDOW_MS));
   }, [ride?.broadcastStartedAt, now]);
 
-  const priceLabel =
-    selectedType === "SHARED"
-      ? `${formatGhs(sharedRange.min)} – ${formatGhs(sharedRange.max)}`
-      : formatGhs(loneFare);
+  const priceLabel = selectedType === "SHARED" ? formatGhs(sharedFare) : formatGhs(loneFare);
 
   const canSwitchToLone = ride?.type === "SHARED" && ride?.occupancy === 1;
 

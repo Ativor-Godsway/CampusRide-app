@@ -43,19 +43,19 @@ describe("LONE fare", () => {
 // ─── SHARED per-rider fare ────────────────────────────────────────────────────
 
 describe("SHARED per-rider fare", () => {
-  it("occupancy 1 → 1000 pesewas", () => {
-    expect(getSharedFarePerRider(1)).toBe(1000);
+  it("occupancy 1 → 500 pesewas (flat)", () => {
+    expect(getSharedFarePerRider(1)).toBe(500);
   });
 
-  it("occupancy 2 → 700 pesewas", () => {
-    expect(getSharedFarePerRider(2)).toBe(700);
+  it("occupancy 2 → 500 pesewas (flat)", () => {
+    expect(getSharedFarePerRider(2)).toBe(500);
   });
 
-  it("occupancy 3 → 600 pesewas", () => {
-    expect(getSharedFarePerRider(3)).toBe(600);
+  it("occupancy 3 → 500 pesewas (flat)", () => {
+    expect(getSharedFarePerRider(3)).toBe(500);
   });
 
-  it("occupancy 4 → 500 pesewas", () => {
+  it("occupancy 4 → 500 pesewas (flat)", () => {
     expect(getSharedFarePerRider(4)).toBe(500);
   });
 
@@ -75,16 +75,16 @@ describe("SHARED per-rider fare", () => {
 // ─── SHARED total fare ────────────────────────────────────────────────────────
 
 describe("SHARED total fare", () => {
-  it("occupancy 1 → 1000  (1000 × 1)", () => {
-    expect(getSharedTotalFare(1)).toBe(1000);
+  it("occupancy 1 → 500  (500 × 1)", () => {
+    expect(getSharedTotalFare(1)).toBe(500);
   });
 
-  it("occupancy 2 → 1400  (700 × 2)", () => {
-    expect(getSharedTotalFare(2)).toBe(1400);
+  it("occupancy 2 → 1000  (500 × 2)", () => {
+    expect(getSharedTotalFare(2)).toBe(1000);
   });
 
-  it("occupancy 3 → 1800  (600 × 3)", () => {
-    expect(getSharedTotalFare(3)).toBe(1800);
+  it("occupancy 3 → 1500  (500 × 3)", () => {
+    expect(getSharedTotalFare(3)).toBe(1500);
   });
 
   it("occupancy 4 → 2000  (500 × 4)", () => {
@@ -110,10 +110,10 @@ describe("haul-climbs invariant", () => {
     }
   });
 
-  it("exact values at each occupancy are 1000/1400/1800/2000", () => {
-    expect(getSharedTotalFare(1)).toBe(1000);
-    expect(getSharedTotalFare(2)).toBe(1400);
-    expect(getSharedTotalFare(3)).toBe(1800);
+  it("exact values at each occupancy are 500/1000/1500/2000", () => {
+    expect(getSharedTotalFare(1)).toBe(500);
+    expect(getSharedTotalFare(2)).toBe(1000);
+    expect(getSharedTotalFare(3)).toBe(1500);
     expect(getSharedTotalFare(4)).toBe(2000);
   });
 });
@@ -174,25 +174,14 @@ describe("fare split — spot-checks", () => {
 // ─── Competitive guarantees ───────────────────────────────────────────────────
 
 describe("competitive guarantees", () => {
-  it("occupancy-1 shared per-rider fare is exactly 1000 (lone-shared floor)", () => {
-    expect(getSharedFarePerRider(1)).toBe(1000);
-  });
-
-  it("no shared rider ever pays more than 1000 pesewas at any occupancy", () => {
+  it("every shared rider pays exactly 500 pesewas, regardless of occupancy", () => {
     for (const occ of [1, 2, 3, 4] as const) {
-      expect(getSharedFarePerRider(occ)).toBeLessThanOrEqual(1000);
+      expect(getSharedFarePerRider(occ)).toBe(500);
     }
   });
 
-  it("full car (occupancy 4) per-rider fare is exactly 500 pesewas", () => {
-    expect(getSharedFarePerRider(4)).toBe(500);
-  });
-
-  it("shared total at every occupancy is at least 1000 (minimum driver haul)", () => {
-    for (const occ of [1, 2, 3, 4] as const) {
-      expect(getSharedTotalFare(occ)).toBeGreaterThanOrEqual(1000);
-    }
-  });
+  // The old "≥1000 minimum driver haul" guarantee is intentionally removed:
+  // a solo SHARED rider now nets the driver 500 total, not 1000.
 });
 
 // ─── Convenience combiners ────────────────────────────────────────────────────
@@ -209,25 +198,25 @@ describe("priceLoneRide", () => {
 });
 
 describe("priceSharedRide", () => {
-  it("occupancy 2: all fields correct", () => {
+  it("occupancy 2: flat farePerRider, total scales with headcount", () => {
     const result = priceSharedRide(2);
-    expect(result.farePerRider).toBe(700);
-    expect(result.total).toBe(1400);
-    expect(result.commission).toBe(210);
-    expect(result.driverShare).toBe(1190);
+    expect(result.farePerRider).toBe(500);
+    expect(result.total).toBe(1000);
+    expect(result.commission).toBe(150);
+    expect(result.driverShare).toBe(850);
     expect(result.commission + result.driverShare).toBe(result.total);
   });
 
-  it("occupancy 3: all fields correct", () => {
+  it("occupancy 3: flat farePerRider, total scales with headcount", () => {
     const result = priceSharedRide(3);
-    expect(result.farePerRider).toBe(600);
-    expect(result.total).toBe(1800);
-    expect(result.commission).toBe(270);
-    expect(result.driverShare).toBe(1530);
+    expect(result.farePerRider).toBe(500);
+    expect(result.total).toBe(1500);
+    expect(result.commission).toBe(225);
+    expect(result.driverShare).toBe(1275);
     expect(result.commission + result.driverShare).toBe(result.total);
   });
 
-  it("occupancy 4: all fields correct", () => {
+  it("occupancy 4: flat farePerRider, total scales with headcount", () => {
     const result = priceSharedRide(4);
     expect(result.farePerRider).toBe(500);
     expect(result.total).toBe(2000);

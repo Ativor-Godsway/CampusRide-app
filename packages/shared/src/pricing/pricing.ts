@@ -14,10 +14,12 @@ export const PRICING = {
   MAX_SHARED_OCCUPANCY: 4,
 
   /**
-   * Flat per-rider fare for a SHARED ride, by final occupancy at departure.
-   * Every rider in the car pays the same rate. Key = final occupancy (1–4).
+   * Flat per-rider fare for a SHARED ride — 500 pesewas regardless of final
+   * occupancy. Keyed by occupancy (1–4) only so `getSharedFarePerRider`'s
+   * signature and every call site stay unchanged; the value is the same at
+   * every key on purpose, not a placeholder.
    */
-  SHARED_FARES: { 1: 1000, 2: 700, 3: 600, 4: 500 } as const,
+  SHARED_FARES: { 1: 500, 2: 500, 3: 500, 4: 500 } as const,
 
   /**
    * Commission split: 15% platform, 85% driver.
@@ -74,9 +76,10 @@ export function getLoneFare(): number {
 }
 
 /**
- * Per-rider fare for a SHARED ride at the given final occupancy.
- * Every rider in the car pays this same amount.
- * occ 1→1000, 2→700, 3→600, 4→500 pesewas.
+ * Per-rider fare for a SHARED ride — flat 500 pesewas, decoupled from final
+ * occupancy. `occupancy` is still validated (1–4, the seat cap) and kept as
+ * a parameter so every call site stays the same; it no longer affects the
+ * returned amount.
  */
 export function getSharedFarePerRider(occupancy: number): number {
   validateSharedOccupancy(occupancy);

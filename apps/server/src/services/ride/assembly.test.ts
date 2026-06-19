@@ -75,7 +75,7 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
       dropoffZoneId: dropoff.id,
     });
     expect(joinA.ride.occupancy).toBe(1);
-    expect(joinA.passenger.lockedFare).toBe(getSharedFarePerRider(1)); // 1000
+    expect(joinA.passenger.lockedFare).toBe(getSharedFarePerRider(1)); // 500 (flat)
 
     // 3. Riders B and C each request SHARED in combinable (same) zones.
     const { ride: rideB, rider: riderB } = await createTestRide({
@@ -106,12 +106,12 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
     let suggestions = suggestFillsForRide(anchor, [rideB, rideC], [], new Date());
     expect(suggestions.map((r) => r.id).sort()).toEqual([rideB.id, rideC.id].sort());
 
-    // 4. Driver adds B -> occupancy 2, A & B ratchet to 700 each.
+    // 4. Driver adds B -> occupancy 2, A & B both stay at flat 500.
     anchor = await addRiderToCar(prisma, driver.user.id, rideA.id, rideB.id);
     expect(anchor.occupancy).toBe(2);
     expect(anchor.passengers).toHaveLength(2);
     for (const p of anchor.passengers) {
-      expect(p.lockedFare).toBe(getSharedFarePerRider(2)); // 700
+      expect(p.lockedFare).toBe(getSharedFarePerRider(2)); // 500 (flat)
     }
 
     const mergedB = await prisma.ride.findUniqueOrThrow({ where: { id: rideB.id } });
@@ -119,12 +119,12 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
     expect(mergedB.cancelReason).toBe("MERGED_INTO_ANOTHER_RIDE");
     expect(mergedB.mergedIntoRideId).toBe(rideA.id);
 
-    // 5. Driver adds C -> occupancy 3, A/B/C ratchet to 600 each.
+    // 5. Driver adds C -> occupancy 3, A/B/C all stay at flat 500.
     anchor = await addRiderToCar(prisma, driver.user.id, rideA.id, rideC.id);
     expect(anchor.occupancy).toBe(3);
     expect(anchor.passengers).toHaveLength(3);
     for (const p of anchor.passengers) {
-      expect(p.lockedFare).toBe(getSharedFarePerRider(3)); // 600
+      expect(p.lockedFare).toBe(getSharedFarePerRider(3)); // 500 (flat)
     }
 
     const mergedC = await prisma.ride.findUniqueOrThrow({ where: { id: rideC.id } });
@@ -132,14 +132,14 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
     expect(mergedC.cancelReason).toBe("MERGED_INTO_ANOTHER_RIDE");
     expect(mergedC.mergedIntoRideId).toBe(rideA.id);
 
-    // 6. Rider B cancels before departure -> occupancy 2, A & C STAY at 600
-    // (downward-only ratchet, no raise back to 700).
+    // 6. Rider B cancels before departure -> occupancy 2, A & C STAY at flat 500
+    // (the ratchet is a no-op at flat pricing — nothing to raise or lower).
     const passengerB = anchor.passengers.find((p) => p.riderId === riderB.id)!;
     const cancelResult = await applyPassengerTransition(prisma, passengerB.id, "CANCELLED");
     expect(cancelResult.ride.occupancy).toBe(2);
     for (const p of cancelResult.ride.passengers) {
       if (p.id === passengerB.id) continue;
-      expect(p.lockedFare).toBe(getSharedFarePerRider(3)); // still 600
+      expect(p.lockedFare).toBe(getSharedFarePerRider(3)); // still 500 (flat)
     }
 
     // Driver sees the open seat: suggestFillsForRide again.
@@ -162,7 +162,7 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
     suggestions = suggestFillsForRide(anchor, [rideD], [], new Date());
     expect(suggestions.map((r) => r.id)).toEqual([rideD.id]);
 
-    // 7. Driver adds D -> occupancy 3 again, D locks at 600, A & C remain 600.
+    // 7. Driver adds D -> occupancy 3 again, D locks at flat 500, A & C remain 500.
     anchor = await addRiderToCar(prisma, driver.user.id, rideA.id, rideD.id);
     expect(anchor.occupancy).toBe(3);
 
@@ -171,7 +171,7 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
     const activeRiderIds = activePassengers.map((p) => p.riderId).sort();
     expect(activeRiderIds).toEqual([riderA.id, riderC.id, riderD.id].sort());
     for (const p of activePassengers) {
-      expect(p.lockedFare).toBe(getSharedFarePerRider(3)); // 600
+      expect(p.lockedFare).toBe(getSharedFarePerRider(3)); // 500 (flat)
     }
 
     // 8. Driver ARRIVED -> departRide -> IN_PROGRESS, fares frozen, occupancy
@@ -187,7 +187,7 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
       where: { rideId: rideA.id, status: { not: "CANCELLED" } },
     });
     const totalLocked = finalPassengers.reduce((sum, p) => sum + (p.lockedFare ?? 0), 0);
-    expect(totalLocked).toBe(getSharedTotalFare(3)); // 1800
+    expect(totalLocked).toBe(getSharedTotalFare(3)); // 1500 (500 flat x 3 — total still scales with headcount)
 
     // 9. Attempt addRiderToCar after departure -> rejected.
     const { ride: rideE, rider: riderE } = await createTestRide({
