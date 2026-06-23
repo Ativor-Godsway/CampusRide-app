@@ -44,6 +44,14 @@ function isDecisionAction(value: unknown): value is RiderDecisionAction {
   return typeof value === "string" && (DECISION_ACTIONS as readonly string[]).includes(value);
 }
 
+async function requireRider(request: Parameters<typeof requireAuth>[0], reply: Parameters<typeof requireAuth>[1]): Promise<boolean> {
+  if (request.user?.role !== "RIDER") {
+    reply.code(403).send({ error: "Rider role required" });
+    return false;
+  }
+  return true;
+}
+
 /** Statuses from which a rider can still cancel (IN_PROGRESS is the point of no return). */
 const RIDER_CANCELLABLE_STATUSES: RideStatus[] = [
   "REQUESTED",
@@ -84,6 +92,8 @@ async function getDriverInfo(prisma: PrismaClient, driverId: string) {
  */
 export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): void {
   app.post("/rides", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+
     const body = request.body as {
       pickupZoneId?: unknown;
       dropoffZoneId?: unknown;
@@ -136,6 +146,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
   });
 
   app.get("/rides/mine", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+
     const riderId = request.user!.userId;
 
     const rides = await prisma.ride.findMany({
@@ -149,6 +161,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
   });
 
   app.get("/rides/:id", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+
     const { id } = request.params as { id: string };
 
     const ride = await prisma.ride.findUnique({
@@ -195,6 +209,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
   });
 
   app.post("/rides/:id/decision", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+
     const { id } = request.params as { id: string };
     const body = request.body as { action?: unknown };
 
@@ -238,6 +254,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
   });
 
   app.post("/rides/:id/cancel", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+
     const { id } = request.params as { id: string };
 
     const ride = await prisma.ride.findUnique({ where: { id } });
@@ -272,6 +290,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    * Payment row without re-charging the rider.
    */
   app.post("/rides/:id/initiate-payment", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
     const body = request.body as { phone?: unknown; network?: unknown };
@@ -314,6 +334,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
   /** Poll the rider's Moolre payment status for a completed MOMO ride. */
   app.get("/rides/:id/payment-status", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
 

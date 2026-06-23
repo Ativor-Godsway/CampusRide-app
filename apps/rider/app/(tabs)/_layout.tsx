@@ -1,10 +1,10 @@
 import { Redirect, Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { LoadingState, Screen, colors, shadows, useAuth } from "@rida/mobile-shared";
+import { LoadingState, RoleMismatchScreen, Screen, colors, shadows, useAuth } from "@rida/mobile-shared";
 
-/** Bottom tab shell — Home / Rides / Account. Re-checks auth so a signed-out user can't land here directly. */
+/** Bottom tab shell — Home / Rides / Account. Re-checks auth (and role) so a signed-out or mismatched-role user can't land here directly. */
 export default function TabsLayout() {
-  const { isLoading, isAuthenticated, user } = useAuth();
+  const { isLoading, isAuthenticated, user, signOut } = useAuth();
 
   if (isLoading) {
     return (
@@ -16,6 +16,10 @@ export default function TabsLayout() {
 
   if (!isAuthenticated || !user) {
     return <Redirect href="/auth/phone" />;
+  }
+
+  if (user.role !== "RIDER") {
+    return <RoleMismatchScreen expectedRole="RIDER" onSignOut={signOut} />;
   }
 
   return (

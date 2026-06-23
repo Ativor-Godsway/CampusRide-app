@@ -18,6 +18,7 @@ import {
   Card,
   EmptyState,
   LoadingState,
+  RoleMismatchScreen,
   Screen,
   Text,
   colors,
@@ -618,6 +619,10 @@ export default function DriverHomeScreen() {
 
   if (!isAuthenticated || !user) {
     return <Redirect href="/auth/phone" />;
+  }
+
+  if (user.role !== "DRIVER") {
+    return <RoleMismatchScreen expectedRole="DRIVER" onSignOut={signOut} />;
   }
 
   if (!user.driver || !user.driver.carMake) {

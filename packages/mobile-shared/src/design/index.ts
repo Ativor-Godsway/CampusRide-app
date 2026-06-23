@@ -12,3 +12,4 @@ export * from "./components/ServiceIcon";
 export * from "./components/ProgressBar";
 export * from "./components/Sheet";
 export * from "./components/RouteStops";
+export * from "./components/RoleMismatchScreen";
