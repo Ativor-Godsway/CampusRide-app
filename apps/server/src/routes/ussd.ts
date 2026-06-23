@@ -35,10 +35,6 @@ function coerceBoolean(value: unknown): boolean | null {
  */
 export function registerUssdRoutes(app: FastifyInstance, prisma: PrismaClient): void {
   app.post("/ussd/callback", async (request, reply) => {
-    // TEMPORARY — keep until we've confirmed Moolre's exact field
-    // names/value types from Render logs, then remove.
-    request.log.info({ body: request.body }, "[ussd] raw callback body");
-
     const body = request.body as {
       sessionId?: unknown;
       new?: unknown;
