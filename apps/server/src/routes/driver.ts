@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import type { PaymentMethod, PassengerStatus } from "@rida/shared";
+import type { PaymentMethod, PassengerStatus, RideSource } from "@rida/shared";
 import { getLoneFare, getSharedFarePerRider, splitFare, designateBestFit, PRICING } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { claimRide } from "../services/ride/dispatch";
@@ -19,6 +19,7 @@ import {
 } from "../services/ride/errors";
 import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
+import { notifyUssdRider, notifyUssdRiders } from "../services/sms/notifyUssdRiders";
 
 /** Returns the set of zone IDs a driver in `zoneId` is eligible to serve (same zone + 1 hop). */
 function computeEligibleZoneSet(
@@ -59,7 +60,7 @@ async function requireDriver(request: Parameters<typeof requireAuth>[0], reply: 
  */
 async function finalizeRideCompletion(
   prisma: PrismaClient,
-  ride: { id: string; type: "LONE" | "SHARED"; occupancy: number; paymentMethod: string },
+  ride: { id: string; type: "LONE" | "SHARED"; occupancy: number; paymentMethod: string; source: RideSource },
   driverUserId: string,
 ): Promise<void> {
   const paymentMethod = ride.paymentMethod as PaymentMethod;
@@ -88,6 +89,18 @@ async function finalizeRideCompletion(
         paymentStatus: p.status,
       },
     });
+  }
+
+  // USSD-origin riders have no app to receive ride:completed on, so they get
+  // an SMS instead — covers both this ride-level /complete (LONE) and the
+  // per-passenger last-dropoff auto-completion (SHARED), since both call
+  // this function. Fire-and-forget, never throws into the transition path.
+  if (ride.source === "USSD") {
+    void notifyUssdRiders(
+      prisma,
+      summary.perPassenger.map((p) => p.riderId),
+      "Trip complete. Thanks for riding CampusRide.",
+    );
   }
 }
 
@@ -222,6 +235,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         emitRideEvent(rideId, "ride:driver_assigned", { rideId, ...driverInfo });
       }
 
+      if (ride.source === "USSD") {
+        void notifyUssdRider(prisma, ride.riderId, "Driver matched! They're on the way.");
+      }
+
       return reply.code(200).send({ ride });
     } catch (err) {
       if (err instanceof RideAlreadyClaimedError) {
@@ -245,6 +262,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     try {
       const updated = await applyRideTransition(prisma, rideId, "ARRIVED");
       emitRideEvent(rideId, "ride:status", { rideId, status: updated.status });
+      if (updated.source === "USSD") {
+        void notifyUssdRider(prisma, updated.riderId, "Your driver has arrived.");
+      }
       return reply.code(200).send({ ride: updated });
     } catch (err) {
       if (err instanceof InvalidTransitionError) {
@@ -623,6 +643,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           status: result.passenger.status as PassengerStatus,
         });
 
+        if (ride.source === "USSD") {
+          void notifyUssdRider(prisma, passenger.riderId, "Your driver has arrived.");
+        }
+
         return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
       } catch (err) {
         if (err instanceof InvalidTransitionError) {
@@ -726,7 +750,13 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           emitRideEvent(rideId, "ride:status", { rideId, status: result.ride.status });
           await finalizeRideCompletion(
             prisma,
-            { id: result.ride.id, type: ride.type, occupancy: result.ride.occupancy, paymentMethod: result.ride.paymentMethod },
+            {
+              id: result.ride.id,
+              type: ride.type,
+              occupancy: result.ride.occupancy,
+              paymentMethod: result.ride.paymentMethod,
+              source: ride.source,
+            },
             userId,
           );
         }

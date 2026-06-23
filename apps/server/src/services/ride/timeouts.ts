@@ -1,10 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
-import { RIDE_EVENTS } from "@rida/shared";
+import { RIDE_EVENTS, type RideSource } from "@rida/shared";
 import { applyRideTransition } from "./rideService";
 import { emitRideEvent } from "../../realtime/rideSocket";
+import { notifyUssdRider } from "../sms/notifyUssdRiders";
 
 const BROADCAST_TIMEOUT_MS = 90_000;
 const DECISION_GRACE_MS = 90_000;
+
+const NO_DRIVER_NUDGE = "No driver yet. Dial *919*4007# and choose Check Status.";
 
 interface RideTimeoutFields {
   status: string;
@@ -65,7 +68,7 @@ export async function processTimeouts(
   const logger = options.logger ?? console;
   const transitioned: { rideId: string; from: string; to: string }[] = [];
 
-  let candidates: (RideTimeoutFields & { id: string })[];
+  let candidates: (RideTimeoutFields & { id: string; riderId: string; source: RideSource })[];
   try {
     candidates = await prisma.ride.findMany({
       where: {
@@ -78,6 +81,8 @@ export async function processTimeouts(
         createdAt: true,
         broadcastStartedAt: true,
         decisionStartedAt: true,
+        riderId: true,
+        source: true,
       },
     });
   } catch (err) {
@@ -92,6 +97,14 @@ export async function processTimeouts(
         emitRideEvent(ride.id, RIDE_EVENTS.STATUS, { rideId: ride.id, status: "AWAITING_RIDER_DECISION" });
         logger.info({ rideId: ride.id }, "[timeout] REQUESTED → AWAITING_RIDER_DECISION");
         transitioned.push({ rideId: ride.id, from: ride.status, to: "AWAITING_RIDER_DECISION" });
+        // USSD riders have no socket to receive AWAITING_RIDER_DECISION on
+        // and no way to act on the KEEP_WAITING/SWITCH_TO_LONE/CANCEL
+        // decision (that flow is deferred) — this nudge is the only signal
+        // they get that something needs their attention before the 90s
+        // auto-cancel.
+        if (ride.source === "USSD") {
+          void notifyUssdRider(prisma, ride.riderId, NO_DRIVER_NUDGE);
+        }
       } else if (shouldExpireDecision(ride, now)) {
         await applyRideTransition(
           prisma,

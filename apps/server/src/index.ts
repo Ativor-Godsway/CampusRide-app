@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import formbody from "@fastify/formbody";
 import { Server as SocketServer } from "socket.io";
 import { APP_NAME, config } from "./config";
 import { prisma } from "./db/prisma";
@@ -25,6 +26,11 @@ async function bootstrap() {
   const app = Fastify({ logger: true });
 
   await app.register(cors, { origin: true });
+  // Adds an application/x-www-form-urlencoded parser — Moolre's USSD
+  // callback (POST /ussd/callback) sends form-urlencoded, not JSON.
+  // Additive only: Fastify dispatches by exact Content-Type match, so this
+  // does not touch the existing JSON parser every other route already uses.
+  await app.register(formbody);
 
   app.get("/health", async () => {
     return { status: "ok", app: APP_NAME };

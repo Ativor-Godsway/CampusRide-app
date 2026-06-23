@@ -1,5 +1,5 @@
 import { prisma } from "../../db/prisma";
-import type { PassengerStatus, RideStatus, RideType } from "@rida/shared";
+import type { PassengerStatus, RideSource, RideStatus, RideType } from "@rida/shared";
 
 let counter = 0;
 
@@ -95,6 +95,8 @@ export interface CreateTestRideOptions {
   broadcastStartedAt?: Date | null;
   decisionStartedAt?: Date | null;
   createdAt?: Date;
+  /** Defaults to "APP" (Prisma's default) — pass "USSD" to test the USSD-origin SMS hooks. */
+  source?: RideSource;
 }
 
 export async function createTestRide(opts: CreateTestRideOptions) {
@@ -109,6 +111,7 @@ export async function createTestRide(opts: CreateTestRideOptions) {
       driverId: opts.driverId ?? null,
       type: opts.type,
       status: opts.status ?? "REQUESTED",
+      ...(opts.source ? { source: opts.source } : {}),
       pickupZoneId,
       dropoffZoneId,
       occupancy: opts.occupancy ?? 1,

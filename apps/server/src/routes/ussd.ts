@@ -1,9 +1,23 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { handleUssdRequest, type MoolreUssdRequest } from "../services/ussd/ussdHandler";
+import { getSession } from "../services/ussd/session";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+/**
+ * Moolre's USSD callback arrives as application/x-www-form-urlencoded, where
+ * every field is a string — `new=true` arrives as the literal string "true",
+ * not a boolean. Accepts a real boolean (JSON callers, tests) or the
+ * "true"/"false" strings form-urlencoded actually sends.
+ */
+function coerceBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return null;
 }
 
 /**
@@ -19,6 +33,10 @@ function isNonEmptyString(value: unknown): value is string {
  */
 export function registerUssdRoutes(app: FastifyInstance, prisma: PrismaClient): void {
   app.post("/ussd/callback", async (request, reply) => {
+    // TEMPORARY — keep until we've confirmed Moolre's exact field
+    // names/value types from Render logs, then remove.
+    request.log.info({ body: request.body }, "[ussd] raw callback body");
+
     const body = request.body as {
       sessionId?: unknown;
       new?: unknown;
@@ -28,19 +46,25 @@ export function registerUssdRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
     if (
       !isNonEmptyString(body.sessionId) ||
-      typeof body.new !== "boolean" ||
       !isNonEmptyString(body.msisdn) ||
       typeof body.message !== "string"
     ) {
-      // Moolre always sends this shape; a malformed request means something
-      // upstream is broken, not a user input we can re-prompt. End cleanly
-      // rather than throwing into Moolre's webhook caller.
+      // sessionId/msisdn/message have no sensible fallback if missing —
+      // something upstream is broken, not a user input we can re-prompt.
+      // End cleanly rather than throwing into Moolre's webhook caller.
       return reply.code(200).send({ message: "CampusRide is unavailable right now. Please try again later.", reply: false });
     }
 
+    // `new` is the one field with a usable fallback: if it's missing or
+    // doesn't coerce to a boolean, infer freshness from whether we already
+    // have a session for this sessionId, rather than failing the whole
+    // request to the unavailable message.
+    const coercedNew = coerceBoolean(body.new);
+    const isNew = coercedNew !== null ? coercedNew : getSession(body.sessionId) === undefined;
+
     const ussdRequest: MoolreUssdRequest = {
       sessionId: body.sessionId,
-      new: body.new,
+      new: isNew,
       msisdn: body.msisdn,
       message: body.message,
     };
