@@ -1,6 +1,5 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import formbody from "@fastify/formbody";
 import { Server as SocketServer } from "socket.io";
 import { APP_NAME, config } from "./config";
 import { prisma } from "./db/prisma";
@@ -26,11 +25,34 @@ async function bootstrap() {
   const app = Fastify({ logger: true });
 
   await app.register(cors, { origin: true });
-  // Adds an application/x-www-form-urlencoded parser — Moolre's USSD
-  // callback (POST /ussd/callback) sends form-urlencoded, not JSON.
-  // Additive only: Fastify dispatches by exact Content-Type match, so this
-  // does not touch the existing JSON parser every other route already uses.
-  await app.register(formbody);
+  // Parser for application/x-www-form-urlencoded, scoped to that
+  // Content-Type only — Fastify dispatches by exact header match, so this
+  // never touches the built-in application/json parser every other route
+  // uses. Moolre's USSD callback (POST /ussd/callback) is supposed to send
+  // genuine form-urlencoded, but in practice sends a raw JSON string under
+  // this Content-Type — so JSON.parse is tried first, falling back to real
+  // form decoding (URLSearchParams) only if that throws. Subsumes
+  // @fastify/formbody, which had no JSON-detection and would otherwise
+  // decode Moolre's JSON blob as a single urlencoded key with an empty value.
+  app.addContentTypeParser(
+    "application/x-www-form-urlencoded",
+    { parseAs: "string" },
+    (_request, body, done) => {
+      try {
+        const parsed = JSON.parse(body as string);
+        if (parsed !== null && typeof parsed === "object") {
+          return done(null, parsed);
+        }
+      } catch {
+        // Not JSON — fall through to real form decoding below.
+      }
+      try {
+        done(null, Object.fromEntries(new URLSearchParams(body as string)));
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
 
   app.get("/health", async () => {
     return { status: "ok", app: APP_NAME };

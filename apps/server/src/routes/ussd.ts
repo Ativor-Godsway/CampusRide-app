@@ -8,15 +8,17 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 /**
- * Moolre's USSD callback arrives as application/x-www-form-urlencoded, where
- * every field is a string — `new=true` arrives as the literal string "true",
- * not a boolean. Accepts a real boolean (JSON callers, tests) or the
- * "true"/"false" strings form-urlencoded actually sends.
+ * Moolre's USSD callback's `new` field shows up as a real boolean, the
+ * strings "true"/"false", or (confirmed against the real gateway) the
+ * integer 1/0 or the strings "1"/"0". Only these explicit known shapes
+ * coerce — deliberately NOT a blanket Boolean(value) cast, which would
+ * silently accept any truthy garbage instead of falling through to the
+ * session-presence inference below on an unauthenticated callback path.
  */
 function coerceBoolean(value: unknown): boolean | null {
   if (typeof value === "boolean") return value;
-  if (value === "true") return true;
-  if (value === "false") return false;
+  if (value === 1 || value === "1" || value === "true") return true;
+  if (value === 0 || value === "0" || value === "false") return false;
   return null;
 }
 
