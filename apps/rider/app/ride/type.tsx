@@ -28,9 +28,11 @@ import {
   radii,
   regionForCoordinates,
   rideQueryKey,
+  RouteStops,
   spacing,
   submitRating,
   submitRideDecision,
+  typography,
   useAuth,
   useDriverLocation,
   useRideTracking,
@@ -327,6 +329,7 @@ export default function RideTypeScreen() {
               {ride?.status === "COMPLETED" && (
                 <CompletedContent
                   rideId={ride.id}
+                  rideType={ride.type}
                   fareSummary={trackingData?.fareSummary}
                   onDone={() => router.replace("/")}
                 />
@@ -377,11 +380,20 @@ function OptionsContent({
     <>
       <Text variant="h1">Choose your ride</Text>
 
-      <View style={styles.route}>
-        <Text variant="bodySmall" color="muted">
-          {pickupZoneName} → {dropoffZoneName}
-        </Text>
-      </View>
+      <RouteStops
+        style={styles.route}
+        connectorHeight={14}
+        origin={
+          <Text variant="bodySmall" numberOfLines={1}>
+            {pickupZoneName}
+          </Text>
+        }
+        destination={
+          <Text variant="bodySmall" numberOfLines={1}>
+            {dropoffZoneName}
+          </Text>
+        }
+      />
 
       {options.map((option) => {
         const isSelected = selectedType === option.type;
@@ -633,7 +645,7 @@ function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
         </View>
         {driver.plate ? (
           <View style={styles.plateBadge}>
-            <Text variant="caption">{driver.plate}</Text>
+            <Text variant="mono" style={{ fontSize: 12 }}>{driver.plate}</Text>
           </View>
         ) : null}
       </View>
@@ -805,12 +817,26 @@ function RatingPanel({
   );
 }
 
+/** Mint "shared & saved" note — purely presentational, derived from the existing flat lone-fare constant. */
+function SharedSavingsNote({ amountPesewas }: { amountPesewas: number }) {
+  return (
+    <View style={styles.savingsNote}>
+      <Ionicons name="people" size={14} color={colors.success} />
+      <Text variant="bodySmall" style={styles.savingsNoteText}>
+        Shared ride — you saved {formatGhs(amountPesewas)} vs. lone
+      </Text>
+    </View>
+  );
+}
+
 function CompletedContent({
   rideId,
+  rideType,
   fareSummary,
   onDone,
 }: {
   rideId: string;
+  rideType: RideType;
   fareSummary: RideCompletedFareSummary | undefined;
   onDone: () => void;
 }) {
@@ -870,6 +896,8 @@ function CompletedContent({
   }
 
   const { yourFarePesewas, paymentMethod } = fareSummary;
+  const savingsPesewas =
+    rideType === "SHARED" ? Math.max(0, priceLoneRide().fare - yourFarePesewas) : 0;
 
   // ── Rating screen (shared by both paths after payment) ───────────────────────
   if (ratingReady) {
@@ -911,6 +939,7 @@ function CompletedContent({
             </Text>
           </View>
         </View>
+        {savingsPesewas > 0 && <SharedSavingsNote amountPesewas={savingsPesewas} />}
         <Card style={styles.infoCard}>
           <View style={styles.infoRow}>
             <Ionicons name="cash-outline" size={16} color={colors.ink[400]} />
@@ -1022,6 +1051,7 @@ function CompletedContent({
           </Text>
         </View>
       </View>
+      {savingsPesewas > 0 && <SharedSavingsNote amountPesewas={savingsPesewas} />}
       <Button label="Rate your driver" onPress={() => setRatingReady(true)} />
     </View>
   );
@@ -1059,7 +1089,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radii["2xl"],
     borderTopRightRadius: radii["2xl"],
   },
-  sheetHandle: { backgroundColor: colors.border, width: 40 },
+  sheetHandle: { backgroundColor: colors.borderStrong, width: 40, height: 5 },
   sheetContent: {
     paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xl,
@@ -1082,6 +1112,18 @@ const styles = StyleSheet.create({
   stateHeading: { flex: 1, gap: 4 },
   progressSection: { gap: spacing.xs },
   progressLabel: { textAlign: "center" },
+  savingsNote: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    backgroundColor: colors.successSurface,
+    borderWidth: 1,
+    borderColor: colors.primary[100],
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  savingsNoteText: { flex: 1, color: colors.success, fontWeight: typography.weight.semibold },
   infoCard: { gap: spacing.sm },
   infoRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   infoLabel: { flex: 1 },

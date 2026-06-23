@@ -7,10 +7,19 @@ export interface CardProps extends ViewProps {
   elevated?: boolean;
   /** Deep near-black "feature card" treatment for selective emphasis — use sparingly. */
   dark?: boolean;
+  /**
+   * Decorative radial-green glow bleeding from the top-right corner — the
+   * "signature dark card" treatment. Defaults to `true` whenever `dark` is
+   * set; pass `glow={false}` to opt a specific dark card out. No-op when
+   * `dark` is false. Implemented as a clipped translucent circle (no
+   * gradient library in the tree) — purely decorative, no layout impact.
+   */
+  glow?: boolean;
 }
 
 /** Surface container — the basic building block for tiles, list rows, and grouped content. */
-export function Card({ noPadding, elevated = true, dark = false, style, children, ...rest }: CardProps) {
+export function Card({ noPadding, elevated = true, dark = false, glow, style, children, ...rest }: CardProps) {
+  const showGlow = dark && (glow ?? true);
   return (
     <View
       style={[
@@ -22,6 +31,15 @@ export function Card({ noPadding, elevated = true, dark = false, style, children
       ]}
       {...rest}
     >
+      {/* Absolutely-positioned clipping layer, sibling to children (not wrapping
+          them) — overflow:hidden on the shadow-bearing outer view itself would
+          clip the shadow on iOS, and wrapping children would break any `gap`/
+          `flexDirection` a caller passes via `style` for arranging them. */}
+      {showGlow && (
+        <View pointerEvents="none" style={styles.clip}>
+          <View style={styles.glow} />
+        </View>
+      )}
       {children}
     </View>
   );
@@ -43,5 +61,23 @@ const styles = StyleSheet.create({
   },
   padded: {
     padding: spacing.lg,
+  },
+  clip: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: radii.lg,
+    overflow: "hidden",
+  },
+  glow: {
+    position: "absolute",
+    top: -60,
+    right: -60,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: "rgba(25, 116, 60, 0.35)",
   },
 });

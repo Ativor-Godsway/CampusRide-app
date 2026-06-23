@@ -1,65 +1,71 @@
 /**
  * CampusRide design tokens — single source of truth for both the rider and
  * driver apps. Brand direction: Bolt/Uber-caliber — calm, confident,
- * high-contrast, trustworthy (it handles money). The deep CampusRide green
- * (#1A7A3C) is the brand anchor; a warm amber accent provides contrast for
+ * high-contrast, trustworthy (it handles money). The CampusRide forest green
+ * (#19743C) is the brand anchor; a warm amber accent provides contrast for
  * highlights (ratings, live indicators), near-black ink carries text, and
  * warm-neutral surfaces keep the UI calm without feeling sterile.
  */
 
+import { Platform } from "react-native";
+
 export const colors = {
   primary: {
-    50: "#E8F5ED",
-    100: "#C8E8D3",
+    50: "#E8F3EC",
+    100: "#CDE6D6",
     200: "#9BD5AE",
     300: "#6CC089",
     400: "#3F9F63",
-    500: "#1A7A3C",
-    600: "#15642F",
-    700: "#114F26",
+    500: "#19743C",
+    600: "#115C2F",
+    700: "#0F5429",
     800: "#0D3B1D",
     900: "#082813",
   },
   /** Warm amber accent — used sparingly for highlights, ratings, and live/active indicators. */
   accent: {
-    50: "#FFF6E0",
-    100: "#FFE9B3",
+    50: "#FBF0DA",
+    100: "#F0DFBE",
     200: "#FFDA85",
     300: "#FFC94D",
     400: "#FFBB29",
-    500: "#F5A623",
-    600: "#D68910",
-    700: "#A8690C",
+    500: "#E0902A",
+    600: "#9A6711",
+    700: "#7A5310",
   },
   ink: {
-    900: "#111111",
+    900: "#0F1311",
     800: "#1F2422",
     700: "#2B3230",
     600: "#3F4845",
     500: "#545D5A",
-    400: "#6B7572",
-    300: "#8A938F",
+    400: "#6B7280",
+    300: "#9AA1A6",
     200: "#A8B0AD",
     100: "#D6DCDA",
     50: "#EEF2F0",
   },
   white: "#FFFFFF",
-  background: "#F5F6F7",
-  surface: "#F5F7F6",
+  background: "#F1F3F2",
+  surface: "#F6F7F6",
   surfaceMuted: "#ECEFED",
   surfaceSunken: "#E4E9E6",
-  border: "#E1E6E3",
+  hairline: "#F0F2F0",
+  border: "#E8EBE9",
   borderStrong: "#CBD3CF",
-  /** Deep near-black surface for selective "feature card" emphasis (Uber-style account tiles). Use sparingly. */
-  surfaceDark: "#10140F",
-  surfaceDarkElevated: "#1B221C",
+  /** Deep near-black surface for selective "feature card" emphasis (Uber-style account tiles, signature dark hero cards). Use sparingly. */
+  surfaceDark: "#0F1311",
+  surfaceDarkElevated: "#14181A",
   borderDark: "#2E362F",
-  success: "#1A7A3C",
-  successSurface: "#E8F5ED",
-  error: "#C53030",
+  /** Accent text/dots on dark surfaces (e.g. "Live" pulse, online status, dark-card highlights). */
+  glowGreen: "#7BE0A0",
+  success: "#19743C",
+  successSurface: "#E8F3EC",
+  error: "#B23A3A",
   errorSurface: "#FBEAEA",
-  warning: "#B7791F",
-  warningSurface: "#FBF3E1",
+  danger: "#B23A3A",
+  warning: "#9A6711",
+  warningSurface: "#FBF0DA",
   /** Translucent scrim for sheets/modals. */
   overlay: "rgba(8, 40, 19, 0.45)",
 } as const;
@@ -67,6 +73,8 @@ export const colors = {
 export const typography = {
   fontFamily: {
     base: undefined, // system default — keeps native feel on both platforms
+    /** System monospace — for plates, OTP/codes, timers, and fares-as-figures only. */
+    mono: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
   },
   size: {
     xs: 12,
@@ -143,6 +151,14 @@ export const shadows = {
     shadowOpacity: 0.14,
     shadowRadius: 24,
     elevation: 8,
+  },
+  /** Brand-tinted glow for primary CTAs — green-tinted lift instead of a flat ink shadow. */
+  brand: {
+    shadowColor: colors.primary[500],
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 6,
   },
 } as const;
 

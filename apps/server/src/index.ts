@@ -11,6 +11,7 @@ import { registerZoneRoutes } from "./routes/zones";
 import { registerRideRoutes } from "./routes/rides";
 import { registerRatingRoutes } from "./routes/ratings";
 import { registerDriverRoutes } from "./routes/driver";
+import { registerUssdRoutes } from "./routes/ussd";
 import { initRideSocket } from "./realtime/rideSocket";
 
 // 15s was too aggressive for Neon's pooled connection budget alongside
@@ -35,6 +36,7 @@ async function bootstrap() {
   registerRideRoutes(app, prisma);
   registerRatingRoutes(app, prisma);
   registerDriverRoutes(app, prisma);
+  registerUssdRoutes(app, prisma);
 
   // app.server is the underlying http.Server — attach Socket.io to it directly
   await app.ready();

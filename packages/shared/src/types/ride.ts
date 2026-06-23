@@ -1,5 +1,8 @@
 export type RideType = "LONE" | "SHARED";
 
+/** USSD vs app-originated ride — drives SMS vs push notification on transitions. */
+export type RideSource = "APP" | "USSD";
+
 export type RideStatus =
   | "REQUESTED"
   | "MATCHED"
@@ -34,6 +37,7 @@ export interface Ride {
   driverId: string | null;
   type: RideType;
   status: RideStatus;
+  source: RideSource;
   pickupZoneId: string;
   dropoffZoneId: string;
   occupancy: number;

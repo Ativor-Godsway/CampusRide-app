@@ -50,9 +50,9 @@ const styles = StyleSheet.create({
   },
   handle: {
     width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: colors.border,
+    height: 5,
+    borderRadius: radii.full,
+    backgroundColor: colors.borderStrong,
     alignSelf: "center",
     marginBottom: spacing.lg,
   },

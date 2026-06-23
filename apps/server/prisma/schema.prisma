@@ -22,6 +22,11 @@ enum RideType {
   SHARED
 }
 
+enum RideSource {
+  APP
+  USSD
+}
+
 enum RideStatus {
   REQUESTED
   MATCHED
@@ -154,6 +159,8 @@ model Ride {
   driverId      String?
   type          RideType
   status        RideStatus    @default(REQUESTED)
+  /// USSD vs app-originated ride — drives SMS vs push notification on transitions.
+  source        RideSource    @default(APP)
   pickupZoneId  String
   dropoffZoneId String
   occupancy     Int           @default(1)

@@ -34,8 +34,10 @@ import {
   passengerArrived,
   passengerPickup,
   passengerDropoff,
+  RouteStops,
   shadows,
   spacing,
+  typography,
   useAuth,
 } from "@rida/mobile-shared";
 import type {
@@ -149,19 +151,21 @@ function SuggestionCard({ suggestion, adding, onAdd }: SuggestionCardProps) {
         <Badge variant="accent" label="★  Best match" style={fillStyles.suggBadge} />
       )}
       {/* Route */}
-      <View style={fillStyles.suggRouteRow}>
-        <View style={fillStyles.suggMarkerCol}>
-          <View style={fillStyles.suggPickupDot} />
-          <View style={fillStyles.suggConnector} />
-          <Ionicons name="location" size={12} color={colors.ink[700]} />
-        </View>
-        <View style={fillStyles.suggTextCol}>
-          <Text variant="bodySmall" color="muted">Pickup</Text>
-          <Text variant="bodyMedium">{suggestion.pickupZoneName}</Text>
-          <Text variant="bodySmall" color="muted" style={fillStyles.suggDropoffLabel}>Dropoff</Text>
-          <Text variant="bodyMedium">{suggestion.dropoffZoneName}</Text>
-        </View>
-      </View>
+      <RouteStops
+        connectorHeight={20}
+        origin={
+          <>
+            <Text variant="bodySmall" color="muted">Pickup</Text>
+            <Text variant="bodyMedium">{suggestion.pickupZoneName}</Text>
+          </>
+        }
+        destination={
+          <>
+            <Text variant="bodySmall" color="muted">Dropoff</Text>
+            <Text variant="bodyMedium">{suggestion.dropoffZoneName}</Text>
+          </>
+        }
+      />
 
       <Text variant="caption" color="muted">{timeAgo(suggestion.createdAt)}</Text>
 
@@ -217,6 +221,15 @@ function FillYourCarView({
           {isAssembling ? "Assembling · On the way to pickups" : "On the road · Picking up & dropping off"}
         </Text>
       </View>
+
+      {!isAssembling && occupancy > 1 && (
+        <View style={fillStyles.sharedNotice}>
+          <Ionicons name="people" size={16} color={colors.warning} />
+          <Text variant="bodySmall" style={fillStyles.sharedNoticeText}>
+            Shared trip · {occupancy} riders, separate dropoffs
+          </Text>
+        </View>
+      )}
 
       {/* Current car card */}
       <Card style={fillStyles.carCard}>
@@ -301,23 +314,21 @@ function RequestCard({ ride, claiming, onAccept, onDecline }: RequestCardProps) 
       {ride.bestFit && (
         <Badge variant="accent" label="★  Best match" style={styles.bestMatchBadge} />
       )}
-      <View style={styles.routeRow}>
-        <View style={styles.markerCol}>
-          <View style={styles.pickupDot} />
-          <View style={styles.routeConnector} />
-          <Ionicons name="location" size={14} color={colors.ink[700]} />
-        </View>
-        <View style={styles.routeTextCol}>
+      <RouteStops
+        style={styles.routeRow}
+        origin={
           <View style={styles.zoneBlock}>
             <Text variant="label" color="muted">PICKUP</Text>
             <Text variant="bodyMedium">{ride.pickupZoneName}</Text>
           </View>
+        }
+        destination={
           <View style={styles.zoneBlock}>
             <Text variant="label" color="muted">DROPOFF</Text>
             <Text variant="bodyMedium">{ride.dropoffZoneName}</Text>
           </View>
-        </View>
-      </View>
+        }
+      />
       <View style={styles.fareStrip}>
         <View style={styles.fareStripItem}>
           <Text variant="label" color="muted">FARE</Text>
@@ -895,13 +906,7 @@ const styles = StyleSheet.create({
   },
   requestCard: { gap: spacing.md },
   bestMatchBadge: { alignSelf: "flex-start" },
-  routeRow: { flexDirection: "row", gap: spacing.md, paddingVertical: spacing.xs },
-  markerCol: { width: 20, alignItems: "center", gap: 2, paddingTop: 14 },
-  pickupDot: {
-    width: 10, height: 10, borderRadius: radii.full, backgroundColor: colors.primary[500],
-  },
-  routeConnector: { width: 2, height: 28, backgroundColor: colors.border },
-  routeTextCol: { flex: 1, gap: spacing.md },
+  routeRow: { paddingVertical: spacing.xs },
   zoneBlock: { gap: 2 },
   fareStrip: {
     flexDirection: "row",
@@ -933,6 +938,17 @@ const fillStyles = StyleSheet.create({
   bannerDotMatched: { backgroundColor: colors.accent[500] },
   bannerDotArrived: { backgroundColor: colors.primary[500] },
   bannerText: { flex: 1 },
+  sharedNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.warningSurface,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  sharedNoticeText: { flex: 1, color: colors.warning, fontWeight: typography.weight.semibold },
   // Car card
   carCard: { gap: spacing.md, marginBottom: spacing.lg },
   carHeader: {
@@ -1012,12 +1028,4 @@ const fillStyles = StyleSheet.create({
   // Suggestion card
   suggestionCard: { gap: spacing.sm, marginBottom: spacing.md },
   suggBadge: { alignSelf: "flex-start" },
-  suggRouteRow: { flexDirection: "row", gap: spacing.sm },
-  suggMarkerCol: { width: 16, alignItems: "center", gap: 1, paddingTop: 2 },
-  suggPickupDot: {
-    width: 8, height: 8, borderRadius: radii.full, backgroundColor: colors.primary[400],
-  },
-  suggConnector: { width: 1, height: 28, backgroundColor: colors.border },
-  suggTextCol: { flex: 1, gap: 1 },
-  suggDropoffLabel: { marginTop: spacing.xs },
 });

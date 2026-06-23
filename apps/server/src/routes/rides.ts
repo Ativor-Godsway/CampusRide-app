@@ -1,13 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, RideStatus, RideType } from "@rida/shared";
-import { getLoneFare, getSharedFarePerRider } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { applyRideTransition } from "../services/ride/rideService";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
 import { InvalidSwitchToLoneError, InvalidTransitionError } from "../services/ride/errors";
 import { emitRideEvent } from "../realtime/rideSocket";
 import { broadcastRide } from "../services/ride/dispatch";
+import {
+  createRide,
+  ActiveRideExistsError,
+  SameZoneError,
+  ZoneNotFoundError,
+} from "../services/ride/createRide";
 import { getRidePaymentSummary, initiateCollection } from "../services/payment/paymentFlow";
 import type { MoolreChannel } from "../services/payment/constants";
 import { paymentService } from "../services/active";
@@ -18,16 +23,6 @@ const RIDE_TYPES = ["LONE", "SHARED"] as const;
 const PAYMENT_METHODS = ["CASH", "MOMO"] as const;
 const MOOLRE_CHANNELS = ["MTN", "TELECEL", "AT"] as const;
 const DECISION_ACTIONS: readonly RiderDecisionAction[] = ["KEEP_WAITING", "SWITCH_TO_LONE", "CANCEL"];
-
-// Rides in any of these statuses count as "active" — a rider may have at
-// most one at a time.
-const ACTIVE_RIDE_STATUSES: RideStatus[] = [
-  "REQUESTED",
-  "MATCHED",
-  "ARRIVED",
-  "IN_PROGRESS",
-  "AWAITING_RIDER_DECISION",
-];
 
 function isRideType(value: unknown): value is RideType {
   return typeof value === "string" && (RIDE_TYPES as readonly string[]).includes(value);
@@ -109,58 +104,29 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     const paymentMethod: PaymentMethod =
       isPaymentMethod(body.paymentMethod) ? body.paymentMethod : "MOMO";
 
-    if (body.pickupZoneId === body.dropoffZoneId) {
-      return reply.code(400).send({ error: "pickupZoneId and dropoffZoneId must differ" });
-    }
-
-    const [pickupZone, dropoffZone] = await Promise.all([
-      prisma.zone.findUnique({ where: { id: body.pickupZoneId } }),
-      prisma.zone.findUnique({ where: { id: body.dropoffZoneId } }),
-    ]);
-
-    if (!pickupZone || !dropoffZone) {
-      return reply.code(404).send({ error: "pickupZoneId or dropoffZoneId not found" });
-    }
-
     const riderId = request.user!.userId;
 
-    const existingActiveRide = await prisma.ride.findFirst({
-      where: { riderId, status: { in: ACTIVE_RIDE_STATUSES } },
-    });
-
-    if (existingActiveRide) {
-      return reply.code(409).send({ error: "You already have an active ride", ride: existingActiveRide });
-    }
-
-    const lockedFare = body.type === "SHARED" ? getSharedFarePerRider(1) : getLoneFare();
-
-    const ride = await prisma.ride.create({
-      data: {
+    let ride;
+    try {
+      ride = await createRide(prisma, {
         riderId,
         type: body.type,
-        status: "REQUESTED",
         pickupZoneId: body.pickupZoneId,
         dropoffZoneId: body.dropoffZoneId,
-        occupancy: 1,
         paymentMethod,
-        broadcastStartedAt: new Date(),
-        passengers: {
-          create: {
-            riderId,
-            pickupZoneId: body.pickupZoneId,
-            dropoffZoneId: body.dropoffZoneId,
-            status: "WAITING",
-            lockedFare,
-          },
-        },
-      },
-      include: { passengers: true },
-    });
-
-    // Notify eligible real drivers via socket (Phase 6a). Fire-and-forget.
-    broadcastRide(prisma, ride.id).catch((err) => {
-      console.error(`[broadcastRide] failed for ride ${ride.id}:`, err);
-    });
+      });
+    } catch (err) {
+      if (err instanceof SameZoneError) {
+        return reply.code(400).send({ error: err.message });
+      }
+      if (err instanceof ZoneNotFoundError) {
+        return reply.code(404).send({ error: err.message });
+      }
+      if (err instanceof ActiveRideExistsError) {
+        return reply.code(409).send({ error: err.message, ride: err.existingRide });
+      }
+      throw err;
+    }
 
     if (config.enableMockDriver) {
       startMockDriverForRide(prisma, ride.id);

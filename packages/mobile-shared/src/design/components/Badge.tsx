@@ -2,7 +2,7 @@ import { View, StyleSheet, type ViewProps } from "react-native";
 import { colors, radii, spacing } from "../tokens";
 import { Text } from "./Text";
 
-export type BadgeVariant = "default" | "soon" | "success" | "error" | "warning" | "accent";
+export type BadgeVariant = "default" | "soon" | "success" | "error" | "warning" | "accent" | "live";
 
 export interface BadgeProps extends ViewProps {
   label: string;
@@ -54,5 +54,10 @@ const variantStyles: Record<BadgeVariant, { container: object; text: object }> =
   accent: {
     container: { backgroundColor: colors.accent[50] },
     text: { color: colors.accent[600] },
+  },
+  /** White text on ink — status/"Live" chip on photos, maps, and dark surfaces. */
+  live: {
+    container: { backgroundColor: colors.surfaceDark },
+    text: { color: colors.white },
   },
 };

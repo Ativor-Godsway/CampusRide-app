@@ -3,7 +3,7 @@ import { useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { useAuth } from "../AuthContext";
 import { verifyOtp, type OtpPurpose } from "../api";
-import { Button, Screen, Text, Input, colors, radii, spacing } from "../../design";
+import { Button, Screen, Input, colors, radii, spacing, typography } from "../../design";
 import { errorMessage } from "../errorMessage";
 import { AuthHero } from "./AuthHero";
 
@@ -74,7 +74,9 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
   },
   codeInput: {
+    fontFamily: typography.fontFamily.mono,
     fontSize: 24,
+    fontWeight: typography.weight.bold,
     textAlign: "center",
     letterSpacing: 8,
   },

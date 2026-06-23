@@ -13,7 +13,7 @@
     "android": {
       "package": "gh.edu.ug.rida.rider",
       "adaptiveIcon": {
-        "backgroundColor": "#1A7A3C"
+        "backgroundColor": "#19743C"
       }
     },
     "plugins": [

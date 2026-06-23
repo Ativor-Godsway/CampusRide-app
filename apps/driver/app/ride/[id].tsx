@@ -20,8 +20,10 @@ import {
   driverDepart,
   driverComplete,
   radii,
+  RouteStops,
   shadows,
   spacing,
+  typography,
   useAuth,
 } from "@rida/mobile-shared";
 import type { RideWithZones } from "@rida/mobile-shared";
@@ -201,35 +203,35 @@ export default function ActiveRideScreen() {
       <Screen>
         <View style={styles.doneContainer}>
           <View style={styles.doneIconWrap}>
-            <Ionicons name="checkmark-circle" size={72} color={colors.primary[500]} />
+            <Ionicons name="checkmark-circle" size={72} color={colors.glowGreen} />
           </View>
           <Text variant="h1" style={styles.doneTitle}>
             Ride Complete
           </Text>
 
           {earnedPesewas !== null && completedPaymentMethod === "MOMO" && (
-            <Card style={styles.earnCard}>
-              <Text variant="label" color="muted">YOUR EARNINGS (85%)</Text>
-              <Text variant="h1" style={styles.earnAmount}>
+            <Card dark style={styles.earnCard}>
+              <Text variant="label" color="glow">YOUR EARNINGS (85%)</Text>
+              <Text variant="h1" color="inverse" style={styles.earnAmount}>
                 {formatGhs(earnedPesewas)}
               </Text>
-              <Text variant="caption" color="muted">
+              <Text variant="caption" style={styles.earnCardSubtext}>
                 MoMo payout follows once the rider's payment clears.
               </Text>
             </Card>
           )}
 
           {earnedPesewas !== null && completedPaymentMethod === "CASH" && (
-            <Card style={styles.earnCard}>
-              <Text variant="label" color="muted">COLLECT FROM RIDER</Text>
-              <Text variant="h1" style={styles.earnAmount}>
+            <Card dark style={styles.earnCard}>
+              <Text variant="label" color="glow">COLLECT FROM RIDER</Text>
+              <Text variant="h1" color="inverse" style={styles.earnAmount}>
                 {formatGhs(earnedPesewas + commissionPesewas)}
               </Text>
               <View style={styles.cashBreakdown}>
-                <Text variant="bodySmall" color="muted">
+                <Text variant="bodySmall" style={styles.earnCardSubtext}>
                   Your share: {formatGhs(earnedPesewas)}
                 </Text>
-                <Text variant="bodySmall" color="muted">
+                <Text variant="bodySmall" style={styles.earnCardSubtext}>
                   Platform fee owed: {formatGhs(commissionPesewas)}
                 </Text>
               </View>
@@ -264,31 +266,29 @@ export default function ActiveRideScreen() {
         {/* Status pill */}
         <View style={styles.statusPill}>
           <View style={styles.statusDot} />
-          <Text variant="bodySmall" color="muted">
+          <Text variant="bodySmall" color="inverse">
             {statusLabel(step)}
           </Text>
         </View>
 
         {/* Route summary */}
-        <View style={styles.routeRow}>
-          <View style={styles.markerCol}>
-            <View style={styles.pickupDot} />
-            <View style={styles.routeConnector} />
-            <Ionicons name="location" size={14} color={colors.ink[700]} />
-          </View>
-          <View style={styles.routeTextCol}>
+        <RouteStops
+          connectorHeight={32}
+          origin={
             <View style={styles.zoneBlock}>
               <Text variant="label" color="muted">PICKUP</Text>
               <Text variant="bodyMedium">{ride.pickupZone.name}</Text>
               <Text variant="caption" color="muted">{ride.pickupZone.quadrant}</Text>
             </View>
+          }
+          destination={
             <View style={styles.zoneBlock}>
               <Text variant="label" color="muted">DROPOFF</Text>
               <Text variant="bodyMedium">{ride.dropoffZone.name}</Text>
               <Text variant="caption" color="muted">{ride.dropoffZone.quadrant}</Text>
             </View>
-          </View>
-        </View>
+          }
+        />
 
         {/* Primary action */}
         <Button
@@ -310,16 +310,16 @@ const styles = StyleSheet.create({
     paddingTop: spacing.lg,
     paddingBottom: spacing.xl,
     gap: spacing.lg,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
-    marginTop: -radii.xl,
+    borderTopLeftRadius: radii["2xl"],
+    borderTopRightRadius: radii["2xl"],
+    marginTop: -radii["2xl"],
     ...shadows.lg,
   },
   statusPill: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
-    backgroundColor: colors.surfaceMuted,
+    backgroundColor: colors.surfaceDark,
     alignSelf: "flex-start",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
@@ -329,33 +329,12 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: radii.full,
-    backgroundColor: colors.primary[500],
+    backgroundColor: colors.glowGreen,
   },
   routeRow: {
     flexDirection: "row",
     gap: spacing.md,
     flex: 1,
-  },
-  markerCol: {
-    width: 20,
-    alignItems: "center",
-    gap: 2,
-    paddingTop: 14,
-  },
-  pickupDot: {
-    width: 10,
-    height: 10,
-    borderRadius: radii.full,
-    backgroundColor: colors.primary[500],
-  },
-  routeConnector: {
-    width: 2,
-    flex: 1,
-    backgroundColor: colors.border,
-  },
-  routeTextCol: {
-    flex: 1,
-    justifyContent: "space-between",
   },
   zoneBlock: {
     gap: 2,
@@ -382,7 +361,10 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   earnAmount: {
-    color: colors.primary[600],
+    fontWeight: typography.weight.extrabold,
+  },
+  earnCardSubtext: {
+    color: "rgba(255,255,255,0.65)",
   },
   cashBreakdown: {
     marginTop: spacing.xs,

@@ -10,9 +10,10 @@ export type TextVariant =
   | "bodyMedium"
   | "bodySmall"
   | "caption"
-  | "label";
+  | "label"
+  | "mono";
 
-export type TextColor = "default" | "muted" | "subtle" | "inverse" | "primary" | "accent" | "error" | "success";
+export type TextColor = "default" | "muted" | "subtle" | "inverse" | "primary" | "accent" | "error" | "success" | "glow";
 
 export interface TextComponentProps extends RNTextProps {
   variant?: TextVariant;
@@ -69,6 +70,13 @@ const variantStyles = StyleSheet.create({
     lineHeight: typography.size.sm * typography.lineHeight.normal,
     letterSpacing: typography.letterSpacing.wide,
   },
+  /** Plates, OTP/codes, timers, fares-as-figures only — never for prose. */
+  mono: {
+    fontFamily: typography.fontFamily.mono,
+    fontSize: typography.size.md,
+    fontWeight: typography.weight.bold,
+    letterSpacing: 0.6,
+  },
 });
 
 const colorStyles: Record<TextColor, { color: string }> = {
@@ -80,6 +88,8 @@ const colorStyles: Record<TextColor, { color: string }> = {
   accent: { color: colors.accent[600] },
   error: { color: colors.error },
   success: { color: colors.success },
+  /** Accent text/dots on dark surfaces. */
+  glow: { color: colors.glowGreen },
 };
 
 /** Type-scale-bound text component. Use `variant` for size/weight and `color` for the semantic palette — avoid ad-hoc font sizes elsewhere. */

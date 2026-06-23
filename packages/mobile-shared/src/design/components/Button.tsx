@@ -87,8 +87,8 @@ const sizeStyles = StyleSheet.create({
 });
 
 const variantStyles = StyleSheet.create({
-  primary: { backgroundColor: colors.primary[500], ...shadows.sm },
-  secondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.primary[500] },
+  primary: { backgroundColor: colors.primary[500], ...shadows.brand },
+  secondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.primary[200] },
   ghost: { backgroundColor: "transparent" },
-  danger: { backgroundColor: colors.error, ...shadows.sm },
+  danger: { backgroundColor: colors.danger, ...shadows.sm },
 });

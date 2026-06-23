@@ -128,10 +128,12 @@ export default function LocationScreen() {
         Choose where you're starting and where you're headed.
       </Text>
 
-      <Card dark style={styles.planCard}>
+      <Card dark glow={false} style={styles.planCard}>
         <View style={[styles.fieldRow, activeField === "pickup" && styles.fieldRowActive]}>
           <View style={styles.markerCol}>
-            <View style={styles.pickupDot} />
+            <View style={styles.originRing}>
+              <View style={styles.pickupDot} />
+            </View>
             <View style={styles.connector} />
           </View>
           <View style={styles.fieldTextCol}>
@@ -169,7 +171,7 @@ export default function LocationScreen() {
 
         <View style={[styles.fieldRow, activeField === "dropoff" && styles.fieldRowActive]}>
           <View style={styles.markerCol}>
-            <Ionicons name="location" size={16} color={colors.white} />
+            <View style={styles.destSquare} />
           </View>
           <View style={styles.fieldTextCol}>
             <Text variant="label" style={styles.fieldLabel}>
@@ -258,15 +260,29 @@ const styles = StyleSheet.create({
     width: 20,
     alignItems: "center",
   },
+  originRing: {
+    width: 20,
+    height: 20,
+    borderRadius: radii.full,
+    backgroundColor: "rgba(232, 243, 236, 0.22)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
   pickupDot: {
     width: 10,
     height: 10,
     borderRadius: radii.full,
     backgroundColor: colors.primary[400],
   },
+  destSquare: {
+    width: 12,
+    height: 12,
+    borderRadius: radii.sm,
+    backgroundColor: colors.white,
+  },
   connector: {
-    width: 1,
-    height: 24,
+    width: 2,
+    height: 20,
     backgroundColor: colors.borderDark,
     marginVertical: 4,
   },
