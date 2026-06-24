@@ -99,6 +99,77 @@ interface PassengerRowProps {
   onDropoff: () => void;
 }
 
+/**
+ * Status pill spec per passenger state — color + label + dot SHAPE, never a
+ * glow/shadow alone (Android elevation ignores shadowColor). Dot shape
+ * (round vs. square) carries meaning independent of color, so the state is
+ * legible without reading the label text. No blue exists in tokens.ts, so
+ * ARRIVED uses the neutral ink family rather than introducing a new hex.
+ */
+const PASSENGER_STATUS_PILL: Record<
+  PassengerInCar["status"],
+  { label: string; bg: string; fg: string; dotBg: string; dotBorder: string; square: boolean }
+> = {
+  WAITING: {
+    label: "Waiting",
+    bg: colors.warningSurface,
+    fg: colors.warning,
+    dotBg: "transparent",
+    dotBorder: colors.warning,
+    square: false,
+  },
+  ARRIVED: {
+    label: "Arrived",
+    bg: colors.ink[50],
+    fg: colors.ink[600],
+    dotBg: colors.ink[400],
+    dotBorder: colors.ink[400],
+    square: false,
+  },
+  PICKED_UP: {
+    label: "Picked up",
+    bg: colors.successSurface,
+    fg: colors.success,
+    dotBg: colors.success,
+    dotBorder: colors.success,
+    square: true,
+  },
+  DROPPED_OFF: {
+    label: "Dropped off",
+    bg: colors.surfaceMuted,
+    fg: colors.ink[500],
+    dotBg: colors.ink[300],
+    dotBorder: colors.ink[300],
+    square: false,
+  },
+  CANCELLED: {
+    label: "Cancelled",
+    bg: colors.errorSurface,
+    fg: colors.danger,
+    dotBg: colors.danger,
+    dotBorder: colors.danger,
+    square: false,
+  },
+};
+
+function PassengerStatusPill({ status }: { status: PassengerInCar["status"] }) {
+  const pill = PASSENGER_STATUS_PILL[status];
+  return (
+    <View style={[fillStyles.statusPill, { backgroundColor: pill.bg }]}>
+      <View
+        style={[
+          fillStyles.statusDot,
+          pill.square ? fillStyles.statusDotSquare : fillStyles.statusDotRound,
+          { backgroundColor: pill.dotBg, borderColor: pill.dotBorder },
+        ]}
+      />
+      <Text variant="caption" style={{ color: pill.fg, fontWeight: typography.weight.semibold }}>
+        {pill.label}
+      </Text>
+    </View>
+  );
+}
+
 function PassengerRow({ passenger, acting, onArrived, onPickup, onDropoff }: PassengerRowProps) {
   return (
     <View style={fillStyles.passengerRow}>
@@ -108,6 +179,9 @@ function PassengerRow({ passenger, acting, onArrived, onPickup, onDropoff }: Pas
         <Ionicons name="location" size={12} color={colors.ink[600]} />
       </View>
       <View style={fillStyles.passengerTextCol}>
+        <View style={fillStyles.passengerPillRow}>
+          <PassengerStatusPill status={passenger.status} />
+        </View>
         <Text variant="bodySmall">{passenger.pickupZoneName}</Text>
         <Text variant="bodySmall">{passenger.dropoffZoneName}</Text>
         {passenger.lockedFare !== null && (
@@ -149,21 +223,12 @@ function SuggestionCard({ suggestion, adding, onAdd }: SuggestionCardProps) {
       {suggestion.compatible && (
         <Badge variant="accent" label="★  Best match" style={fillStyles.suggBadge} />
       )}
-      {/* Route */}
+      {/* Route — geometry only, no "Pickup"/"Dropoff" text labels (the
+          marker shapes already carry that meaning; see RouteStops). */}
       <RouteStops
         connectorHeight={20}
-        origin={
-          <>
-            <Text variant="bodySmall" color="muted">Pickup</Text>
-            <Text variant="bodyMedium">{suggestion.pickupZoneName}</Text>
-          </>
-        }
-        destination={
-          <>
-            <Text variant="bodySmall" color="muted">Dropoff</Text>
-            <Text variant="bodyMedium">{suggestion.dropoffZoneName}</Text>
-          </>
-        }
+        origin={<Text variant="bodyMedium">{suggestion.pickupZoneName}</Text>}
+        destination={<Text variant="bodyMedium">{suggestion.dropoffZoneName}</Text>}
       />
 
       <Text variant="caption" color="muted">{timeAgo(suggestion.createdAt)}</Text>
@@ -960,13 +1025,14 @@ const fillStyles = StyleSheet.create({
   passengerList: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
-    paddingTop: spacing.md,
-    gap: spacing.sm,
+    paddingTop: spacing.sm,
+    gap: spacing.xs,
   },
   passengerRow: {
     flexDirection: "row",
     alignItems: "flex-start",
     gap: spacing.sm,
+    paddingVertical: spacing.xs,
   },
   passengerMarkerCol: { width: 16, alignItems: "center", gap: 1, paddingTop: 2 },
   passengerPickupDot: {
@@ -974,6 +1040,19 @@ const fillStyles = StyleSheet.create({
   },
   passengerConnector: { width: 1, height: 16, backgroundColor: colors.border },
   passengerTextCol: { flex: 1, gap: 2 },
+  passengerPillRow: { marginBottom: 2 },
+  statusPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 5,
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  statusDot: { width: 7, height: 7, borderWidth: 1.5 },
+  statusDotRound: { borderRadius: radii.full },
+  statusDotSquare: { borderRadius: radii.sm },
   passengerActionCol: { alignItems: "flex-end", justifyContent: "center" },
   noPassengersNote: { textAlign: "center", paddingVertical: spacing.sm },
   // Completion summary
