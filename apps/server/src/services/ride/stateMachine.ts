@@ -26,6 +26,14 @@ export function canTransitionRide(from: RideStatus, to: RideStatus): boolean {
   return RIDE_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * Statuses in which a ride counts as a driver's "active" ride — a driver may
+ * hold at most one at a time. AWAITING_RIDER_DECISION is excluded: that
+ * status only arises once a ride has no current driver (e.g. driver backed
+ * out), so it never conflicts with a new claim.
+ */
+export const ACTIVE_DRIVER_STATUSES: readonly RideStatus[] = ["MATCHED", "ARRIVED", "IN_PROGRESS"];
+
 export interface RideTransitionContext {
   /** Required when toStatus is "CANCELLED". */
   cancelReason?: RideCancelReason;

@@ -8,8 +8,9 @@ import { departRide, addRiderToCar } from "../services/ride/assembly";
 import type { RideWithPassengers } from "../services/ride/assembly";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
-import { isActivePassengerStatus } from "../services/ride/stateMachine";
+import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
 import {
+  DriverHasActiveRideError,
   RideAlreadyClaimedError,
   InvalidTransitionError,
   NotRideOwnerError,
@@ -35,8 +36,6 @@ function computeEligibleZoneSet(
   }
   return zones;
 }
-
-const ACTIVE_DRIVER_STATUSES = ["MATCHED", "ARRIVED", "IN_PROGRESS"] as const;
 
 async function requireDriver(request: Parameters<typeof requireAuth>[0], reply: Parameters<typeof requireAuth>[1]): Promise<boolean> {
   if (request.user?.role !== "DRIVER") {
@@ -243,6 +242,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     } catch (err) {
       if (err instanceof RideAlreadyClaimedError) {
         return reply.code(409).send({ error: "Ride already claimed by another driver" });
+      }
+      if (err instanceof DriverHasActiveRideError) {
+        return reply
+          .code(409)
+          .send({ error: err.message, existingRide: err.existingRide });
       }
       throw err;
     }

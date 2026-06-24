@@ -27,6 +27,21 @@ export class RideAlreadyClaimedError extends Error {
 }
 
 /**
+ * Thrown by claimRide when the claiming driver already has another ride in
+ * an active status (MATCHED/ARRIVED/IN_PROGRESS) — a driver may hold at most
+ * one active ride at a time, mirroring ActiveRideExistsError on the rider side.
+ */
+export class DriverHasActiveRideError extends Error {
+  readonly existingRide: { id: string };
+
+  constructor(existingRide: { id: string }) {
+    super("Driver already has an active ride");
+    this.name = "DriverHasActiveRideError";
+    this.existingRide = existingRide;
+  }
+}
+
+/**
  * Thrown by riderDecision(SWITCH_TO_LONE) when the ride does not have
  * exactly one active passenger.
  */

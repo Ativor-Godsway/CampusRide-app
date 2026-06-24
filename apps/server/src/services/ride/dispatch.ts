@@ -1,7 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
 import { emitDriverBroadcast } from "../../realtime/rideSocket";
-import { RideAlreadyClaimedError } from "./errors";
+import { DriverHasActiveRideError, RideAlreadyClaimedError } from "./errors";
+import { ACTIVE_DRIVER_STATUSES } from "./stateMachine";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -81,9 +82,35 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
  * win the claim — the rest affect zero rows and throw
  * RideAlreadyClaimedError. The win/lose decision is made by Postgres's
  * row-level locking on the conditional update itself, not by an
- * application-level read-then-write or lock.
+ * application-level read-then-write or lock. This deliberately stays a
+ * single round-trip statement, no held-open transaction — an earlier version
+ * wrapped this in prisma.$transaction to make the driver-active-ride check
+ * below airtight, but that held a connection per concurrent caller and blew
+ * past Neon's pooled connection_limit under this project's own concurrent-
+ * claim test, turning clean RideAlreadyClaimedError rejections into raw
+ * PrismaClientKnownRequestErrors. Not worth it for a check that's already
+ * accepted as a small, non-atomic race on the rider side (see
+ * ActiveRideExistsError in createRide.ts) — this mirrors that exactly.
+ *
+ * Before the update, checks the claiming driver doesn't already hold an
+ * active ride (MATCHED/ARRIVED/IN_PROGRESS) via a plain pre-check read, the
+ * same read-then-write shape createRide.ts uses for the rider-side guard.
+ *
+ * This blocks the common case — a driver claiming a second ride while
+ * already on one. It does NOT close the rare race where the same driver
+ * fires two concurrent claims (for two different REQUESTED rides) at almost
+ * the same instant: both pre-check reads can pass before either update
+ * commits, since the read and the write aren't in the same transaction.
+ * Full atomicity for this check is tracked for post-buildathon.
  */
 export async function claimRide(prisma: PrismaClient, rideId: string, driverId: string) {
+  const existingActiveRide = await prisma.ride.findFirst({
+    where: { driverId, status: { in: [...ACTIVE_DRIVER_STATUSES] } },
+  });
+  if (existingActiveRide) {
+    throw new DriverHasActiveRideError(existingActiveRide);
+  }
+
   const result = await prisma.ride.updateMany({
     where: { id: rideId, status: "REQUESTED", driverId: null },
     data: { driverId, status: "MATCHED" },
