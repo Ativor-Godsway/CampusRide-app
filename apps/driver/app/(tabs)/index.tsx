@@ -49,6 +49,8 @@ import type {
 
 type DriverStatus = "offline" | "online" | "on_ride";
 type SortBy = "pickup" | "dropoff";
+/** State A segmented toggle — "private" = LONE requests, "shared" = SHARED requests. Both come from the same /driver/rides/eligible response; this only filters which type is shown. */
+type RequestTab = "private" | "shared";
 
 function timeAgo(isoDate: string): string {
   const diffSecs = Math.floor((Date.now() - new Date(isoDate).getTime()) / 1000);
@@ -369,10 +371,9 @@ interface RequestCardProps {
   ride: EligibleRideItem;
   claiming: boolean;
   onAccept: () => void;
-  onDecline: () => void;
 }
 
-function RequestCard({ ride, claiming, onAccept, onDecline }: RequestCardProps) {
+function RequestCard({ ride, claiming, onAccept }: RequestCardProps) {
   return (
     <Card style={styles.requestCard}>
       {ride.bestFit && (
@@ -409,19 +410,12 @@ function RequestCard({ ride, claiming, onAccept, onDecline }: RequestCardProps) 
           <Text variant="bodyMedium">{timeAgo(ride.createdAt)}</Text>
         </View>
       </View>
-      <View style={styles.cardActions}>
-        <View style={styles.declineWrap}>
-          <Button label="Decline" variant="secondary" onPress={onDecline} fullWidth />
-        </View>
-        <View style={styles.acceptWrap}>
-          <Button
-            label={claiming ? "Claiming…" : "Accept"}
-            onPress={onAccept}
-            loading={claiming}
-            fullWidth
-          />
-        </View>
-      </View>
+      <Button
+        label={claiming ? "Claiming…" : "Accept"}
+        onPress={onAccept}
+        loading={claiming}
+        fullWidth
+      />
     </Card>
   );
 }
@@ -446,7 +440,7 @@ export default function DriverHomeScreen() {
 
   const [status, setStatus] = useState<DriverStatus>("offline");
   const [sortBy, setSortBy] = useState<SortBy>("pickup");
-  const [declinedRideIds, setDeclinedRideIds] = useState<Set<string>>(new Set());
+  const [requestTab, setRequestTab] = useState<RequestTab>("private");
   const [claimingRideId, setClaimingRideId] = useState<string | null>(null);
   const [addingRideId, setAddingRideId] = useState<string | null>(null);
   const [actingPassengerId, setActingPassengerId] = useState<string | null>(null);
@@ -523,7 +517,6 @@ export default function DriverHomeScreen() {
       setDriverAvailability(on, zoneId),
     onSuccess: (_data, vars) => {
       setStatus(vars.isOnline ? "online" : "offline");
-      if (!vars.isOnline) setDeclinedRideIds(new Set());
       void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
       void queryClient.invalidateQueries({ queryKey: ["eligibleRides"] });
     },
@@ -565,7 +558,6 @@ export default function DriverHomeScreen() {
         const httpStatus = (err as { response?: { status?: number } }).response?.status;
         if (httpStatus === 409) {
           Alert.alert("Claimed", "Another driver picked this up first.");
-          setDeclinedRideIds((prev) => new Set([...prev, ride.rideId]));
         } else {
           Alert.alert("Error", "Could not claim this ride. Try again.");
         }
@@ -576,10 +568,6 @@ export default function DriverHomeScreen() {
     },
     [claimingRideId, queryClient, router, refetchEligible],
   );
-
-  const handleDecline = useCallback((rideId: string) => {
-    setDeclinedRideIds((prev) => new Set([...prev, rideId]));
-  }, []);
 
   // Fill-your-car: add a compatible passenger.
   const handleAddPassenger = useCallback(
@@ -743,16 +731,16 @@ export default function DriverHomeScreen() {
 
   // ─── Normal home (6b-1 eligible-rides list) ──────────────────────────────────
 
-  const visibleRides = rawEligibleRides.filter((r) => !declinedRideIds.has(r.rideId));
   const sortKey: keyof EligibleRideItem =
     sortBy === "pickup" ? "pickupZoneName" : "dropoffZoneName";
 
-  const loneRides = [...visibleRides.filter((r) => r.type === "LONE")].sort((a, b) =>
+  const loneRides = [...rawEligibleRides.filter((r) => r.type === "LONE")].sort((a, b) =>
     (a[sortKey] as string).localeCompare(b[sortKey] as string),
   );
-  const sharedRides = [...visibleRides.filter((r) => r.type === "SHARED")].sort((a, b) =>
+  const sharedRides = [...rawEligibleRides.filter((r) => r.type === "SHARED")].sort((a, b) =>
     (a[sortKey] as string).localeCompare(b[sortKey] as string),
   );
+  const tabRides = requestTab === "private" ? loneRides : sharedRides;
 
   return (
     <Screen scroll>
@@ -813,9 +801,34 @@ export default function DriverHomeScreen() {
         </View>
       )}
 
-      {/* Online: sort toggle + sectioned list */}
+      {/* Online: request-type toggle + sort toggle + single filtered list */}
       {isOnline && (
         <>
+          <View style={styles.requestTabPill}>
+            <Pressable
+              onPress={() => setRequestTab("private")}
+              style={[styles.requestTabBtn, requestTab === "private" && styles.requestTabBtnActive]}
+            >
+              <Text
+                variant="bodySmall"
+                style={requestTab === "private" ? styles.sortBtnTextActive : styles.sortBtnText}
+              >
+                Private rides
+              </Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setRequestTab("shared")}
+              style={[styles.requestTabBtn, requestTab === "shared" && styles.requestTabBtnActive]}
+            >
+              <Text
+                variant="bodySmall"
+                style={requestTab === "shared" ? styles.sortBtnTextActive : styles.sortBtnText}
+              >
+                Shared rides
+              </Text>
+            </Pressable>
+          </View>
+
           <View style={styles.sortRow}>
             <Text variant="label" color="muted">SORT BY</Text>
             <View style={styles.sortPill}>
@@ -844,42 +857,29 @@ export default function DriverHomeScreen() {
             </View>
           </View>
 
-          {loneRides.length > 0 && (
+          {tabRides.length > 0 ? (
             <View style={styles.section}>
-              <SectionHeader title="LONE REQUESTS" count={loneRides.length} />
-              {loneRides.map((ride) => (
+              <SectionHeader
+                title={requestTab === "private" ? "PRIVATE RIDES" : "SHARED RIDES"}
+                count={tabRides.length}
+              />
+              {tabRides.map((ride) => (
                 <RequestCard
                   key={ride.rideId}
                   ride={ride}
                   claiming={claimingRideId === ride.rideId}
                   onAccept={() => void handleAccept(ride)}
-                  onDecline={() => handleDecline(ride.rideId)}
                 />
               ))}
             </View>
-          )}
-
-          {sharedRides.length > 0 && (
-            <View style={styles.section}>
-              <SectionHeader title="SHARED REQUESTS" count={sharedRides.length} />
-              {sharedRides.map((ride) => (
-                <RequestCard
-                  key={ride.rideId}
-                  ride={ride}
-                  claiming={claimingRideId === ride.rideId}
-                  onAccept={() => void handleAccept(ride)}
-                  onDecline={() => handleDecline(ride.rideId)}
-                />
-              ))}
-            </View>
-          )}
-
-          {loneRides.length === 0 && sharedRides.length === 0 && (
+          ) : (
             <View style={styles.emptyList}>
               <Ionicons name="radio-outline" size={48} color={colors.ink[200]} />
               <Text variant="h3" style={styles.emptyTitle}>Waiting for requests</Text>
               <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
-                Ride requests near your zone will appear here.
+                {requestTab === "private"
+                  ? "Private ride requests near your zone will appear here."
+                  : "Shared ride requests near your zone will appear here."}
               </Text>
             </View>
           )}
@@ -928,6 +928,21 @@ const styles = StyleSheet.create({
   },
   emptyTitle: { marginTop: spacing.sm },
   emptyBody: { textAlign: "center", maxWidth: 260 },
+  requestTabPill: {
+    flexDirection: "row",
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radii.full,
+    padding: 3,
+    gap: 2,
+    marginBottom: spacing.lg,
+  },
+  requestTabBtn: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+    borderRadius: radii.full,
+  },
+  requestTabBtnActive: { backgroundColor: colors.white, ...shadows.sm },
   sortRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -975,9 +990,6 @@ const styles = StyleSheet.create({
   },
   fareStripItem: { flex: 1, gap: 2, alignItems: "center" },
   earnText: { color: colors.primary[600] },
-  cardActions: { flexDirection: "row", gap: spacing.sm },
-  declineWrap: { flex: 1 },
-  acceptWrap: { flex: 2 },
 });
 
 // Fill-your-car styles (separate namespace to stay organised)
