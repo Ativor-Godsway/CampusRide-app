@@ -63,22 +63,30 @@ export async function initiateCollection(
     },
   });
 
-  const result = await paymentService.collect({
-    rideId: input.rideId,
-    payerPhone: input.payerPhone,
-    channel: input.channel,
-    amountPesewas: input.amountPesewas,
-    externalRef,
-  });
+  try {
+    const result = await paymentService.collect({
+      rideId: input.rideId,
+      payerPhone: input.payerPhone,
+      channel: input.channel,
+      amountPesewas: input.amountPesewas,
+      externalRef,
+    });
 
-  if (isDefiniteFailure(result.txstatus)) {
-    return prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    if (isDefiniteFailure(result.txstatus)) {
+      return prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    }
+    if (isDefiniteSuccess(result.txstatus)) {
+      return prisma.payment.update({ where: { id: payment.id }, data: { status: "SUCCESS" } });
+    }
+    // PENDING or UNKNOWN — await the webhook / a later status check.
+    return payment;
+  } catch (err) {
+    // The provider call itself failed (e.g. auth rejection, duplicate ref) —
+    // the Payment row must not be left stuck PENDING. Rethrown so the error
+    // (with Moolre's code/message) stays visible in logs rather than swallowed.
+    await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    throw err;
   }
-  if (isDefiniteSuccess(result.txstatus)) {
-    return prisma.payment.update({ where: { id: payment.id }, data: { status: "SUCCESS" } });
-  }
-  // PENDING or UNKNOWN — await the webhook / a later status check.
-  return payment;
 }
 
 export interface RiderPayer {

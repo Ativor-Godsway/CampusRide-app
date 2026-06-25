@@ -16,10 +16,10 @@ export type MoolreChannel = "MTN" | "TELECEL" | "AT";
  * one per endpoint — never share a single "channel code" constant across
  * collection and transfer.
  */
-export const COLLECTION_CHANNEL_CODE: Record<MoolreChannel, number> = {
-  MTN: 13,
-  TELECEL: 6,
-  AT: 7,
+export const COLLECTION_CHANNEL_CODE: Record<MoolreChannel, string> = {
+  MTN: "13",
+  TELECEL: "6",
+  AT: "7",
 };
 
 export const TRANSFER_CHANNEL_CODE: Record<MoolreChannel, number> = {

@@ -43,6 +43,7 @@ export function registerWebhookRoutes(
   webhookSecret: string,
 ): void {
   app.post("/webhooks/moolre", async (request, reply) => {
+    console.log("[MOOLRE WEBHOOK HIT]", JSON.stringify(request.body));
     const body = request.body as { data?: Record<string, unknown> };
     const data = body.data;
 

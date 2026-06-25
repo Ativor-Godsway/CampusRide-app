@@ -19,22 +19,33 @@ export interface MoolreConfig {
   baseUrl: string;
   /** X-API-USER header — username, sent on all calls. */
   apiUser: string;
-  /** X-API-PUBKEY header — collection calls only. */
+  /**
+   * X-API-PUBKEY header. Not currently sent by any call site — collection
+   * was found to require the private key (X-API-KEY) instead, like every
+   * other endpoint. Kept for any endpoint that's later found to legitimately
+   * need the public key; never sent to sandbox (sandbox takes X-API-USER only).
+   */
   publicKey: string;
-  /** X-API-KEY header — transfer/disbursement + validate-name. Moves money out; the most sensitive secret in the system. */
+  /** X-API-KEY header — sent on every live-mode call (collection, transfer/disbursement, validate-name). Moves money out; the most sensitive secret in the system. Never sent to sandbox. */
   privateKey: string;
   /** Moolre account number, sent on all calls. */
   accountNumber: string;
 }
 
 interface MoolreResponseShape {
-  /** Moolre's response code, e.g. "OTP_REQ", "payment-requested", "TX0001", "400_INSUFFICIENT_BALANCE". */
+  /** Moolre's response code, e.g. "TR099", "TP14", "TP13", "AIN01", "AIN04". */
   code?: string;
   status?: string;
+  message?: string;
   txstatus?: number;
   data?: { txstatus?: number; name?: string; accountname?: string; [key: string]: unknown };
   [key: string]: unknown;
 }
+
+/** Body-level codes that mean "not a failure" even though the call isn't a definite success yet. */
+const OK_CODES = new Set(["TR099", "TP14"]);
+/** Body-level codes that are always a hard failure, regardless of `status`. */
+const HARD_FAILURE_CODES = new Set(["TP13", "AIN01", "AIN04"]);
 
 /**
  * Real payment integration via Moolre, behind the PaymentService interface.
@@ -57,7 +68,7 @@ export class MoolrePaymentService implements PaymentService {
       accountnumber: this.cfg.accountNumber,
     };
 
-    const data = await this.post("/open/transact/payment", body, { usePublicKey: true });
+    const data = await this.post("/open/transact/payment", body, { keyType: "private" });
 
     // Collection is async by nature: an OTP prompt, "payment-requested", or
     // "pending" response all mean "awaiting confirmation via webhook/status
@@ -82,7 +93,7 @@ export class MoolrePaymentService implements PaymentService {
       accountnumber: this.cfg.accountNumber,
     };
 
-    const data = await this.post("/open/transact/validate", body, { usePublicKey: false });
+    const data = await this.post("/open/transact/validate", body, { keyType: "private" });
 
     const accountName = data.data?.accountname ?? data.data?.name;
     if (typeof accountName !== "string" || accountName.length === 0) {
@@ -103,7 +114,7 @@ export class MoolrePaymentService implements PaymentService {
       accountnumber: this.cfg.accountNumber,
     };
 
-    const data = await this.post("/open/transact/transfer", body, { usePublicKey: false });
+    const data = await this.post("/open/transact/transfer", body, { keyType: "private" });
 
     const txstatus = toTxStatus(data.txstatus ?? data.data?.txstatus, TX_STATUS.UNKNOWN);
 
@@ -123,31 +134,60 @@ export class MoolrePaymentService implements PaymentService {
       accountnumber: this.cfg.accountNumber,
     };
 
-    const data = await this.post("/open/transact/status", body, { usePublicKey: false });
+    const data = await this.post("/open/transact/status", body, { keyType: "private" });
 
     const txstatus = toTxStatus(data.txstatus ?? data.data?.txstatus, TX_STATUS.UNKNOWN);
 
     return { txstatus, externalRef, raw: data };
   }
 
+  /** True for sandbox.moolre.com, false for api.moolre.com (or any other live host). */
+  private isSandbox(): boolean {
+    return new URL(this.cfg.baseUrl).host.startsWith("sandbox.");
+  }
+
   /**
-   * POSTs to a Moolre endpoint with the correct key for the operation.
-   * Collection uses X-API-PUBKEY; everything else (transfer, validate,
-   * status) uses X-API-KEY (the private key). X-API-USER is sent on every
-   * call. Never logs header values.
+   * SANDBOX AUTH QUIRK: sandbox.moolre.com only accepts X-API-USER — sending
+   * X-API-KEY or X-API-PUBKEY at all (even empty) causes auth failures
+   * (AIN01/AIN04). Live (api.moolre.com) requires X-API-USER plus the
+   * appropriate key. Never logs header values.
+   */
+  private buildAuthHeaders(keyType: "private" | "public"): Record<string, string> {
+    const headers: Record<string, string> = { "X-API-USER": this.cfg.apiUser };
+    if (this.isSandbox()) {
+      return headers;
+    }
+    if (keyType === "private") {
+      if (!this.cfg.privateKey) {
+        throw new Error("MOOLRE_PRIVATE_KEY is required for live Moolre calls (X-API-KEY) but is not set");
+      }
+      headers["X-API-KEY"] = this.cfg.privateKey;
+    } else {
+      if (!this.cfg.publicKey) {
+        throw new Error("MOOLRE_PUBLIC_KEY is required for this live Moolre call (X-API-PUBKEY) but is not set");
+      }
+      headers["X-API-PUBKEY"] = this.cfg.publicKey;
+    }
+    return headers;
+  }
+
+  /**
+   * POSTs to a Moolre endpoint and classifies the response body, not just
+   * the HTTP status: Moolre returns HTTP 200 for body-level failures (e.g.
+   * duplicate externalref, auth rejection), so those must be inspected
+   * explicitly or they'd be silently treated as "pending". `status` is
+   * normalized via String() because Moolre returns it inconsistently as
+   * integer 1 or string "0".
    */
   private async post(
     path: string,
     body: Record<string, unknown>,
-    opts: { usePublicKey: boolean },
+    opts: { keyType: "private" | "public" },
   ): Promise<MoolreResponseShape> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
-      "X-API-USER": this.cfg.apiUser,
+      ...this.buildAuthHeaders(opts.keyType),
     };
-    headers[opts.usePublicKey ? "X-API-PUBKEY" : "X-API-KEY"] = opts.usePublicKey
-      ? this.cfg.publicKey
-      : this.cfg.privateKey;
 
     const response = await fetch(`${this.cfg.baseUrl}${path}`, {
       method: "POST",
@@ -160,6 +200,21 @@ export class MoolrePaymentService implements PaymentService {
     if (!response.ok) {
       throw new Error(`Moolre ${path} returned HTTP ${response.status}: ${JSON.stringify(data)}`);
     }
+
+    const statusStr = data.status !== undefined ? String(data.status) : undefined;
+    const code = typeof data.code === "string" ? data.code : undefined;
+    const isOkCode = code !== undefined && OK_CODES.has(code);
+    const isHardFailureCode = code !== undefined && HARD_FAILURE_CODES.has(code);
+
+    if (isHardFailureCode || (statusStr !== "1" && !isOkCode)) {
+      throw new Error(
+        `Moolre ${path} failed: code=${code ?? "?"} status=${statusStr ?? "?"} message=${
+          data.message ?? JSON.stringify(data)
+        }`,
+      );
+    }
+
+    console.log(`[MOOLRE] ${path} ok: code=${code ?? "?"} status=${statusStr ?? "?"} data=${JSON.stringify(data.data)}`);
 
     return data;
   }
