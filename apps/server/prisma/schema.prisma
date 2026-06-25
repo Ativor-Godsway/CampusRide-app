@@ -70,6 +70,7 @@ enum PaymentRecordStatus {
   PENDING
   SUCCESS
   FAILED
+  AWAITING_OTP
 }
 
 enum OtpPurpose {
@@ -235,6 +236,8 @@ model Payment {
   type        PaymentType
   status      PaymentRecordStatus @default(PENDING)
   providerRef String?
+  /// Moolre's own transaction id (the TR099 `data` uuid) — distinct from providerRef (our externalRef). Null until a PROMPT_SENT collect() outcome is recorded.
+  providerTxId String?
   createdAt   DateTime            @default(now())
 
   ride  Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
