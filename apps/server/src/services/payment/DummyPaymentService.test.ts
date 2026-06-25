@@ -3,7 +3,7 @@ import { DummyPaymentService } from "./DummyPaymentService";
 import { TX_STATUS } from "./constants";
 
 describe("DummyPaymentService — happy paths (no network)", () => {
-  it("collect returns PENDING, matching Moolre's real async collection flow", async () => {
+  it("collect returns PROMPT_SENT, matching Moolre's real async collection flow", async () => {
     const service = new DummyPaymentService();
     const result = await service.collect({
       rideId: "ride-1",
@@ -12,7 +12,7 @@ describe("DummyPaymentService — happy paths (no network)", () => {
       amountPesewas: 1000,
       externalRef: "collect:ride-1:rider-1",
     });
-    expect(result.txstatus).toBe(TX_STATUS.PENDING);
+    expect(result.kind).toBe("PROMPT_SENT");
     expect(result.externalRef).toBe("collect:ride-1:rider-1");
   });
 
@@ -55,7 +55,7 @@ describe("DummyPaymentService — happy paths (no network)", () => {
     expect((await service.getStatus("collect:ride-1:rider-1")).txstatus).toBe(TX_STATUS.SUCCESS);
   });
 
-  it("idempotency: repeated collect with the same externalRef returns the stored result, not a fresh one", async () => {
+  it("collect() caches its outcome idempotently; settlement is tracked separately via getStatus", async () => {
     const service = new DummyPaymentService();
     const externalRef = "collect:ride-1:rider-1";
     await service.collect({
@@ -65,9 +65,9 @@ describe("DummyPaymentService — happy paths (no network)", () => {
       amountPesewas: 1000,
       externalRef,
     });
-    service.markCollected(externalRef);
 
-    // A retry after the provider already confirmed success must not reset to PENDING.
+    // A repeated collect() call returns the cached initiate-call outcome —
+    // it does not reflect settlement, which is a separate concern.
     const retry = await service.collect({
       rideId: "ride-1",
       payerPhone: "+233200000001",
@@ -75,6 +75,10 @@ describe("DummyPaymentService — happy paths (no network)", () => {
       amountPesewas: 1000,
       externalRef,
     });
-    expect(retry.txstatus).toBe(TX_STATUS.SUCCESS);
+    expect(retry.kind).toBe("PROMPT_SENT");
+
+    // Settlement, once confirmed, is visible via getStatus() — not via collect().
+    service.markCollected(externalRef);
+    expect((await service.getStatus(externalRef)).txstatus).toBe(TX_STATUS.SUCCESS);
   });
 });

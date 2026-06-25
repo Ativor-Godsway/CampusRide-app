@@ -1,6 +1,6 @@
 import type {
+  CollectOutcome,
   CollectParams,
-  CollectResult,
   DisburseParams,
   DisburseResult,
   PaymentService,
@@ -37,7 +37,7 @@ export class PaystackPaymentService implements PaymentService {
     void this.secretKey;
   }
 
-  async collect(_params: CollectParams): Promise<CollectResult> {
+  async collect(_params: CollectParams): Promise<CollectOutcome> {
     throw new Error("PaystackPaymentService.collect is not implemented — Moolre is the active provider");
   }
 

@@ -64,7 +64,7 @@ export async function initiateCollection(
   });
 
   try {
-    const result = await paymentService.collect({
+    await paymentService.collect({
       rideId: input.rideId,
       payerPhone: input.payerPhone,
       channel: input.channel,
@@ -72,13 +72,9 @@ export async function initiateCollection(
       externalRef,
     });
 
-    if (isDefiniteFailure(result.txstatus)) {
-      return prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
-    }
-    if (isDefiniteSuccess(result.txstatus)) {
-      return prisma.payment.update({ where: { id: payment.id }, data: { status: "SUCCESS" } });
-    }
-    // PENDING or UNKNOWN — await the webhook / a later status check.
+    // Both OTP_REQUIRED and PROMPT_SENT mean "awaiting confirmation via
+    // webhook/status check" — neither is a definite outcome yet, so the
+    // Payment row stays PENDING either way (no AWAITING_OTP state this phase).
     return payment;
   } catch (err) {
     // The provider call itself failed (e.g. auth rejection, duplicate ref) —

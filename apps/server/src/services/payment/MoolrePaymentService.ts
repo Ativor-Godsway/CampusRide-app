@@ -1,8 +1,8 @@
 import { pesewasToGhs } from "./amounts";
 import { COLLECTION_CHANNEL_CODE, TRANSFER_CHANNEL_CODE, TX_STATUS, type TxStatus } from "./constants";
 import type {
+  CollectOutcome,
   CollectParams,
-  CollectResult,
   DisburseParams,
   DisburseResult,
   PaymentService,
@@ -57,7 +57,7 @@ const HARD_FAILURE_CODES = new Set(["TP13", "AIN01", "AIN04"]);
 export class MoolrePaymentService implements PaymentService {
   constructor(private readonly cfg: MoolreConfig) {}
 
-  async collect(params: CollectParams): Promise<CollectResult> {
+  async collect(params: CollectParams): Promise<CollectOutcome> {
     const body = {
       type: TYPE_MOBILE_MONEY,
       channel: COLLECTION_CHANNEL_CODE[params.channel],
@@ -66,22 +66,17 @@ export class MoolrePaymentService implements PaymentService {
       amount: pesewasToGhs(params.amountPesewas),
       externalref: params.externalRef,
       accountnumber: this.cfg.accountNumber,
+      ...(params.otpcode ? { otpcode: params.otpcode } : {}),
     };
 
     const data = await this.post("/open/transact/payment", body, { keyType: "private" });
 
-    // Collection is async by nature: an OTP prompt, "payment-requested", or
-    // "pending" response all mean "awaiting confirmation via webhook/status
-    // check" — never a definite outcome at this point. Only a response that
-    // explicitly carries txstatus=2 (FAILED) is a definite failure here.
-    const txstatus = toTxStatus(data.txstatus ?? data.data?.txstatus, TX_STATUS.PENDING);
-
-    return {
-      txstatus,
-      externalRef: params.externalRef,
-      providerRef: extractProviderRef(data),
-      raw: data,
-    };
+    // post() already threw on any hard-failure code — only TR099 (USSD
+    // prompt sent) or TP14 (OTP required, SMS sent) reach here.
+    if (data.code === "TP14") {
+      return { kind: "OTP_REQUIRED", externalRef: params.externalRef, raw: data };
+    }
+    return { kind: "PROMPT_SENT", externalRef: params.externalRef, providerTxId: extractProviderRef(data), raw: data };
   }
 
   async validateRecipient(params: ValidateRecipientParams): Promise<ValidateRecipientResult> {

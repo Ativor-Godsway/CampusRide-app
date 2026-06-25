@@ -11,6 +11,8 @@ export interface CollectParams {
   amountPesewas: number;
   /** Caller-assigned, unique and deterministic per ride/leg (idempotency key). */
   externalRef: string;
+  /** Only sent on the second collect() call, after an OTP_REQUIRED outcome — omitted (not the empty string) on the first call. */
+  otpcode?: string;
 }
 
 export interface CollectResult {
@@ -21,6 +23,18 @@ export interface CollectResult {
   providerRef?: string;
   raw?: unknown;
 }
+
+/**
+ * Moolre's Collections two-step flow: the initiate call either prompts the
+ * payer's phone directly (PROMPT_SENT) or requires an OTP confirmation first
+ * (OTP_REQUIRED, SMS already sent) — the caller re-calls collect() with the
+ * same externalRef and the otpcode the rider entered. Hard failures (bad
+ * auth, duplicate ref) are not represented here — they throw (see
+ * MoolrePaymentService.post()).
+ */
+export type CollectOutcome =
+  | { kind: "OTP_REQUIRED"; externalRef: string; raw?: unknown }
+  | { kind: "PROMPT_SENT"; externalRef: string; providerTxId?: string; raw?: unknown };
 
 export interface ValidateRecipientParams {
   phone: string;
@@ -67,8 +81,8 @@ export interface StatusResult {
  * a repeated `externalRef` as "return the existing result, do not re-initiate".
  */
 export interface PaymentService {
-  /** Initiates a collection (charge) from a rider. Returns a pending result; final status arrives via webhook or getStatus. */
-  collect(params: CollectParams): Promise<CollectResult>;
+  /** Initiates a collection (charge) from a rider. Returns OTP_REQUIRED or PROMPT_SENT; final settlement status arrives via webhook or getStatus. */
+  collect(params: CollectParams): Promise<CollectOutcome>;
   /** Resolves the account holder name for a recipient before disbursing. Throws if the account can't be validated. */
   validateRecipient(params: ValidateRecipientParams): Promise<ValidateRecipientResult>;
   /** Initiates a transfer (payout) to a driver. Uses the PRIVATE key — this moves money out. */

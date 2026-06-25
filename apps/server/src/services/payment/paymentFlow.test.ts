@@ -15,7 +15,7 @@ import {
 } from "./paymentFlow";
 import { UnknownPaymentReferenceError } from "./errors";
 import { applyRideTransition } from "../ride/rideService";
-import type { CollectParams, CollectResult, PaymentService } from "./PaymentService";
+import type { CollectOutcome, CollectParams, PaymentService } from "./PaymentService";
 import { createTestDriver, createTestRide, cleanupRide, cleanupDriver } from "../ride/testFixtures";
 
 const createdRideIds: string[] = [];
@@ -169,31 +169,37 @@ describe("initiateCollection", () => {
     const { ride, rider } = await createDepartedRideWithOnePassenger(1000);
 
     const failingService: PaymentService = {
-      collect: async (params: CollectParams): Promise<CollectResult> => ({
-        txstatus: TX_STATUS.FAILED,
-        externalRef: params.externalRef,
-      }),
+      collect: async (): Promise<CollectOutcome> => {
+        throw new Error("Moolre /open/transact/payment failed: code=AIN01 status=0 message=Authentication Error");
+      },
       validateRecipient: async () => ({ accountName: "n/a" }),
       disburse: async (params) => ({ txstatus: TX_STATUS.SUCCESS, externalRef: params.externalRef }),
       getStatus: async (externalRef) => ({ txstatus: TX_STATUS.UNKNOWN, externalRef }),
     };
 
-    const payment = await initiateCollection(prisma, failingService, {
-      rideId: ride.id,
-      riderId: rider.id,
-      amountPesewas: 1000,
-      payerPhone: "+233200000011",
-      channel: "MTN",
+    // initiateCollection rethrows after marking FAILED, so the failure must stay visible in logs.
+    await expect(
+      initiateCollection(prisma, failingService, {
+        rideId: ride.id,
+        riderId: rider.id,
+        amountPesewas: 1000,
+        payerPhone: "+233200000011",
+        channel: "MTN",
+      }),
+    ).rejects.toThrow("Moolre /open/transact/payment failed: code=AIN01 status=0 message=Authentication Error");
+
+    const payment = await prisma.payment.findFirstOrThrow({
+      where: { providerRef: collectionExternalRef(ride.id, rider.id) },
     });
     expect(payment.status).toBe("FAILED");
   });
 
-  it("leaves the Payment PENDING when the provider returns PENDING or UNKNOWN", async () => {
+  it("leaves the Payment PENDING when collect() returns without a definite settlement", async () => {
     const { ride, rider } = await createDepartedRideWithOnePassenger(1000);
 
-    const unknownService: PaymentService = {
-      collect: async (params: CollectParams): Promise<CollectResult> => ({
-        txstatus: TX_STATUS.UNKNOWN,
+    const promptSentService: PaymentService = {
+      collect: async (params: CollectParams): Promise<CollectOutcome> => ({
+        kind: "PROMPT_SENT",
         externalRef: params.externalRef,
       }),
       validateRecipient: async () => ({ accountName: "n/a" }),
@@ -201,7 +207,7 @@ describe("initiateCollection", () => {
       getStatus: async (externalRef) => ({ txstatus: TX_STATUS.UNKNOWN, externalRef }),
     };
 
-    const payment = await initiateCollection(prisma, unknownService, {
+    const payment = await initiateCollection(prisma, promptSentService, {
       rideId: ride.id,
       riderId: rider.id,
       amountPesewas: 1000,
