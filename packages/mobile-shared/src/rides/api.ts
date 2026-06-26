@@ -101,15 +101,34 @@ export async function submitRating(input: SubmitRatingInput): Promise<void> {
 
 export type MoolreNetwork = "MTN" | "TELECEL" | "AT";
 
-/** Initiate MOMO collection for the rider's completed ride leg. Idempotent. */
+/**
+ * "OTP_SENT" -> first prompt, show the OTP entry step. "OTP_RETRY" -> the
+ * submitted otpcode didn't match, stay on OTP entry. "SUBMITTED" -> no OTP
+ * needed (or it was just confirmed) — await the existing push-prompt/webhook
+ * confirmation. null -> no OTP-related state (e.g. a definite failure).
+ */
+export type OtpStage = "OTP_SENT" | "OTP_RETRY" | "SUBMITTED" | null;
+
+export interface InitiateRidePaymentResult {
+  paymentStatus: PaymentStatus;
+  otpStage: OtpStage;
+}
+
+/**
+ * Initiate MOMO collection for the rider's completed ride leg, or confirm an
+ * OTP after a prior "OTP_SENT"/"OTP_RETRY" response. otpcode must be omitted
+ * on the first call and present on the confirmation call; phone/network must
+ * be the SAME values sent on the first call. Idempotent.
+ */
 export async function initiateRidePayment(
   rideId: string,
   phone: string,
   network: MoolreNetwork,
-): Promise<{ paymentStatus: PaymentStatus }> {
-  const res = await api.post<{ paymentStatus: PaymentStatus }>(
+  otpcode?: string,
+): Promise<InitiateRidePaymentResult> {
+  const res = await api.post<InitiateRidePaymentResult>(
     `/rides/${rideId}/initiate-payment`,
-    { phone, network },
+    { phone, network, otpcode },
   );
   return res.data;
 }

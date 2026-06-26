@@ -751,7 +751,7 @@ function MyLegDoneContent({ dropoffZoneName }: { dropoffZoneName: string }) {
   );
 }
 
-type MomoPhase = "form" | "waiting" | "confirmed" | "failed";
+type MomoPhase = "form" | "otp" | "waiting" | "confirmed" | "failed";
 
 function RatingPanel({
   rideId,
@@ -844,9 +844,18 @@ function CompletedContent({
   const [phone, setPhone] = useState("");
   const [network, setNetwork] = useState<MoolreNetwork>("MTN");
   const [paying, setPaying] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [confirmingOtp, setConfirmingOtp] = useState(false);
+  const [otpExpired, setOtpExpired] = useState(false);
   const [ratingReady, setRatingReady] = useState(false);
 
-  // Sync momo phase from server-provided status when fareSummary arrives
+  // Sync momo phase from server-provided status when fareSummary arrives.
+  // NOTE: fareSummary.paymentStatus has no AWAITING_OTP bucket (deferred 3b
+  // TODO — see paymentFlow.ts's getRidePaymentSummary), so a remount can't
+  // auto-resume into the "otp" phase from this effect; the rider has to tap
+  // Pay again, which safely re-surfaces OTP_SENT without re-charging (see
+  // handlePay). Immediate post-3c follow-up if poll-based OTP awareness is needed.
   useEffect(() => {
     if (!fareSummary || fareSummary.paymentMethod !== "MOMO") return;
     if (fareSummary.paymentStatus === "COLLECTED" || fareSummary.paymentStatus === "DISBURSED") {
@@ -878,13 +887,58 @@ function CompletedContent({
     }
     setPaying(true);
     try {
-      await initiateRidePayment(rideId, phone.trim(), network);
-      setMomoPhase("waiting");
+      const { otpStage } = await initiateRidePayment(rideId, phone.trim(), network);
+      if (otpStage === "OTP_SENT") {
+        setOtpExpired(false);
+        setOtpError(null);
+        setOtpCode("");
+        setMomoPhase("otp");
+      } else {
+        // "SUBMITTED" or null — no OTP needed (or already confirmed elsewhere).
+        setMomoPhase("waiting");
+      }
     } catch {
       Alert.alert("Couldn't initiate payment", "Please check your connection and try again.");
     } finally {
       setPaying(false);
     }
+  }
+
+  async function handleConfirmOtp() {
+    if (otpCode.trim().length !== 6) {
+      setOtpError("Enter the 6-digit code");
+      return;
+    }
+    setOtpError(null);
+    setConfirmingOtp(true);
+    try {
+      const { otpStage } = await initiateRidePayment(rideId, phone.trim(), network, otpCode.trim());
+      if (otpStage === "OTP_RETRY") {
+        setOtpCode("");
+        setOtpError("That code didn't match. Check your messages and try again.");
+      } else {
+        // "SUBMITTED" — correct code accepted (or otherwise resolved) — await confirmation.
+        setMomoPhase("waiting");
+      }
+    } catch (err) {
+      const status = (err as { response?: { status?: number } }).response?.status;
+      if (status === 409) {
+        setOtpExpired(true);
+        setOtpError("This payment's confirmation window has closed. Tap Pay to start again.");
+      } else {
+        // Keep the entered code — a flaky network shouldn't make them retype it.
+        setOtpError("Couldn't confirm your code. Please check your connection and try again.");
+      }
+    } finally {
+      setConfirmingOtp(false);
+    }
+  }
+
+  function handleRestartOtp() {
+    setOtpExpired(false);
+    setOtpError(null);
+    setOtpCode("");
+    setMomoPhase("form");
   }
 
   if (!fareSummary) {
@@ -1005,6 +1059,46 @@ function CompletedContent({
           onPress={() => void handlePay()}
           loading={paying}
         />
+      </View>
+    );
+  }
+
+  // ── MOMO path — OTP entry ─────────────────────────────────────────────────────
+  if (momoPhase === "otp") {
+    return (
+      <View style={styles.section}>
+        <View style={styles.stateHeader}>
+          <ServiceIcon
+            name="key-outline"
+            size={48}
+            iconSize={22}
+            background={colors.primary[50]}
+            color={colors.primary[600]}
+          />
+          <View style={styles.stateHeading}>
+            <Text variant="h2">Enter the code</Text>
+            <Text variant="bodySmall" color="muted">
+              We sent a code to {phone.trim()}. Enter it to confirm your payment.
+            </Text>
+          </View>
+        </View>
+        <Input
+          label="Verification code"
+          placeholder="000000"
+          keyboardType="number-pad"
+          maxLength={6}
+          doneAccessory
+          value={otpCode}
+          onChangeText={setOtpCode}
+          error={otpError ?? undefined}
+          editable={!otpExpired}
+          style={styles.codeInput}
+        />
+        {otpExpired ? (
+          <Button label="Start over" onPress={handleRestartOtp} />
+        ) : (
+          <Button label="Confirm payment" onPress={() => void handleConfirmOtp()} loading={confirmingOtp} />
+        )}
       </View>
     );
   }
@@ -1189,5 +1283,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.errorSurface,
     borderColor: colors.error,
     borderWidth: 1,
+  },
+  // ── OTP code entry (MOMO otp state)
+  codeInput: {
+    fontFamily: typography.fontFamily.mono,
+    fontSize: typography.size["2xl"],
+    fontWeight: typography.weight.bold,
+    textAlign: "center",
+    letterSpacing: 8,
   },
 });
