@@ -14,6 +14,7 @@ import {
   ZoneNotFoundError,
 } from "../services/ride/createRide";
 import { getRidePaymentSummary, initiateCollection } from "../services/payment/paymentFlow";
+import { NoAwaitingOtpPaymentError } from "../services/payment/errors";
 import type { MoolreChannel } from "../services/payment/constants";
 import { paymentService } from "../services/active";
 import { config } from "../config";
@@ -284,21 +285,30 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
   });
 
   /**
-   * Rider initiates MOMO payment for their completed ride leg.
-   * Body: { phone: string; network: "MTN" | "TELECEL" | "AT" }
-   * Idempotent — calling again with the same ride/rider returns the existing
-   * Payment row without re-charging the rider.
+   * Rider initiates MOMO payment for their completed ride leg, and (second
+   * call) confirms an OTP if Moolre required one.
+   * Body: { phone: string; network: "MTN" | "TELECEL" | "AT"; otpcode?: string }
+   * otpcode is only sent on the confirmation call, after the first response's
+   * otpStage is "OTP_SENT" or "OTP_RETRY". The client must echo the SAME
+   * phone/network it sent on the first call — they're not persisted, and are
+   * passed straight through to Moolre's re-call.
+   * Idempotent — calling again with the same ride/rider (no otpcode) returns
+   * the existing Payment row without re-charging the rider.
    */
   app.post("/rides/:id/initiate-payment", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
-    const body = request.body as { phone?: unknown; network?: unknown };
+    const body = request.body as { phone?: unknown; network?: unknown; otpcode?: unknown };
 
     if (!isNonEmptyString(body.phone) || !isMoolreChannel(body.network)) {
       return reply.code(400).send({ error: "phone and network (MTN|TELECEL|AT) are required" });
     }
+    if (body.otpcode !== undefined && !isNonEmptyString(body.otpcode)) {
+      return reply.code(400).send({ error: "otpcode must be a non-empty string if provided" });
+    }
+    const otpcode = body.otpcode as string | undefined;
 
     const ride = await prisma.ride.findUnique({
       where: { id: rideId },
@@ -321,15 +331,27 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       return reply.code(409).send({ error: "No fare recorded for this rider" });
     }
 
-    const payment = await initiateCollection(prisma, paymentService, {
-      rideId,
-      riderId: userId,
-      amountPesewas,
-      payerPhone: body.phone,
-      channel: body.network,
-    });
+    let payment;
+    try {
+      payment = await initiateCollection(prisma, paymentService, {
+        rideId,
+        riderId: userId,
+        amountPesewas,
+        payerPhone: body.phone,
+        channel: body.network,
+        otpcode,
+      });
+    } catch (err) {
+      if (err instanceof NoAwaitingOtpPaymentError) {
+        return reply.code(409).send({ error: "No pending OTP confirmation for this ride" });
+      }
+      throw err;
+    }
 
-    return reply.code(200).send({ paymentStatus: payment.status });
+    const otpStage =
+      payment.status === "AWAITING_OTP" ? (otpcode != null ? "OTP_RETRY" : "OTP_SENT") : payment.status === "PENDING" ? "SUBMITTED" : null;
+
+    return reply.code(200).send({ paymentStatus: payment.status, otpStage });
   });
 
   /** Poll the rider's Moolre payment status for a completed MOMO ride. */

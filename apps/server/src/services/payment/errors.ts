@@ -16,3 +16,19 @@ export class UnknownPaymentReferenceError extends Error {
     this.externalRef = externalRef;
   }
 }
+
+/**
+ * Thrown when an otpcode is submitted but there's no AWAITING_OTP Payment row
+ * to confirm it against — either no row exists for this externalref, or the
+ * row is in some other state (PENDING/SUCCESS/FAILED). Never calls Moolre in
+ * this case.
+ */
+export class NoAwaitingOtpPaymentError extends Error {
+  readonly externalRef: string;
+
+  constructor(externalRef: string) {
+    super(`No AWAITING_OTP Payment found for externalref ${externalRef}`);
+    this.name = "NoAwaitingOtpPaymentError";
+    this.externalRef = externalRef;
+  }
+}

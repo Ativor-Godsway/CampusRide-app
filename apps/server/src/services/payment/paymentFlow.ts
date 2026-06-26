@@ -2,7 +2,7 @@ import type { PrismaClient, Payment } from "@prisma/client";
 import { splitFare } from "@rida/shared";
 import { isActivePassengerStatus } from "../ride/stateMachine";
 import { isDefiniteFailure, isDefiniteSuccess, type MoolreChannel } from "./constants";
-import { UnknownPaymentReferenceError } from "./errors";
+import { NoAwaitingOtpPaymentError, UnknownPaymentReferenceError } from "./errors";
 import type { PaymentService } from "./PaymentService";
 
 /**
@@ -34,13 +34,68 @@ export interface CollectForRiderInput {
   amountPesewas: number;
   payerPhone: string;
   channel: MoolreChannel;
+  /** Present only on the OTP-confirmation (second) call — the code the rider entered. */
+  otpcode?: string;
 }
 
 /**
- * Initiates (or returns the existing) collection Payment row for a single
- * rider. Idempotent on `collectionExternalRef(rideId, riderId)` — a second
- * call with the same ride/rider returns the existing row without calling the
- * provider again.
+ * Runs (or re-runs) the actual collect() call against an existing Payment row
+ * and applies its outcome. Shared by the first call (payment just created,
+ * status PENDING) and the OTP-confirmation call (payment already
+ * AWAITING_OTP) — the transition logic is identical either way.
+ */
+async function runCollectAttempt(
+  prisma: PrismaClient,
+  paymentService: PaymentService,
+  payment: Payment,
+  input: CollectForRiderInput,
+  externalRef: string,
+): Promise<Payment> {
+  try {
+    const outcome = await paymentService.collect({
+      rideId: input.rideId,
+      payerPhone: input.payerPhone,
+      channel: input.channel,
+      amountPesewas: input.amountPesewas,
+      externalRef,
+      otpcode: input.otpcode,
+    });
+
+    if (outcome.kind === "OTP_REQUIRED") {
+      if (payment.status !== "AWAITING_OTP") {
+        return prisma.payment.update({ where: { id: payment.id }, data: { status: "AWAITING_OTP" } });
+      }
+      // Wrong code on a retry — stays AWAITING_OTP, no-op write.
+      return payment;
+    }
+
+    // PROMPT_SENT — advance to PENDING (awaiting webhook confirmation), persist providerTxId if present.
+    return prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: "PENDING", ...(outcome.providerTxId ? { providerTxId: outcome.providerTxId } : {}) },
+    });
+  } catch (err) {
+    // The provider call itself failed (e.g. auth rejection, duplicate ref) —
+    // the Payment row must not be left stuck PENDING/AWAITING_OTP. Rethrown so
+    // the error (with Moolre's code/message) stays visible in logs rather than swallowed.
+    await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    throw err;
+  }
+}
+
+/**
+ * Initiates (or confirms, or returns the existing) collection Payment row for
+ * a single rider. Idempotent on `collectionExternalRef(rideId, riderId)`:
+ *
+ * - no existing row -> create one and call collect(). If otpcode is somehow
+ *   present here (no row to confirm), throws NoAwaitingOtpPaymentError instead
+ *   of creating a row and calling collect() with a stray otpcode.
+ * - existing row + no otpcode -> genuine duplicate re-submit, return as-is
+ *   (today's double-charge protection, unchanged).
+ * - existing row + otpcode + status AWAITING_OTP -> OTP confirmation; bypasses
+ *   the short-circuit above and re-calls collect() with the same externalRef.
+ * - existing row + otpcode + any other status -> nothing to confirm, throws
+ *   NoAwaitingOtpPaymentError. Never calls Moolre.
  */
 export async function initiateCollection(
   prisma: PrismaClient,
@@ -50,7 +105,20 @@ export async function initiateCollection(
   const externalRef = collectionExternalRef(input.rideId, input.riderId);
 
   const existing = await prisma.payment.findFirst({ where: { providerRef: externalRef } });
-  if (existing) return existing;
+
+  if (existing) {
+    if (!input.otpcode) {
+      return existing;
+    }
+    if (existing.status !== "AWAITING_OTP") {
+      throw new NoAwaitingOtpPaymentError(externalRef);
+    }
+    return runCollectAttempt(prisma, paymentService, existing, input, externalRef);
+  }
+
+  if (input.otpcode) {
+    throw new NoAwaitingOtpPaymentError(externalRef);
+  }
 
   const payment = await prisma.payment.create({
     data: {
@@ -63,29 +131,7 @@ export async function initiateCollection(
     },
   });
 
-  try {
-    const outcome = await paymentService.collect({
-      rideId: input.rideId,
-      payerPhone: input.payerPhone,
-      channel: input.channel,
-      amountPesewas: input.amountPesewas,
-      externalRef,
-    });
-
-    // Both OTP_REQUIRED and PROMPT_SENT mean "awaiting confirmation via
-    // webhook/status check" — neither is a definite outcome yet, so the
-    // Payment row stays PENDING either way (no AWAITING_OTP state this phase).
-    if (outcome.kind === "PROMPT_SENT" && outcome.providerTxId) {
-      return prisma.payment.update({ where: { id: payment.id }, data: { providerTxId: outcome.providerTxId } });
-    }
-    return payment;
-  } catch (err) {
-    // The provider call itself failed (e.g. auth rejection, duplicate ref) —
-    // the Payment row must not be left stuck PENDING. Rethrown so the error
-    // (with Moolre's code/message) stays visible in logs rather than swallowed.
-    await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
-    throw err;
-  }
+  return runCollectAttempt(prisma, paymentService, payment, input, externalRef);
 }
 
 export interface RiderPayer {
@@ -225,6 +271,8 @@ export async function getRidePaymentSummary(prisma: PrismaClient, rideId: string
     } else if (collection?.status === "SUCCESS") {
       status = "COLLECTED";
     } else {
+      // TODO(3c): AWAITING_OTP currently buckets as PENDING here; surface it distinctly
+      // when the UI needs poll-based OTP awareness.
       status = "PENDING";
     }
 
