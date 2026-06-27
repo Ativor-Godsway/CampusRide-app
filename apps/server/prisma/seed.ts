@@ -21,14 +21,36 @@ const zones = [
 ];
 
 async function main() {
-  const existing = await prisma.zone.count();
-  if (existing > 0) {
-    console.log(`Zones already seeded (${existing} found). Skipping.`);
-    return;
+  // Zones — guarded (idempotent): seed only on an empty table.
+  const existingZones = await prisma.zone.count();
+  if (existingZones === 0) {
+    await prisma.zone.createMany({ data: zones });
+    console.log(`Seeded ${zones.length} zones.`);
+  } else {
+    console.log(`Zones already seeded (${existingZones} found). Skipping zone seed.`);
   }
 
-  await prisma.zone.createMany({ data: zones });
-  console.log(`Seeded ${zones.length} zones.`);
+  // Full-mesh ZoneAdjacency (demo scope): every seeded zone adjacent to every
+  // other, BOTH directions. computeEligibleZoneSet (driver.ts) reads adjacency
+  // bidirectionally, so one direction would suffice — but both makes the mesh
+  // explicit and matches the one-way row shape the rest of the code assumes.
+  // A realistic adjacency graph is deferred post-buildathon.
+  // Idempotent: skipDuplicates relies on @@unique([zoneId, adjacentZoneId]).
+  const allZones = await prisma.zone.findMany({ select: { id: true } });
+  const edges: { zoneId: string; adjacentZoneId: string }[] = [];
+  for (const a of allZones) {
+    for (const b of allZones) {
+      if (a.id !== b.id) edges.push({ zoneId: a.id, adjacentZoneId: b.id });
+    }
+  }
+
+  const result = await prisma.zoneAdjacency.createMany({
+    data: edges,
+    skipDuplicates: true,
+  });
+  console.log(
+    `Seeded ${result.count} new ZoneAdjacency rows (${edges.length} edges for ${allZones.length} zones).`,
+  );
 }
 
 main()
