@@ -152,3 +152,21 @@ export function priceSharedRide(occupancy: number): SharedRidePrice {
   const { commission, driverShare } = splitFare(total);
   return { farePerRider, total, commission, driverShare };
 }
+
+/**
+ * Driver's GROSS (85%) share for a completed ride, derived purely from the
+ * fare model — there is no stored per-ride driver share. Pesewas.
+ *
+ * `riders` is the number of riders billed for the ride: always 1 for LONE
+ * (single flat fare); for SHARED, pass the count of riders who actually
+ * COMPLETED the trip (DROPPED_OFF), NOT the ride's raw `occupancy`. `occupancy`
+ * is recomputed on cancels and can understate completers when a rider cancels
+ * after another has already been dropped off (see the driver ride-history
+ * route), so it must not be used here.
+ *
+ * Result is gross accrued, not settled/paid out.
+ */
+export function getDriverGrossForRide(type: "LONE" | "SHARED", riders: number): number {
+  const totalFare = type === "LONE" ? getLoneFare() : getSharedTotalFare(riders);
+  return splitFare(totalFare).driverShare;
+}
