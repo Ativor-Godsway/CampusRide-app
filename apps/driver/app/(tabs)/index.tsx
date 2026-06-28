@@ -480,7 +480,6 @@ export default function DriverHomeScreen() {
   const [claimingRideId, setClaimingRideId] = useState<string | null>(null);
   const [addingRideId, setAddingRideId] = useState<string | null>(null);
   const [actingPassengerId, setActingPassengerId] = useState<string | null>(null);
-  const [completedSummary, setCompletedSummary] = useState<{ occupancy: number } | null>(null);
 
   const isOnline = status === "online" || status === "on_ride";
 
@@ -667,18 +666,17 @@ export default function DriverHomeScreen() {
     [activeRide, actingPassengerId, queryClient],
   );
 
-  // Per-passenger: driver has dropped off this one passenger. If no
-  // passenger remains active, the ride completes server-side — show a brief
-  // summary, then let the driver head back to the online list.
+  // Per-passenger: driver has dropped off this one passenger. If no passenger
+  // remains active, the ride completes server-side; invalidating the active
+  // ride makes it resolve to null on the next read, so the driver returns to
+  // the online browsing list automatically — no completion screen, no tap,
+  // and they stay online (status is never flipped offline).
   const handlePassengerDropoff = useCallback(
     async (passengerId: string) => {
       if (!activeRide || actingPassengerId !== null) return;
       setActingPassengerId(passengerId);
       try {
-        const result = await passengerDropoff(activeRide.id, passengerId);
-        if (result.ride.status === "COMPLETED") {
-          setCompletedSummary({ occupancy: result.ride.occupancy });
-        }
+        await passengerDropoff(activeRide.id, passengerId);
         void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
       } catch {
         Alert.alert("Error", "Could not drop off this passenger. Try again.");
@@ -688,11 +686,6 @@ export default function DriverHomeScreen() {
     },
     [activeRide, actingPassengerId, queryClient],
   );
-
-  const handleDoneWithCompletedRide = useCallback(() => {
-    setCompletedSummary(null);
-    void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
-  }, [queryClient]);
 
   // ─── Loading guard ────────────────────────────────────────────────────────
   // Auth/role/onboarding are already gated by the parent (tabs) layout — by
@@ -708,23 +701,6 @@ export default function DriverHomeScreen() {
 
   const firstName = user.name?.split(" ")[0] ?? "Driver";
   const toggling = availabilityMutation.isPending;
-
-  // ─── Brief completion summary (last dropoff just completed the ride) ───────
-
-  if (completedSummary) {
-    return (
-      <Screen>
-        <View style={fillStyles.completionWrap}>
-          <Ionicons name="checkmark-circle" size={72} color={colors.primary[500]} />
-          <Text variant="h2" style={fillStyles.completionTitle}>Ride complete</Text>
-          <Text variant="bodySmall" color="muted" style={fillStyles.completionBody}>
-            All {completedSummary.occupancy} rider{completedSummary.occupancy !== 1 ? "s" : ""} dropped off.
-          </Text>
-          <Button label="Back to online list" onPress={handleDoneWithCompletedRide} fullWidth />
-        </View>
-      </Screen>
-    );
-  }
 
   // ─── Fill-your-car mode (SHARED: assembling, then driving) ──────────────────
 
@@ -1095,16 +1071,6 @@ const fillStyles = StyleSheet.create({
   statusDotSquare: { borderRadius: radii.sm },
   passengerActionCol: { alignItems: "flex-end", justifyContent: "center" },
   noPassengersNote: { textAlign: "center", paddingVertical: spacing.sm },
-  // Completion summary
-  completionWrap: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.xl,
-  },
-  completionTitle: { textAlign: "center" },
-  completionBody: { textAlign: "center", marginBottom: spacing.md },
   // Suggestions
   suggestionsSection: { marginTop: spacing.sm },
   sectionHeader: {
