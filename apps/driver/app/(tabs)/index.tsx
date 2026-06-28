@@ -286,6 +286,13 @@ function FillYourCarView({
   const suggestions: FillSuggestion[] = isAssembling ? fillData?.suggestions ?? [] : [];
   const isFull = occupancy >= 4;
 
+  // Completed/cancelled passengers drop off the list; the car stays active with
+  // whoever remains. Server keeps the row in createdAt order (stable), so we
+  // never re-sort here — order is locked, first-added on top.
+  const visiblePassengers = passengers.filter(
+    (p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP",
+  );
+
   return (
     <>
       {/* Status banner */}
@@ -316,9 +323,9 @@ function FillYourCarView({
           <OccupancyStepper current={occupancy} max={4} />
         </View>
 
-        {passengers.length > 0 ? (
+        {visiblePassengers.length > 0 ? (
           <View style={fillStyles.passengerList}>
-            {passengers.map((p) => (
+            {visiblePassengers.map((p) => (
               <PassengerRow
                 key={p.id}
                 passenger={p}
