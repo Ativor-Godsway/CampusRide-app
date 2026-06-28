@@ -275,6 +275,12 @@ function FillYourCarView({
   onPassengerDropoff,
   onPassengerCancel,
 }: FillYourCarProps) {
+  // Pickup -> dropoff filter for the addable pending-requests list (same model
+  // as the home browsing filter). Filters which requests can be added; it
+  // never touches the passengers already in the car.
+  const [suggPickup, setSuggPickup] = useState<string>(ALL_FILTER);
+  const [suggDropoff, setSuggDropoff] = useState<string>(ALL_FILTER);
+
   // Assembling = car still open to new adds (MATCHED/ARRIVED). Driving =
   // IN_PROGRESS, car closed — the first passenger pickup already walked the
   // ride here automatically, so there is no ride-level "Depart" button.
@@ -289,6 +295,25 @@ function FillYourCarView({
   const occupancy = isAssembling ? fillData?.occupancy ?? ride.occupancy : ride.occupancy;
   const suggestions: FillSuggestion[] = isAssembling ? fillData?.suggestions ?? [] : [];
   const isFull = occupancy >= 4;
+
+  // Dependent pickup -> dropoff filter over the suggestions, with the same
+  // effective-value guard as the home list (a value not in the live options
+  // falls back to ALL, so the list never freezes on a stale selection).
+  const suggPickupOptions = distinctSorted(suggestions.map((s) => s.pickupZoneName));
+  const effSuggPickup = suggPickupOptions.includes(suggPickup) ? suggPickup : ALL_FILTER;
+  const suggDropoffPool =
+    effSuggPickup === ALL_FILTER
+      ? suggestions
+      : suggestions.filter((s) => s.pickupZoneName === effSuggPickup);
+  const suggDropoffOptions = distinctSorted(suggDropoffPool.map((s) => s.dropoffZoneName));
+  const effSuggDropoff = suggDropoffOptions.includes(suggDropoff) ? suggDropoff : ALL_FILTER;
+  const visibleSuggestions = suggDropoffPool.filter(
+    (s) => effSuggDropoff === ALL_FILTER || s.dropoffZoneName === effSuggDropoff,
+  );
+  const selectSuggPickup = (value: string) => {
+    setSuggPickup(value);
+    setSuggDropoff(ALL_FILTER);
+  };
 
   // Apply the optimistic overlay so a tapped row advances instantly, then drop
   // completed/cancelled passengers (the car stays active with whoever remains).
@@ -355,10 +380,28 @@ function FillYourCarView({
             <Text variant="label" color="muted">NEARBY REQUESTS</Text>
             {!isFull && (
               <View style={fillStyles.sectionCount}>
-                <Text variant="caption" color="muted">{suggestions.length}</Text>
+                <Text variant="caption" color="muted">{visibleSuggestions.length}</Text>
               </View>
             )}
           </View>
+
+          {/* Filter the addable requests only — never the in-car passengers. */}
+          {!isFull && suggestions.length > 0 && (
+            <View style={fillStyles.suggFilters}>
+              <FilterChipRow
+                label="Pickup"
+                options={suggPickupOptions}
+                selected={effSuggPickup}
+                onSelect={selectSuggPickup}
+              />
+              <FilterChipRow
+                label="Dropoff"
+                options={suggDropoffOptions}
+                selected={effSuggDropoff}
+                onSelect={setSuggDropoff}
+              />
+            </View>
+          )}
 
           {isFull ? (
             <View style={fillStyles.fullBanner}>
@@ -369,8 +412,12 @@ function FillYourCarView({
             <View style={fillStyles.emptySuggestions}>
               <Text variant="bodySmall" color="muted">No compatible requests nearby right now.</Text>
             </View>
+          ) : visibleSuggestions.length === 0 ? (
+            <View style={fillStyles.emptySuggestions}>
+              <Text variant="bodySmall" color="muted">No requests match this pickup and dropoff.</Text>
+            </View>
           ) : (
-            suggestions.map((s) => (
+            visibleSuggestions.map((s) => (
               <SuggestionCard
                 key={s.requestRideId}
                 suggestion={s}
@@ -1126,6 +1173,7 @@ const fillStyles = StyleSheet.create({
   noPassengersNote: { textAlign: "center", paddingVertical: spacing.sm },
   // Suggestions
   suggestionsSection: { marginTop: spacing.sm },
+  suggFilters: { gap: spacing.sm, marginBottom: spacing.md },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
