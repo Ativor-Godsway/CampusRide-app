@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, PassengerStatus, RideSource } from "@rida/shared";
-import { getLoneFare, getSharedFarePerRider, splitFare, designateBestFit, PRICING } from "@rida/shared";
+import { getLoneFare, getSharedFarePerRider, getSharedTotalFare, getDriverGrossForRide, splitFare, designateBestFit, PRICING } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { claimRide } from "../services/ride/dispatch";
 import { departRide, addRiderToCar } from "../services/ride/assembly";
@@ -207,6 +207,64 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         })),
       },
     });
+  });
+
+  /**
+   * Read-only completed-ride history for the authenticated driver, newest
+   * first. Earnings are DERIVED from the fixed fare model (no stored per-ride
+   * driver share exists, and the CommissionLedger stores the platform's cut,
+   * not the driver's) — gross accrued, not settled/paid out.
+   *
+   * SHARED gross is derived from the count of riders who actually completed
+   * (DROPPED_OFF passengers), not the ride's raw `occupancy`: occupancy is
+   * recomputed on cancels and can understate completers when a rider cancels
+   * after another has already been dropped off.
+   */
+  app.get("/driver/rides/history", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+
+    const userId = request.user!.userId;
+
+    const rides = await prisma.ride.findMany({
+      where: { driverId: userId, status: "COMPLETED" },
+      include: {
+        pickupZone: { select: { name: true } },
+        dropoffZone: { select: { name: true } },
+        passengers: { select: { status: true } },
+      },
+      orderBy: { completedAt: "desc" },
+    });
+
+    const items = rides.map((ride) => {
+      // LONE: always exactly 1 rider (its ride-level /complete never marks the
+      // passenger DROPPED_OFF). SHARED: count the riders who actually finished.
+      // Clamp to the valid 1–4 seat range purely defensively — completion
+      // guarantees at least one DROPPED_OFF, and seats cap at 4.
+      const droppedOff = ride.passengers.filter((p) => p.status === "DROPPED_OFF").length;
+      const riders =
+        ride.type === "LONE" ? 1 : Math.min(PRICING.MAX_SHARED_OCCUPANCY, Math.max(1, droppedOff));
+
+      const facePesewas = ride.type === "LONE" ? getLoneFare() : getSharedTotalFare(riders);
+      const driverGrossPesewas = getDriverGrossForRide(ride.type, riders);
+
+      return {
+        rideId: ride.id,
+        pickupZoneName: ride.pickupZone.name,
+        dropoffZoneName: ride.dropoffZone.name,
+        type: ride.type as "LONE" | "SHARED",
+        source: ride.source as "APP" | "USSD",
+        completedAt: (ride.completedAt ?? ride.createdAt).toISOString(),
+        facePesewas,
+        driverGrossPesewas,
+      };
+    });
+
+    const summary = {
+      totalRides: items.length,
+      totalGrossPesewas: items.reduce((sum, i) => sum + i.driverGrossPesewas, 0),
+    };
+
+    return reply.code(200).send({ rides: items, summary });
   });
 
   /**
