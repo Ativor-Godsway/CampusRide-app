@@ -1,4 +1,4 @@
-import type { PassengerStatus, Ride, RideType, Zone } from "@rida/shared";
+import type { PassengerStatus, Ride, RideSource, RideType, Zone } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
 export interface DriverProfile {
@@ -101,6 +101,39 @@ export interface EligibleRideItem {
 export async function getEligibleRides(): Promise<EligibleRideItem[]> {
   const res = await api.get<{ rides: EligibleRideItem[] }>("/driver/rides/eligible");
   return res.data.rides;
+}
+
+// ─── Completed-ride history (read-only, derived earnings) ────────────────────
+
+export interface DriverRideHistoryItem {
+  rideId: string;
+  pickupZoneName: string;
+  dropoffZoneName: string;
+  type: RideType;
+  source: RideSource;
+  /** ISO timestamp the ride was marked COMPLETED. */
+  completedAt: string;
+  /** Face fare for the ride in pesewas (fixed model). */
+  facePesewas: number;
+  /** Driver's derived gross (85%) share in pesewas — accrued, not paid out. */
+  driverGrossPesewas: number;
+}
+
+export interface DriverRideHistorySummary {
+  totalRides: number;
+  /** Sum of per-ride driver gross, pesewas. Gross accrued, not settled. */
+  totalGrossPesewas: number;
+}
+
+export interface DriverRideHistory {
+  rides: DriverRideHistoryItem[];
+  summary: DriverRideHistorySummary;
+}
+
+/** Fetch the authenticated driver's completed rides + derived earnings summary. */
+export async function getDriverRideHistory(): Promise<DriverRideHistory> {
+  const res = await api.get<DriverRideHistory>("/driver/rides/history");
+  return res.data;
 }
 
 // ─── Fill-your-car assembly (Phase 6b-2) ─────────────────────────────────────
