@@ -33,6 +33,40 @@ export async function submitDriverProfile(input: SubmitDriverProfileInput): Prom
   return res.data.driver;
 }
 
+/** Full driver profile (name from User + vehicle/photo from Driver). */
+export interface DriverProfileFull {
+  name: string;
+  phone: string;
+  carMake: string | null;
+  carModel: string | null;
+  carColor: string | null;
+  plate: string | null;
+  photoUrl: string | null;
+  isApproved: boolean;
+  isOnline: boolean;
+}
+
+/**
+ * Partial profile edit. Every provided field must be non-empty (the server
+ * rejects empty name and empty vehicle fields). Omitted fields are left as-is.
+ */
+export interface UpdateDriverProfileInput {
+  name?: string;
+  carMake?: string;
+  carModel?: string;
+  carColor?: string;
+  plate?: string;
+  photoUrl?: string;
+}
+
+/** Patch the driver's profile (PATCH /driver/profile). Caller should refreshMe() after. */
+export async function updateDriverProfile(
+  input: UpdateDriverProfileInput,
+): Promise<DriverProfileFull> {
+  const res = await api.patch<{ profile: DriverProfileFull }>("/driver/profile", input);
+  return res.data.profile;
+}
+
 /** Set the driver online/offline and optionally update their current zone. */
 export async function setDriverAvailability(
   isOnline: boolean,

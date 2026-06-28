@@ -99,6 +99,7 @@
 - Multi-campus expansion.
 - Push notifications.
 - Per-car rider consent (auto-enroll for now — locked decision from Phase 2d).
+- **Signed / server-side Cloudinary uploads.** Driver profile-photo upload currently uses an UNSIGNED Cloudinary preset, uploading client-direct from Expo (cloud name + preset are public `EXPO_PUBLIC_*` values, no secret in the bundle). Post-buildathon, move this to a signed, server-side upload (server holds the Cloudinary API secret and either signs the params or proxies the upload) so the preset can't be abused for arbitrary unsigned uploads.
 
 ---
 
