@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "expo-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -39,6 +39,7 @@ import {
   spacing,
   typography,
   useAuth,
+  useToast,
 } from "@rida/mobile-shared";
 import type {
   EligibleRideItem,
@@ -100,10 +101,9 @@ function OccupancyStepper({ current, max }: { current: number; max: number }) {
 }
 
 interface PassengerRowProps {
+  /** Status reflects the optimistic overlay, so the button advances instantly
+   * on tap; no per-row spinner. */
   passenger: PassengerInCar;
-  /** Independent per-row loading state, keyed by passengerId by the caller —
-   * never a single shared boolean, so multiple rows stay tappable at once. */
-  acting: boolean;
   onArrived: () => void;
   onPickup: () => void;
   onDropoff: () => void;
@@ -180,7 +180,7 @@ function PassengerStatusPill({ status }: { status: PassengerInCar["status"] }) {
   );
 }
 
-function PassengerRow({ passenger, acting, onArrived, onPickup, onDropoff }: PassengerRowProps) {
+function PassengerRow({ passenger, onArrived, onPickup, onDropoff }: PassengerRowProps) {
   return (
     <View style={fillStyles.passengerRow}>
       <View style={fillStyles.passengerMarkerCol}>
@@ -200,18 +200,13 @@ function PassengerRow({ passenger, acting, onArrived, onPickup, onDropoff }: Pas
       </View>
       <View style={fillStyles.passengerActionCol}>
         {passenger.status === "WAITING" && (
-          <Button
-            label={acting ? "…" : "I'm here"}
-            variant="secondary"
-            loading={acting}
-            onPress={onArrived}
-          />
+          <Button label="I'm here" variant="secondary" onPress={onArrived} />
         )}
         {passenger.status === "ARRIVED" && (
-          <Button label={acting ? "…" : "Start pickup"} loading={acting} onPress={onPickup} />
+          <Button label="Start pickup" onPress={onPickup} />
         )}
         {passenger.status === "PICKED_UP" && (
-          <Button label={acting ? "…" : "Drop off"} loading={acting} onPress={onDropoff} />
+          <Button label="Drop off" onPress={onDropoff} />
         )}
         {passenger.status === "DROPPED_OFF" && (
           <Ionicons name="checkmark-circle" size={24} color={colors.primary[500]} />
@@ -252,9 +247,8 @@ interface FillYourCarProps {
   ride: RideWithZones;
   fillData: FillSuggestionsResult | undefined;
   addingRideId: string | null;
-  /** The one passenger row currently mid-action, if any — independent of
-   * addingRideId so suggestion-adding and passenger actions never block each other. */
-  actingPassengerId: string | null;
+  /** Optimistic per-passenger status overlay (passengerId -> advanced status). */
+  optimistic: Record<string, PassengerInCar["status"]>;
   onAddPassenger: (requestRideId: string) => void;
   onPassengerArrived: (passengerId: string) => void;
   onPassengerPickup: (passengerId: string) => void;
@@ -265,7 +259,7 @@ function FillYourCarView({
   ride,
   fillData,
   addingRideId,
-  actingPassengerId,
+  optimistic,
   onAddPassenger,
   onPassengerArrived,
   onPassengerPickup,
@@ -286,12 +280,13 @@ function FillYourCarView({
   const suggestions: FillSuggestion[] = isAssembling ? fillData?.suggestions ?? [] : [];
   const isFull = occupancy >= 4;
 
-  // Completed/cancelled passengers drop off the list; the car stays active with
-  // whoever remains. Server keeps the row in createdAt order (stable), so we
-  // never re-sort here — order is locked, first-added on top.
-  const visiblePassengers = passengers.filter(
-    (p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP",
-  );
+  // Apply the optimistic overlay so a tapped row advances instantly, then drop
+  // completed/cancelled passengers (the car stays active with whoever remains).
+  // Server keeps rows in createdAt order (stable), so we never re-sort here —
+  // order is locked, first-added on top.
+  const visiblePassengers = passengers
+    .map((p) => ({ ...p, status: optimistic[p.id] ?? p.status }))
+    .filter((p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP");
 
   return (
     <>
@@ -329,7 +324,6 @@ function FillYourCarView({
               <PassengerRow
                 key={p.id}
                 passenger={p}
-                acting={actingPassengerId === p.id}
                 onArrived={() => onPassengerArrived(p.id)}
                 onPickup={() => onPassengerPickup(p.id)}
                 onDropoff={() => onPassengerDropoff(p.id)}
@@ -479,7 +473,12 @@ export default function DriverHomeScreen() {
   const [dropoffFilter, setDropoffFilter] = useState<string>(ALL_FILTER);
   const [claimingRideId, setClaimingRideId] = useState<string | null>(null);
   const [addingRideId, setAddingRideId] = useState<string | null>(null);
-  const [actingPassengerId, setActingPassengerId] = useState<string | null>(null);
+  // Optimistic per-passenger status overlay (passengerId -> advanced status),
+  // applied over server data; cleared once the server catches up, or rolled
+  // back on failure. inFlightRef serializes actions per passenger.
+  const [optimistic, setOptimistic] = useState<Record<string, PassengerInCar["status"]>>({});
+  const inFlightRef = useRef<Set<string>>(new Set());
+  const { showToast, toast } = useToast();
 
   const isOnline = status === "online" || status === "on_ride";
 
@@ -628,63 +627,75 @@ export default function DriverHomeScreen() {
     [activeRide, addingRideId, queryClient, refetchFill],
   );
 
-  // Per-passenger: driver has arrived at this one passenger's pickup. No
-  // ride-level effect — only this row updates.
+  // Optimistic per-passenger transition: advance the row instantly, fire the
+  // request in the background, and on failure silently roll back + toast. One
+  // in-flight action per passenger so a rapid second tap can't outrun the
+  // server's ordering. The overlay is cleared only after the refreshed server
+  // data has caught up (await the refetch), so there is no backward flicker.
+  const runTransition = useCallback(
+    async (
+      passengerId: string,
+      target: PassengerInCar["status"],
+      call: (rideId: string) => Promise<unknown>,
+      failMessage: string,
+    ) => {
+      if (!activeRide || inFlightRef.current.has(passengerId)) return;
+      const rideId = activeRide.id;
+      inFlightRef.current.add(passengerId);
+      setOptimistic((prev) => ({ ...prev, [passengerId]: target }));
+      const clear = () =>
+        setOptimistic((prev) => {
+          const next = { ...prev };
+          delete next[passengerId];
+          return next;
+        });
+      try {
+        await call(rideId);
+        await queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
+        // Assembling shows the polled fill list; refresh it too before clearing.
+        if (assembling) await refetchFill();
+        clear();
+      } catch {
+        clear();
+        showToast(failMessage);
+      } finally {
+        inFlightRef.current.delete(passengerId);
+      }
+    },
+    [activeRide, assembling, queryClient, refetchFill, showToast],
+  );
+
   const handlePassengerArrived = useCallback(
-    async (passengerId: string) => {
-      if (!activeRide || actingPassengerId !== null) return;
-      setActingPassengerId(passengerId);
-      try {
-        await passengerArrived(activeRide.id, passengerId);
-        void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
-      } catch {
-        Alert.alert("Error", "Could not mark this passenger arrived. Try again.");
-      } finally {
-        setActingPassengerId(null);
-      }
-    },
-    [activeRide, actingPassengerId, queryClient],
+    (passengerId: string) =>
+      void runTransition(
+        passengerId,
+        "ARRIVED",
+        (rideId) => passengerArrived(rideId, passengerId),
+        "Couldn't mark arrived — reverted",
+      ),
+    [runTransition],
   );
 
-  // Per-passenger: driver has picked up this one passenger. If this is the
-  // ride's first pickup, the ride itself walks to IN_PROGRESS server-side —
-  // invalidating driverActiveRide picks that up on the next read, no
-  // separate "depart" call needed.
   const handlePassengerPickup = useCallback(
-    async (passengerId: string) => {
-      if (!activeRide || actingPassengerId !== null) return;
-      setActingPassengerId(passengerId);
-      try {
-        await passengerPickup(activeRide.id, passengerId);
-        void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
-      } catch {
-        Alert.alert("Error", "Could not start pickup. Try again.");
-      } finally {
-        setActingPassengerId(null);
-      }
-    },
-    [activeRide, actingPassengerId, queryClient],
+    (passengerId: string) =>
+      void runTransition(
+        passengerId,
+        "PICKED_UP",
+        (rideId) => passengerPickup(rideId, passengerId),
+        "Couldn't start pickup — reverted",
+      ),
+    [runTransition],
   );
 
-  // Per-passenger: driver has dropped off this one passenger. If no passenger
-  // remains active, the ride completes server-side; invalidating the active
-  // ride makes it resolve to null on the next read, so the driver returns to
-  // the online browsing list automatically — no completion screen, no tap,
-  // and they stay online (status is never flipped offline).
   const handlePassengerDropoff = useCallback(
-    async (passengerId: string) => {
-      if (!activeRide || actingPassengerId !== null) return;
-      setActingPassengerId(passengerId);
-      try {
-        await passengerDropoff(activeRide.id, passengerId);
-        void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
-      } catch {
-        Alert.alert("Error", "Could not drop off this passenger. Try again.");
-      } finally {
-        setActingPassengerId(null);
-      }
-    },
-    [activeRide, actingPassengerId, queryClient],
+    (passengerId: string) =>
+      void runTransition(
+        passengerId,
+        "DROPPED_OFF",
+        (rideId) => passengerDropoff(rideId, passengerId),
+        "Couldn't drop off — reverted",
+      ),
+    [runTransition],
   );
 
   // ─── Loading guard ────────────────────────────────────────────────────────
@@ -706,7 +717,8 @@ export default function DriverHomeScreen() {
 
   if (filling && activeRide) {
     return (
-      <Screen scroll>
+      <View style={styles.screenRoot}>
+        <Screen scroll>
         <View style={styles.header}>
           <View>
             <Text variant="bodySmall" color="muted">{assembling ? "Assembling" : "Driving"}</Text>
@@ -731,13 +743,15 @@ export default function DriverHomeScreen() {
           ride={activeRide}
           fillData={fillData}
           addingRideId={addingRideId}
-          actingPassengerId={actingPassengerId}
+          optimistic={optimistic}
           onAddPassenger={(rideId) => void handleAddPassenger(rideId)}
           onPassengerArrived={(passengerId) => void handlePassengerArrived(passengerId)}
           onPassengerPickup={(passengerId) => void handlePassengerPickup(passengerId)}
           onPassengerDropoff={(passengerId) => void handlePassengerDropoff(passengerId)}
         />
-      </Screen>
+        </Screen>
+        {toast}
+      </View>
     );
   }
 
@@ -907,6 +921,8 @@ export default function DriverHomeScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  // Wraps the fill-your-car Screen so the toast can pin to the viewport bottom.
+  screenRoot: { flex: 1 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
