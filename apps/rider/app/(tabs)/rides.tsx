@@ -95,17 +95,24 @@ export default function RidesTab() {
         {data.map((ride, index) => {
           const status = STATUS_BADGE[ride.status];
           const isActive = ACTIVE_STATUSES.includes(ride.status);
+          // #7: a request absorbed into another car (CANCELLED / MERGED) is
+          // still resumable — tap follows the pointer to the anchor ride.
+          const isMerged =
+            ride.status === "CANCELLED" &&
+            ride.cancelReason === "MERGED_INTO_ANOTHER_RIDE" &&
+            !!ride.mergedIntoRideId;
+          const isResumable = isActive || isMerged;
           return (
             <View key={ride.id}>
               <Pressable
-                style={({ pressed }) => [styles.row, pressed && isActive && styles.pressed]}
+                style={({ pressed }) => [styles.row, pressed && isResumable && styles.pressed]}
                 onPress={
-                  isActive
+                  isResumable
                     ? () =>
                         router.push({
                           pathname: "/ride/type",
                           params: {
-                            rideId: ride.id,
+                            rideId: ride.mergedIntoRideId ?? ride.id,
                             pickupZoneId: ride.pickupZoneId,
                             dropoffZoneId: ride.dropoffZoneId,
                             pickupZoneName: ride.pickupZone.name,
@@ -118,7 +125,7 @@ export default function RidesTab() {
                         })
                     : undefined
                 }
-                accessibilityRole={isActive ? "button" : undefined}
+                accessibilityRole={isResumable ? "button" : undefined}
               >
                 <ListRow.Icon
                   name={ride.type === "SHARED" ? "people-outline" : "person-outline"}

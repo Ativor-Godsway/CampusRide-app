@@ -128,6 +128,22 @@ export default function RideTypeScreen() {
     return () => clearInterval(interval);
   }, [ride?.status]);
 
+  // #7 merged-rider reach: this request may have been absorbed into another
+  // driver's car (CANCELLED / MERGED_INTO_ANOTHER_RIDE). Follow the pointer to
+  // the anchor ride so useRideTracking listens on the correct room and
+  // per-passenger events reach us. Anchor riders never hit this (their ride is
+  // never merged).
+  const isMerged =
+    ride?.status === "CANCELLED" &&
+    ride.cancelReason === "MERGED_INTO_ANOTHER_RIDE" &&
+    !!ride.mergedIntoRideId;
+
+  useEffect(() => {
+    if (isMerged && ride?.mergedIntoRideId && ride.mergedIntoRideId !== activeRideId) {
+      setActiveRideId(ride.mergedIntoRideId);
+    }
+  }, [isMerged, ride?.mergedIntoRideId, activeRideId]);
+
   // ── Fares ───────────────────────────────────────────────────────────────────
   // Flat per-rider SHARED fare — getSharedFarePerRider(occupancy) now returns
   // the same 500 pesewas regardless of which occupancy (1-4) is passed in.
@@ -286,9 +302,16 @@ export default function RideTypeScreen() {
             />
           )}
 
-          {activeRideId !== null && (
+          {activeRideId !== null &&
+            (myPassenger?.status === "CANCELLED" ? (
+              <CancelledContent
+                onDone={() => router.replace("/")}
+                title="Driver cancelled"
+                message="Your driver cancelled your pickup. Please request a ride again."
+              />
+            ) : (
             <>
-              {(!ride || ride.status === "REQUESTED") && (
+              {(!ride || ride.status === "REQUESTED" || isMerged) && (
                 <SearchingContent
                   pickupZoneName={params.pickupZoneName}
                   dropoffZoneName={params.dropoffZoneName}
@@ -335,9 +358,11 @@ export default function RideTypeScreen() {
                 />
               )}
 
-              {ride?.status === "CANCELLED" && <CancelledContent onDone={() => router.replace("/")} />}
+              {ride?.status === "CANCELLED" && !isMerged && (
+                <CancelledContent onDone={() => router.replace("/")} />
+              )}
             </>
-          )}
+            ))}
         </BottomSheetScrollView>
       </BottomSheet>
     </View>
@@ -1151,7 +1176,15 @@ function CompletedContent({
   );
 }
 
-function CancelledContent({ onDone }: { onDone: () => void }) {
+function CancelledContent({
+  onDone,
+  title = "Ride cancelled",
+  message = "Your request has been cancelled.",
+}: {
+  onDone: () => void;
+  title?: string;
+  message?: string;
+}) {
   return (
     <View style={styles.section}>
       <View style={styles.stateHeader}>
@@ -1163,9 +1196,9 @@ function CancelledContent({ onDone }: { onDone: () => void }) {
           color={colors.error}
         />
         <View style={styles.stateHeading}>
-          <Text variant="h2">Ride cancelled</Text>
+          <Text variant="h2">{title}</Text>
           <Text variant="bodySmall" color="muted">
-            Your request has been cancelled.
+            {message}
           </Text>
         </View>
       </View>
