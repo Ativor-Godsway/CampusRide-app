@@ -29,7 +29,8 @@ export type RideCancelReason =
   | "RIDER_CANCELLED"
   | "DRIVER_BACKED_OUT"
   | "NO_DRIVERS_AVAILABLE"
-  | "ALL_PASSENGERS_LEFT";
+  | "ALL_PASSENGERS_LEFT"
+  | "MERGED_INTO_ANOTHER_RIDE";
 
 export interface Ride {
   id: string;
@@ -46,6 +47,9 @@ export interface Ride {
   paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethod;
   cancelReason: RideCancelReason | null;
+  /** Set when this request was absorbed into another car (CANCELLED /
+   *  MERGED_INTO_ANOTHER_RIDE) — points at the anchor ride to follow. */
+  mergedIntoRideId: string | null;
   createdAt: Date;
   departedAt: Date | null;
   completedAt: Date | null;
