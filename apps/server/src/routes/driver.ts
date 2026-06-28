@@ -268,6 +268,70 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   });
 
   /**
+   * Partial profile update for the authenticated driver — name (on User) and
+   * vehicle fields + photoUrl (on Driver), each optional. Pure profile CRUD;
+   * no money or state-machine effects.
+   *
+   * Every provided field must be a non-empty string: rejecting an empty name
+   * preserves the required-name invariant, and rejecting empty vehicle fields
+   * preserves the "complete profile" invariant that going online depends on
+   * (see PATCH /driver/availability). Fields that are omitted are left as-is.
+   */
+  app.patch("/driver/profile", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+
+    const userId = request.user!.userId;
+    const body = (request.body ?? {}) as Record<string, unknown>;
+
+    const TEXT_FIELDS = ["name", "carMake", "carModel", "carColor", "plate", "photoUrl"] as const;
+    type TextField = (typeof TEXT_FIELDS)[number];
+
+    // Collect only the keys actually present in the body. A present field must
+    // be a non-empty (post-trim) string, else 400 — never silently dropped.
+    const provided: Partial<Record<TextField, string>> = {};
+    for (const field of TEXT_FIELDS) {
+      if (!(field in body)) continue;
+      const value = body[field];
+      if (typeof value !== "string" || value.trim().length === 0) {
+        return reply.code(400).send({ error: `${field} must be a non-empty string` });
+      }
+      // Plate is normalized to uppercase to match onboarding (completeDriverProfile).
+      provided[field] = field === "plate" ? value.trim().toUpperCase() : value.trim();
+    }
+
+    if (Object.keys(provided).length === 0) {
+      return reply.code(400).send({ error: "At least one field is required to update" });
+    }
+
+    const { name, ...driverFields } = provided;
+
+    const user = await prisma.$transaction(async (tx) => {
+      if (name !== undefined) {
+        await tx.user.update({ where: { id: userId }, data: { name } });
+      }
+      if (Object.keys(driverFields).length > 0) {
+        await tx.driver.update({ where: { userId }, data: driverFields });
+      }
+      return tx.user.findUniqueOrThrow({ where: { id: userId }, include: { driver: true } });
+    });
+
+    const driver = user.driver;
+    return reply.code(200).send({
+      profile: {
+        name: user.name,
+        phone: user.phone,
+        carMake: driver?.carMake ?? null,
+        carModel: driver?.carModel ?? null,
+        carColor: driver?.carColor ?? null,
+        plate: driver?.plate ?? null,
+        photoUrl: driver?.photoUrl ?? null,
+        isApproved: driver?.isApproved ?? false,
+        isOnline: driver?.isOnline ?? false,
+      },
+    });
+  });
+
+  /**
    * Atomically claim a REQUESTED ride (first-to-claim-wins).
    * On success emits ride:status (MATCHED) + ride:driver_assigned to the ride room.
    */
