@@ -136,3 +136,4 @@ stale online state without a fresh zone). Post-buildathon: either block
 going online until a zone resolves, or surface a "location needed" state in
 the driver app instead of an empty ride list. Demo mitigation: confirm the
 demo driver row has a non-null `currentZoneId` before presenting.
+Yesrt
