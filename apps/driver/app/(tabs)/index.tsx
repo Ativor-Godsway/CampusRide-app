@@ -34,6 +34,7 @@ import {
   passengerArrived,
   passengerPickup,
   passengerDropoff,
+  passengerCancel,
   RouteStops,
   shadows,
   spacing,
@@ -107,6 +108,8 @@ interface PassengerRowProps {
   onArrived: () => void;
   onPickup: () => void;
   onDropoff: () => void;
+  /** Cancel is offered for WAITING only — gone once "I'm here" is tapped. */
+  onCancel: () => void;
 }
 
 /**
@@ -180,7 +183,7 @@ function PassengerStatusPill({ status }: { status: PassengerInCar["status"] }) {
   );
 }
 
-function PassengerRow({ passenger, onArrived, onPickup, onDropoff }: PassengerRowProps) {
+function PassengerRow({ passenger, onArrived, onPickup, onDropoff, onCancel }: PassengerRowProps) {
   return (
     <View style={fillStyles.passengerRow}>
       <View style={fillStyles.passengerMarkerCol}>
@@ -200,7 +203,12 @@ function PassengerRow({ passenger, onArrived, onPickup, onDropoff }: PassengerRo
       </View>
       <View style={fillStyles.passengerActionCol}>
         {passenger.status === "WAITING" && (
-          <Button label="I'm here" variant="secondary" onPress={onArrived} />
+          <View style={fillStyles.waitingActions}>
+            <Button label="I'm here" variant="secondary" onPress={onArrived} />
+            <Pressable onPress={onCancel} hitSlop={8} accessibilityRole="button">
+              <Text variant="caption" style={fillStyles.cancelText}>Cancel</Text>
+            </Pressable>
+          </View>
         )}
         {passenger.status === "ARRIVED" && (
           <Button label="Start pickup" onPress={onPickup} />
@@ -253,6 +261,7 @@ interface FillYourCarProps {
   onPassengerArrived: (passengerId: string) => void;
   onPassengerPickup: (passengerId: string) => void;
   onPassengerDropoff: (passengerId: string) => void;
+  onPassengerCancel: (passengerId: string) => void;
 }
 
 function FillYourCarView({
@@ -264,6 +273,7 @@ function FillYourCarView({
   onPassengerArrived,
   onPassengerPickup,
   onPassengerDropoff,
+  onPassengerCancel,
 }: FillYourCarProps) {
   // Assembling = car still open to new adds (MATCHED/ARRIVED). Driving =
   // IN_PROGRESS, car closed — the first passenger pickup already walked the
@@ -327,6 +337,7 @@ function FillYourCarView({
                 onArrived={() => onPassengerArrived(p.id)}
                 onPickup={() => onPassengerPickup(p.id)}
                 onDropoff={() => onPassengerDropoff(p.id)}
+                onCancel={() => onPassengerCancel(p.id)}
               />
             ))}
           </View>
@@ -698,6 +709,29 @@ export default function DriverHomeScreen() {
     [runTransition],
   );
 
+  // Cancel before pickup (WAITING only). Confirm first — it drops the rider
+  // from the car and notifies them — then run it through the same optimistic
+  // path (row disappears instantly; reverts + toast on failure).
+  const handlePassengerCancel = useCallback(
+    (passengerId: string) => {
+      Alert.alert("Remove rider?", "They'll be told their pickup was cancelled.", [
+        { text: "Keep", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () =>
+            void runTransition(
+              passengerId,
+              "CANCELLED",
+              (rideId) => passengerCancel(rideId, passengerId),
+              "Couldn't cancel — reverted",
+            ),
+        },
+      ]);
+    },
+    [runTransition],
+  );
+
   // ─── Loading guard ────────────────────────────────────────────────────────
   // Auth/role/onboarding are already gated by the parent (tabs) layout — by
   // the time this screen renders, the user is a confirmed onboarded driver.
@@ -748,6 +782,7 @@ export default function DriverHomeScreen() {
           onPassengerArrived={(passengerId) => void handlePassengerArrived(passengerId)}
           onPassengerPickup={(passengerId) => void handlePassengerPickup(passengerId)}
           onPassengerDropoff={(passengerId) => void handlePassengerDropoff(passengerId)}
+          onPassengerCancel={(passengerId) => handlePassengerCancel(passengerId)}
         />
         </Screen>
         {toast}
@@ -1086,6 +1121,8 @@ const fillStyles = StyleSheet.create({
   statusDotRound: { borderRadius: radii.full },
   statusDotSquare: { borderRadius: radii.sm },
   passengerActionCol: { alignItems: "flex-end", justifyContent: "center" },
+  waitingActions: { alignItems: "flex-end", gap: spacing.xs },
+  cancelText: { color: colors.danger, fontWeight: typography.weight.semibold },
   noPassengersNote: { textAlign: "center", paddingVertical: spacing.sm },
   // Suggestions
   suggestionsSection: { marginTop: spacing.sm },

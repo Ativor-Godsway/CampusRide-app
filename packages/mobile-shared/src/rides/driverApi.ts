@@ -294,3 +294,17 @@ export async function passengerDropoff(
   );
   return res.data;
 }
+
+/**
+ * Cancel a passenger before pickup (WAITING -> CANCELLED). Server enforces
+ * WAITING-only and broadcasts the cancellation to the rider.
+ */
+export async function passengerCancel(
+  rideId: string,
+  passengerId: string,
+): Promise<PassengerLifecycleResult> {
+  const res = await api.post<PassengerLifecycleResult>(
+    `/rides/${rideId}/passengers/${passengerId}/cancel`,
+  );
+  return res.data;
+}
