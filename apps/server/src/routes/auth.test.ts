@@ -88,6 +88,47 @@ describe("auth routes — signup + login round trip", () => {
     expect(loginBody.user.id).toBe(signupBody.user.id);
   });
 
+  it("includes the driver profile (with carMake) in a DRIVER's login response", async () => {
+    const phone = newPhone();
+    const signupVerifiedToken = await requestAndVerify(phone, "SIGNUP");
+
+    const signupRes = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      payload: { phone, name: "Onboarded Driver", role: "DRIVER", verifiedToken: signupVerifiedToken },
+    });
+    expect(signupRes.statusCode).toBe(201);
+    const signupBody = JSON.parse(signupRes.body);
+    userIds.push(signupBody.user.id);
+    // A freshly signed-up driver has a driver row but a null carMake.
+    expect(signupBody.user.driver).not.toBeNull();
+    expect(signupBody.user.driver.carMake).toBeNull();
+
+    // Complete onboarding so carMake is non-null — the field the driver app's
+    // onboarding gate reads.
+    const profileRes = await app.inject({
+      method: "POST",
+      url: "/driver/profile",
+      headers: { authorization: `Bearer ${signupBody.accessToken}` },
+      payload: { carMake: "Toyota", carModel: "Corolla", carColor: "White", plate: "GR-1234-26" },
+    });
+    expect(profileRes.statusCode).toBe(200);
+
+    const loginVerifiedToken = await requestAndVerify(phone, "LOGIN");
+    const loginRes = await app.inject({
+      method: "POST",
+      url: "/auth/login",
+      payload: { phone, verifiedToken: loginVerifiedToken },
+    });
+    expect(loginRes.statusCode).toBe(200);
+    const loginBody = JSON.parse(loginRes.body);
+    expect(loginBody.user.id).toBe(signupBody.user.id);
+    // Regression guard: login must surface the same `user.driver` shape as /me,
+    // so the onboarding gate doesn't re-trigger after logout→login.
+    expect(loginBody.user.driver).not.toBeNull();
+    expect(loginBody.user.driver.carMake).toBe("Toyota");
+  });
+
   it("rejects signup with a verifiedToken for the wrong purpose", async () => {
     const phone = newPhone();
     const loginVerifiedToken = await requestAndVerify(phone, "LOGIN");

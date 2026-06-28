@@ -1,4 +1,4 @@
-import type { PrismaClient, User } from "@prisma/client";
+import type { Driver, PrismaClient, User } from "@prisma/client";
 import { TOKEN } from "./constants";
 import { generateRefreshTokenValue, sha256 } from "./hash";
 import {
@@ -44,7 +44,7 @@ export interface SignupInput {
 }
 
 export interface SignupResult extends AuthTokens {
-  user: User;
+  user: User & { driver: Driver | null };
 }
 
 /**
@@ -61,12 +61,18 @@ export async function signup(prisma: PrismaClient, input: SignupInput): Promise<
   }
 
   const user = await prisma.user.create({
-    data: { phone: input.phone, name: input.name, role: input.role },
+    data: {
+      phone: input.phone,
+      name: input.name,
+      role: input.role,
+      // For DRIVER, create the pending Driver row (empty profile, isApproved=false)
+      // in the same write and include it below, so the signup response carries the
+      // same `user.driver` shape as /me and login. carMake stays null, so the
+      // onboarding gate still correctly routes a new driver to onboarding.
+      ...(input.role === "DRIVER" ? { driver: { create: { isApproved: false } } } : {}),
+    },
+    include: { driver: true },
   });
-
-  if (input.role === "DRIVER") {
-    await prisma.driver.create({ data: { userId: user.id, isApproved: false } });
-  }
 
   const tokens = await issueTokens(prisma, user);
   return { user, ...tokens };
@@ -79,14 +85,17 @@ export interface LoginInput {
 }
 
 export interface LoginResult extends AuthTokens {
-  user: User;
+  user: User & { driver: Driver | null };
 }
 
 /** Logs in an existing user. Throws UserNotFoundError if no account exists for the phone. */
 export async function login(prisma: PrismaClient, input: LoginInput): Promise<LoginResult> {
   verifyVerificationToken(input.verifiedToken, input.phone, "LOGIN");
 
-  const user = await prisma.user.findUnique({ where: { phone: input.phone } });
+  const user = await prisma.user.findUnique({
+    where: { phone: input.phone },
+    include: { driver: true },
+  });
   if (!user) {
     throw new UserNotFoundError(input.phone);
   }
