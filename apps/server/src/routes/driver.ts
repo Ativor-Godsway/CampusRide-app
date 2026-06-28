@@ -186,7 +186,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         // SHARED ride (IN_PROGRESS) needs each passenger's own pickup/dropoff
         // for the per-passenger pickup/dropoff list, same shape as
         // fill-suggestions' PassengerInCar.
-        passengers: { include: { pickupZone: true, dropoffZone: true } },
+        passengers: { include: { pickupZone: true, dropoffZone: true }, orderBy: { createdAt: "asc" } },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -553,7 +553,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const anchor = await prisma.ride.findUnique({
       where: { id: rideId },
       include: {
-        passengers: { include: { pickupZone: true, dropoffZone: true } },
+        passengers: { include: { pickupZone: true, dropoffZone: true }, orderBy: { createdAt: "asc" } },
         pickupZone: true,
         dropoffZone: true,
       },
@@ -658,7 +658,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       // Reload with zone names for the response.
       const withZones = await prisma.ride.findUniqueOrThrow({
         where: { id: rideId },
-        include: { passengers: { include: { pickupZone: true, dropoffZone: true } } },
+        include: { passengers: { include: { pickupZone: true, dropoffZone: true }, orderBy: { createdAt: "asc" } } },
       });
 
       const passengers = withZones.passengers

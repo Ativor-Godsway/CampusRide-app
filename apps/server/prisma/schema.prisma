@@ -218,6 +218,10 @@ model RidePassenger {
   /// only as occupancy increases; frozen permanently once the ride departs
   lockedFare    Int?
   status        PassengerStatus @default(WAITING)
+  /// Set at join time; the stable ascending sort key for the driver's
+  /// per-passenger list so first-added stays on top and order never shifts
+  /// on a status change.
+  createdAt     DateTime        @default(now())
 
   ride        Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
   rider       User @relation(fields: [riderId], references: [id], onDelete: Restrict)
