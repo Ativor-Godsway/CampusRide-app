@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   View,
@@ -48,9 +49,16 @@ import type {
 } from "@rida/mobile-shared";
 
 type DriverStatus = "offline" | "online" | "on_ride";
-type SortBy = "pickup" | "dropoff";
 /** State A segmented toggle — "private" = LONE requests, "shared" = SHARED requests. Both come from the same /driver/rides/eligible response; this only filters which type is shown. */
 type RequestTab = "private" | "shared";
+
+/** Sentinel for the "no specific location" pickup/dropoff filter option. */
+const ALL_FILTER = "ALL";
+
+/** Distinct, alphabetically-sorted list of values (stable chip order across polls). */
+function distinctSorted(values: string[]): string[] {
+  return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+}
 
 function timeAgo(isoDate: string): string {
   const diffSecs = Math.floor((Date.now() - new Date(isoDate).getTime()) / 1000);
@@ -376,40 +384,16 @@ interface RequestCardProps {
 function RequestCard({ ride, claiming, onAccept }: RequestCardProps) {
   return (
     <Card style={styles.requestCard}>
+      {/* Absolutely positioned so it overlaps the corner instead of adding row height. */}
       {ride.bestFit && (
         <Badge variant="accent" label="★  Best match" style={styles.bestMatchBadge} />
       )}
+      {/* Geometry only — the dot/line connector already conveys pickup → dropoff, no text labels. */}
       <RouteStops
         style={styles.routeRow}
-        origin={
-          <View style={styles.zoneBlock}>
-            <Text variant="label" color="muted">PICKUP</Text>
-            <Text variant="bodyMedium">{ride.pickupZoneName}</Text>
-          </View>
-        }
-        destination={
-          <View style={styles.zoneBlock}>
-            <Text variant="label" color="muted">DROPOFF</Text>
-            <Text variant="bodyMedium">{ride.dropoffZoneName}</Text>
-          </View>
-        }
+        origin={<Text variant="bodyMedium">{ride.pickupZoneName}</Text>}
+        destination={<Text variant="bodyMedium">{ride.dropoffZoneName}</Text>}
       />
-      <View style={styles.fareStrip}>
-        <View style={styles.fareStripItem}>
-          <Text variant="label" color="muted">FARE</Text>
-          <Text variant="bodyMedium">{formatGhs(ride.farePesewas)}</Text>
-        </View>
-        <View style={styles.fareStripItem}>
-          <Text variant="label" color="muted">YOU EARN</Text>
-          <Text variant="bodyMedium" style={styles.earnText}>
-            {formatGhs(ride.driverSharePesewas)}
-          </Text>
-        </View>
-        <View style={styles.fareStripItem}>
-          <Text variant="label" color="muted">POSTED</Text>
-          <Text variant="bodyMedium">{timeAgo(ride.createdAt)}</Text>
-        </View>
-      </View>
       <Button
         label={claiming ? "Claiming…" : "Accept"}
         onPress={onAccept}
@@ -417,6 +401,47 @@ function RequestCard({ ride, claiming, onAccept }: RequestCardProps) {
         fullWidth
       />
     </Card>
+  );
+}
+
+interface FilterChipRowProps {
+  label: string;
+  /** Distinct location names (without the "All" sentinel — prepended here). */
+  options: string[];
+  /** Currently effective selection (ALL_FILTER or one of `options`). */
+  selected: string;
+  onSelect: (value: string) => void;
+}
+
+/** One horizontally-scrollable line of filter chips: "All" + each distinct location. */
+function FilterChipRow({ label, options, selected, onSelect }: FilterChipRowProps) {
+  return (
+    <View style={styles.filterRow}>
+      <Text variant="label" color="muted" style={styles.filterLabel}>{label}</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterChips}
+      >
+        {[ALL_FILTER, ...options].map((value) => {
+          const active = value === selected;
+          return (
+            <Pressable
+              key={value}
+              onPress={() => onSelect(value)}
+              style={[styles.filterChip, active && styles.filterChipActive]}
+            >
+              <Text
+                variant="bodySmall"
+                style={active ? styles.filterChipTextActive : styles.filterChipText}
+              >
+                {value === ALL_FILTER ? "All" : value}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
   );
 }
 
@@ -439,8 +464,12 @@ export default function DriverHomeScreen() {
   const { isLoading: authLoading, isAuthenticated, user, signOut } = useAuth();
 
   const [status, setStatus] = useState<DriverStatus>("offline");
-  const [sortBy, setSortBy] = useState<SortBy>("pickup");
-  const [requestTab, setRequestTab] = useState<RequestTab>("private");
+  const [requestTab, setRequestTab] = useState<RequestTab>("shared");
+  // Dependent location filters. Raw selections; the render normalizes them
+  // against the currently-available options (see effectivePickup/Dropoff), so
+  // a value that vanishes on a poll refresh falls back to ALL automatically.
+  const [pickupFilter, setPickupFilter] = useState<string>(ALL_FILTER);
+  const [dropoffFilter, setDropoffFilter] = useState<string>(ALL_FILTER);
   const [claimingRideId, setClaimingRideId] = useState<string | null>(null);
   const [addingRideId, setAddingRideId] = useState<string | null>(null);
   const [actingPassengerId, setActingPassengerId] = useState<string | null>(null);
@@ -731,54 +760,57 @@ export default function DriverHomeScreen() {
 
   // ─── Normal home (6b-1 eligible-rides list) ──────────────────────────────────
 
-  const sortKey: keyof EligibleRideItem =
-    sortBy === "pickup" ? "pickupZoneName" : "dropoffZoneName";
+  // Requests for the active tab, in the server's order (newest first).
+  const tabRides = rawEligibleRides.filter((r) =>
+    requestTab === "private" ? r.type === "LONE" : r.type === "SHARED",
+  );
 
-  const loneRides = [...rawEligibleRides.filter((r) => r.type === "LONE")].sort((a, b) =>
-    (a[sortKey] as string).localeCompare(b[sortKey] as string),
+  // Dependent pickup → dropoff filter, derived entirely from the current
+  // requests. `effective*` is the single guard that keeps the selection valid:
+  // any filter value not present in the live options (a poll refresh removed
+  // the last matching request, a tab switch, or a pickup change that narrows
+  // the dropoffs) normalizes to ALL here — for both the chip highlight and the
+  // filtering — so the list can never freeze on a stale, empty selection.
+  const pickupOptions = distinctSorted(tabRides.map((r) => r.pickupZoneName));
+  const effectivePickup = pickupOptions.includes(pickupFilter) ? pickupFilter : ALL_FILTER;
+
+  const dropoffPool =
+    effectivePickup === ALL_FILTER
+      ? tabRides
+      : tabRides.filter((r) => r.pickupZoneName === effectivePickup);
+  const dropoffOptions = distinctSorted(dropoffPool.map((r) => r.dropoffZoneName));
+  const effectiveDropoff = dropoffOptions.includes(dropoffFilter) ? dropoffFilter : ALL_FILTER;
+
+  const visibleRides = dropoffPool.filter(
+    (r) => effectiveDropoff === ALL_FILTER || r.dropoffZoneName === effectiveDropoff,
   );
-  const sharedRides = [...rawEligibleRides.filter((r) => r.type === "SHARED")].sort((a, b) =>
-    (a[sortKey] as string).localeCompare(b[sortKey] as string),
-  );
-  const tabRides = requestTab === "private" ? loneRides : sharedRides;
+
+  // Switching tabs starts from a clean All/All — the available locations differ
+  // per tab. Choosing a pickup resets the dropoff to All (the reachable set
+  // changes); the effective-value guard above covers everything else.
+  const selectTab = (tab: RequestTab) => {
+    setRequestTab(tab);
+    setPickupFilter(ALL_FILTER);
+    setDropoffFilter(ALL_FILTER);
+  };
+  const selectPickup = (value: string) => {
+    setPickupFilter(value);
+    setDropoffFilter(ALL_FILTER);
+  };
 
   return (
     <Screen scroll>
-      {/* Header */}
+      {/* Header — compact online toggle replaces the old avatar + full-width status card. */}
       <View style={styles.header}>
         <View>
           <Text variant="bodySmall" color="muted">Welcome back</Text>
           <Text variant="h1">{firstName}</Text>
         </View>
-        <Pressable
-          onPress={() =>
-            Alert.alert("Sign out?", "", [
-              { text: "Cancel", style: "cancel" },
-              { text: "Sign out", style: "destructive", onPress: () => void signOut() },
-            ])
-          }
-          style={styles.avatar}
-          accessibilityRole="button"
-          accessibilityLabel="Account"
-        >
-          <Text variant="h3" color="inverse">{firstName.charAt(0).toUpperCase()}</Text>
-        </Pressable>
-      </View>
-
-      {/* Online/Offline toggle card */}
-      <Card style={styles.statusCard}>
-        <View style={styles.statusRow}>
-          <View style={styles.statusTextCol}>
-            <View style={styles.statusDotRow}>
-              <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-              <Text variant="h3">{isOnline ? "Online" : "Offline"}</Text>
-            </View>
-            <Text variant="bodySmall" color="muted">
-              {isOnline
-                ? "You're visible to riders. Browse and accept trips below."
-                : "Go online to start receiving trip requests."}
-            </Text>
-          </View>
+        <View style={styles.onlineToggle}>
+          <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
+          <Text variant="bodySmall" style={styles.onlineLabel}>
+            {isOnline ? "Online" : "Offline"}
+          </Text>
           <Switch
             value={isOnline}
             onValueChange={() => void handleToggle()}
@@ -788,7 +820,7 @@ export default function DriverHomeScreen() {
             accessibilityLabel="Online toggle"
           />
         </View>
-      </Card>
+      </View>
 
       {/* Offline: empty state */}
       {!isOnline && (
@@ -806,7 +838,7 @@ export default function DriverHomeScreen() {
         <>
           <View style={styles.requestTabPill}>
             <Pressable
-              onPress={() => setRequestTab("private")}
+              onPress={() => selectTab("private")}
               style={[styles.requestTabBtn, requestTab === "private" && styles.requestTabBtnActive]}
             >
               <Text
@@ -817,7 +849,7 @@ export default function DriverHomeScreen() {
               </Text>
             </Pressable>
             <Pressable
-              onPress={() => setRequestTab("shared")}
+              onPress={() => selectTab("shared")}
               style={[styles.requestTabBtn, requestTab === "shared" && styles.requestTabBtnActive]}
             >
               <Text
@@ -829,50 +861,7 @@ export default function DriverHomeScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.sortRow}>
-            <Text variant="label" color="muted">SORT BY</Text>
-            <View style={styles.sortPill}>
-              <Pressable
-                onPress={() => setSortBy("pickup")}
-                style={[styles.sortBtn, sortBy === "pickup" && styles.sortBtnActive]}
-              >
-                <Text
-                  variant="bodySmall"
-                  style={sortBy === "pickup" ? styles.sortBtnTextActive : styles.sortBtnText}
-                >
-                  Pickup
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setSortBy("dropoff")}
-                style={[styles.sortBtn, sortBy === "dropoff" && styles.sortBtnActive]}
-              >
-                <Text
-                  variant="bodySmall"
-                  style={sortBy === "dropoff" ? styles.sortBtnTextActive : styles.sortBtnText}
-                >
-                  Dropoff
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-
-          {tabRides.length > 0 ? (
-            <View style={styles.section}>
-              <SectionHeader
-                title={requestTab === "private" ? "PRIVATE RIDES" : "SHARED RIDES"}
-                count={tabRides.length}
-              />
-              {tabRides.map((ride) => (
-                <RequestCard
-                  key={ride.rideId}
-                  ride={ride}
-                  claiming={claimingRideId === ride.rideId}
-                  onAccept={() => void handleAccept(ride)}
-                />
-              ))}
-            </View>
-          ) : (
+          {tabRides.length === 0 ? (
             <View style={styles.emptyList}>
               <Ionicons name="radio-outline" size={48} color={colors.ink[200]} />
               <Text variant="h3" style={styles.emptyTitle}>Waiting for requests</Text>
@@ -882,6 +871,49 @@ export default function DriverHomeScreen() {
                   : "Shared ride requests near your zone will appear here."}
               </Text>
             </View>
+          ) : (
+            <>
+              {/* Dependent location filter — options derive from the current requests. */}
+              <View style={styles.filterGroup}>
+                <FilterChipRow
+                  label="Pickup"
+                  options={pickupOptions}
+                  selected={effectivePickup}
+                  onSelect={selectPickup}
+                />
+                <FilterChipRow
+                  label="Dropoff"
+                  options={dropoffOptions}
+                  selected={effectiveDropoff}
+                  onSelect={setDropoffFilter}
+                />
+              </View>
+
+              {visibleRides.length > 0 ? (
+                <View style={styles.section}>
+                  <SectionHeader
+                    title={requestTab === "private" ? "PRIVATE RIDES" : "SHARED RIDES"}
+                    count={visibleRides.length}
+                  />
+                  {visibleRides.map((ride) => (
+                    <RequestCard
+                      key={ride.rideId}
+                      ride={ride}
+                      claiming={claimingRideId === ride.rideId}
+                      onAccept={() => void handleAccept(ride)}
+                    />
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.emptyList}>
+                  <Ionicons name="funnel-outline" size={48} color={colors.ink[200]} />
+                  <Text variant="h3" style={styles.emptyTitle}>No matching requests</Text>
+                  <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
+                    No requests match this pickup and dropoff. Tap “All” to clear the filter.
+                  </Text>
+                </View>
+              )}
+            </>
           )}
         </>
       )}
@@ -906,10 +938,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  statusCard: { marginBottom: spacing.xl },
-  statusRow: { flexDirection: "row", alignItems: "center", gap: spacing.lg },
-  statusTextCol: { flex: 1, gap: spacing.xs },
-  statusDotRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  onlineToggle: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  onlineLabel: { fontWeight: typography.weight.semibold },
   statusDot: { width: 10, height: 10, borderRadius: radii.full },
   dotOnline: { backgroundColor: colors.primary[500] },
   dotOffline: { backgroundColor: colors.ink[300] },
@@ -943,23 +973,23 @@ const styles = StyleSheet.create({
     borderRadius: radii.full,
   },
   requestTabBtnActive: { backgroundColor: colors.white, ...shadows.sm },
-  sortRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: spacing.lg,
-  },
-  sortPill: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.full,
-    padding: 3,
-    gap: 2,
-  },
-  sortBtn: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radii.full },
-  sortBtnActive: { backgroundColor: colors.white, ...shadows.sm },
+  // Shared by the request-type pill (Private/Shared) text.
   sortBtnText: { color: colors.ink[500] },
   sortBtnTextActive: { color: colors.ink[900], fontWeight: "600" as const },
+  // Dependent pickup/dropoff filter — two scrollable chip lines.
+  filterGroup: { gap: spacing.sm, marginBottom: spacing.lg },
+  filterRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  filterLabel: { width: 52 },
+  filterChips: { gap: spacing.xs, paddingRight: spacing.md },
+  filterChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.full,
+    backgroundColor: colors.surfaceMuted,
+  },
+  filterChipActive: { backgroundColor: colors.primary[500] },
+  filterChipText: { color: colors.ink[500] },
+  filterChipTextActive: { color: colors.white, fontWeight: typography.weight.semibold },
   section: { gap: spacing.md, marginBottom: spacing.xl },
   sectionHeader: {
     flexDirection: "row",
@@ -978,18 +1008,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   requestCard: { gap: spacing.md },
-  bestMatchBadge: { alignSelf: "flex-start" },
+  // Overlaps the top-right corner (absolute) so it never adds row height.
+  bestMatchBadge: { position: "absolute", top: spacing.sm, right: spacing.sm, zIndex: 1 },
   routeRow: { paddingVertical: spacing.xs },
-  zoneBlock: { gap: 2 },
-  fareStrip: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.md,
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  fareStripItem: { flex: 1, gap: 2, alignItems: "center" },
-  earnText: { color: colors.primary[600] },
 });
 
 // Fill-your-car styles (separate namespace to stay organised)
