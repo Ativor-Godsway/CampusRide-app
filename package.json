@@ -15,5 +15,8 @@
     "db:migrate": "npm run db:migrate --workspace=apps/server",
     "db:seed": "npm run db:seed --workspace=apps/server",
     "db:generate": "npm run db:generate --workspace=apps/server"
+  },
+  "dependencies": {
+    "@expo/ngrok": "^4.1.3"
   }
 }
