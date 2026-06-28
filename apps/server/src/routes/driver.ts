@@ -655,6 +655,16 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     try {
       const updatedAnchor = await addRiderToCar(prisma, userId, rideId, body.requestRideId);
 
+      // #7 merged-rider reach: addRiderToCar set the absorbed request to
+      // CANCELLED/MERGED_INTO_ANOTHER_RIDE but broadcasts nothing to its room.
+      // That rider's app is still tracking the absorbed ride, so emit
+      // ride:status to its room — the client sees CANCELLED + mergedIntoRideId
+      // and follows to this anchor in ~1-2s instead of waiting on the 12s poll.
+      emitRideEvent(body.requestRideId, "ride:status", {
+        rideId: body.requestRideId,
+        status: "CANCELLED",
+      });
+
       // Reload with zone names for the response.
       const withZones = await prisma.ride.findUniqueOrThrow({
         where: { id: rideId },
@@ -885,6 +895,66 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
             },
             userId,
           );
+        }
+
+        return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          return reply.code(409).send({ error: "Invalid transition from current passenger status" });
+        }
+        throw err;
+      }
+    },
+  );
+
+  /**
+   * Driver cancels THIS passenger before pickup — WAITING -> CANCELLED only.
+   * Enforced WAITING-only at the route (the state machine also permits ARRIVED,
+   * but the product rule is "no cancel once 'I'm here' is tapped").
+   *
+   * Cancel is a real state transition, not a UI-only removal: the cancelled
+   * rider is dropped from the car and MUST be told via socket so they don't sit
+   * stranded on "driver on the way". Emits ride:passenger_status CANCELLED to
+   * the rider's personal room; if this empties the car, applyPassengerTransition
+   * cancels the ride (ALL_PASSENGERS_LEFT) and we broadcast ride:status too.
+   */
+  app.post(
+    "/rides/:id/passengers/:passengerId/cancel",
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      if (!(await requireDriver(request, reply))) return;
+
+      const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
+      const userId = request.user!.userId;
+
+      const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+      if (!ride) return reply.code(404).send({ error: "Ride not found" });
+      if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+
+      const passenger = await prisma.ridePassenger.findUnique({ where: { id: passengerId } });
+      if (!passenger || passenger.rideId !== rideId) {
+        return reply.code(404).send({ error: "Passenger not found on this ride" });
+      }
+      if (passenger.status !== "WAITING") {
+        return reply
+          .code(409)
+          .send({ error: "A passenger can only be cancelled before pickup" });
+      }
+
+      try {
+        const result = await applyPassengerTransition(prisma, passengerId, "CANCELLED");
+
+        emitToRider(passenger.riderId, "ride:passenger_status", {
+          rideId,
+          ridePassengerId: passengerId,
+          riderId: passenger.riderId,
+          status: result.passenger.status as PassengerStatus,
+        });
+
+        const justCancelledRide =
+          result.ride.status === "CANCELLED" && ride.status !== "CANCELLED";
+        if (justCancelledRide) {
+          emitRideEvent(rideId, "ride:status", { rideId, status: result.ride.status });
         }
 
         return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
