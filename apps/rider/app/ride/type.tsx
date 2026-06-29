@@ -912,7 +912,9 @@ function CompletedContent({
     }
     setPaying(true);
     try {
-      const { otpStage } = await initiateRidePayment(rideId, phone.trim(), network);
+      const resp = await initiateRidePayment(rideId, phone.trim(), network);
+      console.log("[OTP DEBUG] initiate-payment response:", JSON.stringify(resp));
+      const { otpStage } = resp;
       if (otpStage === "OTP_SENT") {
         setOtpExpired(false);
         setOtpError(null);
@@ -937,7 +939,9 @@ function CompletedContent({
     setOtpError(null);
     setConfirmingOtp(true);
     try {
-      const { otpStage } = await initiateRidePayment(rideId, phone.trim(), network, otpCode.trim());
+      const resp = await initiateRidePayment(rideId, phone.trim(), network, otpCode.trim());
+      console.log("[OTP DEBUG] otpcode confirmation response:", JSON.stringify(resp));
+      const { otpStage } = resp;
       if (otpStage === "OTP_RETRY") {
         setOtpCode("");
         setOtpError("That code didn't match. Check your messages and try again.");
