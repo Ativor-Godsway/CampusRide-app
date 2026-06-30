@@ -55,3 +55,10 @@ services:
       # Never enable on production.
       - key: ENABLE_MOCK_DRIVER
         value: "false"
+
+      # Comma-separated browser origins allowed to call the public demo OTP
+      # routes (/demo/otp/*) from the showcase site. Leave unset to reflect any
+      # origin; set to the showcase's exact origin to lock it down. Set the
+      # value in the Render dashboard → Environment tab.
+      - key: DEMO_OTP_CORS_ORIGINS
+        sync: false

@@ -6,6 +6,7 @@ import { prisma } from "./db/prisma";
 import { processTimeouts } from "./services/ride/timeouts";
 import { otpService, paymentService, routeService } from "./services/active";
 import { registerAuthRoutes } from "./routes/auth";
+import { registerDemoOtpRoutes } from "./routes/demoOtp";
 import { registerWebhookRoutes } from "./routes/webhooks";
 import { registerZoneRoutes } from "./routes/zones";
 import { registerRideRoutes } from "./routes/rides";
@@ -24,7 +25,16 @@ export { paymentService, routeService, otpService };
 async function bootstrap() {
   const app = Fastify({ logger: true });
 
-  await app.register(cors, { origin: true });
+  // CORS: when DEMO_OTP_CORS_ORIGINS is set (comma-separated), restrict to that
+  // allowlist so the public showcase site is the only browser origin able to
+  // call us; when unset, reflect any origin (prior behavior — avoids breaking
+  // anything before the showcase origin is confirmed). Native apps (Expo/React
+  // Native) send no Origin header and are unaffected either way.
+  const corsAllowlist = config.demoOtpCorsOrigins
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
+  await app.register(cors, { origin: corsAllowlist.length > 0 ? corsAllowlist : true });
   // Parser for application/x-www-form-urlencoded, scoped to that
   // Content-Type only — Fastify dispatches by exact header match, so this
   // never touches the built-in application/json parser every other route
@@ -59,6 +69,7 @@ async function bootstrap() {
   });
 
   registerAuthRoutes(app, prisma, otpService);
+  registerDemoOtpRoutes(app, prisma, otpService);
   registerWebhookRoutes(app, prisma, paymentService, config.moolre.webhookSecret);
   registerZoneRoutes(app, prisma);
   registerRideRoutes(app, prisma);

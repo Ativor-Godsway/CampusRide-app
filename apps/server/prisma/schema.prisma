@@ -269,6 +269,28 @@ model OtpCode {
   @@index([phone])
 }
 
+/// Isolated, short-TTL OTP store for the PUBLIC showcase demo (/demo/otp/*).
+/// Deliberately separate from OtpCode so the demo's abusable, unauthenticated
+/// surface can never interfere with the real signup/login OTP flow. Rows are
+/// swept after 24h (see services/demoOtp) — long enough for the daily/global
+/// rate-limit windows, short enough to keep the table tiny.
+model DemoOtp {
+  id        String   @id @default(cuid())
+  /// Normalized local form, e.g. "0594826328".
+  phone     String
+  /// SHA-256 hash of the 6-digit code — never store the raw code.
+  codeHash  String
+  /// Request IP, for per-IP rate limiting only. Never logged.
+  ip        String?
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([phone])
+  @@index([createdAt])
+  @@index([ip])
+}
+
 model RefreshToken {
   id          String    @id @default(cuid())
   userId      String

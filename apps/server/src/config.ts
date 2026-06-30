@@ -37,6 +37,12 @@ export const config = {
    */
   otpProvider: process.env.OTP_PROVIDER ?? "dummy",
   /**
+   * Comma-separated browser origins allowed to call the public demo OTP routes
+   * (e.g. the showcase site). When empty, CORS reflects any origin (the prior
+   * default). Native apps send no Origin header and are unaffected. See index.ts.
+   */
+  demoOtpCorsOrigins: process.env.DEMO_OTP_CORS_ORIGINS ?? "",
+  /**
    * Phase 5c dev-only mock driver: when true, every ride created via
    * POST /rides is driven through MATCHED -> ARRIVED -> IN_PROGRESS ->
    * COMPLETED by a simulated driver (src/dev/mockDriver.ts), emitting the
