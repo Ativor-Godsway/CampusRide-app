@@ -239,7 +239,10 @@ model Payment {
   amount      Int
   type        PaymentType
   status      PaymentRecordStatus @default(PENDING)
-  providerRef String?
+  /// Our deterministic externalRef (idempotency key, e.g. collect:{rideId}:{riderId}).
+  /// @unique enforces the double-charge guard at the DB layer, closing the
+  /// check-then-create race in initiateCollection (report finding 6a).
+  providerRef String?             @unique
   /// Moolre's own transaction id (the TR099 `data` uuid) — distinct from providerRef (our externalRef). Null until a PROMPT_SENT collect() outcome is recorded.
   providerTxId String?
   createdAt   DateTime            @default(now())

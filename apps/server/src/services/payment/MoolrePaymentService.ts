@@ -38,7 +38,11 @@ interface MoolreResponseShape {
   status?: string;
   message?: string;
   txstatus?: number;
-  data?: { txstatus?: number; name?: string; accountname?: string; [key: string]: unknown };
+  // Moolre returns `data` as EITHER a nested object (status / validate /
+  // transfer endpoints) OR a bare string — the collection TR099 settlement
+  // uuid, e.g. "data":"ef3adeff-9b77-4d72-8d9e-cd53bf77f963" (confirmed
+  // against a live collection). extractProviderRef() handles the string form.
+  data?: string | { txstatus?: number; name?: string; accountname?: string; [key: string]: unknown };
   [key: string]: unknown;
 }
 
@@ -90,7 +94,8 @@ export class MoolrePaymentService implements PaymentService {
 
     const data = await this.post("/open/transact/validate", body, { keyType: "private" });
 
-    const accountName = data.data?.accountname ?? data.data?.name;
+    const d = dataObject(data);
+    const accountName = d?.accountname ?? d?.name;
     if (typeof accountName !== "string" || accountName.length === 0) {
       throw new Error(`Moolre validate returned no account name: ${JSON.stringify(data)}`);
     }
@@ -111,7 +116,7 @@ export class MoolrePaymentService implements PaymentService {
 
     const data = await this.post("/open/transact/transfer", body, { keyType: "private" });
 
-    const txstatus = toTxStatus(data.txstatus ?? data.data?.txstatus, TX_STATUS.UNKNOWN);
+    const txstatus = toTxStatus(data.txstatus ?? dataObject(data)?.txstatus, TX_STATUS.UNKNOWN);
 
     return {
       txstatus,
@@ -131,7 +136,7 @@ export class MoolrePaymentService implements PaymentService {
 
     const data = await this.post("/open/transact/status", body, { keyType: "private" });
 
-    const txstatus = toTxStatus(data.txstatus ?? data.data?.txstatus, TX_STATUS.UNKNOWN);
+    const txstatus = toTxStatus(data.txstatus ?? dataObject(data)?.txstatus, TX_STATUS.UNKNOWN);
 
     return { txstatus, externalRef, raw: data };
   }
@@ -222,7 +227,22 @@ function toTxStatus(value: unknown, fallback: TxStatus): TxStatus {
   return fallback;
 }
 
+/**
+ * Narrows `data.data` to its object form (status / validate / transfer
+ * endpoints). Returns undefined when Moolre sent the bare-string form (a
+ * collection settlement uuid) — those callers read object fields, not the uuid.
+ */
+function dataObject(data: MoolreResponseShape): Record<string, unknown> | undefined {
+  return typeof data.data === "object" && data.data !== null ? data.data : undefined;
+}
+
 function extractProviderRef(data: MoolreResponseShape): string | undefined {
+  // Collection's TR099 returns the settlement uuid as a bare string in `data`
+  // (confirmed live: "data":"ef3adeff-9b77-4d72-8d9e-cd53bf77f963"). Every
+  // other endpoint nests the id inside an object instead.
+  if (typeof data.data === "string") {
+    return data.data.length > 0 ? data.data : undefined;
+  }
   const id = data.data?.transactionid ?? data.data?.id;
   return typeof id === "string" ? id : typeof id === "number" ? String(id) : undefined;
 }
