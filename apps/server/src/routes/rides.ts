@@ -349,7 +349,11 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     }
 
     const otpStage =
-      payment.status === "AWAITING_OTP" ? (otpcode != null ? "OTP_RETRY" : "OTP_SENT") : payment.status === "PENDING" ? "SUBMITTED" : null;
+      payment.status === "AWAITING_OTP"
+        ? (otpcode != null ? "OTP_RETRY" : "OTP_SENT")
+        : payment.status === "PENDING" || payment.status === "PROMPT_PENDING"
+          ? "SUBMITTED"
+          : null;
 
     return reply.code(200).send({ paymentStatus: payment.status, otpStage });
   });

@@ -34,7 +34,19 @@ export interface CollectResult {
  */
 export type CollectOutcome =
   | { kind: "OTP_REQUIRED"; externalRef: string; raw?: unknown }
-  | { kind: "PROMPT_SENT"; externalRef: string; providerTxId?: string; raw?: unknown };
+  | {
+      kind: "PROMPT_SENT";
+      externalRef: string;
+      providerTxId?: string;
+      /**
+       * Raw Moolre body code: "TP17" (phone verified — must push the prompt via
+       * a chained 3rd collect()) vs "TR099" (PIN prompt pushed). undefined for
+       * non-Moolre providers (Dummy) — callers MUST treat an absent code as
+       * today's PENDING path.
+       */
+      code?: string;
+      raw?: unknown;
+    };
 
 export interface ValidateRecipientParams {
   phone: string;

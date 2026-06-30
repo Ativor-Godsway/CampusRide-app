@@ -1,9 +1,10 @@
+import { Prisma } from "@prisma/client";
 import type { PrismaClient, Payment } from "@prisma/client";
 import { splitFare } from "@rida/shared";
 import { isActivePassengerStatus } from "../ride/stateMachine";
 import { isDefiniteFailure, isDefiniteSuccess, type MoolreChannel } from "./constants";
 import { NoAwaitingOtpPaymentError, UnknownPaymentReferenceError } from "./errors";
-import type { PaymentService } from "./PaymentService";
+import type { CollectOutcome, PaymentService } from "./PaymentService";
 
 /**
  * Idempotency keys. Deterministic per ride/leg so retries (and webhook
@@ -50,9 +51,18 @@ async function runCollectAttempt(
   payment: Payment,
   input: CollectForRiderInput,
   externalRef: string,
+  /**
+   * True only for the chained 3rd collect() (TP17 -> TR099). HARD depth cap: a
+   * chained invocation can never start another chain, so the live-debit calls
+   * are bounded to exactly 2 by the signature — never inferred from otpcode
+   * state. A chained invocation also does NOT write FAILED on its own collect()
+   * failure; the TP17 call site owns that single write (see below).
+   */
+  chained = false,
 ): Promise<Payment> {
+  let outcome: CollectOutcome;
   try {
-    const outcome = await paymentService.collect({
+    outcome = await paymentService.collect({
       rideId: input.rideId,
       payerPhone: input.payerPhone,
       channel: input.channel,
@@ -60,27 +70,67 @@ async function runCollectAttempt(
       externalRef,
       otpcode: input.otpcode,
     });
-
-    if (outcome.kind === "OTP_REQUIRED") {
-      if (payment.status !== "AWAITING_OTP") {
-        return prisma.payment.update({ where: { id: payment.id }, data: { status: "AWAITING_OTP" } });
-      }
-      // Wrong code on a retry — stays AWAITING_OTP, no-op write.
-      return payment;
-    }
-
-    // PROMPT_SENT — advance to PENDING (awaiting webhook confirmation), persist providerTxId if present.
-    return prisma.payment.update({
-      where: { id: payment.id },
-      data: { status: "PENDING", ...(outcome.providerTxId ? { providerTxId: outcome.providerTxId } : {}) },
-    });
   } catch (err) {
-    // The provider call itself failed (e.g. auth rejection, duplicate ref) —
-    // the Payment row must not be left stuck PENDING/AWAITING_OTP. Rethrown so
-    // the error (with Moolre's code/message) stays visible in logs rather than swallowed.
-    await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    // FIRST-level collect() failure marks FAILED here. A CHAINED (#3) failure is
+    // intentionally NOT written here — the TP17 call site owns it — so a single
+    // failure can never produce two FAILED writes. Rethrown so Moolre's
+    // code/message stays visible in logs rather than swallowed.
+    if (!chained) {
+      await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+    }
     throw err;
   }
+
+  if (outcome.kind === "OTP_REQUIRED") {
+    if (payment.status !== "AWAITING_OTP") {
+      return prisma.payment.update({ where: { id: payment.id }, data: { status: "AWAITING_OTP" } });
+    }
+    // Wrong code on a retry — stays AWAITING_OTP, no-op write.
+    return payment;
+  }
+
+  // PROMPT_SENT — branch on the raw Moolre code (Phase B):
+  //   TP17  -> OTP verified; mark PROMPT_PENDING, then chain the REQUIRED 3rd
+  //            collect() (same ref, NO otpcode) that pushes the MoMo PIN prompt.
+  //   TR099 -> PIN prompt pushed; persist providerTxId + PROMPT_PENDING atomically.
+  //   absent/other code -> today's PENDING (Dummy/test, or a no-OTP direct prompt).
+  // `!chained` is the hard depth-2 cap: a chained call can NEVER re-enter here.
+  if (!chained && outcome.code === "TP17" && input.otpcode) {
+    const verified = await prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: "PROMPT_PENDING" },
+    });
+    try {
+      // `return await` so this try/catch owns the chained call's failure.
+      return await runCollectAttempt(
+        prisma,
+        paymentService,
+        verified,
+        { ...input, otpcode: undefined },
+        externalRef,
+        true,
+      );
+    } catch (err) {
+      // SINGLE FAILED write for ANY chained-call failure (collect() #3 or its
+      // post-call write). The chained invocation deliberately wrote nothing.
+      await prisma.payment.update({ where: { id: payment.id }, data: { status: "FAILED" } });
+      throw err;
+    }
+  }
+
+  if (outcome.code === "TR099") {
+    // E5 — providerTxId + PROMPT_PENDING in one atomic update(), awaited before return.
+    return prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: "PROMPT_PENDING", ...(outcome.providerTxId ? { providerTxId: outcome.providerTxId } : {}) },
+    });
+  }
+
+  // No code (Dummy/test) or any other PROMPT_SENT code — today's PENDING path.
+  return prisma.payment.update({
+    where: { id: payment.id },
+    data: { status: "PENDING", ...(outcome.providerTxId ? { providerTxId: outcome.providerTxId } : {}) },
+  });
 }
 
 /**
@@ -120,17 +170,32 @@ export async function initiateCollection(
     throw new NoAwaitingOtpPaymentError(externalRef);
   }
 
-  const payment = await prisma.payment.create({
-    data: {
-      rideId: input.rideId,
-      riderId: input.riderId,
-      amount: input.amountPesewas,
-      type: "COLLECTION",
-      status: "PENDING",
-      providerRef: externalRef,
-    },
-  });
+  // Create the first-call row. Phase A's @unique(providerRef) is the race guard:
+  // a racing concurrent create throws P2002 (closing report finding 6a), which we
+  // catch below — no transaction needed. collect() runs strictly afterwards.
+  let payment: Payment;
+  try {
+    payment = await prisma.payment.create({
+      data: {
+        rideId: input.rideId,
+        riderId: input.riderId,
+        amount: input.amountPesewas,
+        type: "COLLECTION",
+        status: "PENDING",
+        providerRef: externalRef,
+      },
+    });
+  } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      // A concurrent request won the create AND will run its own collect();
+      // re-read the winner and DO NOT call collect() again (no double-charge).
+      return prisma.payment.findFirstOrThrow({ where: { providerRef: externalRef } });
+    }
+    throw err;
+  }
 
+  // We created the row, so we drive the first collect(); a racing finder above
+  // returned early without calling it.
   return runCollectAttempt(prisma, paymentService, payment, input, externalRef);
 }
 

@@ -80,7 +80,7 @@ export class MoolrePaymentService implements PaymentService {
     if (data.code === "TP14") {
       return { kind: "OTP_REQUIRED", externalRef: params.externalRef, raw: data };
     }
-    return { kind: "PROMPT_SENT", externalRef: params.externalRef, providerTxId: extractProviderRef(data), raw: data };
+    return { kind: "PROMPT_SENT", externalRef: params.externalRef, providerTxId: extractProviderRef(data), code: data.code, raw: data };
   }
 
   async validateRecipient(params: ValidateRecipientParams): Promise<ValidateRecipientResult> {
