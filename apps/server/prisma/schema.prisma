@@ -71,6 +71,7 @@ enum PaymentRecordStatus {
   SUCCESS
   FAILED
   AWAITING_OTP
+  PROMPT_PENDING
 }
 
 enum OtpPurpose {
