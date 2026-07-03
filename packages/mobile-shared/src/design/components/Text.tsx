@@ -3,6 +3,8 @@ import { colors, typography } from "../tokens";
 
 export type TextVariant =
   | "display"
+  | "title"
+  | "headline"
   | "h1"
   | "h2"
   | "h3"
@@ -21,11 +23,25 @@ export interface TextComponentProps extends RNTextProps {
 }
 
 const variantStyles = StyleSheet.create({
+  /** Screen titles — "Enter the code", "Choose your ride". */
   display: {
-    fontSize: typography.size["5xl"],
+    fontSize: typography.size.display,
     fontWeight: typography.weight.extrabold,
-    lineHeight: typography.size["5xl"] * typography.lineHeight.tight,
+    lineHeight: 40,
     letterSpacing: typography.letterSpacing.tighter,
+  },
+  /** Section/sheet titles. */
+  title: {
+    fontSize: typography.size["2xl"],
+    fontWeight: typography.weight.bold,
+    lineHeight: 30,
+    letterSpacing: typography.letterSpacing.tight,
+  },
+  /** Row/card headings — driver name, place name. */
+  headline: {
+    fontSize: typography.size.lg,
+    fontWeight: typography.weight.semibold,
+    lineHeight: 24,
   },
   h1: {
     fontSize: typography.size["3xl"],
