@@ -122,12 +122,14 @@ async function simulate(prisma: PrismaClient, rideId: string): Promise<void> {
     include: { pickupZone: true, dropoffZone: true },
   });
 
-  const { _avg } = await prisma.rating.aggregate({
-    where: { rateeId: driver.id },
-    _avg: { stars: true },
-  });
+  const [{ _avg }, trips] = await Promise.all([
+    prisma.rating.aggregate({ where: { rateeId: driver.id }, _avg: { stars: true } }),
+    prisma.ride.count({ where: { driverId: driver.id, status: "COMPLETED" } }),
+  ]);
 
   emitRideEvent(rideId, "ride:status", { rideId, status: ride.status });
+  // Mirrors the real assign payload's driver-intrinsic fields. coRiderName is
+  // omitted here (per-viewer; delivered via GET /rides/:id, not the broadcast).
   emitRideEvent(rideId, "ride:driver_assigned", {
     rideId,
     driverId: driver.id,
@@ -137,6 +139,9 @@ async function simulate(prisma: PrismaClient, rideId: string): Promise<void> {
     carColor: driver.driver?.carColor ?? null,
     plate: driver.driver?.plate ?? null,
     rating: _avg.stars ?? null,
+    photoUrl: driver.driver?.photoUrl ?? null,
+    trips,
+    phone: driver.phone ?? null,
   });
 
   const pickup = { latitude: withZones.pickupZone.latitude, longitude: withZones.pickupZone.longitude };

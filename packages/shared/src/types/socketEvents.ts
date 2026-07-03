@@ -27,6 +27,20 @@ export interface DriverAssignedPayload {
   plate: string | null;
   /** Average of the driver's past ratings, or null if they have none yet. */
   rating: number | null;
+  /** Cloudinary avatar URL, or null if the driver hasn't uploaded a photo. Optional so older/broadcast payloads without it stay valid. */
+  photoUrl?: string | null;
+  /** Count of the driver's completed rides, or null if unavailable. */
+  trips?: number | null;
+  /** Driver's phone number for the rider's Call button, or null. */
+  phone?: string | null;
+  /**
+   * A co-passenger's FIRST NAME only, for the shared-trip callout — never a
+   * full name, id, or contact detail. Per-viewer, so it is populated ONLY on
+   * the authenticated GET /rides/:id response, never on the room-broadcast
+   * socket payload (which is identical for every passenger). null/undefined
+   * for lone rides or when there is no co-rider.
+   */
+  coRiderName?: string | null;
 }
 
 export interface DriverLocationPayload {
