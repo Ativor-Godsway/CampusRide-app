@@ -3,6 +3,7 @@ export * from "./haptics";
 export * from "./components/Text";
 export * from "./components/AnimatedPressable";
 export * from "./components/Avatar";
+export * from "./components/Caret";
 export * from "./components/Chip";
 export * from "./components/Keypad";
 export * from "./components/SheetHandle";

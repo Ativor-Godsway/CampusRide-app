@@ -1,10 +1,22 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
-import { Pressable, View, StyleSheet } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../AuthContext";
-import { Button, Screen, Text, Input, colors, radii, spacing, touchTarget } from "../../design";
+import {
+  Button,
+  Input,
+  Screen,
+  Text,
+  border,
+  brand,
+  colors,
+  radii,
+  spacing,
+  surface,
+  touchTarget,
+} from "../../design";
 import { errorMessage } from "../errorMessage";
-import { AuthHero } from "./AuthHero";
 
 type SignupRole = "RIDER" | "DRIVER";
 
@@ -42,59 +54,75 @@ export function SignupScreen({ allowedRoles = ["RIDER", "DRIVER"] }: SignupScree
   }
 
   return (
-    <Screen scroll noPadding edges={["top"]}>
-      <AuthHero compact title="Tell us about you" subtitle="One more step before you're ready to ride" onBack={() => router.back()} />
-      <View style={styles.panel}>
-        <Input label="Full name" placeholder="Full name" autoComplete="name" value={name} onChangeText={setName} />
+    <Screen scroll>
+      <Pressable
+        onPress={() => router.back()}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+        style={styles.backButton}
+      >
+        <Ionicons name="chevron-back" size={22} color={colors.ink[700]} />
+      </Pressable>
 
-        {allowedRoles.length > 1 ? (
-          <View style={styles.roleSection}>
-            <Text variant="label" color="muted" style={styles.roleLabel}>
-              I am a...
-            </Text>
-            <View style={styles.roleRow}>
-              {allowedRoles.map((option) => {
-                const selected = role === option;
-                return (
-                  <Pressable
-                    key={option}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    style={[styles.roleButton, selected && styles.roleButtonSelected]}
-                    onPress={() => setRole(option)}
-                  >
-                    <Text variant="bodyMedium" color={selected ? "inverse" : "default"}>
-                      {option === "RIDER" ? "Rider" : "Driver"}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
+      <Text variant="display">Tell us about you</Text>
+      <Text variant="body" color="muted" style={styles.subtitle}>
+        One more step before you're ready to ride.
+      </Text>
 
-        {error ? (
-          <Text variant="bodySmall" color="error" style={styles.error}>
-            {error}
+      <Input label="Full name" placeholder="Full name" autoComplete="name" value={name} onChangeText={setName} />
+
+      {allowedRoles.length > 1 ? (
+        <View style={styles.roleSection}>
+          <Text variant="label" color="muted" style={styles.roleLabel}>
+            I am a...
           </Text>
-        ) : null}
+          <View style={styles.roleRow}>
+            {allowedRoles.map((option) => {
+              const selected = role === option;
+              return (
+                <Pressable
+                  key={option}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  style={[styles.roleButton, selected && styles.roleButtonSelected]}
+                  onPress={() => setRole(option)}
+                >
+                  <Text variant="bodyMedium" color={selected ? "primary" : "muted"}>
+                    {option === "RIDER" ? "Rider" : "Driver"}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
 
-        <Button label="Finish" loading={isSubmitting} onPress={() => void handleSubmit()} />
-      </View>
+      {error ? (
+        <Text variant="bodySmall" color="error" style={styles.error}>
+          {error}
+        </Text>
+      ) : null}
+
+      <Button label="Finish" loading={isSubmitting} onPress={() => void handleSubmit()} />
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-    marginTop: -radii["2xl"],
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing["2xl"],
-    paddingBottom: spacing.xl,
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.pill,
+    backgroundColor: surface.raised,
+    borderWidth: 1,
+    borderColor: border.subtle,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.lg,
+  },
+  subtitle: {
+    marginTop: spacing.xs,
+    marginBottom: spacing.xl,
   },
   roleSection: {
     marginBottom: spacing.lg,
@@ -109,15 +137,16 @@ const styles = StyleSheet.create({
   roleButton: {
     flex: 1,
     borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: radii.md,
+    borderColor: border.subtle,
+    borderRadius: radii.pill,
+    backgroundColor: surface.raised,
     minHeight: touchTarget.minHeight,
     alignItems: "center",
     justifyContent: "center",
   },
   roleButtonSelected: {
-    backgroundColor: colors.primary[500],
-    borderColor: colors.primary[500],
+    backgroundColor: brand.tint,
+    borderColor: brand.primary,
   },
   error: {
     marginBottom: spacing.md,

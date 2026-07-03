@@ -116,6 +116,18 @@ export const rating = {
   star: colors.accent[500],
 } as const;
 
+/** Translucent whites for content sitting on brand-green surfaces (splash, welcome, dark heroes). */
+export const onBrand = {
+  /** Hairline borders (badge outlines). */
+  border: "rgba(255,255,255,0.20)",
+  /** Secondary copy. */
+  secondary: "rgba(255,255,255,0.85)",
+  /** Tinted fills (icon bubbles, pressed states). */
+  faint: "rgba(255,255,255,0.14)",
+  /** Decorative route-line texture. */
+  texture: "rgba(255,255,255,0.08)",
+} as const;
+
 // ─── Type / space / shape ─────────────────────────────────────────────────────
 
 export const typography = {
