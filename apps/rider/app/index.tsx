@@ -1,36 +1,20 @@
-import { useState } from "react";
 import { Redirect } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import { RoleMismatchScreen, useAuth } from "@rida/mobile-shared";
-import { AnimatedSplash } from "../components/AnimatedSplash";
+import { LoadingState, RoleMismatchScreen, Screen, useAuth } from "@rida/mobile-shared";
 
-// Hold the native splash until the animated JS splash takes over (no-op in Expo Go).
-void SplashScreen.preventAutoHideAsync().catch(() => {});
-
-/** Play the full splash only on cold start — post-login replace("/") lands here again and must gate instantly. */
-let hasSplashedThisLaunch = false;
-
-/** Entry — animated splash over the auth gate, then routes to the tab shell, welcome, or role mismatch. */
+/** Pure auth gate — routes to the tab shell when signed in, or the auth flow otherwise. */
 export default function Index() {
   const { isLoading, isAuthenticated, user, signOut } = useAuth();
-  const [splashDone, setSplashDone] = useState(hasSplashedThisLaunch);
 
-  if (!splashDone) {
+  if (isLoading) {
     return (
-      <AnimatedSplash
-        ready={!isLoading}
-        onFinished={() => {
-          hasSplashedThisLaunch = true;
-          setSplashDone(true);
-        }}
-      />
+      <Screen>
+        <LoadingState />
+      </Screen>
     );
   }
 
-  if (isLoading) return null;
-
   if (!isAuthenticated || !user) {
-    return <Redirect href="/welcome" />;
+    return <Redirect href="/auth/phone" />;
   }
 
   if (user.role !== "RIDER") {

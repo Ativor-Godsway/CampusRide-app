@@ -73,7 +73,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   content: {
-    paddingHorizontal: spacing.gutter,
+    paddingHorizontal: spacing.xl,
     paddingTop: spacing.lg,
   },
   grow: {

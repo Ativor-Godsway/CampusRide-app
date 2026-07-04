@@ -1,134 +1,74 @@
 /**
  * CampusRide design tokens — single source of truth for both the rider and
- * driver apps. Brand direction: Uber-restraint × Bolt-warmth — soft warm-
- * neutral surfaces (cream/sand), deep forest green (#1A5E3A) as the single
- * accent, near-black ink text, generous whitespace, pill controls, soft
- * radii. Premium = restraint + motion; no decorative gradients or glows.
- *
- * Two layers:
- *  - `colors` — the raw scales (legacy names kept so existing screens in
- *    both apps keep compiling; values re-pointed to the warm palette).
- *  - `surface` / `brand` / `ink` / `border` / `status` / `rating` — the
- *    semantic layer. New/redesigned UI should use these.
+ * driver apps. Brand direction: Bolt/Uber-caliber — calm, confident,
+ * high-contrast, trustworthy (it handles money). The CampusRide forest green
+ * (#19743C) is the brand anchor; a warm amber accent provides contrast for
+ * highlights (ratings, live indicators), near-black ink carries text, and
+ * warm-neutral surfaces keep the UI calm without feeling sterile.
  */
 
 import { Platform } from "react-native";
 
 export const colors = {
   primary: {
-    50: "#E4EFE8",
-    100: "#CBE2D4",
-    200: "#9CC9AE",
-    300: "#6FAE8B",
-    400: "#3F8862",
-    500: "#1A5E3A",
-    600: "#134A2D",
-    700: "#103F26",
-    800: "#0C2F1D",
-    900: "#082013",
+    50: "#E8F3EC",
+    100: "#CDE6D6",
+    200: "#9BD5AE",
+    300: "#6CC089",
+    400: "#3F9F63",
+    500: "#19743C",
+    600: "#115C2F",
+    700: "#0F5429",
+    800: "#0D3B1D",
+    900: "#082813",
   },
-  /** Warm amber accent — ratings and live/active indicators only. */
+  /** Warm amber accent — used sparingly for highlights, ratings, and live/active indicators. */
   accent: {
-    50: "#FBF3E4",
+    50: "#FBF0DA",
     100: "#F0DFBE",
-    200: "#F2CE8B",
-    300: "#EDBC61",
-    400: "#E9B14E",
-    500: "#E5A83B",
-    600: "#B7791F",
-    700: "#8F5E18",
+    200: "#FFDA85",
+    300: "#FFC94D",
+    400: "#FFBB29",
+    500: "#E0902A",
+    600: "#9A6711",
+    700: "#7A5310",
   },
   ink: {
-    900: "#171A17",
-    800: "#22261F",
-    700: "#343830",
-    600: "#474C43",
-    500: "#5B5F58",
-    400: "#787C72",
-    300: "#9A9D94",
-    200: "#B4B6AD",
-    100: "#D8D9D1",
-    50: "#EDECE5",
+    900: "#0F1311",
+    800: "#1F2422",
+    700: "#2B3230",
+    600: "#3F4845",
+    500: "#545D5A",
+    400: "#6B7280",
+    300: "#9AA1A6",
+    200: "#A8B0AD",
+    100: "#D6DCDA",
+    50: "#EEF2F0",
   },
   white: "#FFFFFF",
-  background: "#F0EEE8",
-  surface: "#F4F2EC",
-  surfaceMuted: "#EBE8E0",
-  surfaceSunken: "#E7E4DC",
-  hairline: "#EAE7DF",
-  border: "#E3E0D8",
-  borderStrong: "#CFCCC2",
-  /** Deep near-black surface for selective "feature card" emphasis. Use sparingly. */
-  surfaceDark: "#141613",
-  surfaceDarkElevated: "#1C1F1A",
-  borderDark: "#2E332C",
-  /** Accent text/dots on dark surfaces (e.g. "Live" pulse, online status). */
+  background: "#F1F3F2",
+  surface: "#F6F7F6",
+  surfaceMuted: "#ECEFED",
+  surfaceSunken: "#E4E9E6",
+  hairline: "#F0F2F0",
+  border: "#E8EBE9",
+  borderStrong: "#CBD3CF",
+  /** Deep near-black surface for selective "feature card" emphasis (Uber-style account tiles, signature dark hero cards). Use sparingly. */
+  surfaceDark: "#0F1311",
+  surfaceDarkElevated: "#14181A",
+  borderDark: "#2E362F",
+  /** Accent text/dots on dark surfaces (e.g. "Live" pulse, online status, dark-card highlights). */
   glowGreen: "#7BE0A0",
-  success: "#1A5E3A",
-  successSurface: "#E4EFE8",
-  error: "#B3261E",
-  errorSurface: "#F9E9E7",
-  danger: "#B3261E",
-  warning: "#B7791F",
-  warningSurface: "#FBF3E4",
+  success: "#19743C",
+  successSurface: "#E8F3EC",
+  error: "#B23A3A",
+  errorSurface: "#FBEAEA",
+  danger: "#B23A3A",
+  warning: "#9A6711",
+  warningSurface: "#FBF0DA",
   /** Translucent scrim for sheets/modals. */
-  overlay: "rgba(20, 22, 19, 0.35)",
+  overlay: "rgba(8, 40, 19, 0.45)",
 } as const;
-
-// ─── Semantic layer ───────────────────────────────────────────────────────────
-
-export const surface = {
-  base: colors.background,
-  raised: colors.white,
-  sunken: colors.surfaceSunken,
-  inverse: colors.surfaceDark,
-} as const;
-
-export const brand = {
-  primary: colors.primary[500],
-  primaryPressed: colors.primary[600],
-  /** Soft green fill for selected states and savings callouts. */
-  tint: colors.primary[50],
-} as const;
-
-export const ink = {
-  primary: colors.ink[900],
-  secondary: colors.ink[500],
-  tertiary: colors.ink[300],
-  onBrand: colors.white,
-} as const;
-
-export const border = {
-  subtle: colors.border,
-  strong: colors.borderStrong,
-} as const;
-
-export const status = {
-  success: colors.success,
-  successTint: colors.successSurface,
-  warning: colors.warning,
-  warningTint: colors.warningSurface,
-  error: colors.error,
-  errorTint: colors.errorSurface,
-} as const;
-
-export const rating = {
-  star: colors.accent[500],
-} as const;
-
-/** Translucent whites for content sitting on brand-green surfaces (splash, welcome, dark heroes). */
-export const onBrand = {
-  /** Hairline borders (badge outlines). */
-  border: "rgba(255,255,255,0.20)",
-  /** Secondary copy. */
-  secondary: "rgba(255,255,255,0.85)",
-  /** Tinted fills (icon bubbles, pressed states). */
-  faint: "rgba(255,255,255,0.14)",
-  /** Decorative route-line texture. */
-  texture: "rgba(255,255,255,0.08)",
-} as const;
-
-// ─── Type / space / shape ─────────────────────────────────────────────────────
 
 export const typography = {
   fontFamily: {
@@ -144,7 +84,6 @@ export const typography = {
     xl: 20,
     "2xl": 24,
     "3xl": 30,
-    display: 34,
     "4xl": 36,
     "5xl": 44,
   },
@@ -175,8 +114,6 @@ export const spacing = {
   sm: 8,
   md: 12,
   lg: 16,
-  /** Standard screen edge padding. */
-  gutter: 20,
   xl: 24,
   "2xl": 32,
   "3xl": 40,
@@ -185,68 +122,52 @@ export const spacing = {
 } as const;
 
 export const radii = {
-  sm: 10,
-  md: 16,
-  lg: 22,
-  xl: 28,
+  sm: 6,
+  md: 10,
+  lg: 16,
+  xl: 24,
   "2xl": 32,
-  pill: 999,
   full: 999,
 } as const;
 
-/**
- * One soft ambient shadow language. Android elevation stays ≤ 4 everywhere —
- * stacked heavy elevations murder Android perf and read as un-designed.
- */
 export const shadows = {
   sm: {
     shadowColor: colors.ink[900],
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.06,
     shadowRadius: 3,
     elevation: 1,
   },
-  /** Raised cards. */
   md: {
     shadowColor: colors.ink[900],
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
     elevation: 3,
   },
-  /** Floating surfaces (dock, sheets) — slightly stronger, still ambient. */
   lg: {
     shadowColor: colors.ink[900],
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.14,
     shadowRadius: 24,
-    elevation: 4,
+    elevation: 8,
   },
-  /** @deprecated Green CTA glow retired with the redesign — kept as a soft ambient alias so existing callers keep compiling. */
+  /** Brand-tinted glow for primary CTAs — green-tinted lift instead of a flat ink shadow. */
   brand: {
-    shadowColor: colors.ink[900],
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
+    shadowColor: colors.primary[500],
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
     shadowRadius: 16,
-    elevation: 3,
+    elevation: 6,
   },
 } as const;
 
-/**
- * Motion tokens. Springs are Reanimated spring configs — `snappy` for taps
- * and selections, `gentle` for sheets/cards entering. Durations are for
- * fades and simple timing transitions.
- */
+/** Shared animation durations (ms) for Animated-based transitions (sheets, progress bars, etc). */
 export const motion = {
   duration: {
-    fast: 180,
-    base: 260,
-    normal: 260,
+    fast: 120,
+    normal: 220,
     slow: 360,
-  },
-  spring: {
-    snappy: { damping: 18, stiffness: 220 },
-    gentle: { damping: 22, stiffness: 140 },
   },
 } as const;
 

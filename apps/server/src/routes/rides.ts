@@ -67,10 +67,9 @@ const RIDER_CANCELLABLE_STATUSES: RideStatus[] = [
  * reconnects/reloads after the assignment sees the same shape.
  */
 async function getDriverInfo(prisma: PrismaClient, driverId: string) {
-  const [driver, { _avg }, trips] = await Promise.all([
+  const [driver, { _avg }] = await Promise.all([
     prisma.user.findUnique({ where: { id: driverId }, include: { driver: true } }),
     prisma.rating.aggregate({ where: { rateeId: driverId }, _avg: { stars: true } }),
-    prisma.ride.count({ where: { driverId, status: "COMPLETED" } }),
   ]);
   if (!driver) return null;
 
@@ -82,11 +81,6 @@ async function getDriverInfo(prisma: PrismaClient, driverId: string) {
     carColor: driver.driver?.carColor ?? null,
     plate: driver.driver?.plate ?? null,
     rating: _avg.stars ?? null,
-    photoUrl: driver.driver?.photoUrl ?? null,
-    trips,
-    phone: driver.phone ?? null,
-    // Filled per-viewer by the GET handler for shared rides; null otherwise.
-    coRiderName: null as string | null,
   };
 }
 
@@ -189,23 +183,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       return reply.code(403).send({ error: "Forbidden" });
     }
 
-    let driver = ride.driverId ? await getDriverInfo(prisma, ride.driverId) : null;
-
-    // Co-rider first name for the shared-trip callout. Per-viewer and
-    // privacy-scoped: computed only on this authenticated response (never on
-    // the room broadcast, which is identical for all passengers), and only a
-    // single FIRST NAME — never a full name, id, or contact detail.
-    if (driver && ride.type === "SHARED") {
-      const otherPassenger = ride.passengers.find((p) => p.riderId !== userId);
-      if (otherPassenger) {
-        const coRider = await prisma.user.findUnique({
-          where: { id: otherPassenger.riderId },
-          select: { name: true },
-        });
-        const coRiderName = coRider?.name?.trim().split(/\s+/)[0] ?? null;
-        driver = { ...driver, coRiderName };
-      }
-    }
+    const driver = ride.driverId ? await getDriverInfo(prisma, ride.driverId) : null;
 
     // Include fare summary when COMPLETED so polling self-contains the full
     // completion signal (no socket required to show the rating/fare screen).

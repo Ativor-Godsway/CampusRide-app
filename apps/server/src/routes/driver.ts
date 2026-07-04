@@ -104,14 +104,11 @@ async function finalizeRideCompletion(
 }
 
 async function getDriverInfo(prisma: PrismaClient, driverId: string) {
-  const [driver, { _avg }, trips] = await Promise.all([
+  const [driver, { _avg }] = await Promise.all([
     prisma.user.findUnique({ where: { id: driverId }, include: { driver: true } }),
     prisma.rating.aggregate({ where: { rateeId: driverId }, _avg: { stars: true } }),
-    prisma.ride.count({ where: { driverId, status: "COMPLETED" } }),
   ]);
   if (!driver) return null;
-  // Driver-intrinsic fields only — coRiderName is per-viewer and lives on the
-  // GET /rides/:id response, never on this room-broadcast assign payload.
   return {
     driverId: driver.id,
     name: driver.name,
@@ -120,9 +117,6 @@ async function getDriverInfo(prisma: PrismaClient, driverId: string) {
     carColor: driver.driver?.carColor ?? null,
     plate: driver.driver?.plate ?? null,
     rating: _avg.stars ?? null,
-    photoUrl: driver.driver?.photoUrl ?? null,
-    trips,
-    phone: driver.phone ?? null,
   };
 }
 

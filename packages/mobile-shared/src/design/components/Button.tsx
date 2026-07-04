@@ -1,12 +1,11 @@
-import { ActivityIndicator, StyleSheet } from "react-native";
-import { colors, radii, spacing, touchTarget } from "../tokens";
+import { ActivityIndicator, Pressable, StyleSheet, type PressableProps } from "react-native";
+import { colors, radii, shadows, spacing, touchTarget } from "../tokens";
 import { Text } from "./Text";
-import { AnimatedPressable, type AnimatedPressableProps } from "./AnimatedPressable";
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 export type ButtonSize = "md" | "lg";
 
-export interface ButtonProps extends Omit<AnimatedPressableProps, "style" | "children"> {
+export interface ButtonProps extends Omit<PressableProps, "style" | "children"> {
   label: string;
   variant?: ButtonVariant;
   size?: ButtonSize;
@@ -14,10 +13,7 @@ export interface ButtonProps extends Omit<AnimatedPressableProps, "style" | "chi
   fullWidth?: boolean;
 }
 
-/**
- * Primary action surface — green pill with a pressed spring and a light
- * haptic on primary/danger actions. Always meets the minimum touch target.
- */
+/** Primary action surface. Always meets the 48px minimum touch target. */
 export function Button({
   label,
   variant = "primary",
@@ -25,23 +21,22 @@ export function Button({
   loading = false,
   fullWidth = true,
   disabled,
-  haptic,
   ...rest
 }: ButtonProps) {
   const isDisabled = disabled || loading;
 
   return (
-    <AnimatedPressable
+    <Pressable
       accessibilityRole="button"
       accessibilityState={{ disabled: isDisabled }}
       disabled={isDisabled}
-      haptic={haptic ?? (variant === "primary" || variant === "danger")}
-      style={[
+      style={({ pressed }) => [
         styles.base,
         sizeStyles[size],
         variantStyles[variant],
         fullWidth && styles.fullWidth,
         isDisabled && styles.disabled,
+        pressed && !isDisabled && styles.pressed,
       ]}
       {...rest}
     >
@@ -52,7 +47,7 @@ export function Button({
           {label}
         </Text>
       )}
-    </AnimatedPressable>
+    </Pressable>
   );
 }
 
@@ -65,12 +60,12 @@ const textColor: Record<ButtonVariant, "inverse" | "primary" | "default"> = {
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: radii.pill,
+    borderRadius: radii.md,
     alignItems: "center",
     justifyContent: "center",
     flexDirection: "row",
     minHeight: touchTarget.minHeight,
-    paddingHorizontal: spacing.xl,
+    paddingHorizontal: spacing.lg,
   },
   fullWidth: {
     width: "100%",
@@ -78,19 +73,22 @@ const styles = StyleSheet.create({
   label: {
     textAlign: "center",
   },
+  pressed: {
+    opacity: 0.85,
+  },
   disabled: {
-    opacity: 0.4,
+    opacity: 0.5,
   },
 });
 
 const sizeStyles = StyleSheet.create({
   md: { minHeight: touchTarget.minHeight },
-  lg: { minHeight: touchTarget.minHeight + 8, paddingHorizontal: spacing["2xl"] },
+  lg: { minHeight: touchTarget.minHeight + 8, paddingHorizontal: spacing.xl },
 });
 
 const variantStyles = StyleSheet.create({
-  primary: { backgroundColor: colors.primary[500] },
-  secondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.primary[500] },
+  primary: { backgroundColor: colors.primary[500], ...shadows.brand },
+  secondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.primary[200] },
   ghost: { backgroundColor: "transparent" },
-  danger: { backgroundColor: colors.danger },
+  danger: { backgroundColor: colors.danger, ...shadows.sm },
 });

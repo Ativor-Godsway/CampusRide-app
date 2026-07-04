@@ -6,9 +6,6 @@
     "orientation": "portrait",
     "scheme": "campusride-rider",
     "userInterfaceStyle": "automatic",
-    "splash": {
-      "backgroundColor": "#1A5E3A"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "gh.edu.ug.rida.rider"
@@ -16,17 +13,11 @@
     "android": {
       "package": "gh.edu.ug.rida.rider",
       "adaptiveIcon": {
-        "backgroundColor": "#1A5E3A"
+        "backgroundColor": "#19743C"
       }
     },
     "plugins": [
       "expo-router",
-      [
-        "expo-splash-screen",
-        {
-          "backgroundColor": "#1A5E3A"
-        }
-      ],
       "expo-secure-store",
       [
         "expo-location",

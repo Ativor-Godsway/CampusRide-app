@@ -15,7 +15,7 @@ export default function TabsLayout() {
   }
 
   if (!isAuthenticated || !user) {
-    return <Redirect href="/welcome" />;
+    return <Redirect href="/auth/phone" />;
   }
 
   if (user.role !== "RIDER") {

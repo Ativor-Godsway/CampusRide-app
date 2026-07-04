@@ -1,27 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { BlurView } from "expo-blur";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Ionicons } from "@expo/vector-icons";
-import Animated, {
-  cancelAnimation,
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withDelay,
-  withRepeat,
-  withSpring,
-  withTiming,
-} from "react-native-reanimated";
-import type { MapStyleElement } from "react-native-maps";
 import type { PaymentMethod, RideCompletedFareSummary, RideType } from "@rida/shared";
 import { getSharedFarePerRider, priceLoneRide } from "@rida/shared";
 import {
   ActiveRideExistsError,
-  AnimatedPressable,
   Badge,
   Button,
   Card,
@@ -30,23 +16,19 @@ import {
   Input,
   LoadingState,
   type MoolreNetwork,
+  ProgressBar,
   ServiceIcon,
-  SheetHandle,
   Text,
-  brand,
   cancelRide,
   colors,
   createRide,
   formatGhs,
-  haptics,
   initiateRidePayment,
-  motion,
-  onBrand,
   pollPaymentStatus,
   radii,
   regionForCoordinates,
   rideQueryKey,
-  shadows,
+  RouteStops,
   spacing,
   submitRating,
   submitRideDecision,
@@ -56,13 +38,16 @@ import {
   useRideTracking,
   type RideDriverInfo,
 } from "@rida/mobile-shared";
-import mapStyleJson from "../../assets/mapStyle.json";
 
-const MAP_STYLE = mapStyleJson as MapStyleElement[];
-const SHEET_SNAP_POINTS = ["36%", "60%", "90%"];
-
+const BROADCAST_WINDOW_MS = 90_000;
 const DUMMY_ETA_MINUTES = 4;
 const STARS = [1, 2, 3, 4, 5];
+const SEARCHING_MESSAGES = [
+  "Finding your driver…",
+  "Connecting you with nearby drivers…",
+  "Reaching out to drivers near you…",
+  "Hang tight, almost there…",
+] as const;
 
 interface RideOption {
   type: RideType;
@@ -101,6 +86,7 @@ export default function RideTypeScreen() {
   const [driverLocation, setDriverLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
 
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -135,6 +121,12 @@ export default function RideTypeScreen() {
           myPassenger?.status === "DROPPED_OFF"
         ? myPassenger.status
         : "WAITING";
+
+  useEffect(() => {
+    if (ride?.status !== "REQUESTED") return;
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [ride?.status]);
 
   // #7 merged-rider reach: this request may have been absorbed into another
   // driver's car (CANCELLED / MERGED_INTO_ANOTHER_RIDE). Follow the pointer to
@@ -203,12 +195,19 @@ export default function RideTypeScreen() {
       { id: "dropoff", ...dropoffCoord, label: params.dropoffZoneName, role: "dropoff" },
     ];
     if (driverLocation) {
-      zones.push({ id: "driver", ...driverLocation, label: "Driver", role: "driver" });
+      zones.push({ id: "driver", ...driverLocation, label: "Driver" });
     }
     return zones;
   }, [pickupCoord, dropoffCoord, driverLocation, params.pickupZoneName, params.dropoffZoneName]);
 
   // ── Search progress ─────────────────────────────────────────────────────────
+  const searchProgress = useMemo(() => {
+    if (!ride?.broadcastStartedAt) return 1;
+    const start = new Date(ride.broadcastStartedAt).getTime();
+    const elapsed = now - start;
+    return Math.max(0, Math.min(1, 1 - elapsed / BROADCAST_WINDOW_MS));
+  }, [ride?.broadcastStartedAt, now]);
+
   const priceLabel = selectedType === "SHARED" ? formatGhs(sharedFare) : formatGhs(loneFare);
 
   const canSwitchToLone = ride?.type === "SHARED" && ride?.occupancy === 1;
@@ -267,64 +266,6 @@ export default function RideTypeScreen() {
     }
   }
 
-  // ── Presentational derivations (read-only; drive sheet height + map pill) ─────
-  const insets = useSafeAreaInsets();
-  const sheetRef = useRef<BottomSheet>(null);
-
-  // Which snap height suits the current phase — compact while searching, mid
-  // once a driver's assigned, full for options/payment. Pure function of the
-  // existing ride state; never mutates it.
-  const snapTarget = (() => {
-    if (activeRideId === null) return 2;
-    if (!ride || isMerged || ride.status === "REQUESTED") return 0;
-    switch (ride.status) {
-      case "AWAITING_RIDER_DECISION":
-        return 1;
-      case "MATCHED":
-      case "ARRIVED":
-      case "IN_PROGRESS":
-        return myLegStatus === "DROPPED_OFF" ? 1 : 1;
-      case "COMPLETED":
-        return 2;
-      case "CANCELLED":
-        return 0;
-      default:
-        return 1;
-    }
-  })();
-  const initialSnapRef = useRef(snapTarget);
-
-  useEffect(() => {
-    sheetRef.current?.snapToIndex(snapTarget);
-  }, [snapTarget]);
-
-  // Floating status pill copy — derived from the ride status the screen
-  // already tracks; no new state, no fabricated ETA (DUMMY_ETA_MINUTES is the
-  // same placeholder the assigned card already shows).
-  const statusPill: { text: string } | { prefix: string; value: string } | null = (() => {
-    if (activeRideId === null || !ride) return null;
-    if (isMerged || ride.status === "REQUESTED") return { text: "Finding your driver" };
-    switch (ride.status) {
-      case "AWAITING_RIDER_DECISION":
-        return { text: "No driver yet" };
-      case "MATCHED":
-      case "ARRIVED":
-      case "IN_PROGRESS":
-        if (myLegStatus === "DROPPED_OFF") return { text: "You've arrived" };
-        if (myLegStatus === "PICKED_UP") return { text: "On the trip" };
-        if (myLegStatus === "ARRIVED") return { text: "Driver has arrived" };
-        return driverLocation
-          ? { prefix: "Arriving", value: `${DUMMY_ETA_MINUTES} min` }
-          : { text: "Driver on the way" };
-      case "COMPLETED":
-        return { text: "Trip complete" };
-      case "CANCELLED":
-        return { text: "Ride cancelled" };
-      default:
-        return null;
-    }
-  })();
-
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
@@ -334,56 +275,15 @@ export default function RideTypeScreen() {
         routeLine={[pickupCoord, dropoffCoord]}
         height={windowHeight}
         light
-        mapStyle={MAP_STYLE}
         showRecenter
         rounded={false}
       />
 
-      {/* Map overlays — presentational only. Back button = plain white circle
-          (ambient shadow, no blur); status pill = the one blur surface on the
-          map (the dock is the other). */}
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Go back"
-        onPress={() => router.back()}
-        style={[styles.backButton, { top: insets.top + spacing.sm }]}
-      >
-        <Ionicons name="arrow-back" size={22} color={colors.ink[900]} />
-      </Pressable>
-
-      {statusPill ? (
-        <View style={[styles.statusPillWrap, { top: insets.top + spacing.sm }]} pointerEvents="none">
-          <View style={styles.statusPillShadow}>
-            <View style={styles.statusPillClip}>
-              <BlurView intensity={25} tint="light" style={StyleSheet.absoluteFill} />
-              <View style={[StyleSheet.absoluteFill, styles.statusPillTint]} />
-              <View style={styles.statusPillRow}>
-                {"prefix" in statusPill ? (
-                  <>
-                    <Text variant="label" style={styles.statusPillText}>
-                      {statusPill.prefix}
-                    </Text>
-                    <Text variant="mono" style={styles.statusPillValue}>
-                      {statusPill.value}
-                    </Text>
-                  </>
-                ) : (
-                  <Text variant="label" style={styles.statusPillText}>
-                    {statusPill.text}
-                  </Text>
-                )}
-              </View>
-            </View>
-          </View>
-        </View>
-      ) : null}
-
       <BottomSheet
-        ref={sheetRef}
-        snapPoints={SHEET_SNAP_POINTS}
-        index={initialSnapRef.current}
+        snapPoints={["40%", "85%"]}
+        index={0}
         backgroundStyle={styles.sheetBackground}
-        handleComponent={SheetHandle}
+        handleIndicatorStyle={styles.sheetHandle}
       >
         <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
           {activeRideId === null && (
@@ -413,8 +313,11 @@ export default function RideTypeScreen() {
             <>
               {(!ride || ride.status === "REQUESTED" || isMerged) && (
                 <SearchingContent
+                  pickupZoneName={params.pickupZoneName}
+                  dropoffZoneName={params.dropoffZoneName}
                   priceLabel={priceLabel}
                   rideType={selectedType}
+                  progress={ride ? searchProgress : 1}
                   onCancel={() => void handleCancel()}
                   cancelling={cancelling}
                 />
@@ -473,94 +376,6 @@ const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string; icon: keyof
   { value: "CASH", label: "Cash", icon: "cash-outline" },
 ];
 
-/** One ride option — border + a snappy scale tick animate on selection. */
-function OptionCard({
-  option,
-  isSelected,
-  isExpanded,
-  onSelect,
-  onToggleExpand,
-}: {
-  option: RideOption;
-  isSelected: boolean;
-  isExpanded: boolean;
-  onSelect: () => void;
-  onToggleExpand: () => void;
-}) {
-  const sel = useSharedValue(isSelected ? 1 : 0);
-  const scale = useSharedValue(1);
-
-  useEffect(() => {
-    sel.value = withTiming(isSelected ? 1 : 0, { duration: motion.duration.fast });
-    if (isSelected) {
-      scale.value = withSpring(1.02, motion.spring.snappy, () => {
-        scale.value = withSpring(1, motion.spring.snappy);
-      });
-    }
-  }, [isSelected, sel, scale]);
-
-  const cardStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-    borderColor: sel.value > 0.5 ? brand.primary : colors.border,
-    borderWidth: 1.5,
-  }));
-
-  return (
-    <AnimatedPressable
-      accessibilityRole="button"
-      accessibilityState={{ selected: isSelected }}
-      onPress={() => {
-        haptics.selection();
-        onSelect();
-      }}
-      style={styles.optionPressable}
-    >
-      <Animated.View style={[styles.optionCard, cardStyle]}>
-        <View style={styles.optionRow}>
-          <ServiceIcon
-            name={option.icon}
-            size={52}
-            iconSize={26}
-            background={isSelected ? brand.tint : colors.surface}
-            color={isSelected ? colors.primary[600] : colors.ink[500]}
-          />
-          <View style={styles.optionInfo}>
-            <View style={styles.optionHeader}>
-              <Text variant="headline">{option.title}</Text>
-              {option.type === "SHARED" ? <Badge label="Recommended" variant="success" /> : null}
-            </View>
-            <Text variant="bodySmall" color="muted">
-              {option.summary}
-            </Text>
-          </View>
-          <View style={styles.optionRight}>
-            <Text variant="title" color={isSelected ? "primary" : "default"}>
-              {option.priceLabel}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={isExpanded ? `Hide ${option.title} details` : `Show ${option.title} details`}
-              onPress={onToggleExpand}
-              hitSlop={8}
-              style={styles.detailsToggle}
-            >
-              <Text variant="caption" color="muted">
-                {isExpanded ? "Less" : "Details"}
-              </Text>
-              <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={13} color={colors.ink[400]} />
-            </Pressable>
-          </View>
-        </View>
-        {isExpanded ? (
-          <Text variant="bodySmall" color="muted" style={styles.details}>
-            {option.details}
-          </Text>
-        ) : null}
-      </Animated.View>
-    </AnimatedPressable>
-  );
-}
-
 function OptionsContent({
   options,
   selectedType,
@@ -588,21 +403,77 @@ function OptionsContent({
 }) {
   return (
     <>
-      <Text variant="title">Choose your ride</Text>
-      <Text variant="label" color="primary" numberOfLines={1} style={styles.routeLine}>
-        {pickupZoneName} → {dropoffZoneName}
-      </Text>
+      <Text variant="h1">Choose your ride</Text>
 
-      {options.map((option) => (
-        <OptionCard
-          key={option.type}
-          option={option}
-          isSelected={selectedType === option.type}
-          isExpanded={expandedType === option.type}
-          onSelect={() => onSelectType(option.type)}
-          onToggleExpand={() => onToggleExpand(option.type)}
-        />
-      ))}
+      <RouteStops
+        style={styles.route}
+        connectorHeight={14}
+        origin={
+          <Text variant="bodySmall" numberOfLines={1}>
+            {pickupZoneName}
+          </Text>
+        }
+        destination={
+          <Text variant="bodySmall" numberOfLines={1}>
+            {dropoffZoneName}
+          </Text>
+        }
+      />
+
+      {options.map((option) => {
+        const isSelected = selectedType === option.type;
+        const isExpanded = expandedType === option.type;
+        return (
+          <Pressable
+            key={option.type}
+            accessibilityRole="button"
+            onPress={() => onSelectType(option.type)}
+          >
+            <Card style={[styles.option, isSelected && styles.optionSelected]}>
+              <View style={styles.optionRow}>
+                <ServiceIcon
+                  name={option.icon}
+                  size={52}
+                  iconSize={26}
+                  background={isSelected ? colors.primary[50] : colors.surface}
+                  color={isSelected ? colors.primary[600] : colors.ink[500]}
+                />
+                <View style={styles.optionInfo}>
+                  <View style={styles.optionHeader}>
+                    <Text variant="h3">{option.title}</Text>
+                    {option.type === "SHARED" ? (
+                      <Badge label="Recommended" variant="success" />
+                    ) : null}
+                  </View>
+                  <Text variant="h2" color={isSelected ? "primary" : undefined} style={styles.price}>
+                    {option.priceLabel}
+                  </Text>
+                  <Text variant="bodySmall" color="muted">
+                    {option.summary}
+                  </Text>
+                </View>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={isExpanded ? "Hide details" : "Show details"}
+                  onPress={() => onToggleExpand(option.type)}
+                  style={styles.chevron}
+                >
+                  <Ionicons
+                    name={isExpanded ? "chevron-up" : "chevron-down"}
+                    size={20}
+                    color={colors.ink[400]}
+                  />
+                </Pressable>
+              </View>
+              {isExpanded ? (
+                <Text variant="bodySmall" color="muted" style={styles.details}>
+                  {option.details}
+                </Text>
+              ) : null}
+            </Card>
+          </Pressable>
+        );
+      })}
 
       <View style={styles.paymentSection}>
         <Text variant="label" color="muted">
@@ -612,21 +483,21 @@ function OptionsContent({
           {PAYMENT_METHOD_OPTIONS.map((opt) => {
             const selected = selectedPaymentMethod === opt.value;
             return (
-              <AnimatedPressable
+              <Pressable
                 key={opt.value}
                 accessibilityRole="button"
-                accessibilityState={{ selected }}
-                onPress={() => {
-                  haptics.selection();
-                  onSelectPaymentMethod(opt.value);
-                }}
+                onPress={() => onSelectPaymentMethod(opt.value)}
                 style={[styles.paymentOption, selected && styles.paymentOptionSelected]}
               >
-                <Ionicons name={opt.icon} size={18} color={selected ? colors.primary[600] : colors.ink[400]} />
+                <Ionicons
+                  name={opt.icon}
+                  size={18}
+                  color={selected ? colors.primary[600] : colors.ink[400]}
+                />
                 <Text variant="bodySmall" color={selected ? "primary" : "muted"}>
                   {opt.label}
                 </Text>
-              </AnimatedPressable>
+              </Pressable>
             );
           })}
         </View>
@@ -637,7 +508,7 @@ function OptionsContent({
           <LoadingState message="Requesting your ride..." />
         ) : (
           <Button
-            label={selectedType === "SHARED" ? "Request shared ride" : "Request private ride"}
+            label={selectedType === "SHARED" ? "Request shared ride" : "Request solo ride"}
             onPress={onSubmit}
           />
         )}
@@ -648,94 +519,59 @@ function OptionsContent({
 
 // ── Tracking phase content ────────────────────────────────────────────────────
 
-/** Two expanding-fading rings behind a car glyph — the "searching" radar. */
-function RadarPulse() {
-  const r1 = useSharedValue(0);
-  const r2 = useSharedValue(0);
-
-  useEffect(() => {
-    const ease = Easing.out(Easing.ease);
-    r1.value = withRepeat(withTiming(1, { duration: 1800, easing: ease }), -1, false);
-    r2.value = withDelay(900, withRepeat(withTiming(1, { duration: 1800, easing: ease }), -1, false));
-    return () => {
-      cancelAnimation(r1);
-      cancelAnimation(r2);
-    };
-  }, [r1, r2]);
-
-  const ring1 = useAnimatedStyle(() => ({
-    transform: [{ scale: 0.7 + r1.value * 1.2 }],
-    opacity: (1 - r1.value) * 0.4,
-  }));
-  const ring2 = useAnimatedStyle(() => ({
-    transform: [{ scale: 0.7 + r2.value * 1.2 }],
-    opacity: (1 - r2.value) * 0.4,
-  }));
-
-  return (
-    <View style={styles.radarWrap}>
-      <Animated.View style={[styles.radarRing, ring1]} />
-      <Animated.View style={[styles.radarRing, ring2]} />
-      <View style={styles.radarCore}>
-        <Ionicons name="car" size={24} color={brand.primary} />
-      </View>
-    </View>
-  );
-}
-
-/** Indeterminate progress — a green dot easing back and forth along a thin track. */
-function TravelingDot() {
-  const [trackWidth, setTrackWidth] = useState(0);
-  const t = useSharedValue(0);
-
-  useEffect(() => {
-    t.value = withRepeat(withTiming(1, { duration: 1400, easing: Easing.inOut(Easing.ease) }), -1, true);
-    return () => cancelAnimation(t);
-  }, [t]);
-
-  const dotStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: t.value * Math.max(0, trackWidth - 10) }],
-  }));
-
-  return (
-    <View style={styles.dotTrack} onLayout={(e) => setTrackWidth(e.nativeEvent.layout.width)}>
-      <Animated.View style={[styles.travelingDot, dotStyle]} />
-    </View>
-  );
-}
-
 function SearchingContent({
-  rideType,
+  pickupZoneName,
+  dropoffZoneName,
   priceLabel,
+  rideType,
+  progress,
   onCancel,
   cancelling,
 }: {
-  rideType: RideType;
+  pickupZoneName: string;
+  dropoffZoneName: string;
   priceLabel: string;
+  rideType: RideType;
+  progress: number;
   onCancel: () => void;
   cancelling: boolean;
 }) {
+  const [msgIdx, setMsgIdx] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(
+      () => setMsgIdx((i) => (i + 1) % SEARCHING_MESSAGES.length),
+      20000,
+    );
+    return () => clearInterval(timer);
+  }, []);
+
   return (
     <View style={styles.section}>
-      <View style={styles.searchHeader}>
-        <RadarPulse />
-        <Text variant="title" style={styles.searchTitle}>
-          Finding your driver…
-        </Text>
-        <Text variant="bodySmall" color="muted">
-          Contacting drivers near you
-        </Text>
+      <View style={styles.stateHeader}>
+        <ServiceIcon name="search" size={48} iconSize={22} />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">{SEARCHING_MESSAGES[msgIdx]}</Text>
+          <Text variant="bodySmall" color="muted">
+            {pickupZoneName} → {dropoffZoneName}
+          </Text>
+        </View>
       </View>
 
-      <TravelingDot />
+      <View style={styles.progressSection}>
+        <ProgressBar progress={progress} />
+        <Text variant="caption" color="subtle" style={styles.progressLabel}>
+          Contacting available drivers nearby
+        </Text>
+      </View>
 
       <Card style={styles.infoCard}>
         <View style={styles.infoRow}>
           <Ionicons name="car-outline" size={16} color={colors.ink[400]} />
           <Text variant="bodySmall" color="muted" style={styles.infoLabel}>
-            {rideType === "SHARED" ? "Shared ride" : "Private ride"}
+            {rideType === "SHARED" ? "Shared ride" : "Solo ride"}
           </Text>
-          <Text variant="bodyMedium">{priceLabel}</Text>
+          <Text variant="bodySmall">{priceLabel}</Text>
         </View>
       </Card>
 
@@ -766,7 +602,7 @@ function NoDriverContent({
           color={colors.warning}
         />
         <View style={styles.stateHeading}>
-          <Text variant="title">No drivers available right now</Text>
+          <Text variant="h2">No drivers available right now</Text>
           <Text variant="bodySmall" color="muted">
             Try again — campus driver availability changes quickly.
           </Text>
@@ -792,11 +628,6 @@ function NoDriverContent({
   );
 }
 
-/**
- * Driver identity. Stays initials for now — the real Cloudinary photo lands
- * in Phase 5 (the payload has no photoUrl yet). Rendered in the branded
- * tint-on-primary style so the Phase 5 swap is a drop-in.
- */
 function DriverAvatar({ name }: { name: string }) {
   const initials = name
     .trim()
@@ -806,68 +637,23 @@ function DriverAvatar({ name }: { name: string }) {
     .join("")
     .toUpperCase();
   return (
-    <View style={styles.avatar} accessibilityLabel={name}>
-      <Text variant="title" color="primary">
+    <View style={styles.avatar}>
+      <Text variant="h3" color="inverse">
         {initials}
       </Text>
     </View>
   );
 }
 
-/**
- * Call / Message / Safety row. All three are inert for now: the rider-facing
- * driver payload carries no phone number (so no `tel:` target) and there are
- * no existing message/safety handlers to wire. Rendered as the designed row
- * but non-interactive — flagged for a future phase / server field.
- */
-function DriverActionRow() {
-  return (
-    <View style={styles.actionRow}>
-      <View
-        style={styles.callPill}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: true }}
-        accessibilityLabel="Call driver (not available yet)"
-      >
-        <Ionicons name="call" size={18} color={colors.white} />
-        <Text variant="bodyMedium" color="inverse">
-          Call
-        </Text>
-      </View>
-      <View
-        style={styles.messagePill}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: true }}
-        accessibilityLabel="Message driver (not available yet)"
-      >
-        <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary[600]} />
-        <Text variant="bodyMedium" color="primary">
-          Message
-        </Text>
-      </View>
-      <View
-        style={styles.safetyButton}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: true }}
-        accessibilityLabel="Safety options (not available yet)"
-      >
-        <Ionicons name="shield-checkmark-outline" size={20} color={colors.ink[700]} />
-      </View>
-    </View>
-  );
-}
-
 function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
-  // carColor/make/model + plate are in the payload; a trips count is NOT
-  // (noted for Phase 5's server change) so "· N trips" is omitted.
-  const vehicle = [driver.carColor, driver.carMake, driver.carModel].filter(Boolean).join(" ");
+  const car = [driver.carColor, driver.carMake, driver.carModel].filter(Boolean).join(" ");
   return (
     <Card style={styles.driverCard}>
       <View style={styles.driverRow}>
         <DriverAvatar name={driver.name} />
         <View style={styles.driverInfo}>
-          <Text variant="headline">{driver.name}</Text>
-          {driver.rating != null ? (
+          <Text variant="h3">{driver.name}</Text>
+          {driver.rating != null && (
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={13} color={colors.accent[500]} />
               <Text variant="bodySmall" color="muted">
@@ -875,22 +661,18 @@ function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
                 {driver.rating.toFixed(1)}
               </Text>
             </View>
-          ) : null}
-        </View>
-        <View style={styles.driverRight}>
-          {driver.plate ? (
-            <View style={styles.plateBadge}>
-              <Text variant="mono" style={styles.plateText}>
-                {driver.plate}
-              </Text>
-            </View>
-          ) : null}
-          {vehicle ? (
-            <Text variant="caption" color="muted" style={styles.vehicleText} numberOfLines={1}>
-              {vehicle}
+          )}
+          {car ? (
+            <Text variant="bodySmall" color="muted">
+              {car}
             </Text>
           ) : null}
         </View>
+        {driver.plate ? (
+          <View style={styles.plateBadge}>
+            <Text variant="mono" style={{ fontSize: 12 }}>{driver.plate}</Text>
+          </View>
+        ) : null}
       </View>
     </Card>
   );
@@ -912,27 +694,31 @@ function DriverFoundContent({
   onCancel: () => void;
   cancelling: boolean;
 }) {
-  const firstName = driver.name.split(" ")[0];
-  const title = arrived
-    ? `${firstName} has arrived`
-    : hasLocation
-      ? `${firstName} is arriving in ${DUMMY_ETA_MINUTES} min`
-      : `${firstName} is on the way`;
-
   return (
     <View style={styles.section}>
-      <View style={styles.stateHeading}>
-        <Text variant="caption" color="muted">
-          {arrived ? "YOUR DRIVER HAS ARRIVED" : "YOUR DRIVER IS ON THE WAY"}
-        </Text>
-        <Text variant="title">{title}</Text>
+      <View style={styles.stateHeader}>
+        <ServiceIcon
+          name={arrived ? "flag" : "car"}
+          size={48}
+          iconSize={22}
+          background={arrived ? colors.successSurface : colors.primary[50]}
+          color={arrived ? colors.success : colors.primary[600]}
+        />
+        <View style={styles.stateHeading}>
+          <Text variant="h2">{arrived ? "Your driver has arrived" : "Driver is on the way to you"}</Text>
+          <Text variant="bodySmall" color="muted">
+            {arrived
+              ? "Head to your pickup point — your driver is waiting."
+              : hasLocation
+                ? `About ${DUMMY_ETA_MINUTES} min away`
+                : "Your driver is getting ready"}
+          </Text>
+        </View>
       </View>
 
       <PremiumDriverCard driver={driver} />
 
-      <DriverActionRow />
-
-      <Button label="Cancel ride" variant="ghost" onPress={onCancel} loading={cancelling} />
+      <Button label="Cancel ride" variant="secondary" onPress={onCancel} loading={cancelling} />
     </View>
   );
 }
@@ -1431,107 +1217,32 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   sheetBackground: {
     backgroundColor: colors.white,
-    borderTopLeftRadius: radii.xl,
-    borderTopRightRadius: radii.xl,
+    borderTopLeftRadius: radii["2xl"],
+    borderTopRightRadius: radii["2xl"],
   },
+  sheetHandle: { backgroundColor: colors.borderStrong, width: 40, height: 5 },
   sheetContent: {
-    paddingHorizontal: spacing.gutter,
+    paddingHorizontal: spacing.xl,
     paddingBottom: spacing.xl,
     gap: spacing.lg,
   },
-  // ── Map overlays
-  backButton: {
-    position: "absolute",
-    left: spacing.gutter,
-    width: 44,
-    height: 44,
-    borderRadius: radii.full,
-    backgroundColor: colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-    ...shadows.md,
-  },
-  statusPillWrap: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    alignItems: "center",
-  },
-  statusPillShadow: {
-    borderRadius: radii.pill,
-    ...shadows.md,
-  },
-  statusPillClip: {
-    borderRadius: radii.pill,
-    overflow: "hidden",
-  },
-  statusPillTint: {
-    backgroundColor: colors.surfaceDark,
-    opacity: 0.7,
-  },
-  statusPillRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    minHeight: 40,
-  },
-  statusPillText: { color: colors.white },
-  statusPillValue: { color: colors.white, fontSize: typography.size.sm },
   // ── Options
-  routeLine: { marginTop: spacing.xs, marginBottom: spacing.sm },
-  optionPressable: {},
-  optionCard: {
-    backgroundColor: colors.white,
-    borderRadius: radii.lg,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    ...shadows.sm,
-  },
+  route: { marginTop: spacing.xs, marginBottom: spacing.lg },
+  option: { marginBottom: spacing.lg, borderWidth: 2, borderColor: "transparent" },
+  optionSelected: { borderColor: colors.primary[500] },
   optionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   optionInfo: { flex: 1, gap: 2 },
   optionHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  optionRight: { alignItems: "flex-end", gap: 2 },
-  detailsToggle: { flexDirection: "row", alignItems: "center", gap: 2 },
+  price: { marginTop: 2 },
+  chevron: { padding: spacing.xs },
   details: { marginTop: spacing.md },
   footer: { marginTop: spacing.sm, marginBottom: spacing.xl, minHeight: 80 },
   // ── State panels
   section: { gap: spacing.md },
   stateHeader: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   stateHeading: { flex: 1, gap: 4 },
-  // ── Searching (radar + traveling dot)
-  searchHeader: { alignItems: "center", gap: spacing.xs, paddingVertical: spacing.sm },
-  searchTitle: { marginTop: spacing.sm },
-  radarWrap: { width: 96, height: 96, alignItems: "center", justifyContent: "center" },
-  radarRing: {
-    position: "absolute",
-    width: 96,
-    height: 96,
-    borderRadius: radii.full,
-    backgroundColor: brand.primary,
-  },
-  radarCore: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.full,
-    backgroundColor: brand.tint,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  dotTrack: {
-    height: 4,
-    borderRadius: radii.pill,
-    backgroundColor: colors.surfaceSunken,
-    justifyContent: "center",
-  },
-  travelingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: radii.pill,
-    backgroundColor: brand.primary,
-  },
+  progressSection: { gap: spacing.xs },
+  progressLabel: { textAlign: "center" },
   savingsNote: {
     flexDirection: "row",
     alignItems: "center",
@@ -1552,55 +1263,18 @@ const styles = StyleSheet.create({
   driverCard: {},
   driverRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   driverInfo: { flex: 1, gap: 2 },
-  driverRight: { alignItems: "flex-end", gap: spacing.xs },
   ratingRow: { flexDirection: "row", alignItems: "center" },
   plateBadge: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-    backgroundColor: colors.surfaceSunken,
+    backgroundColor: colors.surfaceMuted,
     borderRadius: radii.sm,
   },
-  plateText: { fontSize: 13 },
-  vehicleText: { maxWidth: 120, textAlign: "right" },
   avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: radii.full,
-    backgroundColor: brand.tint,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  // ── Driver action row (Call / Message / Safety — inert for now)
-  actionRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  callPill: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.xs,
-    minHeight: 48,
-    borderRadius: radii.pill,
-    backgroundColor: brand.primary,
-  },
-  messagePill: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.xs,
-    minHeight: 48,
-    borderRadius: radii.pill,
-    backgroundColor: colors.white,
-    borderWidth: 1.5,
-    borderColor: colors.primary[500],
-  },
-  safetyButton: {
     width: 48,
     height: 48,
     borderRadius: radii.full,
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
+    backgroundColor: colors.primary[500],
     alignItems: "center",
     justifyContent: "center",
   },
