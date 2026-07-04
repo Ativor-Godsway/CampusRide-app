@@ -81,6 +81,7 @@ async function getDriverInfo(prisma: PrismaClient, driverId: string) {
     carColor: driver.driver?.carColor ?? null,
     plate: driver.driver?.plate ?? null,
     rating: _avg.stars ?? null,
+    photoUrl: driver.driver?.photoUrl ?? null,
   };
 }
 

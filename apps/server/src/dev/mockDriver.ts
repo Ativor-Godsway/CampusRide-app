@@ -137,6 +137,9 @@ async function simulate(prisma: PrismaClient, rideId: string): Promise<void> {
     carColor: driver.driver?.carColor ?? null,
     plate: driver.driver?.plate ?? null,
     rating: _avg.stars ?? null,
+    // Real, reachable Cloudinary URL (public demo cloud, has a face) so dev
+    // mode actually renders a photo and exercises the g_face/c_fill transform.
+    photoUrl: "https://res.cloudinary.com/demo/image/upload/woman.jpg",
   });
 
   const pickup = { latitude: withZones.pickupZone.latitude, longitude: withZones.pickupZone.longitude };

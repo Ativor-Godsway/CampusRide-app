@@ -27,6 +27,8 @@ export interface DriverAssignedPayload {
   plate: string | null;
   /** Average of the driver's past ratings, or null if they have none yet. */
   rating: number | null;
+  /** Cloudinary avatar URL, or null if the driver hasn't uploaded a photo. Optional so older/broadcast payloads without it stay valid. */
+  photoUrl?: string | null;
 }
 
 export interface DriverLocationPayload {
