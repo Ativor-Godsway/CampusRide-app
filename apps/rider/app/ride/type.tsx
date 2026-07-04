@@ -3,7 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
+import { cloudinaryAvatar } from "./cloudinaryAvatar";
 import type { PaymentMethod, RideCompletedFareSummary, RideType } from "@rida/shared";
 import { getSharedFarePerRider, priceLoneRide } from "@rida/shared";
 import {
@@ -628,7 +630,8 @@ function NoDriverContent({
   );
 }
 
-function DriverAvatar({ name }: { name: string }) {
+function DriverAvatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) {
+  const [failed, setFailed] = useState(false);
   const initials = name
     .trim()
     .split(/\s+/)
@@ -636,11 +639,23 @@ function DriverAvatar({ name }: { name: string }) {
     .map((w) => w[0] ?? "")
     .join("")
     .toUpperCase();
+  const showPhoto = Boolean(photoUrl) && !failed;
   return (
-    <View style={styles.avatar}>
-      <Text variant="h3" color="inverse">
-        {initials}
-      </Text>
+    <View style={styles.avatar} accessibilityLabel={`Driver ${name}`}>
+      {showPhoto ? (
+        <Image
+          source={{ uri: cloudinaryAvatar(photoUrl!, 48) }}
+          style={styles.avatarImage}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          transition={200}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <Text variant="h3" color="inverse">
+          {initials}
+        </Text>
+      )}
     </View>
   );
 }
@@ -650,7 +665,7 @@ function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
   return (
     <Card style={styles.driverCard}>
       <View style={styles.driverRow}>
-        <DriverAvatar name={driver.name} />
+        <DriverAvatar name={driver.name} photoUrl={driver.photoUrl} />
         <View style={styles.driverInfo}>
           <Text variant="h3">{driver.name}</Text>
           {driver.rating != null && (
@@ -1277,6 +1292,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary[500],
     alignItems: "center",
     justifyContent: "center",
+  },
+  avatarImage: {
+    width: 48,
+    height: 48,
+    borderRadius: radii.full,
   },
   // ── Rating
   ratingSection: { alignItems: "center", gap: spacing.sm },
