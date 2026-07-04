@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { cloudinaryAvatar } from "./cloudinaryAvatar";
@@ -286,6 +286,9 @@ export default function RideTypeScreen() {
         index={0}
         backgroundStyle={styles.sheetBackground}
         handleIndicatorStyle={styles.sheetHandle}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
         <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
           {activeRideId === null && (
@@ -1083,6 +1086,7 @@ function CompletedContent({
           value={phone}
           onChangeText={setPhone}
           returnKeyType="done"
+          InputComponent={BottomSheetTextInput}
         />
         <View style={styles.networkRow}>
           {(["MTN", "TELECEL", "AT"] as MoolreNetwork[]).map((n) => (
@@ -1137,6 +1141,7 @@ function CompletedContent({
           error={otpError ?? undefined}
           editable={!otpExpired}
           style={styles.codeInput}
+          InputComponent={BottomSheetTextInput}
         />
         {otpExpired ? (
           <Button label="Start over" onPress={handleRestartOtp} />

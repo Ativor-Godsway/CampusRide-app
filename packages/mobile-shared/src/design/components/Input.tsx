@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ComponentType } from "react";
 import {
   InputAccessoryView,
   Keyboard,
@@ -22,10 +22,27 @@ export interface InputProps extends TextInputProps {
    * `returnKeyType="done"` so the keypad's own done/checkmark dismisses it.
    */
   doneAccessory?: boolean;
+  /**
+   * The underlying text-input component. Defaults to React Native's
+   * `TextInput`. Pass a drop-in that accepts `TextInputProps` (e.g. gorhom's
+   * `BottomSheetTextInput`) when the field lives inside a bottom sheet and
+   * needs keyboard-aware resizing. Omitting it preserves the exact plain
+   * `TextInput` behavior.
+   */
+  InputComponent?: ComponentType<TextInputProps>;
 }
 
 /** Labeled text input with focus and error states. Used by auth and ride-request forms. */
-export function Input({ label, error, style, onFocus, onBlur, doneAccessory, ...rest }: InputProps) {
+export function Input({
+  label,
+  error,
+  style,
+  onFocus,
+  onBlur,
+  doneAccessory,
+  InputComponent = TextInput,
+  ...rest
+}: InputProps) {
   const [isFocused, setIsFocused] = useState(false);
   const accessoryId = useId();
   const showIosAccessory = doneAccessory && Platform.OS === "ios";
@@ -37,7 +54,7 @@ export function Input({ label, error, style, onFocus, onBlur, doneAccessory, ...
           {label}
         </Text>
       ) : null}
-      <TextInput
+      <InputComponent
         style={[
           styles.input,
           isFocused && styles.inputFocused,
