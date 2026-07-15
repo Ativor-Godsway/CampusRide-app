@@ -1,0 +1,32 @@
+# Local Postgres for the server test suite (and optional local dev).
+#
+# The integration tests run hundreds of sequential queries; against a remote
+# auto-suspending Neon branch that meant 400–540s per file, dropped connections,
+# and SIGSEGV. A local Postgres runs the whole suite in ~12s, deterministically.
+#
+#   docker compose up -d
+#   cd apps/server && npm run db:reset:test && npm run db:seed:test && npm test
+#
+# Matches apps/server/.env.test.example (postgres/postgres @ localhost:5432/rida_test).
+# NOTE: verified in this repo against a native local Postgres; the Docker path is
+# provided for CI / machines without a native install.
+services:
+  postgres:
+    image: postgres:16
+    container_name: rida-test-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rida_test
+    ports:
+      - "5432:5432"
+    volumes:
+      - rida-test-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d rida_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  rida-test-pgdata:

@@ -1,4 +1,17 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+import path from "node:path";
+
+// Per-environment .env loading (dev/test/prod split — see docs/environments.md).
+// NODE_ENV picks the file: `.env.development` (default), `.env.test` (vitest
+// sets NODE_ENV=test), or none in production (Render injects real env vars, and
+// no .env* file is deployed). We load the env-specific file FIRST, then `.env`
+// as a fallback — dotenv never overrides an already-set var, so the specific
+// file and any real process env (Render) both win over the base `.env`. This is
+// what keeps local dev/tests OFF the production database.
+const NODE_ENV = process.env.NODE_ENV ?? "development";
+const serverRoot = path.resolve(__dirname, "..");
+dotenv.config({ path: path.join(serverRoot, `.env.${NODE_ENV}`) });
+dotenv.config({ path: path.join(serverRoot, ".env") });
 
 export const APP_NAME = "CampusRide";
 

@@ -8,6 +8,10 @@ export default defineConfig({
     },
   },
   test: {
+    // Force NODE_ENV=test so config.ts loads `.env.test` (the isolated Neon
+    // `test` branch), not the base `.env`. Vitest defaults to this, but pin it
+    // explicitly so the dev/test/prod split can't silently regress.
+    env: { NODE_ENV: "test" },
     // Neon's pooled connection has noticeable per-query latency; the ride
     // service tests issue many sequential queries inside transactions.
     testTimeout: 60000,

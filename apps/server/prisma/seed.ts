@@ -30,6 +30,16 @@ async function main() {
     console.log(`Zones already seeded (${existingZones} found). Skipping zone seed.`);
   }
 
+  // SEED_ZONE_ADJACENCY=false seeds zones ONLY (no adjacency). The `test` branch
+  // uses this: the dispatch/assembly eligibility tests build and assert their
+  // OWN sparse edges, and a pre-seeded full mesh both collides on the unique
+  // constraint and breaks "distant zone is not adjacent" assumptions. Dev/prod
+  // leave it unset (default true) and get the full demo mesh below.
+  if (process.env.SEED_ZONE_ADJACENCY === "false") {
+    console.log("SEED_ZONE_ADJACENCY=false — skipping ZoneAdjacency seed (zones only).");
+    return;
+  }
+
   // Full-mesh ZoneAdjacency (demo scope): every seeded zone adjacent to every
   // other, BOTH directions. computeEligibleZoneSet (driver.ts) reads adjacency
   // bidirectionally, so one direction would suffice — but both makes the mesh
