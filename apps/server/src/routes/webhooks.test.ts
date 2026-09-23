@@ -190,8 +190,8 @@ describe("POST /webhooks/moolre — Moolre disabled (cash-only launch)", () => {
     await disabledApp.close();
   });
 
-  it("defaults to config.moolre.enabled, which is false in this environment", async () => {
-    expect(config.moolre.enabled).toBe(false);
+  it("defaults to config.moolre.paymentsEnabled, which is false in this environment", async () => {
+    expect(config.moolre.paymentsEnabled).toBe(false);
 
     const defaultApp = Fastify();
     registerWebhookRoutes(defaultApp, prisma, paymentService, WEBHOOK_SECRET);

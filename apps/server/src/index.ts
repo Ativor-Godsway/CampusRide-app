@@ -5,7 +5,12 @@ import { Server as SocketServer } from "socket.io";
 import { APP_NAME, config } from "./config";
 import { prisma } from "./db/prisma";
 import { processTimeouts } from "./services/ride/timeouts";
-import { otpService, paymentService, routeService } from "./services/active";
+import {
+  assertOtpServiceAllowedInProduction,
+  otpService,
+  paymentService,
+  routeService,
+} from "./services/active";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerDemoOtpRoutes } from "./routes/demoOtp";
 import { registerWebhookRoutes } from "./routes/webhooks";
@@ -24,6 +29,10 @@ const TIMEOUT_POLL_INTERVAL_MS = 30_000;
 export { paymentService, routeService, otpService };
 
 async function bootstrap() {
+  // Fail loud before binding a port: a production server that cannot deliver
+  // login OTPs is not serviceable (see services/active.ts).
+  assertOtpServiceAllowedInProduction(otpService, config.nodeEnv);
+
   // trustProxy: Render terminates TLS at a proxy, so the socket IP is the
   // proxy's. Trusting the proxy makes request.ip (and therefore the rate
   // limiter's per-IP keys) resolve to the real client via X-Forwarded-For,

@@ -332,7 +332,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     // production ever resolves — the rider's "Pay" tap hung forever. Fail
     // closed with an explicit, typed answer instead, BEFORE any Payment row is
     // created. Checked first so the answer doesn't depend on ride state.
-    if (!config.moolre.enabled) {
+    if (!config.moolre.paymentsEnabled) {
       return reply.code(409).send({
         error: "Digital payments are disabled — please pay the driver in cash.",
         code: "PAYMENTS_CASH_ONLY",

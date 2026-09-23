@@ -36,7 +36,7 @@ async function main() {
     console.error("Usage: sendTestOtpMoolre.ts <phone>");
     process.exit(1);
   }
-  if (!config.moolre.enabled || !config.moolre.vasKey || !config.moolre.smsSenderId) {
+  if (!config.moolre.smsEnabled || !config.moolre.vasKey || !config.moolre.smsSenderId) {
     console.error(
       "Set MOOLRE_ENABLED=true, MOOLRE_VAS_KEY, and MOOLRE_SMS_SENDER_ID in .env before running this.",
     );

@@ -65,7 +65,7 @@ async function authedDriver() {
 
 describe("POST /rides/:id/initiate-payment — cash-only launch", () => {
   it("returns the typed cash-only refusal instead of falling through to DummyPaymentService", async () => {
-    expect(config.moolre.enabled).toBe(false);
+    expect(config.moolre.paymentsEnabled).toBe(false);
 
     const { rider, token } = await authedRider();
     const { ride } = await createTestRide({ type: "LONE", status: "COMPLETED" });

@@ -29,7 +29,7 @@ async function main() {
     console.error("Usage: moolreSandbox.ts <phone>");
     process.exit(1);
   }
-  if (!config.moolre.enabled) {
+  if (!config.moolre.paymentsEnabled) {
     console.error("Set MOOLRE_ENABLED=true (and the Moolre keys) in .env before running this.");
     process.exit(1);
   }

@@ -26,7 +26,17 @@ export const config = {
     senderId: process.env.MNOTIFY_SENDER_ID ?? "CampusRide",
   },
   moolre: {
-    enabled: process.env.MOOLRE_ENABLED === "true",
+    /**
+     * Phase 2: the single MOOLRE_ENABLED flag used to gate payments AND SMS
+     * together, which made "OTP by real SMS while payments stay off"
+     * impossible. It is now split in two. Both fall back to the legacy
+     * MOOLRE_ENABLED only when the specific var is unset, so an old
+     * environment keeps its exact previous behaviour.
+     */
+    /** Collections/disbursements + the Moolre webhook. OFF for the cash-only launch. */
+    paymentsEnabled: (process.env.MOOLRE_PAYMENTS_ENABLED ?? process.env.MOOLRE_ENABLED) === "true",
+    /** Moolre SMS (VAS) transport — OTP delivery and USSD notifications. Independent of payments. */
+    smsEnabled: (process.env.MOOLRE_SMS_ENABLED ?? process.env.MOOLRE_ENABLED) === "true",
     // sandbox.moolre.com for now, api.moolre.com for live — config-driven, never hardcoded.
     baseUrl: process.env.MOOLRE_BASE_URL ?? "https://sandbox.moolre.com",
     apiUser: process.env.MOOLRE_API_USER ?? "",
@@ -69,7 +79,7 @@ export const config = {
   /**
    * Selects the OTP delivery provider. One of "moolre" | "mnotify" | "dummy".
    * Precedence (see services/active.ts):
-   *   - "moolre"  -> MoolreOtpService, only if moolre.enabled AND vasKey/smsSenderId set.
+   *   - "moolre"  -> MoolreOtpService, only if moolre.smsEnabled AND vasKey/smsSenderId set.
    *   - "mnotify" -> MnotifyOtpService, only if mnotify.enabled.
    *   - anything else (incl. unset/"dummy") -> DummyOtpService (default for tests/dev).
    * If the requested provider's prerequisites aren't met, falls back to DummyOtpService.
@@ -96,7 +106,7 @@ export const config = {
    * any phone number could otherwise mint a rider account with no
    * verification. The USSD service code is left intact and dormant; flip this
    * to "true" only once the callback has a gateway IP allowlist / shared
-   * secret. Same pattern as `moolre.enabled`.
+   * secret. Same pattern as `moolre.paymentsEnabled`.
    */
   enableUssd: process.env.ENABLE_USSD === "true",
 } as const;

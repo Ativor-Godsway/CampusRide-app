@@ -53,7 +53,7 @@ const HARD_FAILURE_CODES = new Set(["TP13", "AIN01", "AIN04"]);
 
 /**
  * Real payment integration via Moolre, behind the PaymentService interface.
- * Only instantiated when `config.moolre.enabled` is true (see
+ * Only instantiated when `config.moolre.paymentsEnabled` is true (see
  * services/active.ts) — tests and local dev use DummyPaymentService instead,
  * so this code path never runs in the automated test suite. Verified via the
  * manual sandbox script (scripts/moolreSandbox.ts).

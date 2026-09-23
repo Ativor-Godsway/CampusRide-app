@@ -114,7 +114,7 @@ async function main() {
   }
   const channel = channelArg as Channel;
 
-  if (!config.moolre.enabled) {
+  if (!config.moolre.paymentsEnabled) {
     console.error("Set MOOLRE_ENABLED=true (and the LIVE Moolre keys) in .env before running this.");
     process.exit(1);
   }

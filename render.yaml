@@ -43,14 +43,53 @@ services:
 
       # ── Feature flags (safe defaults for first deploy) ──────────────────────
 
-      # Keep false until Moolre payment integration is wired and tested.
-      - key: MOOLRE_ENABLED
+      # Moolre is gated by TWO independent flags (Phase 2). Payments stay off
+      # for the cash-only launch; SMS is on so real login OTPs are texted.
+      - key: MOOLRE_PAYMENTS_ENABLED
         value: "false"
 
-      # "dummy" logs OTPs to the server console instead of sending real SMS.
-      # Switch to "moolre" or "mnotify" once SMS is configured.
+      - key: MOOLRE_SMS_ENABLED
+        value: "true"
+
+      # Real SMS delivery for login OTPs. The server REFUSES TO BOOT if this
+      # resolves to the dummy provider while NODE_ENV=production, so the
+      # credentials below must be present for the service to come up.
       - key: OTP_PROVIDER
-        value: dummy
+        value: moolre
+
+      # ── Moolre credentials (set values in Render dashboard — never commit) ──
+
+      # Moolre account/API user the SMS (VAS) and payment calls authenticate as.
+      - key: MOOLRE_API_USER
+        sync: false
+
+      # X-API-VASKEY — required for SMS. Without it OTP delivery falls back to
+      # the dummy provider, which now blocks production boot.
+      - key: MOOLRE_VAS_KEY
+        sync: false
+
+      # Pre-registered, Moolre-approved SMS sender ID. Also required for SMS.
+      - key: MOOLRE_SMS_SENDER_ID
+        sync: false
+
+      # Live SMS/payments host. Defaults to sandbox.moolre.com in code — set
+      # this to https://api.moolre.com for production.
+      - key: MOOLRE_BASE_URL
+        sync: false
+
+      # Payment-only credentials. Unused while MOOLRE_PAYMENTS_ENABLED=false;
+      # listed so the payment phase is a dashboard change, not a redeploy.
+      - key: MOOLRE_PUBLIC_KEY
+        sync: false
+
+      - key: MOOLRE_PRIVATE_KEY
+        sync: false
+
+      - key: MOOLRE_ACCOUNT_NUMBER
+        sync: false
+
+      - key: MOOLRE_WEBHOOK_SECRET
+        sync: false
 
       # Never enable on production.
       - key: ENABLE_MOCK_DRIVER

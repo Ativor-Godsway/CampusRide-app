@@ -42,7 +42,7 @@ export function registerWebhookRoutes(
   prisma: PrismaClient,
   paymentService: PaymentService,
   webhookSecret: string,
-  enabled: boolean = config.moolre.enabled,
+  enabled: boolean = config.moolre.paymentsEnabled,
 ): void {
   // Cash-only lockdown (Phase 1): with Moolre disabled there is no collection
   // this webhook could legitimately resolve, and an open callback that can

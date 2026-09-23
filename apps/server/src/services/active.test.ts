@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { resolveOtpService, type OtpProviderConfig } from "./active";
+import {
+  assertOtpServiceAllowedInProduction,
+  InsecureOtpProviderError,
+  resolveOtpService,
+  type OtpProviderConfig,
+} from "./active";
 import { DummyOtpService } from "./otp/DummyOtpService";
 import { MnotifyOtpService } from "./otp/MnotifyOtpService";
 import { MoolreOtpService } from "./otp/MoolreOtpService";
@@ -7,7 +12,7 @@ import { MoolreOtpService } from "./otp/MoolreOtpService";
 function baseConfig(overrides: Partial<OtpProviderConfig> = {}): OtpProviderConfig {
   return {
     otpProvider: "dummy",
-    moolre: { enabled: false, baseUrl: "https://sandbox.moolre.com", apiUser: "", vasKey: "", smsSenderId: "" },
+    moolre: { smsEnabled: false, baseUrl: "https://sandbox.moolre.com", apiUser: "", vasKey: "", smsSenderId: "" },
     mnotify: { enabled: false, apiKey: "", senderId: "CampusRide" },
     ...overrides,
   };
@@ -35,7 +40,7 @@ describe("resolveOtpService — OTP_PROVIDER precedence", () => {
       baseConfig({
         otpProvider: "moolre",
         moolre: {
-          enabled: true,
+          smsEnabled: true,
           baseUrl: "https://sandbox.moolre.com",
           apiUser: "user",
           vasKey: "vas-key",
@@ -48,18 +53,68 @@ describe("resolveOtpService — OTP_PROVIDER precedence", () => {
 
   it("falls back to DummyOtpService for OTP_PROVIDER=moolre when moolre is enabled but vasKey/smsSenderId are missing", () => {
     const service = resolveOtpService(
-      baseConfig({ otpProvider: "moolre", moolre: { enabled: true, baseUrl: "https://sandbox.moolre.com", apiUser: "user", vasKey: "", smsSenderId: "" } }),
+      baseConfig({ otpProvider: "moolre", moolre: { smsEnabled: true, baseUrl: "https://sandbox.moolre.com", apiUser: "user", vasKey: "", smsSenderId: "" } }),
     );
     expect(service).toBeInstanceOf(DummyOtpService);
   });
 
-  it("falls back to DummyOtpService for OTP_PROVIDER=moolre when moolre is not enabled", () => {
+  it("falls back to DummyOtpService for OTP_PROVIDER=moolre when moolre SMS is not enabled", () => {
     const service = resolveOtpService(
       baseConfig({
         otpProvider: "moolre",
-        moolre: { enabled: false, baseUrl: "https://sandbox.moolre.com", apiUser: "user", vasKey: "vas-key", smsSenderId: "CampusRide" },
+        moolre: { smsEnabled: false, baseUrl: "https://sandbox.moolre.com", apiUser: "user", vasKey: "vas-key", smsSenderId: "CampusRide" },
       }),
     );
     expect(service).toBeInstanceOf(DummyOtpService);
+  });
+});
+
+describe("resolveOtpService — SMS and payments flags are independent", () => {
+  it("selects the real SMS provider even though payments stay off (the launch configuration)", () => {
+    // The whole point of the Phase 2 split: MOOLRE_SMS_ENABLED=true while
+    // MOOLRE_PAYMENTS_ENABLED=false. resolveOtpService must not consult the
+    // payments flag at all — OtpProviderConfig does not even carry it.
+    const service = resolveOtpService(
+      baseConfig({
+        otpProvider: "moolre",
+        moolre: {
+          smsEnabled: true,
+          baseUrl: "https://api.moolre.com",
+          apiUser: "user",
+          vasKey: "vas-key",
+          smsSenderId: "CampusRide",
+        },
+      }),
+    );
+    expect(service).toBeInstanceOf(MoolreOtpService);
+  });
+});
+
+describe("assertOtpServiceAllowedInProduction", () => {
+  it("refuses to boot with DummyOtpService when NODE_ENV=production", () => {
+    expect(() => assertOtpServiceAllowedInProduction(new DummyOtpService(), "production")).toThrow(
+      InsecureOtpProviderError,
+    );
+  });
+
+  it("names the env vars an operator needs to set", () => {
+    expect(() => assertOtpServiceAllowedInProduction(new DummyOtpService(), "production")).toThrow(
+      /OTP_PROVIDER=moolre/,
+    );
+  });
+
+  it("allows DummyOtpService outside production (dev and test)", () => {
+    expect(() => assertOtpServiceAllowedInProduction(new DummyOtpService(), "development")).not.toThrow();
+    expect(() => assertOtpServiceAllowedInProduction(new DummyOtpService(), "test")).not.toThrow();
+  });
+
+  it("allows a real provider in production", () => {
+    const real = new MoolreOtpService({
+      baseUrl: "https://api.moolre.com",
+      apiUser: "user",
+      vasKey: "vas-key",
+      senderId: "CampusRide",
+    });
+    expect(() => assertOtpServiceAllowedInProduction(real, "production")).not.toThrow();
   });
 });
