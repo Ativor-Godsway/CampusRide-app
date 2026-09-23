@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { handleUssdRequest, type MoolreUssdRequest } from "../services/ussd/ussdHandler";
 import { getSession } from "../services/ussd/session";
+import { config } from "../config";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -33,8 +34,26 @@ function coerceBoolean(value: unknown): boolean | null {
  * only ever creates REQUESTED rides and reads ride status, it never moves
  * money or mutates another rider's data.
  */
-export function registerUssdRoutes(app: FastifyInstance, prisma: PrismaClient): void {
-  app.post("/ussd/callback", async (request, reply) => {
+export function registerUssdRoutes(
+  app: FastifyInstance,
+  prisma: PrismaClient,
+  enabled: boolean = config.enableUssd,
+): void {
+  // USSD is shelved for this launch (ENABLE_USSD defaults to false). The
+  // callback is unauthenticated and, via findOrCreateRiderByPhone, will mint
+  // a rider account for ANY msisdn with no verification — so while the flag
+  // is off the route is not registered at all and Fastify 404s it. The
+  // handler and services/ussd/* below are left untouched and dormant.
+  if (!enabled) return;
+
+  // NOTE: this per-IP cap keys on Moolre's USSD gateway IP (all callbacks come
+  // from there), so it is a coarse flood-guard, not per-subscriber throttling.
+  // A future hardening step should add a Moolre gateway IP allowlist here (see
+  // ROADMAP / Phase-1 plan) — deliberately NOT implemented in this commit.
+  app.post(
+    "/ussd/callback",
+    { config: { rateLimit: { max: config.rateLimit.ussdCallbackMax, timeWindow: "1 minute" } } },
+    async (request, reply) => {
     const body = request.body as {
       sessionId?: unknown;
       new?: unknown;

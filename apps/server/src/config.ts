@@ -41,6 +41,32 @@ export const config = {
     smsSenderId: process.env.MOOLRE_SMS_SENDER_ID ?? "",
   },
   /**
+   * Rate-limit ceilings (max requests per IP per window). Env-overridable so
+   * they can be tuned on Render without a redeploy — the windows are fixed in
+   * code (see index.ts / route configs), only the max counts are configurable.
+   * All default to the values agreed in the Phase-1 plan.
+   */
+  rateLimit: {
+    /** Global fallback: any route without its own override. Per minute. */
+    globalMax: Number(process.env.RATE_LIMIT_GLOBAL_MAX ?? 100),
+    /** POST /auth/request-otp — per 15 min. Layered ON TOP of per-phone caps. */
+    otpRequestMax: Number(process.env.RATE_LIMIT_OTP_REQUEST ?? 5),
+    /** POST /auth/verify-otp — per 15 min. On top of the 5-attempts-per-OTP cap. */
+    otpVerifyMax: Number(process.env.RATE_LIMIT_OTP_VERIFY ?? 10),
+    /** POST /auth/login — per 15 min. */
+    loginMax: Number(process.env.RATE_LIMIT_LOGIN ?? 10),
+    /** POST /auth/signup — per 15 min. */
+    signupMax: Number(process.env.RATE_LIMIT_SIGNUP ?? 10),
+    /** POST /auth/refresh — per 15 min (higher: legitimate silent re-auth). */
+    refreshMax: Number(process.env.RATE_LIMIT_REFRESH ?? 30),
+    /** POST /rides (create) — per 15 min. */
+    rideCreateMax: Number(process.env.RATE_LIMIT_RIDE_CREATE ?? 20),
+    /** POST /rides/:id/initiate-payment — per 15 min (each hits Moolre). */
+    paymentInitMax: Number(process.env.RATE_LIMIT_PAYMENT_INIT ?? 15),
+    /** POST /ussd/callback — per minute (a USSD session fires many keypresses). */
+    ussdCallbackMax: Number(process.env.RATE_LIMIT_USSD_CALLBACK ?? 60),
+  },
+  /**
    * Selects the OTP delivery provider. One of "moolre" | "mnotify" | "dummy".
    * Precedence (see services/active.ts):
    *   - "moolre"  -> MoolreOtpService, only if moolre.enabled AND vasKey/smsSenderId set.
@@ -63,4 +89,14 @@ export const config = {
    * in production.
    */
   enableMockDriver: process.env.ENABLE_MOCK_DRIVER === "true",
+  /**
+   * USSD channel kill-switch. Default OFF: while false, `POST /ussd/callback`
+   * is not reachable (404), which also closes off the unauthenticated rider
+   * auto-provisioning (`findOrCreateRiderByPhone`) that callback triggers —
+   * any phone number could otherwise mint a rider account with no
+   * verification. The USSD service code is left intact and dormant; flip this
+   * to "true" only once the callback has a gateway IP allowlist / shared
+   * secret. Same pattern as `moolre.enabled`.
+   */
+  enableUssd: process.env.ENABLE_USSD === "true",
 } as const;

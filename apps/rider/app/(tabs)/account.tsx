@@ -7,9 +7,10 @@ interface QuickAction {
   icon: keyof typeof Ionicons.glyphMap;
 }
 
+// No Wallet tile: CampusRide is cash-only for now (digital payment is
+// disabled server-side), so there is no balance to show and no stub to leave.
 const QUICK_ACTIONS: QuickAction[] = [
   { label: "Help", icon: "help-buoy-outline" },
-  { label: "Wallet", icon: "wallet-outline" },
   { label: "Safety", icon: "shield-checkmark-outline" },
   { label: "Inbox", icon: "mail-outline" },
 ];
@@ -71,12 +72,6 @@ export default function AccountTab() {
           title="Edit profile"
           leading={<ListRow.Icon name="person-outline" />}
           onPress={() => showComingSoon("Editing your profile")}
-        />
-        <View style={styles.divider} />
-        <ListRow
-          title="Payment methods"
-          leading={<ListRow.Icon name="card-outline" />}
-          onPress={() => showComingSoon("Payment methods")}
         />
         <View style={styles.divider} />
         <ListRow

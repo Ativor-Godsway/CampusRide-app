@@ -7,6 +7,7 @@ import {
   type DisbursementRecipient,
 } from "../services/payment/paymentFlow";
 import { UnknownPaymentReferenceError } from "../services/payment/errors";
+import { config } from "../config";
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -41,7 +42,16 @@ export function registerWebhookRoutes(
   prisma: PrismaClient,
   paymentService: PaymentService,
   webhookSecret: string,
+  enabled: boolean = config.moolre.enabled,
 ): void {
+  // Cash-only lockdown (Phase 1): with Moolre disabled there is no collection
+  // this webhook could legitimately resolve, and an open callback that can
+  // flip payments to COLLECTED / trigger a disbursement is pure attack
+  // surface. Leave the route unregistered entirely so Fastify 404s it — the
+  // handler below (and the Moolre integration it drives) stays intact and
+  // comes back the moment MOOLRE_ENABLED flips to "true".
+  if (!enabled) return;
+
   app.post("/webhooks/moolre", async (request, reply) => {
     console.log("[MOOLRE WEBHOOK HIT]", JSON.stringify(request.body));
     const body = request.body as { data?: Record<string, unknown> };

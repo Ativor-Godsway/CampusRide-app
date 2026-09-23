@@ -20,6 +20,17 @@ import { paymentService } from "../services/active";
 import { config } from "../config";
 import { startMockDriverForRide } from "../dev/mockDriver";
 
+/**
+ * Shape returned by `POST /rides/:id/initiate-payment` while
+ * `MOOLRE_ENABLED` is false (cash-only launch). `code` is the stable
+ * machine-readable discriminator clients should branch on.
+ */
+export interface CashOnlyPaymentResponse {
+  error: string;
+  code: "PAYMENTS_CASH_ONLY";
+  paymentMode: "CASH_ONLY";
+}
+
 const RIDE_TYPES = ["LONE", "SHARED"] as const;
 const PAYMENT_METHODS = ["CASH", "MOMO"] as const;
 const MOOLRE_CHANNELS = ["MTN", "TELECEL", "AT"] as const;
@@ -93,7 +104,13 @@ async function getDriverInfo(prisma: PrismaClient, driverId: string) {
  * logic is reimplemented here.
  */
 export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): void {
-  app.post("/rides", { preHandler: requireAuth }, async (request, reply) => {
+  app.post(
+    "/rides",
+    {
+      preHandler: requireAuth,
+      config: { rateLimit: { max: config.rateLimit.rideCreateMax, timeWindow: "15 minutes" } },
+    },
+    async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
     const body = request.body as {
@@ -113,8 +130,12 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         .send({ error: "pickupZoneId, dropoffZoneId, and type (LONE|SHARED) are required" });
     }
 
+    // Cash-only launch (Phase 1): an omitted/invalid paymentMethod falls back
+    // to CASH, matching the schema default. Defaulting to MOMO here would
+    // create a ride that initiate-payment now refuses to settle and that
+    // finalizeRideCompletion would skip when writing the commission ledger.
     const paymentMethod: PaymentMethod =
-      isPaymentMethod(body.paymentMethod) ? body.paymentMethod : "MOMO";
+      isPaymentMethod(body.paymentMethod) ? body.paymentMethod : "CASH";
 
     const riderId = request.user!.userId;
 
@@ -296,8 +317,28 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    * Idempotent — calling again with the same ride/rider (no otpcode) returns
    * the existing Payment row without re-charging the rider.
    */
-  app.post("/rides/:id/initiate-payment", { preHandler: requireAuth }, async (request, reply) => {
+  app.post(
+    "/rides/:id/initiate-payment",
+    {
+      preHandler: requireAuth,
+      config: { rateLimit: { max: config.rateLimit.paymentInitMax, timeWindow: "15 minutes" } },
+    },
+    async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
+
+    // Cash-only lockdown (Phase 1). With Moolre disabled there is no live
+    // collection provider: the old fall-through landed on DummyPaymentService,
+    // whose collect() returns a PROMPT_SENT/PENDING outcome that nothing in
+    // production ever resolves — the rider's "Pay" tap hung forever. Fail
+    // closed with an explicit, typed answer instead, BEFORE any Payment row is
+    // created. Checked first so the answer doesn't depend on ride state.
+    if (!config.moolre.enabled) {
+      return reply.code(409).send({
+        error: "Digital payments are disabled — please pay the driver in cash.",
+        code: "PAYMENTS_CASH_ONLY",
+        paymentMode: "CASH_ONLY",
+      } satisfies CashOnlyPaymentResponse);
+    }
 
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;

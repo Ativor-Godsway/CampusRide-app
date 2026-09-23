@@ -171,7 +171,11 @@ model Ride {
   /// Driver's share in pesewas — computed at completion, null until then
   driverShare   Int?
   paymentStatus PaymentStatus @default(PENDING)
-  paymentMethod PaymentMethod @default(MOMO)
+  /// Cash-only launch (Phase 1): defaults to CASH so a client that omits
+  /// paymentMethod can never create a ride that is unsettleable (digital
+  /// payment is gated off) and that would skip the CASH CommissionLedger
+  /// write. Revisit when MOOLRE_ENABLED is turned back on.
+  paymentMethod PaymentMethod @default(CASH)
   /// Reason recorded on every CANCELLED transition; null otherwise
   cancelReason  RideCancelReason?
   createdAt     DateTime      @default(now())

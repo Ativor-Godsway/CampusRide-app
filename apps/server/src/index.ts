@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import rateLimit from "@fastify/rate-limit";
 import { Server as SocketServer } from "socket.io";
 import { APP_NAME, config } from "./config";
 import { prisma } from "./db/prisma";
@@ -23,7 +24,23 @@ const TIMEOUT_POLL_INTERVAL_MS = 30_000;
 export { paymentService, routeService, otpService };
 
 async function bootstrap() {
-  const app = Fastify({ logger: true });
+  // trustProxy: Render terminates TLS at a proxy, so the socket IP is the
+  // proxy's. Trusting the proxy makes request.ip (and therefore the rate
+  // limiter's per-IP keys) resolve to the real client via X-Forwarded-For,
+  // rather than rate-limiting every user under one shared proxy IP.
+  const app = Fastify({ logger: true, trustProxy: true });
+
+  // Global rate limiter. Routes without an explicit `config.rateLimit`
+  // override fall back to globalMax per minute per IP. Per-route overrides
+  // (auth/ride/payment/ussd) are set on each route's options. Keyed on
+  // request.ip (real client IP thanks to trustProxy above). Sensitive OTP/
+  // payment routes tighten this further; none of it removes the existing
+  // per-phone OTP caps in services/auth/otp.ts — the two layers stack.
+  await app.register(rateLimit, {
+    global: true,
+    max: config.rateLimit.globalMax,
+    timeWindow: "1 minute",
+  });
 
   // CORS: when DEMO_OTP_CORS_ORIGINS is set (comma-separated), restrict to that
   // allowlist so the public showcase site is the only browser origin able to

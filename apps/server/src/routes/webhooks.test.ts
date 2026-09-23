@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, afterAll, beforeAll } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import { prisma } from "../db/prisma";
+import { config } from "../config";
 import { registerWebhookRoutes } from "./webhooks";
 import { DummyPaymentService } from "../services/payment/DummyPaymentService";
 import { TX_STATUS } from "../services/payment/constants";
@@ -18,7 +19,10 @@ const createdDriverUserIds: string[] = [];
 beforeAll(async () => {
   paymentService = new DummyPaymentService();
   app = Fastify();
-  registerWebhookRoutes(app, prisma, paymentService, WEBHOOK_SECRET);
+  // enabled: true — these tests exercise the handler itself. In the test env
+  // MOOLRE_ENABLED is false, which would otherwise leave the route
+  // unregistered (see the disabled-gate test at the bottom of this file).
+  registerWebhookRoutes(app, prisma, paymentService, WEBHOOK_SECRET, true);
   await app.ready();
 });
 
@@ -167,5 +171,34 @@ describe("POST /webhooks/moolre", () => {
     const disbursement = await prisma.payment.findFirstOrThrow({ where: { rideId: ride.id, type: "DISBURSEMENT" } });
     expect(disbursement.status).toBe("SUCCESS");
     expect(disbursement.riderId).toBe(driver.user.id);
+  });
+});
+
+describe("POST /webhooks/moolre — Moolre disabled (cash-only launch)", () => {
+  it("is not registered at all, so the route 404s", async () => {
+    const disabledApp = Fastify();
+    registerWebhookRoutes(disabledApp, prisma, paymentService, WEBHOOK_SECRET, false);
+    await disabledApp.ready();
+
+    const res = await disabledApp.inject({
+      method: "POST",
+      url: "/webhooks/moolre",
+      payload: { data: { secret: WEBHOOK_SECRET, txstatus: TX_STATUS.SUCCESS, externalref: "whatever" } },
+    });
+
+    expect(res.statusCode).toBe(404);
+    await disabledApp.close();
+  });
+
+  it("defaults to config.moolre.enabled, which is false in this environment", async () => {
+    expect(config.moolre.enabled).toBe(false);
+
+    const defaultApp = Fastify();
+    registerWebhookRoutes(defaultApp, prisma, paymentService, WEBHOOK_SECRET);
+    await defaultApp.ready();
+
+    const res = await defaultApp.inject({ method: "POST", url: "/webhooks/moolre", payload: {} });
+    expect(res.statusCode).toBe(404);
+    await defaultApp.close();
   });
 });

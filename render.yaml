@@ -56,6 +56,12 @@ services:
       - key: ENABLE_MOCK_DRIVER
         value: "false"
 
+      # USSD channel kill-switch. Shelved for this launch: POST /ussd/callback
+      # is unauthenticated and auto-provisions rider accounts from any phone
+      # number, so it stays closed (404) until that path is hardened.
+      - key: ENABLE_USSD
+        value: "false"
+
       # Comma-separated browser origins allowed to call the public demo OTP
       # routes (/demo/otp/*) from the showcase site. Leave unset to reflect any
       # origin; set to the showcase's exact origin to lock it down. Set the

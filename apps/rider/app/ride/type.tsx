@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import BottomSheet, { BottomSheetScrollView, BottomSheetTextInput } from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { cloudinaryAvatar } from "./cloudinaryAvatar";
@@ -15,9 +15,7 @@ import {
   Card,
   CampusMapView,
   type CampusMapZone,
-  Input,
   LoadingState,
-  type MoolreNetwork,
   ProgressBar,
   ServiceIcon,
   Text,
@@ -25,8 +23,6 @@ import {
   colors,
   createRide,
   formatGhs,
-  initiateRidePayment,
-  pollPaymentStatus,
   radii,
   regionForCoordinates,
   rideQueryKey,
@@ -80,7 +76,7 @@ export default function RideTypeScreen() {
   // ── Options phase ───────────────────────────────────────────────────────────
   const [selectedType, setSelectedType] = useState<RideType>("SHARED");
   const [expandedType, setExpandedType] = useState<RideType | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>("MOMO");
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>("CASH");
   const [submitting, setSubmitting] = useState(false);
 
   // ── Tracking phase (null = options phase, string = post-request or resume) ───
@@ -376,8 +372,10 @@ export default function RideTypeScreen() {
 
 // ── Options phase ─────────────────────────────────────────────────────────────
 
+// Cash-only launch (Phase 1): MoMo is intentionally not offered here. A ride
+// created as MOMO could not be settled at all while digital payment is
+// disabled server-side, and it would also skip the CASH commission ledger.
 const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { value: "MOMO", label: "MoMo", icon: "phone-portrait-outline" },
   { value: "CASH", label: "Cash", icon: "cash-outline" },
 ];
 
@@ -794,8 +792,6 @@ function MyLegDoneContent({ dropoffZoneName }: { dropoffZoneName: string }) {
   );
 }
 
-type MomoPhase = "form" | "otp" | "waiting" | "confirmed" | "failed";
-
 function RatingPanel({
   rideId,
   onDone,
@@ -872,6 +868,13 @@ function SharedSavingsNote({ amountPesewas }: { amountPesewas: number }) {
   );
 }
 
+/**
+ * Ride-complete state. Cash-only launch (Phase 1): digital payment is
+ * disabled server-side, so there is no "Pay with MoMo" trigger here and this
+ * screen never calls POST /rides/:id/initiate-payment. Every completed ride
+ * is settled in cash directly with the driver; the rider goes straight from
+ * the fare summary to rating.
+ */
 function CompletedContent({
   rideId,
   rideType,
@@ -883,110 +886,7 @@ function CompletedContent({
   fareSummary: RideCompletedFareSummary | undefined;
   onDone: () => void;
 }) {
-  const [momoPhase, setMomoPhase] = useState<MomoPhase>("form");
-  const [phone, setPhone] = useState("");
-  const [network, setNetwork] = useState<MoolreNetwork>("MTN");
-  const [paying, setPaying] = useState(false);
-  const [otpCode, setOtpCode] = useState("");
-  const [otpError, setOtpError] = useState<string | null>(null);
-  const [confirmingOtp, setConfirmingOtp] = useState(false);
-  const [otpExpired, setOtpExpired] = useState(false);
   const [ratingReady, setRatingReady] = useState(false);
-
-  // Sync momo phase from server-provided status when fareSummary arrives.
-  // NOTE: fareSummary.paymentStatus has no AWAITING_OTP bucket (deferred 3b
-  // TODO — see paymentFlow.ts's getRidePaymentSummary), so a remount can't
-  // auto-resume into the "otp" phase from this effect; the rider has to tap
-  // Pay again, which safely re-surfaces OTP_SENT without re-charging (see
-  // handlePay). Immediate post-3c follow-up if poll-based OTP awareness is needed.
-  useEffect(() => {
-    if (!fareSummary || fareSummary.paymentMethod !== "MOMO") return;
-    if (fareSummary.paymentStatus === "COLLECTED" || fareSummary.paymentStatus === "DISBURSED") {
-      setMomoPhase("confirmed");
-    } else if (fareSummary.paymentStatus === "FAILED") {
-      setMomoPhase("failed");
-    }
-  }, [fareSummary?.paymentStatus, fareSummary?.paymentMethod]);
-
-  // Poll Moolre while waiting for the push-prompt approval
-  useEffect(() => {
-    if (momoPhase !== "waiting") return;
-    const interval = setInterval(() => {
-      void pollPaymentStatus(rideId).then(({ paymentStatus }) => {
-        if (paymentStatus === "COLLECTED" || paymentStatus === "DISBURSED") {
-          setMomoPhase("confirmed");
-        } else if (paymentStatus === "FAILED") {
-          setMomoPhase("failed");
-        }
-      });
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [momoPhase, rideId]);
-
-  async function handlePay() {
-    if (!phone.trim()) {
-      Alert.alert("Phone required", "Enter your MoMo number to continue.");
-      return;
-    }
-    setPaying(true);
-    try {
-      const resp = await initiateRidePayment(rideId, phone.trim(), network);
-      console.log("[OTP DEBUG] initiate-payment response:", JSON.stringify(resp));
-      const { otpStage } = resp;
-      if (otpStage === "OTP_SENT") {
-        setOtpExpired(false);
-        setOtpError(null);
-        setOtpCode("");
-        setMomoPhase("otp");
-      } else {
-        // "SUBMITTED" or null — no OTP needed (or already confirmed elsewhere).
-        setMomoPhase("waiting");
-      }
-    } catch {
-      Alert.alert("Couldn't initiate payment", "Please check your connection and try again.");
-    } finally {
-      setPaying(false);
-    }
-  }
-
-  async function handleConfirmOtp() {
-    if (otpCode.trim().length !== 6) {
-      setOtpError("Enter the 6-digit code");
-      return;
-    }
-    setOtpError(null);
-    setConfirmingOtp(true);
-    try {
-      const resp = await initiateRidePayment(rideId, phone.trim(), network, otpCode.trim());
-      console.log("[OTP DEBUG] otpcode confirmation response:", JSON.stringify(resp));
-      const { otpStage } = resp;
-      if (otpStage === "OTP_RETRY") {
-        setOtpCode("");
-        setOtpError("That code didn't match. Check your messages and try again.");
-      } else {
-        // "SUBMITTED" — correct code accepted (or otherwise resolved) — await confirmation.
-        setMomoPhase("waiting");
-      }
-    } catch (err) {
-      const status = (err as { response?: { status?: number } }).response?.status;
-      if (status === 409) {
-        setOtpExpired(true);
-        setOtpError("This payment's confirmation window has closed. Tap Pay to start again.");
-      } else {
-        // Keep the entered code — a flaky network shouldn't make them retype it.
-        setOtpError("Couldn't confirm your code. Please check your connection and try again.");
-      }
-    } finally {
-      setConfirmingOtp(false);
-    }
-  }
-
-  function handleRestartOtp() {
-    setOtpExpired(false);
-    setOtpError(null);
-    setOtpCode("");
-    setMomoPhase("form");
-  }
 
   if (!fareSummary) {
     return (
@@ -996,11 +896,10 @@ function CompletedContent({
     );
   }
 
-  const { yourFarePesewas, paymentMethod } = fareSummary;
+  const { yourFarePesewas } = fareSummary;
   const savingsPesewas =
     rideType === "SHARED" ? Math.max(0, priceLoneRide().fare - yourFarePesewas) : 0;
 
-  // ── Rating screen (shared by both paths after payment) ───────────────────────
   if (ratingReady) {
     return (
       <View style={styles.section}>
@@ -1021,162 +920,6 @@ function CompletedContent({
     );
   }
 
-  // ── CASH path ────────────────────────────────────────────────────────────────
-  if (paymentMethod === "CASH") {
-    return (
-      <View style={styles.section}>
-        <View style={styles.stateHeader}>
-          <ServiceIcon
-            name="checkmark-circle"
-            size={48}
-            iconSize={22}
-            background={colors.successSurface}
-            color={colors.success}
-          />
-          <View style={styles.stateHeading}>
-            <Text variant="h2">Ride completed</Text>
-            <Text variant="bodySmall" color="muted">
-              Your fare: {formatGhs(yourFarePesewas)}
-            </Text>
-          </View>
-        </View>
-        {savingsPesewas > 0 && <SharedSavingsNote amountPesewas={savingsPesewas} />}
-        <Card style={styles.infoCard}>
-          <View style={styles.infoRow}>
-            <Ionicons name="cash-outline" size={16} color={colors.ink[400]} />
-            <Text variant="bodySmall" style={styles.infoLabel}>
-              Please pay {formatGhs(yourFarePesewas)} to your driver in cash.
-            </Text>
-          </View>
-        </Card>
-        <Button label="Done — rate your driver" onPress={() => setRatingReady(true)} />
-      </View>
-    );
-  }
-
-  // ── MOMO path — payment form ─────────────────────────────────────────────────
-  if (momoPhase === "form" || momoPhase === "failed") {
-    return (
-      <View style={styles.section}>
-        <View style={styles.stateHeader}>
-          <ServiceIcon
-            name="phone-portrait-outline"
-            size={48}
-            iconSize={22}
-            background={colors.primary[50]}
-            color={colors.primary[600]}
-          />
-          <View style={styles.stateHeading}>
-            <Text variant="h2">Pay with MoMo</Text>
-            <Text variant="bodySmall" color="muted">
-              {formatGhs(yourFarePesewas)} will be charged to your wallet.
-            </Text>
-          </View>
-        </View>
-        {momoPhase === "failed" && (
-          <Card style={styles.errorCard}>
-            <Text variant="bodySmall" color="error">
-              Payment failed. Check your balance and try again.
-            </Text>
-          </Card>
-        )}
-        <Input
-          label="MoMo phone number"
-          placeholder="+233..."
-          value={phone}
-          onChangeText={setPhone}
-          returnKeyType="done"
-          InputComponent={BottomSheetTextInput}
-        />
-        <View style={styles.networkRow}>
-          {(["MTN", "TELECEL", "AT"] as MoolreNetwork[]).map((n) => (
-            <Pressable
-              key={n}
-              accessibilityRole="button"
-              onPress={() => setNetwork(n)}
-              style={[styles.networkOption, network === n && styles.networkOptionSelected]}
-            >
-              <Text variant="bodySmall" color={network === n ? "primary" : "muted"}>
-                {n}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-        <Button
-          label={`Pay ${formatGhs(yourFarePesewas)}`}
-          onPress={() => void handlePay()}
-          loading={paying}
-        />
-      </View>
-    );
-  }
-
-  // ── MOMO path — OTP entry ─────────────────────────────────────────────────────
-  if (momoPhase === "otp") {
-    return (
-      <View style={styles.section}>
-        <View style={styles.stateHeader}>
-          <ServiceIcon
-            name="key-outline"
-            size={48}
-            iconSize={22}
-            background={colors.primary[50]}
-            color={colors.primary[600]}
-          />
-          <View style={styles.stateHeading}>
-            <Text variant="h2">Enter the code</Text>
-            <Text variant="bodySmall" color="muted">
-              We sent a code to {phone.trim()}. Enter it to confirm your payment.
-            </Text>
-          </View>
-        </View>
-        <Input
-          label="Verification code"
-          placeholder="000000"
-          keyboardType="number-pad"
-          maxLength={6}
-          doneAccessory
-          value={otpCode}
-          onChangeText={setOtpCode}
-          error={otpError ?? undefined}
-          editable={!otpExpired}
-          style={styles.codeInput}
-          InputComponent={BottomSheetTextInput}
-        />
-        {otpExpired ? (
-          <Button label="Start over" onPress={handleRestartOtp} />
-        ) : (
-          <Button label="Confirm payment" onPress={() => void handleConfirmOtp()} loading={confirmingOtp} />
-        )}
-      </View>
-    );
-  }
-
-  // ── MOMO path — waiting for push-prompt approval ─────────────────────────────
-  if (momoPhase === "waiting") {
-    return (
-      <View style={styles.section}>
-        <View style={styles.stateHeader}>
-          <ServiceIcon
-            name="time-outline"
-            size={48}
-            iconSize={22}
-            background={colors.primary[50]}
-            color={colors.primary[600]}
-          />
-          <View style={styles.stateHeading}>
-            <Text variant="h2">Approve the prompt</Text>
-            <Text variant="bodySmall" color="muted">
-              Check your phone and approve the MoMo payment request.
-            </Text>
-          </View>
-        </View>
-        <LoadingState message="Waiting for confirmation…" />
-      </View>
-    );
-  }
-
-  // ── MOMO path — confirmed ────────────────────────────────────────────────────
   return (
     <View style={styles.section}>
       <View style={styles.stateHeader}>
@@ -1188,14 +931,22 @@ function CompletedContent({
           color={colors.success}
         />
         <View style={styles.stateHeading}>
-          <Text variant="h2">Payment confirmed</Text>
+          <Text variant="h2">Ride completed</Text>
           <Text variant="bodySmall" color="muted">
-            {formatGhs(yourFarePesewas)} received — thanks!
+            Your fare: {formatGhs(yourFarePesewas)}
           </Text>
         </View>
       </View>
       {savingsPesewas > 0 && <SharedSavingsNote amountPesewas={savingsPesewas} />}
-      <Button label="Rate your driver" onPress={() => setRatingReady(true)} />
+      <Card style={styles.infoCard}>
+        <View style={styles.infoRow}>
+          <Ionicons name="cash-outline" size={16} color={colors.ink[400]} />
+          <Text variant="bodySmall" style={styles.infoLabel}>
+            Please pay {formatGhs(yourFarePesewas)} to your driver in cash.
+          </Text>
+        </View>
+      </Card>
+      <Button label="Done — rate your driver" onPress={() => setRatingReady(true)} />
     </View>
   );
 }
@@ -1324,34 +1075,5 @@ const styles = StyleSheet.create({
   paymentOptionSelected: {
     borderColor: colors.primary[500],
     backgroundColor: colors.primary[50],
-  },
-  // ── MOMO network pill row (completed screen)
-  networkRow: { flexDirection: "row", gap: spacing.sm },
-  networkOption: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: spacing.sm,
-    borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  networkOptionSelected: {
-    borderColor: colors.primary[500],
-    backgroundColor: colors.primary[50],
-  },
-  // ── Error card (MOMO failed state)
-  errorCard: {
-    backgroundColor: colors.errorSurface,
-    borderColor: colors.error,
-    borderWidth: 1,
-  },
-  // ── OTP code entry (MOMO otp state)
-  codeInput: {
-    fontFamily: typography.fontFamily.mono,
-    fontSize: typography.size["2xl"],
-    fontWeight: typography.weight.bold,
-    textAlign: "center",
-    letterSpacing: 8,
   },
 });

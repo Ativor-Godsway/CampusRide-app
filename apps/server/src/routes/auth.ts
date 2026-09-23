@@ -21,6 +21,10 @@ import {
   UserNotFoundError,
 } from "../services/auth/errors";
 import { requireAuth } from "../middleware/auth";
+import { config } from "../config";
+
+/** Shared window for the per-IP auth rate limits (max counts come from config). */
+const AUTH_RATE_WINDOW = "15 minutes";
 
 const OTP_PURPOSES = ["SIGNUP", "LOGIN"] as const;
 const SIGNUP_ROLES = ["RIDER", "DRIVER"] as const;
@@ -42,7 +46,10 @@ export function registerAuthRoutes(
   prisma: PrismaClient,
   otpService: OtpService,
 ): void {
-  app.post("/auth/request-otp", async (request, reply) => {
+  app.post(
+    "/auth/request-otp",
+    { config: { rateLimit: { max: config.rateLimit.otpRequestMax, timeWindow: AUTH_RATE_WINDOW } } },
+    async (request, reply) => {
     const body = request.body as { phone?: unknown; purpose?: unknown };
 
     if (!isNonEmptyString(body.phone) || !isOtpPurpose(body.purpose)) {
@@ -60,7 +67,10 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/verify-otp", async (request, reply) => {
+  app.post(
+    "/auth/verify-otp",
+    { config: { rateLimit: { max: config.rateLimit.otpVerifyMax, timeWindow: AUTH_RATE_WINDOW } } },
+    async (request, reply) => {
     const body = request.body as { phone?: unknown; code?: unknown; purpose?: unknown };
 
     if (
@@ -86,7 +96,10 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/signup", async (request, reply) => {
+  app.post(
+    "/auth/signup",
+    { config: { rateLimit: { max: config.rateLimit.signupMax, timeWindow: AUTH_RATE_WINDOW } } },
+    async (request, reply) => {
     const body = request.body as {
       phone?: unknown;
       name?: unknown;
@@ -124,7 +137,10 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/login", async (request, reply) => {
+  app.post(
+    "/auth/login",
+    { config: { rateLimit: { max: config.rateLimit.loginMax, timeWindow: AUTH_RATE_WINDOW } } },
+    async (request, reply) => {
     const body = request.body as { phone?: unknown; verifiedToken?: unknown };
 
     if (!isNonEmptyString(body.phone) || !isNonEmptyString(body.verifiedToken)) {
@@ -148,7 +164,10 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/refresh", async (request, reply) => {
+  app.post(
+    "/auth/refresh",
+    { config: { rateLimit: { max: config.rateLimit.refreshMax, timeWindow: AUTH_RATE_WINDOW } } },
+    async (request, reply) => {
     const body = request.body as { refreshToken?: unknown };
 
     if (!isNonEmptyString(body.refreshToken)) {
