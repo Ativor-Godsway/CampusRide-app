@@ -17,7 +17,7 @@
     "@rida/mobile-shared": "*",
     "@rida/shared": "*",
     "@tanstack/react-query": "^5.40.0",
-    "axios": "^1.7.2",
+    "axios": "^1.20.0",
     "babel-preset-expo": "~54.0.10",
     "expo": "^54",
     "expo-asset": "~12.0.13",

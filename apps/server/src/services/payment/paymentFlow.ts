@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { PrismaClient, Payment } from "@prisma/client";
 import { splitFare } from "@rida/shared";
@@ -261,9 +262,28 @@ export interface MoolreWebhookPayload {
  * Verifies the webhook `secret` against `expectedSecret`. This is the
  * security gate — without it, anyone could POST a fake "paid" callback and
  * trigger a driver disbursement for an uncollected ride.
+ *
+ * Uses crypto.timingSafeEqual rather than `===`: a plain string compare
+ * short-circuits on the first differing byte, so response timing leaks a
+ * prefix oracle that lets an attacker recover the secret byte by byte over
+ * many requests. timingSafeEqual throws unless both buffers are the same
+ * length, so the length check below is a required pre-check — and because
+ * length is compared non-constant-time either way, it leaks only the
+ * secret's length, which is not sensitive.
+ *
+ * An empty configured secret is rejected outright: otherwise a deployment
+ * that forgot to set MOOLRE_WEBHOOK_SECRET would accept a webhook carrying
+ * an empty secret and authenticate every forgery.
  */
 export function isValidWebhookSecret(payload: { secret?: unknown }, expectedSecret: string): boolean {
-  return typeof payload.secret === "string" && payload.secret.length > 0 && payload.secret === expectedSecret;
+  if (typeof payload.secret !== "string" || payload.secret.length === 0) return false;
+  if (expectedSecret.length === 0) return false;
+
+  const provided = Buffer.from(payload.secret, "utf8");
+  const expected = Buffer.from(expectedSecret, "utf8");
+  if (provided.length !== expected.length) return false;
+
+  return timingSafeEqual(provided, expected);
 }
 
 export interface DisbursementRecipient {

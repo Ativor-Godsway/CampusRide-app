@@ -13,7 +13,7 @@
   "peerDependencies": {
     "@expo/vector-icons": "*",
     "@tanstack/react-query": "^5.40.0",
-    "axios": "^1.7.2",
+    "axios": "^1.20.0",
     "expo-constants": "*",
     "expo-location": "*",
     "expo-router": "*",

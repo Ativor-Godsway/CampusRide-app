@@ -53,7 +53,10 @@ export function registerWebhookRoutes(
   if (!enabled) return;
 
   app.post("/webhooks/moolre", async (request, reply) => {
-    console.log("[MOOLRE WEBHOOK HIT]", JSON.stringify(request.body));
+    // NB: never log `request.body` here — the payload carries the shared
+    // webhook secret in `data.secret`, so dumping it puts a credential that
+    // authorizes driver disbursements into the log stream (and into any log
+    // aggregator downstream). Log outcomes, not payloads.
     const body = request.body as { data?: Record<string, unknown> };
     const data = body.data;
 

@@ -430,3 +430,51 @@ describe("getRidePaymentSummary", () => {
     expect(summary.fullySettled).toBe(false);
   });
 });
+
+describe("isValidWebhookSecret — constant-time comparison (Phase 2)", () => {
+  const SECRET = "s3cret-webhook-value";
+
+  it("accepts the exact secret", () => {
+    expect(isValidWebhookSecret({ secret: SECRET }, SECRET)).toBe(true);
+  });
+
+  it("rejects a wrong secret of the same length (timingSafeEqual path)", () => {
+    const wrong = "x".repeat(SECRET.length);
+    expect(wrong.length).toBe(SECRET.length);
+    expect(isValidWebhookSecret({ secret: wrong }, SECRET)).toBe(false);
+  });
+
+  it("rejects a wrong secret of a different length without throwing", () => {
+    // timingSafeEqual throws on unequal buffer lengths — the explicit length
+    // pre-check must catch this first rather than surfacing a 500.
+    expect(() => isValidWebhookSecret({ secret: "short" }, SECRET)).not.toThrow();
+    expect(isValidWebhookSecret({ secret: "short" }, SECRET)).toBe(false);
+    expect(isValidWebhookSecret({ secret: SECRET + "extra" }, SECRET)).toBe(false);
+  });
+
+  it("rejects a secret that only shares a prefix", () => {
+    const prefix = SECRET.slice(0, -1) + "!";
+    expect(isValidWebhookSecret({ secret: prefix }, SECRET)).toBe(false);
+  });
+
+  it("rejects missing, empty and non-string secrets", () => {
+    expect(isValidWebhookSecret({}, SECRET)).toBe(false);
+    expect(isValidWebhookSecret({ secret: "" }, SECRET)).toBe(false);
+    expect(isValidWebhookSecret({ secret: 12345 as unknown as string }, SECRET)).toBe(false);
+    expect(isValidWebhookSecret({ secret: null as unknown as string }, SECRET)).toBe(false);
+  });
+
+  it("rejects everything when the server's configured secret is empty", () => {
+    // A deployment that forgot MOOLRE_WEBHOOK_SECRET must not authenticate
+    // a forged callback that also sends an empty secret.
+    expect(isValidWebhookSecret({ secret: "" }, "")).toBe(false);
+    expect(isValidWebhookSecret({ secret: "anything" }, "")).toBe(false);
+  });
+
+  it("handles multi-byte characters by byte length, not code-point length", () => {
+    // "é" is 2 bytes in UTF-8; a naive .length check would mis-size the buffers.
+    expect(() => isValidWebhookSecret({ secret: "éé" }, "aaaa")).not.toThrow();
+    expect(isValidWebhookSecret({ secret: "éé" }, "aaaa")).toBe(false);
+    expect(isValidWebhookSecret({ secret: "héllo" }, "héllo")).toBe(true);
+  });
+});

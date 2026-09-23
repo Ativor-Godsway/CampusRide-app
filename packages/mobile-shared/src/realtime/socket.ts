@@ -6,6 +6,15 @@ import { getAccessToken } from "../auth/tokenStore";
 let socket: Socket | null = null;
 
 /**
+ * React Native defines the global `__DEV__` (true in Metro dev builds, false
+ * in release bundles). Guarded with a typeof check so this module is still
+ * safe to import from a plain Node context, such as a unit test.
+ */
+function isDev(): boolean {
+  return typeof __DEV__ !== "undefined" && __DEV__;
+}
+
+/**
  * Lazily creates a single shared Socket.io connection, authenticated with
  * the current access token (same JWT used for HTTP `Authorization: Bearer`).
  * Reused across ride subscriptions so the app holds at most one socket.
@@ -20,20 +29,25 @@ export function getRideSocket(): Socket {
       autoConnect: true,
     });
 
-    socket.on("connect", () => {
-      console.log(
-        "[Socket.io] connected",
-        socket?.id,
-        "transport:",
-        (socket as Socket & { io: { engine: { transport: { name: string } } } }).io.engine.transport.name,
-      );
-    });
-    socket.on("connect_error", (err: Error) => {
-      console.warn("[Socket.io] connect_error:", err.message);
-    });
-    socket.on("disconnect", (reason: string) => {
-      console.log("[Socket.io] disconnected:", reason);
-    });
+    // Connection lifecycle logging is dev-only: in a release build these
+    // lines run on every reconnect and put socket ids / server error strings
+    // into the device log, where any other app with log access can read them.
+    if (isDev()) {
+      socket.on("connect", () => {
+        console.log(
+          "[Socket.io] connected",
+          socket?.id,
+          "transport:",
+          (socket as Socket & { io: { engine: { transport: { name: string } } } }).io.engine.transport.name,
+        );
+      });
+      socket.on("connect_error", (err: Error) => {
+        console.warn("[Socket.io] connect_error:", err.message);
+      });
+      socket.on("disconnect", (reason: string) => {
+        console.log("[Socket.io] disconnected:", reason);
+      });
+    }
   }
   return socket;
 }
