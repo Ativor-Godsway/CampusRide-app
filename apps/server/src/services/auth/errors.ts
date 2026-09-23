@@ -86,6 +86,25 @@ export class InvalidRefreshTokenError extends Error {
 }
 
 /**
+ * Thrown when an ALREADY-CONSUMED refresh token is presented again. Because
+ * every successful refresh revokes the token it rotated out, a second use of
+ * that same token means a copy is in circulation — the legitimate client and
+ * an attacker cannot both hold a live copy of a one-time token. The whole
+ * rotation family is revoked before this is thrown.
+ *
+ * Extends InvalidRefreshTokenError so existing callers keep their behaviour
+ * (the route must answer identically either way — telling an attacker that
+ * their stolen token was detected is free intelligence). It exists as a
+ * distinct type purely so the server can LOG the theft signal.
+ */
+export class RefreshTokenReuseError extends InvalidRefreshTokenError {
+  constructor(public readonly userId: string) {
+    super();
+    this.name = "RefreshTokenReuseError";
+  }
+}
+
+/**
  * Thrown when a short-lived verification token (issued by /auth/verify-otp)
  * is missing, malformed, expired, or for the wrong purpose.
  */

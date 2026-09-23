@@ -10,7 +10,12 @@ import {
   revokeAllForUser,
   signup,
 } from "./authService";
-import { InvalidRefreshTokenError, PhoneAlreadyRegisteredError, UserNotFoundError } from "./errors";
+import {
+  InvalidRefreshTokenError,
+  PhoneAlreadyRegisteredError,
+  RefreshTokenReuseError,
+  UserNotFoundError,
+} from "./errors";
 import { signVerificationToken } from "./tokens";
 import { sha256, generateRefreshTokenValue } from "./hash";
 import { cleanupUser, uniqueTestPhone } from "./testFixtures";
@@ -188,6 +193,9 @@ describe("refresh", () => {
         userId: created.user.id,
         tokenHash: sha256(expiredToken),
         expiresAt: new Date(Date.now() - 1000),
+        // familyId is required since the Phase-2 rotation-chain migration;
+        // a hand-built row is its own single-token family.
+        familyId: "expired-token-family",
       },
     });
 
@@ -258,5 +266,119 @@ describe("completeDriverProfile", () => {
     expect(driver.carMake).toBe("Toyota");
     expect(driver.plate).toBe("GR-1234-26");
     expect(driver.photoUrl).toBe("https://placeholder.example.com/photo.jpg");
+  });
+});
+
+describe("refresh — rotation chains and reuse detection (Phase 2)", () => {
+  /** Signs a user up and returns them plus their first refresh token. */
+  async function newSession() {
+    const phone = uniqueTestPhone();
+    const created = await signup(prisma, {
+      phone,
+      name: "Rotation User",
+      role: "RIDER",
+      verifiedToken: signVerificationToken({ phone, purpose: "SIGNUP" }),
+    });
+    userIds.push(created.user.id);
+    return created;
+  }
+
+  it("keeps every rotated token in one family", async () => {
+    const session = await newSession();
+
+    const second = await refresh(prisma, session.refreshToken);
+    const third = await refresh(prisma, second.refreshToken);
+
+    const rows = await prisma.refreshToken.findMany({ where: { userId: session.user.id } });
+    expect(rows).toHaveLength(3);
+    const families = new Set(rows.map((r) => r.familyId));
+    expect(families.size).toBe(1);
+
+    // The family root is the token issued at signup, and it is a real id.
+    const [familyId] = [...families];
+    expect(rows.some((r) => r.id === familyId)).toBe(true);
+    expect(third.refreshToken).toBeTruthy();
+  });
+
+  it("a separate login starts a separate family", async () => {
+    const a = await newSession();
+    const b = await newSession();
+
+    const rowA = await prisma.refreshToken.findFirstOrThrow({ where: { userId: a.user.id } });
+    const rowB = await prisma.refreshToken.findFirstOrThrow({ where: { userId: b.user.id } });
+    expect(rowA.familyId).not.toBe(rowB.familyId);
+  });
+
+  it("treats reuse of a consumed token as theft and revokes the whole family", async () => {
+    const session = await newSession();
+
+    // Legitimate rotation: token1 -> token2 -> token3.
+    const second = await refresh(prisma, session.refreshToken);
+    const third = await refresh(prisma, second.refreshToken);
+
+    // An attacker replays the first (already consumed) token.
+    await expect(refresh(prisma, session.refreshToken)).rejects.toThrow(RefreshTokenReuseError);
+
+    // Everything in the chain is now revoked — including token3, which the
+    // legitimate client was still holding. Both parties must re-authenticate.
+    const rows = await prisma.refreshToken.findMany({ where: { userId: session.user.id } });
+    expect(rows.every((r) => r.revokedAt !== null)).toBe(true);
+
+    await expect(refresh(prisma, third.refreshToken)).rejects.toThrow(InvalidRefreshTokenError);
+  });
+
+  it("reuse detection reports the owning user, for logging", async () => {
+    const session = await newSession();
+    await refresh(prisma, session.refreshToken);
+
+    await expect(refresh(prisma, session.refreshToken)).rejects.toMatchObject({
+      name: "RefreshTokenReuseError",
+      userId: session.user.id,
+    });
+  });
+
+  it("RefreshTokenReuseError is an InvalidRefreshTokenError, so the route still answers 401", async () => {
+    const session = await newSession();
+    await refresh(prisma, session.refreshToken);
+
+    const err = await refresh(prisma, session.refreshToken).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InvalidRefreshTokenError);
+    // Identical message to an ordinary invalid token — no oracle for the attacker.
+    expect((err as Error).message).toBe("Refresh token is invalid, revoked, or expired");
+  });
+
+  it("does not touch other users' tokens when a family is burned", async () => {
+    const victim = await newSession();
+    const bystander = await newSession();
+
+    await refresh(prisma, victim.refreshToken);
+    await expect(refresh(prisma, victim.refreshToken)).rejects.toThrow(RefreshTokenReuseError);
+
+    const bystanderRows = await prisma.refreshToken.findMany({
+      where: { userId: bystander.user.id },
+    });
+    expect(bystanderRows.every((r) => r.revokedAt === null)).toBe(true);
+    // And the bystander's token still works.
+    await expect(refresh(prisma, bystander.refreshToken)).resolves.toHaveProperty("accessToken");
+  });
+
+  it("an unknown token is rejected without burning anything", async () => {
+    const session = await newSession();
+
+    await expect(refresh(prisma, generateRefreshTokenValue())).rejects.toThrow(
+      InvalidRefreshTokenError,
+    );
+
+    const rows = await prisma.refreshToken.findMany({ where: { userId: session.user.id } });
+    expect(rows.every((r) => r.revokedAt === null)).toBe(true);
+  });
+
+  it("an expired token is rejected as invalid, not as theft", async () => {
+    const session = await newSession();
+    const future = new Date(Date.now() + 1000 * 60 * 60 * 24 * 365);
+
+    const err = await refresh(prisma, session.refreshToken, future).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InvalidRefreshTokenError);
+    expect(err).not.toBeInstanceOf(RefreshTokenReuseError);
   });
 });

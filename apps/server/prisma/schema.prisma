@@ -304,11 +304,17 @@ model RefreshToken {
   revokedAt   DateTime?
   deviceLabel String?
   createdAt   DateTime  @default(now())
+  /// Rotation chain ("family") this token belongs to: the id of the token
+  /// issued at login, inherited by every token rotated out of it. Presenting
+  /// an already-consumed token means a copy is in circulation, so the whole
+  /// family is revoked at once — see authService.refresh.
+  familyId    String
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([tokenHash])
+  @@index([familyId])
 }
 
 /// Phase 5c: a rider rating their driver (or vice versa, in future) at the

@@ -218,6 +218,41 @@ describe("refresh + logout routes", () => {
     });
     expect(reuseRes.statusCode).toBe(401);
 
+    // Phase 2: reusing a consumed token is treated as theft, so the whole
+    // rotation family is revoked — including the token the legitimate client
+    // was holding. It must therefore no longer refresh either.
+    const afterReuseRes = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      payload: { refreshToken: newRefreshToken },
+    });
+    expect(afterReuseRes.statusCode).toBe(401);
+
+    // The 401 body is byte-identical to an ordinary invalid-token rejection,
+    // so a thief cannot tell that they tripped the detector.
+    expect(JSON.parse(reuseRes.body)).toEqual(JSON.parse(afterReuseRes.body));
+  });
+
+  it("logout revokes the current token without needing a reuse event", async () => {
+    const phone = newPhone();
+    const verifiedToken = await requestAndVerify(phone, "SIGNUP");
+
+    const signupRes = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      payload: { phone, name: "Logout Route User", role: "RIDER", verifiedToken },
+    });
+    const { user, refreshToken } = JSON.parse(signupRes.body);
+    userIds.push(user.id);
+
+    const refreshRes = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      payload: { refreshToken },
+    });
+    expect(refreshRes.statusCode).toBe(200);
+    const { refreshToken: newRefreshToken } = JSON.parse(refreshRes.body);
+
     const logoutRes = await app.inject({
       method: "POST",
       url: "/auth/logout",

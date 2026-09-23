@@ -14,6 +14,7 @@ import {
   InvalidOtpError,
   InvalidRefreshTokenError,
   InvalidVerificationTokenError,
+  RefreshTokenReuseError,
   OtpAttemptsExceededError,
   OtpExpiredError,
   OtpRateLimitExceededError,
@@ -178,6 +179,17 @@ export function registerAuthRoutes(
       const result = await refresh(prisma, body.refreshToken);
       return reply.code(200).send(result);
     } catch (err) {
+      if (err instanceof RefreshTokenReuseError) {
+        // Every token in this login's rotation chain has just been revoked.
+        // Log it as the security event it is — but answer EXACTLY as for any
+        // other invalid token (same status, same message), so an attacker
+        // learns nothing about whether they tripped the detector.
+        request.log.warn(
+          { userId: err.userId, event: "refresh_token_reuse" },
+          "Refresh token reuse detected — revoked the entire token family",
+        );
+        return reply.code(401).send({ error: err.message });
+      }
       if (err instanceof InvalidRefreshTokenError) {
         return reply.code(401).send({ error: err.message });
       }
