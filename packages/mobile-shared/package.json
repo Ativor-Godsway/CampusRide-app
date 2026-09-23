@@ -29,5 +29,46 @@
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "peerDependenciesMeta": {
+    "@expo/vector-icons": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "axios": {
+      "optional": true
+    },
+    "expo-constants": {
+      "optional": true
+    },
+    "expo-linking": {
+      "optional": true
+    },
+    "expo-location": {
+      "optional": true
+    },
+    "expo-router": {
+      "optional": true
+    },
+    "expo-secure-store": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    },
+    "react-native-maps": {
+      "optional": true
+    },
+    "react-native-safe-area-context": {
+      "optional": true
+    },
+    "socket.io-client": {
+      "optional": true
+    }
   }
 }
