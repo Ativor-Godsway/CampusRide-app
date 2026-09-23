@@ -11,7 +11,10 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "sourceMap": true,
-    "baseUrl": ".",
+    // No "baseUrl": TypeScript 6 deprecates it (TS5101) and removes it in 7.
+    // Since TS 5, "paths" entries resolve relative to the directory holding
+    // this tsconfig, which is what the relative paths below already assume —
+    // so dropping baseUrl changes nothing about resolution.
     "paths": {
       "@rida/shared": ["../../packages/shared/src/index.ts"]
     }

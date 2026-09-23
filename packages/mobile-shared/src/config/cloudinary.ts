@@ -1,3 +1,4 @@
+import { File } from "expo-file-system";
 import { api } from "../auth/apiClient";
 
 /**
@@ -38,6 +39,28 @@ export function isCloudinaryConfigured(): boolean {
   return true;
 }
 
+/**
+ * React Native's FormData type models only `string | { uri, name, type }`
+ * parts and a two-argument `append` — it predates Blob support and describes
+ * the XHR transport, not Expo's.
+ *
+ * At runtime the object IS capable of more: RN's FormData stores whatever it
+ * is given, and expo/fetch's multipart encoder then accepts strings, Blobs,
+ * and anything exposing `bytes()`. expo-file-system's `File` extends
+ * `FileSystemFile`, which declares `bytes(): Promise<Uint8Array>`, so it
+ * encodes correctly.
+ *
+ * This view expresses that gap in one place, rather than scattering
+ * `as unknown as Blob` casts that would claim something untrue about the value.
+ */
+interface MultipartFormData {
+  append(name: string, value: unknown, fileName?: string): void;
+}
+
+function multipart(formData: FormData): MultipartFormData {
+  return formData as unknown as MultipartFormData;
+}
+
 /** Derives the upload filename/extension from the local URI, defaulting to jpg. */
 function fileNameFor(localUri: string, allowedFormats: string[]): string {
   const match = /\.([a-zA-Z0-9]+)(?:\?.*)?$/.exec(localUri);
@@ -67,13 +90,18 @@ export async function uploadImageToCloudinary(
   }
 
   const formData = new FormData();
-  // React Native FormData accepts a { uri, name, type } file part; the DOM
-  // FormData types don't model it, so cast through unknown to a Blob.
-  formData.append("file", {
-    uri: localUri,
-    name: fileNameFor(localUri, ticket.allowedFormats),
-    type: "image/jpeg",
-  } as unknown as Blob);
+  // The file part is an expo-file-system `File`, NOT React Native's classic
+  // { uri, name, type } object.
+  //
+  // Since SDK 56 Expo installs its own WinterTC-compliant `expo/fetch` as
+  // globalThis.fetch. Its multipart encoder accepts strings, Blobs and
+  // objects exposing bytes() — and throws "Unsupported FormDataPart
+  // implementation" for anything else, which is exactly what the { uri, ... }
+  // object is. `File` implements the Blob interface, so it encodes natively
+  // and the upload keeps working without opting the whole app out of
+  // expo/fetch via EXPO_PUBLIC_USE_RN_FETCH.
+  const file = new File(localUri);
+  multipart(formData).append("file", file, fileNameFor(localUri, ticket.allowedFormats));
 
   // Every signed parameter must be sent back EXACTLY as signed, or Cloudinary
   // rejects the upload — which is precisely what stops a tampered request.
