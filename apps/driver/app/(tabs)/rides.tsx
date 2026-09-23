@@ -101,16 +101,49 @@ export default function RidesTab() {
         <Text variant="h1">Your rides</Text>
       </View>
 
+      {/*
+        Phase 4: the headline figure is now NET, not gross. A driver taking
+        cash fares keeps the whole fare in hand but owes 15% of each one back
+        as commission, so showing only gross overstated what is actually
+        theirs. Gross and commission stay visible underneath so the number is
+        explainable rather than just smaller.
+      */}
       <Card style={styles.earningsCard}>
         <Text variant="label" color="muted">
-          EARNINGS
+          YOUR EARNINGS
         </Text>
         <Text variant="h1" style={styles.earningsAmount}>
-          {formatGhs(summary.totalGrossPesewas)}
+          {formatGhs(summary.netPesewas)}
         </Text>
         <Text variant="caption" color="muted">
-          Total earned · not yet paid out
+          After commission · not yet settled
         </Text>
+
+        <View style={styles.breakdown}>
+          <View style={styles.breakdownRow}>
+            <Text variant="bodySmall" color="muted">
+              Gross earned
+            </Text>
+            <Text variant="bodySmall">{formatGhs(summary.totalGrossPesewas)}</Text>
+          </View>
+          <View style={styles.breakdownRow}>
+            <Text variant="bodySmall" color="muted">
+              Commission owed
+            </Text>
+            <Text variant="bodySmall" color="error">
+              −{formatGhs(summary.commissionOwedPesewas)}
+            </Text>
+          </View>
+        </View>
+
+        {summary.commissionOwedPesewas > 0 && (
+          <Text variant="caption" color="muted">
+            Commission is 15% of each completed cash ride ({summary.commissionRidesCount}{" "}
+            {summary.commissionRidesCount === 1 ? "ride" : "rides"}). We&apos;ll tell you how to
+            settle it before any collection starts.
+          </Text>
+        )}
+
         <Text variant="bodySmall" color="muted" style={styles.ridesCount}>
           {summary.totalRides} {summary.totalRides === 1 ? "ride" : "rides"} completed
         </Text>
@@ -134,6 +167,14 @@ export default function RidesTab() {
 }
 
 const styles = StyleSheet.create({
+  breakdown: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    gap: spacing.xs,
+  },
+  breakdownRow: { flexDirection: "row", justifyContent: "space-between" },
   header: {
     marginBottom: spacing.xl,
   },

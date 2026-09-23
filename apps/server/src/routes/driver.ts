@@ -181,12 +181,31 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     if (!ride) return reply.code(200).send({ ride: null });
 
     const { passengers, ...rideFields } = ride;
+
+    // Phase 4: the driver needs to be able to reach their riders at pickup,
+    // so each passenger carries a name and phone. Scoped to the driver's OWN
+    // active ride and dropped the moment it completes (this route only ever
+    // returns a live ride), which keeps rider contact details tied to the
+    // trip that justifies them.
+    const riderIds = Array.from(new Set([ride.riderId, ...passengers.map((p) => p.riderId)]));
+    const riders = await prisma.user.findMany({
+      where: { id: { in: riderIds } },
+      select: { id: true, name: true, phone: true },
+    });
+    const riderById = new Map(riders.map((r) => [r.id, r]));
+    const owner = riderById.get(ride.riderId) ?? null;
+
     return reply.code(200).send({
       ride: {
         ...rideFields,
+        // The ride owner, for a LONE ride that has no RidePassenger row.
+        riderName: owner?.name ?? null,
+        riderPhone: owner?.phone ?? null,
         passengers: passengers.map((p) => ({
           id: p.id,
           riderId: p.riderId,
+          riderName: riderById.get(p.riderId)?.name ?? null,
+          riderPhone: riderById.get(p.riderId)?.phone ?? null,
           pickupZoneName: p.pickupZone.name,
           dropoffZoneName: p.dropoffZone.name,
           lockedFare: p.lockedFare,

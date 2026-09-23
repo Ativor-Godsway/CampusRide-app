@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { RideStatus } from "@rida/shared";
@@ -13,10 +13,10 @@ import {
   Screen,
   Text,
   colors,
+  Button,
   formatGhs,
-  getMyRides,
+  getMyRidesPage,
   spacing,
-  type RideSummary,
 } from "@rida/mobile-shared";
 
 const STATUS_BADGE: Record<RideStatus, { label: string; variant: BadgeVariant }> = {
@@ -45,10 +45,23 @@ function formatDate(value: Date | string): string {
 /** Rides tab — the rider's trip history. */
 export default function RidesTab() {
   const router = useRouter();
-  const { data, isLoading, isError } = useQuery<RideSummary[]>({
-    queryKey: ["myRides"],
-    queryFn: getMyRides,
-  });
+  /**
+   * Phase 4: paginated history. This used to fetch a single hard-capped page
+   * of 50 with no way to reach anything older, so a regular rider simply lost
+   * access to their earlier trips.
+   *
+   * Cursor-based (see GET /rides/mine): an offset would shift under the
+   * rider if they booked a ride mid-scroll, duplicating or skipping a row.
+   */
+  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery({
+      queryKey: ["myRides"],
+      queryFn: ({ pageParam }: { pageParam: string | undefined }) => getMyRidesPage(pageParam),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    });
+
+  const rides = data?.pages.flatMap((page) => page.rides) ?? [];
 
   if (isLoading) {
     return (
@@ -70,7 +83,7 @@ export default function RidesTab() {
     );
   }
 
-  if (!data || data.length === 0) {
+  if (rides.length === 0) {
     return (
       <Screen>
         <View style={styles.header}>
@@ -92,7 +105,7 @@ export default function RidesTab() {
       </View>
 
       <Card>
-        {data.map((ride, index) => {
+        {rides.map((ride, index) => {
           const status = STATUS_BADGE[ride.status];
           const isActive = ACTIVE_STATUSES.includes(ride.status);
           // #7: a request absorbed into another car (CANCELLED / MERGED) is
@@ -159,16 +172,28 @@ export default function RidesTab() {
                   <Badge label={status.label} variant={status.variant} />
                 </View>
               </Pressable>
-              {index < data.length - 1 ? <View style={styles.divider} /> : null}
+              {index < rides.length - 1 ? <View style={styles.divider} /> : null}
             </View>
           );
         })}
       </Card>
+
+      {hasNextPage && (
+        <View style={styles.loadMore}>
+          <Button
+            label={isFetchingNextPage ? "Loading…" : "Load older rides"}
+            variant="secondary"
+            onPress={() => void fetchNextPage()}
+            loading={isFetchingNextPage}
+          />
+        </View>
+      )}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  loadMore: { marginTop: spacing.lg },
   header: {
     marginBottom: spacing.xl,
   },

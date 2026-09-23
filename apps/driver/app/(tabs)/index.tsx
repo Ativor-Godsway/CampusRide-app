@@ -27,6 +27,7 @@ import {
   radii,
   setDriverAvailability,
   driverClaimRide,
+  rejectRide,
   getDriverActiveRide,
   getEligibleRides,
   getFillSuggestions,
@@ -437,10 +438,13 @@ function FillYourCarView({
 interface RequestCardProps {
   ride: EligibleRideItem;
   claiming: boolean;
+  rejecting: boolean;
   onAccept: () => void;
+  /** Phase 4: explicitly decline, instead of letting the offer time out. */
+  onReject: () => void;
 }
 
-function RequestCard({ ride, claiming, onAccept }: RequestCardProps) {
+function RequestCard({ ride, claiming, rejecting, onAccept, onReject }: RequestCardProps) {
   return (
     <Card style={styles.requestCard}>
       {/* Absolutely positioned so it overlaps the corner instead of adding row height. */}
@@ -453,12 +457,25 @@ function RequestCard({ ride, claiming, onAccept }: RequestCardProps) {
         origin={<Text variant="bodyMedium">{ride.pickupZoneName}</Text>}
         destination={<Text variant="bodyMedium">{ride.dropoffZoneName}</Text>}
       />
-      <Button
-        label={claiming ? "Claiming…" : "Accept"}
-        onPress={onAccept}
-        loading={claiming}
-        fullWidth
-      />
+      <View style={styles.requestActions}>
+        {/*
+          Decline is deliberately the quieter, secondary control: it is the
+          less common action and an accidental tap costs the driver a fare.
+        */}
+        <Button
+          label={rejecting ? "Declining…" : "Decline"}
+          variant="secondary"
+          onPress={onReject}
+          loading={rejecting}
+          disabled={claiming}
+        />
+        <Button
+          label={claiming ? "Claiming…" : "Accept"}
+          onPress={onAccept}
+          loading={claiming}
+          disabled={rejecting}
+        />
+      </View>
     </Card>
   );
 }
@@ -530,6 +547,8 @@ export default function DriverHomeScreen() {
   const [pickupFilter, setPickupFilter] = useState<string>(ALL_FILTER);
   const [dropoffFilter, setDropoffFilter] = useState<string>(ALL_FILTER);
   const [claimingRideId, setClaimingRideId] = useState<string | null>(null);
+  /** Phase 4: the offer currently being declined, if any. */
+  const [rejectingRideId, setRejectingRideId] = useState<string | null>(null);
   const [addingRideId, setAddingRideId] = useState<string | null>(null);
   // Optimistic per-passenger status overlay (passengerId -> advanced status),
   // applied over server data; cleared once the server catches up, or rolled
@@ -659,6 +678,31 @@ export default function DriverHomeScreen() {
       }
     },
     [claimingRideId, queryClient, router, refetchEligible],
+  );
+
+  /**
+   * Phase 4: explicitly decline an offer. Removes it from THIS driver's list
+   * immediately (the server records the rejection and filters it out of
+   * /driver/rides/eligible) while leaving it live for every other driver.
+   *
+   * Optimistic + refetch: the card should disappear on tap, and the refetch
+   * reconciles with the server. A failure is deliberately quiet — the worst
+   * case is the offer reappears on the next poll, which is self-explanatory.
+   */
+  const handleReject = useCallback(
+    async (ride: EligibleRideItem) => {
+      if (rejectingRideId !== null) return;
+      setRejectingRideId(ride.rideId);
+      try {
+        await rejectRide(ride.rideId);
+      } catch {
+        Alert.alert("Couldn't decline", "Please try again.");
+      } finally {
+        setRejectingRideId(null);
+        void refetchEligible();
+      }
+    },
+    [rejectingRideId, refetchEligible],
   );
 
   // Fill-your-car: add a compatible passenger.
@@ -980,6 +1024,8 @@ export default function DriverHomeScreen() {
                       ride={ride}
                       claiming={claimingRideId === ride.rideId}
                       onAccept={() => void handleAccept(ride)}
+                      rejecting={rejectingRideId === ride.rideId}
+                      onReject={() => void handleReject(ride)}
                     />
                   ))}
                 </View>
@@ -1003,6 +1049,8 @@ export default function DriverHomeScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  // Phase 4: Decline / Accept pair on a ride offer.
+  requestActions: { flexDirection: "row", gap: spacing.sm },
   // Wraps the fill-your-car Screen so the toast can pin to the viewport bottom.
   screenRoot: { flex: 1 },
   header: {

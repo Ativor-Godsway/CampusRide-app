@@ -9,3 +9,4 @@ export * from "./pricing/pricing";
 export * from "./ranking/ranking";
 export * from "./ranking/bestFit";
 export * from "./navigation/deepLinks";
+export * from "./eta/eta";
