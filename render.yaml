@@ -1,3 +1,30 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# DEPLOYMENT GATING — ACTION REQUIRED IN THE GITHUB UI
+#
+# Render auto-deploys this service from `main` on every push. Nothing in this
+# file, and nothing in .github/workflows/ci.yml, can stop a deploy on its own:
+# Render watches the branch, not the CI result. So a commit that fails the
+# build or the tests still reaches production unless GitHub refuses the push
+# or merge in the first place.
+#
+# Closing that gap is a MANUAL, ONE-TIME step in the GitHub repo settings
+# (Settings → Branches → Add branch ruleset / protection rule for `main`):
+#
+#   1. Require a pull request before merging.
+#   2. Require status checks to pass, and select all three CI jobs:
+#        - "Lint, typecheck & shared tests"
+#        - "Server tests (Postgres)"
+#        - "Dependency audit"
+#   3. Require branches to be up to date before merging.
+#   4. Optionally, restrict who can push directly to `main`.
+#
+# Until that is switched on, CI reports pass/fail but blocks nothing.
+#
+# Belt and braces (also a dashboard action, in Render): set the service's
+# Auto-Deploy to "After CI checks pass" if the plan offers it, or disable
+# auto-deploy and deploy from the Render dashboard once CI is green.
+# ─────────────────────────────────────────────────────────────────────────────
+
 services:
   - type: web
     name: campusride-server

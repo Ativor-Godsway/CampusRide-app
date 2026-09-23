@@ -1,0 +1,50 @@
+{
+  "$comment": [
+    "Known, accepted npm audit advisories at high/critical severity.",
+    "Checked by scripts/audit-check.mjs, which FAILS CI on any high/critical",
+    "advisory NOT listed here — so new vulnerabilities break the build while",
+    "these known ones do not.",
+    "",
+    "Every entry needs a reason and a reviewBy date. Entries that no longer",
+    "match anything are reported as stale so they get deleted rather than",
+    "silently widening the exception over time.",
+    "",
+    "All current entries trace to expo@54's build toolchain and were accepted",
+    "in Phase 2: clearing them requires expo 54 -> 57, a three-major React",
+    "Native migration that is its own piece of work."
+  ],
+  "allow": [
+    {
+      "id": "GHSA-w3rx-r6r6-pgpr",
+      "package": "image-size",
+      "severity": "high",
+      "reason": "Denial of service in the ICNS parser. Reached only via @expo/cli/metro at BUILD time, parsing our own app icons on a trusted machine — never at runtime and never on attacker-supplied input. Fix requires expo@57.",
+      "acceptedIn": "Phase 2",
+      "reviewBy": "2026-12-31"
+    },
+    {
+      "id": "GHSA-5p2g-fcmc-qvqq",
+      "package": "image-size",
+      "severity": "high",
+      "reason": "Denial of service in the JXL/HEIF parsers. Same build-time-only exposure as GHSA-w3rx-r6r6-pgpr. Fix requires expo@57.",
+      "acceptedIn": "Phase 2",
+      "reviewBy": "2026-12-31"
+    },
+    {
+      "id": "GHSA-6g55-p6wh-862q",
+      "package": "postcss",
+      "severity": "high",
+      "reason": "Arbitrary file read via a crafted stylesheet. postcss is pulled in by the Metro bundler at BUILD time and processes only our own source; the server ships no postcss and the app bundle contains no postcss runtime. Fix requires expo@57.",
+      "acceptedIn": "Phase 2",
+      "reviewBy": "2026-12-31"
+    },
+    {
+      "id": "GHSA-r28c-9q8g-f849",
+      "package": "postcss",
+      "severity": "high",
+      "reason": "Path traversal in source-map auto-loading. Same build-time-only exposure as GHSA-6g55-p6wh-862q. Fix requires expo@57.",
+      "acceptedIn": "Phase 2",
+      "reviewBy": "2026-12-31"
+    }
+  ]
+}

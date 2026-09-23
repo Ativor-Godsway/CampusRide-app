@@ -19,7 +19,7 @@
 const PARAM_SEGMENT = /^[A-Za-z0-9_-]{1,64}$/;
 
 /** Scheme grammar per RFC 3986. */
-const SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.\-]*):(\/\/)?([\s\S]*)$/;
+const SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]*):(\/\/)?([\s\S]*)$/;
 
 export interface DeepLinkPolicy {
   /** The app's own scheme, without "://" (e.g. "campusride-rider"). */
@@ -68,6 +68,9 @@ export function parseDeepLinkPath(url: string, scheme: string): string | null {
 
   // Backslashes and control characters are never legitimate here, and
   // traversal has no meaning in a route name.
+  // Matching control characters is the entire point here: they are exactly
+  // what this check rejects.
+  // eslint-disable-next-line no-control-regex
   if (/[\\\u0000-\u001f\u007f]/.test(path)) return null;
   if (path.includes("..")) return null;
 

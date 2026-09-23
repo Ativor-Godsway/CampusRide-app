@@ -148,3 +148,57 @@ Infrastructure-as-Code flow (connect repo → Render detects the yaml →
 prompts to create services). It lists env var names but no secret values.
 You still need to set `DATABASE_URL`, `DIRECT_URL`, and `JWT_SECRET` in the
 Render dashboard after the service is created.
+
+---
+
+## CI, and the manual step that makes it a deploy gate
+
+`.github/workflows/ci.yml` runs on every push to `main` and every PR
+targeting `main`, in three parallel jobs:
+
+| Job | What it does |
+| --- | --- |
+| **Lint, typecheck & shared tests** | `npm ci`, `prisma generate`, `npm run lint`, `npm run typecheck` (all five workspaces), then `packages/shared`'s suite with coverage. No database. |
+| **Server tests (Postgres)** | Boots a `postgres:16` service container, creates `apps/server/.env.test` from the committed template, then `db:migrate:test` → `db:seed:test` → the full server suite with coverage. |
+| **Dependency audit** | `scripts/audit-check.mjs` — fails on any *new* high/critical npm advisory. |
+
+Coverage is printed but **not** threshold-gated: there is no agreed baseline
+yet. Today it sits at ~96% for `packages/shared` and ~64% for `apps/server`.
+
+### ⚠️ Required manual step: branch protection
+
+**CI does not block deploys on its own.** Render watches the `main` branch,
+not the CI result, so a red build still auto-deploys unless GitHub refuses
+the push or merge first. A workflow file cannot grant itself that authority —
+it has to be switched on by hand, once, in the GitHub UI:
+
+> **Settings → Branches → Add branch ruleset** (or *Add protection rule*) for `main`
+>
+> 1. **Require a pull request before merging**
+> 2. **Require status checks to pass before merging**, selecting all three:
+>    - `Lint, typecheck & shared tests`
+>    - `Server tests (Postgres)`
+>    - `Dependency audit`
+> 3. **Require branches to be up to date before merging**
+> 4. Optionally restrict direct pushes to `main`
+>
+> The status checks only appear in that picker *after* the workflow has run at
+> least once, so push this commit first, then add the rule.
+
+Optionally also set the Render service's auto-deploy to *After CI checks
+pass* (Render dashboard → service → Settings → Build & Deploy), or turn
+auto-deploy off and deploy manually once CI is green.
+
+### The audit allowlist
+
+`npm audit --audit-level=high` on its own would fail every build today: the
+repo carries four known high advisories in `expo@54`'s build toolchain
+(`image-size`, `postcss`) that can only be cleared by an `expo@54 → 57`
+migration, accepted as out of scope in Phase 2. A gate that is red from day
+one gets ignored, so instead `scripts/audit-check.mjs` compares the audit
+against `.audit-allowlist.json` and fails only on advisories that are *not*
+listed. Each exception carries a reason and a `reviewBy` date, and the script
+also reports stale entries so the list shrinks as things get fixed.
+
+To accept a new finding, add an entry with a real justification — not just an
+id. To see the current state locally: `node scripts/audit-check.mjs`.

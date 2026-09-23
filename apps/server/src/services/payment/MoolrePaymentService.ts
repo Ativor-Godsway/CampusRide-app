@@ -214,6 +214,10 @@ export class MoolrePaymentService implements PaymentService {
       );
     }
 
+    // Payment code is out of scope for the Phase 3 lint pass. Convert to
+    // lib/logger when Moolre payments are reactivated; this path is dormant
+    // while MOOLRE_PAYMENTS_ENABLED=false.
+    // eslint-disable-next-line no-console
     console.log(`[MOOLRE] ${path} ok: code=${code ?? "?"} status=${statusStr ?? "?"} data=${JSON.stringify(data.data)}`);
 
     return data;

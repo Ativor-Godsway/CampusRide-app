@@ -21,5 +21,28 @@ export default defineConfig({
     // pooled connection concurrently causes intermittent P1001 "can't reach
     // database server" errors.
     fileParallelism: false,
+    /**
+     * Coverage is INFORMATIONAL for now — no thresholds are set, because we
+     * have no agreed baseline to hold the line at yet. CI prints the summary
+     * so the number is visible on every run; add `thresholds` here once a
+     * baseline is picked.
+     */
+    coverage: {
+      provider: "v8",
+      // `text` for the CI log, `json-summary` so a future CI step (or a
+      // badge) can read the totals without re-parsing the table.
+      reporter: ["text", "json-summary"],
+      reportsDirectory: "./coverage",
+      include: ["src/**/*.ts"],
+      exclude: [
+        "src/**/*.test.ts",
+        // Not application logic: hand-run operator scripts, the dev-only
+        // mock driver simulator, and test fixtures/harness code.
+        "src/scripts/**",
+        "src/dev/**",
+        "src/test/**",
+        "src/**/testFixtures.ts",
+      ],
+    },
   },
 });

@@ -1,0 +1,134 @@
+name: CI
+
+# Runs on every push to main and on every PR targeting main. render.yaml
+# auto-deploys main, so this workflow is the only thing standing between a
+# broken commit and production — see the branch-protection note in
+# render.yaml (that protection must be enabled by hand in GitHub's settings;
+# a workflow file cannot turn it on for itself).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A newer push to the same branch makes an in-flight run obsolete. Cancel it
+# rather than paying for both — except on main, where each commit's result is
+# the deploy gate and needs its own verdict.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Keep CI's Node on the same major as the Render runtime and local dev.
+  NODE_VERSION: "20"
+
+jobs:
+  # ── Static checks: no database needed, so these fail fast and in parallel
+  #    with the (much slower) integration suite below.
+  static:
+    name: Lint, typecheck & shared tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # `npm ci` (not `npm install`) so the lockfile is authoritative: it
+      # installs exactly what is committed and fails if package.json and
+      # package-lock.json have drifted apart.
+      - name: Install dependencies
+        run: npm ci
+
+      # The server's TS references Prisma's generated client, so typecheck
+      # cannot run before `prisma generate`. No database is touched.
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Lint (all workspaces)
+        run: npm run lint
+
+      - name: Typecheck (all workspaces)
+        run: npm run typecheck
+
+      # Pure domain logic — no database, no network.
+      - name: Test packages/shared (with coverage)
+        run: npm run test:coverage --workspace=packages/shared
+
+  # ── Integration suite against a real Postgres.
+  server-tests:
+    name: Server tests (Postgres)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rida_test
+        ports:
+          - 5432:5432
+        # Without this the first migration can race the container's startup.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # apps/server/.env.test is gitignored (it holds a local DB URL), but the
+      # db:*:test scripts load it through dotenv-cli. The committed template
+      # already points at postgres:postgres@localhost:5432/rida_test, which is
+      # exactly the service container above, so copying it is all that's
+      # needed. src/db/dbHostGuard.ts still refuses to run against a
+      # production host.
+      - name: Create .env.test from the committed template
+        run: cp apps/server/.env.test.example apps/server/.env.test
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Run migrations
+        run: npm run db:migrate:test --workspace=apps/server
+
+      - name: Seed test database
+        run: npm run db:seed:test --workspace=apps/server
+
+      # Coverage is informational — printed for visibility, no threshold gate.
+      - name: Test apps/server (with coverage)
+        run: npm run test:coverage --workspace=apps/server
+
+  # ── Dependency vulnerabilities. Separate job so a security finding is
+  #    distinguishable at a glance from a broken test.
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fails on any NEW high/critical advisory. The four known expo@54
+      # build-toolchain findings accepted in Phase 2 are listed, with reasons
+      # and review dates, in .audit-allowlist.json.
+      - name: Audit dependencies (high/critical, allowlisted exceptions)
+        run: node scripts/audit-check.mjs

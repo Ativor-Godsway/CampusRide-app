@@ -18,6 +18,7 @@ import { NoAwaitingOtpPaymentError } from "../services/payment/errors";
 import type { MoolreChannel } from "../services/payment/constants";
 import { paymentService } from "../services/active";
 import { config } from "../config";
+import { logger } from "../lib/logger";
 import { riderRideDetailSelect, riderRideListSelect } from "./selects";
 import { startMockDriverForRide } from "../dev/mockDriver";
 
@@ -261,7 +262,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
       if (updated.status === "REQUESTED") {
         broadcastRide(prisma, id).catch((err) => {
-          console.error(`[broadcastRide] failed for ride ${id}:`, err);
+          logger.error("broadcastRide failed", { rideId: id, err });
         });
         if (config.enableMockDriver) {
           startMockDriverForRide(prisma, id);

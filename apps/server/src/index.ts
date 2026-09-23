@@ -168,6 +168,10 @@ async function bootstrap() {
 }
 
 bootstrap().catch((err) => {
+  // Last-resort handler: bootstrap has failed, so the Fastify logger may never
+  // have been constructed. console is the only output guaranteed to exist on
+  // the way to exit(1).
+  // eslint-disable-next-line no-console
   console.error("Failed to start server:", err);
   process.exit(1);
 });

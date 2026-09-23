@@ -11,7 +11,7 @@ import { registerRideRoutes } from "./rides";
 import { registerAuthRoutes } from "./auth";
 import { signAccessToken } from "../services/auth/tokens";
 import { otpService } from "../services/active";
-import { createTestUser, createTestRide, getTestZones, cleanupRide } from "../services/ride/testFixtures";
+import { createTestUser, createTestRide, cleanupRide } from "../services/ride/testFixtures";
 
 let app: FastifyInstance;
 const createdRideIds: string[] = [];

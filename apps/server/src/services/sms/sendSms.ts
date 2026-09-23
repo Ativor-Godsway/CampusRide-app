@@ -1,5 +1,6 @@
 import { config } from "../../config";
 import { sendMoolreSms } from "./MoolreSmsService";
+import { logger } from "../../lib/logger";
 
 /**
  * Generic SMS send for USSD ride-transition notifications (driver matched,
@@ -13,7 +14,7 @@ export async function sendSms(phone: string, message: string): Promise<{ success
   const { smsEnabled, baseUrl, apiUser, vasKey, smsSenderId } = config.moolre;
 
   if (!smsEnabled || !vasKey || !smsSenderId) {
-    console.log(`[sendSms] Moolre SMS disabled/not configured — would have sent to ${phone}: ${message}`);
+    logger.info("Moolre SMS disabled/not configured — message not sent", { phone, message });
     return { success: false };
   }
 

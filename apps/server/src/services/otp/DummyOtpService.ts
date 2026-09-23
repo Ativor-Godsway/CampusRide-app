@@ -1,4 +1,5 @@
 import type { OtpResult, OtpService } from "./OtpService";
+import { logger } from "../../lib/logger";
 
 /**
  * No-op OTP "delivery" for local dev and the automated test suite.
@@ -19,9 +20,12 @@ export class DummyOtpService implements OtpService {
     if (process.env.NODE_ENV === "development") {
       // Dev convenience only: codes are hashed at rest, so without this there
       // is no way to complete a login locally.
-      console.log(`[DummyOtpService] (dev only) OTP for ${phone}: ${code}`);
+      logger.info("DummyOtpService: OTP issued (dev only, code shown)", { phone, code });
     } else {
-      console.log(`[DummyOtpService] OTP issued for ${phone} — code withheld (NODE_ENV=${process.env.NODE_ENV ?? "unset"})`);
+      logger.info("DummyOtpService: OTP issued — code withheld", {
+        phone,
+        nodeEnv: process.env.NODE_ENV ?? "unset",
+      });
     }
     return { success: true };
   }

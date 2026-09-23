@@ -24,5 +24,10 @@
     "react-native-maps": "*",
     "react-native-safe-area-context": "*",
     "socket.io-client": "^4.7.5"
+  },
+  "scripts": {
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "typecheck": "tsc -p tsconfig.json"
   }
 }

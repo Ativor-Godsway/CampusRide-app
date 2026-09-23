@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, RideSource, RideStatus, RideType } from "@rida/shared";
 import { getLoneFare, getSharedFarePerRider } from "@rida/shared";
 import { broadcastRide } from "./dispatch";
+import { logger } from "../../lib/logger";
 
 /** Rides in any of these statuses count as "active" — a rider may have at most one at a time. */
 export const ACTIVE_RIDE_STATUSES: RideStatus[] = [
@@ -115,7 +116,7 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
   // Notify eligible real drivers via socket. Fire-and-forget — identical to
   // the pre-extraction call site in routes/rides.ts.
   broadcastRide(prisma, ride.id).catch((err) => {
-    console.error(`[broadcastRide] failed for ride ${ride.id}:`, err);
+    logger.error("broadcastRide failed", { rideId: ride.id, err });
   });
 
   return ride;

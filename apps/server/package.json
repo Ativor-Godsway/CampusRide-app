@@ -17,7 +17,11 @@
     "db:seed:dev": "dotenv -e .env.development -- sh -c 'npm run db:guard && SEED_ZONE_ADJACENCY=true ts-node -r tsconfig-paths/register prisma/seed.ts'",
     "db:seed:test": "dotenv -e .env.test -- sh -c 'npm run db:guard && SEED_ZONE_ADJACENCY=false ts-node -r tsconfig-paths/register prisma/seed.ts'",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "eslint src prisma",
+    "lint:fix": "eslint src prisma --fix",
+    "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
@@ -37,6 +41,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
+    "@vitest/coverage-v8": "^5.0.1",
     "dotenv-cli": "^11.0.0",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",

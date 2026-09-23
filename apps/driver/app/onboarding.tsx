@@ -8,7 +8,6 @@ import {
   LoadingState,
   Screen,
   Text,
-  colors,
   spacing,
   submitDriverProfile,
   useAuth,

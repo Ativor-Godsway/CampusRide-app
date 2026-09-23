@@ -32,6 +32,10 @@ export function getRideSocket(): Socket {
     // Connection lifecycle logging is dev-only: in a release build these
     // lines run on every reconnect and put socket ids / server error strings
     // into the device log, where any other app with log access can read them.
+    /* eslint-disable no-console -- Dev-only diagnostics, already gated by
+       isDev() above so they are stripped from release bundles. React Native
+       has no logger to route these through, and Metro's console IS the
+       intended destination while debugging a connection. */
     if (isDev()) {
       socket.on("connect", () => {
         console.log(
@@ -48,6 +52,7 @@ export function getRideSocket(): Socket {
         console.log("[Socket.io] disconnected:", reason);
       });
     }
+    /* eslint-enable no-console */
   }
   return socket;
 }

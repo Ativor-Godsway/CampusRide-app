@@ -20,11 +20,17 @@ export async function notifyUssdRiders(
     await Promise.all(
       users.map((u) =>
         sendSms(u.phone, message).catch((err) => {
+          // USSD code is out of scope for the Phase 3 lint pass; convert to
+          // lib/logger when the USSD channel is picked back up (dormant
+          // while ENABLE_USSD=false).
+          // eslint-disable-next-line no-console
           console.error(`[notifyUssdRiders] failed to SMS rider ${u.id}:`, err);
         }),
       ),
     );
   } catch (err) {
+    // See above: USSD, out of scope this phase.
+    // eslint-disable-next-line no-console
     console.error("[notifyUssdRiders] failed to resolve rider phones:", err);
   }
 }

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+web-build/
+.expo/
+coverage/
+*.tsbuildinfo
+package-lock.json
+apps/server/prisma/migrations/
