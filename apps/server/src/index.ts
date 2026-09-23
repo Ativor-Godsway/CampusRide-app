@@ -1,9 +1,16 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { Server as SocketServer } from "socket.io";
 import { APP_NAME, config } from "./config";
 import { prisma } from "./db/prisma";
+import {
+  parseOriginAllowlist,
+  resolveCorsOrigin,
+  resolveTrustProxy,
+  toFastifyTrustProxy,
+} from "./lib/security";
 import { processTimeouts } from "./services/ride/timeouts";
 import {
   assertOtpServiceAllowedInProduction,
@@ -34,10 +41,16 @@ async function bootstrap() {
   assertOtpServiceAllowedInProduction(otpService, config.nodeEnv);
 
   // trustProxy: Render terminates TLS at a proxy, so the socket IP is the
-  // proxy's. Trusting the proxy makes request.ip (and therefore the rate
-  // limiter's per-IP keys) resolve to the real client via X-Forwarded-For,
-  // rather than rate-limiting every user under one shared proxy IP.
-  const app = Fastify({ logger: true, trustProxy: true });
+  // proxy's. Trusting it makes request.ip (and therefore the rate limiter's
+  // per-IP keys) resolve to the real client via X-Forwarded-For, rather than
+  // rate-limiting every user under one shared proxy IP.
+  //
+  // This is a HOP COUNT, not `true`. `true` trusts the entire forwarded
+  // chain, so any client could send its own X-Forwarded-For and pick a fresh
+  // "IP" per request, silently defeating every per-IP limit in
+  // config.rateLimit. See lib/security.ts#resolveTrustProxy.
+  const trustProxy = resolveTrustProxy(config.trustProxy, config.nodeEnv);
+  const app = Fastify({ logger: true, trustProxy: toFastifyTrustProxy(trustProxy) });
 
   // Global rate limiter. Routes without an explicit `config.rateLimit`
   // override fall back to globalMax per minute per IP. Per-route overrides
@@ -51,16 +64,32 @@ async function bootstrap() {
     timeWindow: "1 minute",
   });
 
-  // CORS: when DEMO_OTP_CORS_ORIGINS is set (comma-separated), restrict to that
-  // allowlist so the public showcase site is the only browser origin able to
-  // call us; when unset, reflect any origin (prior behavior — avoids breaking
-  // anything before the showcase origin is confirmed). Native apps (Expo/React
-  // Native) send no Origin header and are unaffected either way.
-  const corsAllowlist = config.demoOtpCorsOrigins
-    .split(",")
-    .map((o) => o.trim())
-    .filter(Boolean);
-  await app.register(cors, { origin: corsAllowlist.length > 0 ? corsAllowlist : true });
+  // Security headers (HSTS, X-Content-Type-Options, frame-ancestors denial,
+  // Referrer-Policy, and friends) — the API previously sent none at all.
+  // contentSecurityPolicy is off: this service returns JSON, never HTML, so a
+  // CSP protects nothing here while breaking nothing is not guaranteed.
+  // crossOriginEmbedderPolicy is likewise unnecessary for a pure API.
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+    // 180 days, on every subdomain. Render serves the API over HTTPS only,
+    // so there is no plaintext listener for this to lock clients out of.
+    hsts: { maxAge: 15_552_000, includeSubDomains: true, preload: false },
+  });
+
+  // CORS: an explicit allowlist (CORS_ALLOWED_ORIGINS, falling back to the
+  // older DEMO_OTP_CORS_ORIGINS). When it is empty we now DENY all browser
+  // origins in production instead of reflecting whatever origin asked —
+  // reflect-any is limited to non-production. Native apps (Expo/React Native)
+  // send no Origin header, so none of this affects the rider/driver apps.
+  const corsAllowlist = parseOriginAllowlist(config.corsAllowedOrigins);
+  const corsOrigin = resolveCorsOrigin(corsAllowlist, config.nodeEnv);
+  if (corsAllowlist.length === 0 && config.nodeEnv !== "production") {
+    app.log.warn(
+      "CORS_ALLOWED_ORIGINS is unset — reflecting any browser origin. This is permitted outside production only.",
+    );
+  }
+  await app.register(cors, { origin: corsOrigin });
   // Parser for application/x-www-form-urlencoded, scoped to that
   // Content-Type only — Fastify dispatches by exact header match, so this
   // never touches the built-in application/json parser every other route
@@ -106,8 +135,11 @@ async function bootstrap() {
   // app.server is the underlying http.Server — attach Socket.io to it directly
   await app.ready();
 
+  // Socket.io gets the SAME origin policy as HTTP. It used to be an
+  // unconditional "*", which meant any web page could open an authenticated
+  // ride socket in a visitor's browser regardless of the HTTP CORS rules.
   const io = new SocketServer(app.server, {
-    cors: { origin: "*" },
+    cors: { origin: corsOrigin },
   });
 
   io.on("connection", (socket) => {

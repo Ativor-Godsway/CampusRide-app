@@ -92,6 +92,24 @@ export const config = {
    */
   demoOtpCorsOrigins: process.env.DEMO_OTP_CORS_ORIGINS ?? "",
   /**
+   * Comma-separated browser origins allowed to call the API at all (CORS).
+   * Falls back to DEMO_OTP_CORS_ORIGINS, which previously served this role.
+   *
+   * When EMPTY, the API grants NO browser origin in production (it used to
+   * reflect any origin, letting any site call the API from a victim's
+   * browser); outside production it still reflects any origin for
+   * convenience. Native apps send no Origin header, so this never affects
+   * the rider/driver apps. See lib/security.ts#resolveCorsOrigin.
+   */
+  corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS ?? process.env.DEMO_OTP_CORS_ORIGINS ?? "",
+  /**
+   * Raw TRUST_PROXY value; interpreted by lib/security.ts#resolveTrustProxy.
+   * Unset means 1 hop in production (Render's TLS proxy) and no trust
+   * elsewhere. Trusting the whole chain lets clients spoof X-Forwarded-For
+   * and bypass every per-IP rate limit.
+   */
+  trustProxy: process.env.TRUST_PROXY,
+  /**
    * Phase 5c dev-only mock driver: when true, every ride created via
    * POST /rides is driven through MATCHED -> ARRIVED -> IN_PROGRESS ->
    * COMPLETED by a simulated driver (src/dev/mockDriver.ts), emitting the
