@@ -13,7 +13,6 @@ import {
   colors,
   confirmDeleteAccount,
   describeDeleteAccountError,
-  isCloudinaryConfigured,
   radii,
   spacing,
   updateDriverProfile,
@@ -48,10 +47,6 @@ export default function AccountTab() {
   }
 
   async function handlePickPhoto() {
-    if (!isCloudinaryConfigured()) {
-      Alert.alert("Photo upload unavailable", "Image hosting isn't configured yet.");
-      return;
-    }
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!perm.granted) {
       Alert.alert("Permission needed", "Allow photo access to change your picture.");
@@ -67,10 +62,24 @@ export default function AccountTab() {
 
     setUploading(true);
     try {
-      const url = await uploadImageToCloudinary(result.assets[0].uri);
+      // fileSize lets the upload fail fast on an oversized pick; the binding
+      // limits are the server-signed ones Cloudinary enforces.
+      const asset = result.assets[0];
+      const url = await uploadImageToCloudinary(asset.uri, asset.fileSize);
       setPhotoUrl(url);
-    } catch {
-      Alert.alert("Upload failed", "Couldn't upload that photo. Please try again.");
+    } catch (error) {
+      // The server answers 503 when Cloudinary isn't configured; anything
+      // else is a genuine upload failure or an oversized file.
+      const status = (error as { response?: { status?: number } })?.response?.status;
+      if (status === 503) {
+        Alert.alert("Photo upload unavailable", "Image hosting isn't configured yet.");
+      } else {
+        const message =
+          error instanceof Error && error.message.includes("too large")
+            ? error.message
+            : "Couldn't upload that photo. Please try again.";
+        Alert.alert("Upload failed", message);
+      }
     } finally {
       setUploading(false);
     }

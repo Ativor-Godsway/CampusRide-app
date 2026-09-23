@@ -3,6 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, PassengerStatus, RideSource } from "@rida/shared";
 import { getLoneFare, getSharedFarePerRider, getSharedTotalFare, getDriverGrossForRide, splitFare, designateBestFit, PRICING } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
+import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
+import { config } from "../config";
 import { claimRide } from "../services/ride/dispatch";
 import { departRide, addRiderToCar } from "../services/ride/assembly";
 import type { RideWithPassengers } from "../services/ride/assembly";
@@ -302,6 +304,20 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     if (Object.keys(provided).length === 0) {
       return reply.code(400).send({ error: "At least one field is required to update" });
+    }
+
+    // A photoUrl is reported by the client AFTER it uploads to Cloudinary, so
+    // it must be checked rather than trusted: without this a driver could
+    // point their profile photo at any URL on the internet. A real upload
+    // always lands on our Cloudinary account under this driver's own signed
+    // public id (services/uploads/cloudinarySignature.ts). Skipped entirely
+    // when Cloudinary is unconfigured, so local dev can still set a photo.
+    if (provided.photoUrl !== undefined && config.cloudinary.cloudName) {
+      if (!isValidDriverPhotoUrl(provided.photoUrl, config.cloudinary.cloudName, userId)) {
+        return reply
+          .code(400)
+          .send({ error: "photoUrl must be an image uploaded through this app" });
+      }
     }
 
     const { name, ...driverFields } = provided;

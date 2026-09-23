@@ -123,3 +123,17 @@ services:
       # IP and bypass every per-IP rate limit. May also be an IP/CIDR list.
       - key: TRUST_PROXY
         value: "1"
+
+      # ── Cloudinary (signed driver-photo uploads) ───────────────────────────
+      # The app no longer holds any Cloudinary credential: it requests a
+      # short-lived signature from POST /uploads/driver-photo/signature.
+      # CLOUDINARY_API_SECRET is the signing key and must never be exposed to
+      # the apps or prefixed EXPO_PUBLIC_. Set all three in the dashboard.
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+
+      - key: CLOUDINARY_API_KEY
+        sync: false
+
+      - key: CLOUDINARY_API_SECRET
+        sync: false

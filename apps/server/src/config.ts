@@ -75,6 +75,8 @@ export const config = {
     paymentInitMax: Number(process.env.RATE_LIMIT_PAYMENT_INIT ?? 15),
     /** POST /ussd/callback — per minute (a USSD session fires many keypresses). */
     ussdCallbackMax: Number(process.env.RATE_LIMIT_USSD_CALLBACK ?? 60),
+    /** POST /uploads/driver-photo/signature — per 15 min (each authorizes a Cloudinary write). */
+    uploadSignatureMax: Number(process.env.RATE_LIMIT_UPLOAD_SIGNATURE ?? 10),
   },
   /**
    * Selects the OTP delivery provider. One of "moolre" | "mnotify" | "dummy".
@@ -109,6 +111,18 @@ export const config = {
    * and bypass every per-IP rate limit.
    */
   trustProxy: process.env.TRUST_PROXY,
+  /**
+   * Cloudinary credentials for SIGNED driver-photo uploads. The apiSecret is
+   * server-only and must never be exposed to the apps — it is what replaces
+   * the old unsigned upload preset that shipped inside the app bundle.
+   * cloudName is public (it appears in every image URL).
+   */
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? "",
+    apiKey: process.env.CLOUDINARY_API_KEY ?? "",
+    /** Never log. Signing key for upload tickets. */
+    apiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
+  },
   /**
    * Phase 5c dev-only mock driver: when true, every ride created via
    * POST /rides is driven through MATCHED -> ARRIVED -> IN_PROGRESS ->
