@@ -81,6 +81,22 @@ export async function logout(refreshToken: string): Promise<void> {
   await rawApi.post("/auth/logout", { refreshToken }).catch(() => undefined);
 }
 
+/**
+ * Permanently closes the signed-in account (DELETE /me).
+ *
+ * The server anonymizes the account rather than deleting the row — ride and
+ * payment history is preserved — and revokes every refresh token, so the
+ * caller MUST clear local credentials afterwards (AuthContext.deleteAccount
+ * does this by reusing the sign-out path).
+ *
+ * Unlike logout this deliberately does NOT swallow errors: the server
+ * refuses with 409 while a ride is still in flight, and the user needs to
+ * see that instead of being dropped to the welcome screen as if it worked.
+ */
+export async function deleteAccount(): Promise<void> {
+  await api.delete("/me");
+}
+
 export async function getMe(): Promise<{ user: AuthUser }> {
   const res = await api.get<{ user: AuthUser }>("/me");
   return res.data;

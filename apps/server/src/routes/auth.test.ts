@@ -386,3 +386,58 @@ describe("driver profile route", () => {
     expect(riderProfileRes.statusCode).toBe(403);
   });
 });
+
+describe("DELETE /me", () => {
+  it("requires auth", async () => {
+    const res = await app.inject({ method: "DELETE", url: "/me" });
+    expect(res.statusCode).toBe(401);
+  });
+
+  it("anonymizes the account and ends the session", async () => {
+    const phone = newPhone();
+    const verifiedToken = await requestAndVerify(phone, "SIGNUP");
+    const signupRes = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      payload: { phone, name: "Deleting User", role: "RIDER", verifiedToken },
+    });
+    const { user, accessToken, refreshToken } = JSON.parse(signupRes.body);
+    userIds.push(user.id);
+
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/me",
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ deleted: true });
+
+    // The refresh token is dead, so the session cannot be extended.
+    const refreshRes = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      payload: { refreshToken },
+    });
+    expect(refreshRes.statusCode).toBe(401);
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(row.deletedAt).not.toBeNull();
+    expect(row.phone).not.toBe(phone);
+  });
+
+  it("returns 404 on a second delete with the same still-valid access token", async () => {
+    const phone = newPhone();
+    const verifiedToken = await requestAndVerify(phone, "SIGNUP");
+    const signupRes = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      payload: { phone, name: "Twice Deleting", role: "RIDER", verifiedToken },
+    });
+    const { user, accessToken } = JSON.parse(signupRes.body);
+    userIds.push(user.id);
+
+    const auth = { authorization: `Bearer ${accessToken}` };
+    expect((await app.inject({ method: "DELETE", url: "/me", headers: auth })).statusCode).toBe(200);
+    expect((await app.inject({ method: "DELETE", url: "/me", headers: auth })).statusCode).toBe(404);
+  });
+});

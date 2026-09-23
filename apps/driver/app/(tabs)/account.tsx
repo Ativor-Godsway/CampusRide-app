@@ -11,6 +11,8 @@ import {
   Screen,
   Text,
   colors,
+  confirmDeleteAccount,
+  describeDeleteAccountError,
   isCloudinaryConfigured,
   radii,
   spacing,
@@ -21,7 +23,7 @@ import {
 
 /** Account tab — view profile (name, vehicle, photo, approval) and edit it in place. */
 export default function AccountTab() {
-  const { user, refreshMe, signOut } = useAuth();
+  const { user, refreshMe, signOut, deleteAccount } = useAuth();
   const driver = user?.driver;
 
   const [editing, setEditing] = useState(false);
@@ -104,6 +106,14 @@ export default function AccountTab() {
       { text: "Log out", style: "destructive", onPress: () => void signOut() },
     ]);
   };
+
+  // Permanent account closure. The server refuses with 409 while a ride is
+  // still in flight, which describeDeleteAccountError surfaces verbatim.
+  const startDeleteAccount = () =>
+    confirmDeleteAccount({
+      deleteAccount,
+      onError: (error) => Alert.alert("Couldn't delete account", describeDeleteAccountError(error)),
+    });
 
   const initial = user?.name?.charAt(0).toUpperCase() ?? "?";
   const shownPhoto = editing ? photoUrl : driver?.photoUrl ?? null;
@@ -237,6 +247,15 @@ export default function AccountTab() {
               <ListRow.Icon name="log-out-outline" color={colors.error} background={colors.errorSurface} />
             }
             onPress={confirmLogout}
+            showChevron={false}
+          />
+          <View style={styles.divider} />
+          <ListRow
+            title="Delete account"
+            leading={
+              <ListRow.Icon name="trash-outline" color={colors.error} background={colors.errorSurface} />
+            }
+            onPress={startDeleteAccount}
             showChevron={false}
           />
         </Card>

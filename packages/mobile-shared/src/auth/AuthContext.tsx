@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import type { UserRole } from "@rida/shared";
 import {
+  deleteAccount as apiDeleteAccount,
   getMe,
   login as apiLogin,
   logout as apiLogout,
@@ -28,6 +29,12 @@ interface AuthContextValue {
   }) => Promise<void>;
   completeLogin: (input: { phone: string; verifiedToken: string }) => Promise<void>;
   signOut: () => Promise<void>;
+  /**
+   * Permanently closes the account, then clears local credentials exactly as
+   * signOut does. Rejects (without signing out) if the server refuses — e.g.
+   * 409 while a ride is still in flight — so the caller can surface why.
+   */
+  deleteAccount: () => Promise<void>;
   refreshMe: () => Promise<void>;
 }
 
@@ -88,6 +95,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    // Server first: if it refuses (409 active ride, network error), we must
+    // NOT clear local state — the account still exists and the user is still
+    // signed in.
+    await apiDeleteAccount();
+
+    setAccessToken(null);
+    await clearStoredRefreshToken();
+    setUser(null);
+  }, []);
+
   const value: AuthContextValue = {
     user,
     isLoading,
@@ -95,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     completeSignup,
     completeLogin,
     signOut,
+    deleteAccount,
     refreshMe,
   };
 

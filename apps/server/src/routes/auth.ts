@@ -23,6 +23,11 @@ import {
 } from "../services/auth/errors";
 import { requireAuth } from "../middleware/auth";
 import { meSelect } from "./selects";
+import {
+  AccountAlreadyDeletedError,
+  ActiveRideBlocksDeletionError,
+  deleteAccount,
+} from "../services/auth/deleteAccount";
 import { config } from "../config";
 
 /** Shared window for the per-IP auth rate limits (max counts come from config). */
@@ -229,6 +234,33 @@ export function registerAuthRoutes(
     }
 
     return reply.code(200).send({ user });
+  });
+
+  /**
+   * In-app account deletion (app-store requirement, and the only way a user
+   * could previously leave was to ask a human).
+   *
+   * Anonymizes rather than row-deletes — see services/auth/deleteAccount.ts
+   * for why the row has to survive. Idempotent from the client's point of
+   * view: a second call with a still-valid access token gets 404, not a 500.
+   */
+  app.delete("/me", { preHandler: requireAuth }, async (request, reply) => {
+    const userId = request.user!.userId;
+
+    try {
+      await deleteAccount(prisma, userId);
+    } catch (err) {
+      if (err instanceof ActiveRideBlocksDeletionError) {
+        return reply.code(409).send({ error: err.message, rideId: err.rideId });
+      }
+      if (err instanceof AccountAlreadyDeletedError) {
+        return reply.code(404).send({ error: err.message });
+      }
+      throw err;
+    }
+
+    request.log.info({ userId, event: "account_deleted" }, "Account anonymized on user request");
+    return reply.code(200).send({ deleted: true });
   });
 
   app.post("/driver/profile", { preHandler: requireAuth }, async (request, reply) => {

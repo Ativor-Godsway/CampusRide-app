@@ -91,6 +91,11 @@ model User {
   role      UserRole
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  /// Set by DELETE /me. The row is KEPT and anonymized rather than deleted:
+  /// Ride.riderId is onDelete: Restrict, and ride/commission history is
+  /// financial record we must not lose. Once set, `phone` and `name` hold
+  /// placeholders and the account can no longer be logged into.
+  deletedAt DateTime?
 
   driver          Driver?
   ridesAsRider    Ride[]          @relation("RiderRides")

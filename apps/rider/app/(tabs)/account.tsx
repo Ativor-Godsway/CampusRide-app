@@ -1,6 +1,18 @@
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Card, ListRow, Screen, ServiceIcon, Text, colors, radii, spacing, useAuth } from "@rida/mobile-shared";
+import {
+  Card,
+  ListRow,
+  Screen,
+  ServiceIcon,
+  Text,
+  colors,
+  confirmDeleteAccount,
+  describeDeleteAccountError,
+  radii,
+  spacing,
+  useAuth,
+} from "@rida/mobile-shared";
 
 interface QuickAction {
   label: string;
@@ -17,7 +29,7 @@ const QUICK_ACTIONS: QuickAction[] = [
 
 /** Account tab — profile header, Uber-style quick-action grid, settings list, and logout. */
 export default function AccountTab() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, deleteAccount } = useAuth();
 
   const confirmLogout = () => {
     Alert.alert("Log out", "Are you sure you want to log out?", [
@@ -25,6 +37,15 @@ export default function AccountTab() {
       { text: "Log out", style: "destructive", onPress: () => void signOut() },
     ]);
   };
+
+  // Permanent account closure, required for app-store compliance and the
+  // only in-app way to leave. Two-step confirmation lives in mobile-shared
+  // so rider and driver ask identically.
+  const startDeleteAccount = () =>
+    confirmDeleteAccount({
+      deleteAccount,
+      onError: (error) => Alert.alert("Couldn't delete account", describeDeleteAccountError(error)),
+    });
 
   const showComingSoon = (label: string) =>
     Alert.alert(`${label} is coming soon`, "We're working on it — check back in a future update.");
@@ -92,6 +113,13 @@ export default function AccountTab() {
           title="Log out"
           leading={<ListRow.Icon name="log-out-outline" color={colors.error} background={colors.errorSurface} />}
           onPress={confirmLogout}
+          showChevron={false}
+        />
+        <View style={styles.divider} />
+        <ListRow
+          title="Delete account"
+          leading={<ListRow.Icon name="trash-outline" color={colors.error} background={colors.errorSurface} />}
+          onPress={startDeleteAccount}
           showChevron={false}
         />
       </Card>
