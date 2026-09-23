@@ -10,6 +10,12 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
+    // Explicit, because TypeScript 6 changed how ambient @types packages are
+    // discovered: `tsc -p` still found @types/node automatically, but ts-node
+    // (which the db:migrate:test / db:seed:test / db:guard scripts run on)
+    // did not, and failed with "Cannot find name 'process'". Naming it here
+    // makes both paths resolve the same set.
+    "types": ["node"],
     "sourceMap": true,
     // No "baseUrl": TypeScript 6 deprecates it (TS5101) and removes it in 7.
     // Since TS 5, "paths" entries resolve relative to the directory holding

@@ -21,6 +21,11 @@ export interface DriverAssignedPayload {
   rideId: string;
   driverId: string;
   name: string;
+  /**
+   * Driver's phone, so a matched rider can call them at pickup (Phase 4).
+   * Optional so older cached/broadcast payloads without it stay valid.
+   */
+  phone?: string;
   carMake: string | null;
   carModel: string | null;
   carColor: string | null;

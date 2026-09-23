@@ -122,7 +122,8 @@ export default function OnboardingScreen() {
 
       <View style={styles.note}>
         <Text variant="caption" color="muted">
-          Photo upload coming soon — your initials are shown to riders for now.
+          You can add a profile photo from your Account tab — riders see it when you&apos;re
+          matched. Until then they see your initials.
         </Text>
       </View>
 

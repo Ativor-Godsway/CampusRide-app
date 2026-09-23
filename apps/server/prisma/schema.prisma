@@ -96,6 +96,12 @@ model User {
   /// financial record we must not lose. Once set, `phone` and `name` hold
   /// placeholders and the account can no longer be logged into.
   deletedAt DateTime?
+  /// Phase 4 safety: ONE emergency contact the rider can notify with an SOS
+  /// from an active ride. Deliberately a pair of plain columns rather than a
+  /// contacts table — v1 is exactly one contact, and a table would imply a
+  /// management UI we are not building.
+  emergencyContactName  String?
+  emergencyContactPhone String?
 
   driver          Driver?
   ridesAsRider    Ride[]          @relation("RiderRides")
@@ -106,6 +112,7 @@ model User {
   ratingsGiven              Rating[]           @relation("RatingsGiven")
   ratingsReceived           Rating[]           @relation("RatingsReceived")
   driverCommissionLedger    CommissionLedger[] @relation("DriverCommission")
+  rideRejections            RideRejection[]    @relation("DriverRejections")
 }
 
 model Driver {
@@ -189,6 +196,10 @@ model Ride {
   /// Stamped when the ride enters REQUESTED and is broadcast to eligible
   /// drivers; the 90s dispatch timeout is measured from this (or createdAt
   /// if never set).
+  /// Phase 4 safety: opaque token minted on the first SOS for this ride and
+  /// reused afterwards, so the link already sent to a contact keeps working.
+  /// Null until an SOS is raised — a ride nobody flagged has no public URL.
+  trackingToken      String?   @unique
   broadcastStartedAt DateTime?
   /// Stamped when the ride enters AWAITING_RIDER_DECISION; the 90s grace
   /// period for the rider to choose is measured from this.
@@ -208,6 +219,7 @@ model Ride {
   mergedRides      Ride[]            @relation("RideMerge")
   ratings          Rating[]
   commissionLedger CommissionLedger?
+  rejections       RideRejection[]
 
   @@index([status])
   @@index([riderId])
@@ -340,6 +352,24 @@ model Rating {
 
   @@unique([rideId, raterId, rateeId])
   @@index([rateeId])
+}
+
+/// Phase 4: a driver explicitly declining a broadcast ride. Previously a
+/// driver could only ignore a request and let it time out, which is
+/// indistinguishable from a driver who never saw it. A row here removes the
+/// ride from that driver's eligible list immediately while leaving it
+/// available to everyone else.
+model RideRejection {
+  id           String   @id @default(cuid())
+  rideId       String
+  driverUserId String
+  createdAt    DateTime @default(now())
+
+  ride   Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  driver User @relation("DriverRejections", fields: [driverUserId], references: [id], onDelete: Cascade)
+
+  @@unique([rideId, driverUserId])
+  @@index([driverUserId])
 }
 
 /// Tracks the 15% platform commission owed on CASH rides.

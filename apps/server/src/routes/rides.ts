@@ -18,6 +18,7 @@ import { NoAwaitingOtpPaymentError } from "../services/payment/errors";
 import type { MoolreChannel } from "../services/payment/constants";
 import { paymentService } from "../services/active";
 import { config } from "../config";
+import { getDriverInfo } from "../services/user/driverInfo";
 import { logger } from "../lib/logger";
 import { riderRideDetailSelect, riderRideListSelect } from "./selects";
 import { startMockDriverForRide } from "../dev/mockDriver";
@@ -73,30 +74,6 @@ const RIDER_CANCELLABLE_STATUSES: RideStatus[] = [
   "ARRIVED",
   "AWAITING_RIDER_DECISION",
 ];
-
-/**
- * Driver info shaped like the `ride:driver_assigned` socket payload (minus
- * rideId) — used both for that event and for GET /rides/:id so a rider who
- * reconnects/reloads after the assignment sees the same shape.
- */
-async function getDriverInfo(prisma: PrismaClient, driverId: string) {
-  const [driver, { _avg }] = await Promise.all([
-    prisma.user.findUnique({ where: { id: driverId }, include: { driver: true } }),
-    prisma.rating.aggregate({ where: { rateeId: driverId }, _avg: { stars: true } }),
-  ]);
-  if (!driver) return null;
-
-  return {
-    driverId: driver.id,
-    name: driver.name,
-    carMake: driver.driver?.carMake ?? null,
-    carModel: driver.driver?.carModel ?? null,
-    carColor: driver.driver?.carColor ?? null,
-    plate: driver.driver?.plate ?? null,
-    rating: _avg.stars ?? null,
-    photoUrl: driver.driver?.photoUrl ?? null,
-  };
-}
 
 /**
  * Minimal ride-creation route for Phase 5b: the rider picks pickup/dropoff
@@ -175,14 +152,43 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
     const riderId = request.user!.userId;
 
-    const rides = await prisma.ride.findMany({
+    /**
+     * Cursor pagination (Phase 4). This used to hard-cap at the newest 50
+     * rides with no way to reach anything older.
+     *
+     * Cursor over `id` rather than an offset: rides are ordered newest-first
+     * by createdAt, and a rider creating a ride mid-scroll would shift every
+     * offset by one, silently duplicating or skipping a row. A cursor is
+     * stable against that. createdAt alone is not unique enough to page on,
+     * so id is the tiebreaker and the cursor itself.
+     */
+    const query = (request.query ?? {}) as { cursor?: unknown; limit?: unknown };
+
+    const DEFAULT_LIMIT = 20;
+    const MAX_LIMIT = 50;
+    const parsedLimit = Number(query.limit);
+    const limit =
+      Number.isInteger(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, MAX_LIMIT)
+        : DEFAULT_LIMIT;
+
+    const cursor = isNonEmptyString(query.cursor) ? query.cursor : undefined;
+
+    // Fetch one extra row to determine whether another page exists, without
+    // paying for a second COUNT query over the rider's whole history.
+    const rows = await prisma.ride.findMany({
       where: { riderId },
       select: riderRideListSelect,
-      orderBy: { createdAt: "desc" },
-      take: 50,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: limit + 1,
+      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
 
-    return reply.code(200).send({ rides });
+    const hasMore = rows.length > limit;
+    const rides = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? rides[rides.length - 1]!.id : null;
+
+    return reply.code(200).send({ rides, nextCursor, hasMore });
   });
 
   app.get("/rides/:id", { preHandler: requireAuth }, async (request, reply) => {

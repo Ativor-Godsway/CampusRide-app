@@ -5,6 +5,7 @@ import { getLoneFare, getSharedFarePerRider, getSharedTotalFare, getDriverGrossF
 import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
+import { getDriverInfo } from "../services/user/driverInfo";
 import { claimRide } from "../services/ride/dispatch";
 import { departRide, addRiderToCar } from "../services/ride/assembly";
 import type { RideWithPassengers } from "../services/ride/assembly";
@@ -105,23 +106,6 @@ async function finalizeRideCompletion(
   }
 }
 
-async function getDriverInfo(prisma: PrismaClient, driverId: string) {
-  const [driver, { _avg }] = await Promise.all([
-    prisma.user.findUnique({ where: { id: driverId }, include: { driver: true } }),
-    prisma.rating.aggregate({ where: { rateeId: driverId }, _avg: { stars: true } }),
-  ]);
-  if (!driver) return null;
-  return {
-    driverId: driver.id,
-    name: driver.name,
-    carMake: driver.driver?.carMake ?? null,
-    carModel: driver.driver?.carModel ?? null,
-    carColor: driver.driver?.carColor ?? null,
-    plate: driver.driver?.plate ?? null,
-    rating: _avg.stars ?? null,
-    photoUrl: driver.driver?.photoUrl ?? null,
-  };
-}
 
 export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient): void {
   /**
@@ -262,9 +246,32 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       };
     });
 
+    // Phase 4: commission owed comes from CommissionLedger — the 15% recorded
+    // on each completed CASH ride (see finalizeRideCompletion). It is an
+    // unenforced debt record for now, so "owed" here means every row on file,
+    // not an unpaid balance; there is no settlement mechanism to net against
+    // yet. MOMO rides never create a ledger row (the commission is taken at
+    // source), so they contribute gross but no commission.
+    const ledger = await prisma.commissionLedger.aggregate({
+      where: { driverUserId: userId },
+      _sum: { amountPesewas: true },
+      _count: true,
+    });
+    const commissionOwedPesewas = ledger._sum.amountPesewas ?? 0;
+    const totalGrossPesewas = items.reduce((sum, i) => sum + i.driverGrossPesewas, 0);
+
     const summary = {
       totalRides: items.length,
-      totalGrossPesewas: items.reduce((sum, i) => sum + i.driverGrossPesewas, 0),
+      totalGrossPesewas,
+      commissionOwedPesewas,
+      /**
+       * What the driver actually keeps: gross minus the commission recorded
+       * against them. Can go negative in principle (a driver whose only rides
+       * were cash and who has taken no payouts), so it is not clamped —
+       * showing a negative number is more honest than hiding a debt.
+       */
+      netPesewas: totalGrossPesewas - commissionOwedPesewas,
+      commissionRidesCount: ledger._count,
     };
 
     return reply.code(200).send({ rides: items, summary });
@@ -391,6 +398,47 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     }
   });
 
+  /**
+   * Phase 4: the driver explicitly declines a broadcast ride.
+   *
+   * Before this, a driver could only ignore a request and let the 90s
+   * dispatch window expire — indistinguishable from a driver who never saw
+   * it, and the request kept occupying their list until it timed out. A
+   * rejection removes it from THIS driver's eligible list immediately and
+   * leaves it untouched for everyone else; it never cancels the ride.
+   *
+   * Idempotent: re-rejecting is a no-op success rather than a 409, because a
+   * double-tap or a retry on a flaky connection is not an error the driver
+   * should have to think about.
+   */
+  app.post("/rides/:id/reject", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+
+    const { id: rideId } = request.params as { id: string };
+    const userId = request.user!.userId;
+
+    const ride = await prisma.ride.findUnique({ where: { id: rideId } });
+    if (!ride) return reply.code(404).send({ error: "Ride not found" });
+
+    // Only an unclaimed request can be declined. Once a driver has claimed a
+    // ride, walking away is a CANCEL (with its own rules and rider-facing
+    // consequences), not a reject.
+    if (ride.driverId !== null) {
+      return reply.code(409).send({ error: "Ride has already been claimed" });
+    }
+    if (ride.status !== "REQUESTED" && ride.status !== "AWAITING_RIDER_DECISION") {
+      return reply.code(409).send({ error: "Ride is no longer open for offers" });
+    }
+
+    await prisma.rideRejection.upsert({
+      where: { rideId_driverUserId: { rideId, driverUserId: userId } },
+      update: {},
+      create: { rideId, driverUserId: userId },
+    });
+
+    return reply.code(200).send({ rejected: true, rideId });
+  });
+
   /** Driver has arrived at the pickup zone — transitions MATCHED → ARRIVED. */
   app.post("/rides/:id/arrived", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
@@ -483,6 +531,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         driverId: null,
         pickupZoneId: { in: Array.from(driverEligibleZones) },
         broadcastStartedAt: { gte: cutoff },
+        // Phase 4: hide rides THIS driver explicitly declined. Scoped to the
+        // rejecting driver only — the ride stays live for everyone else, which
+        // is the whole point of an explicit reject over letting it time out.
+        rejections: { none: { driverUserId: userId } },
       },
       include: { pickupZone: true, dropoffZone: true },
       orderBy: { createdAt: "desc" },
