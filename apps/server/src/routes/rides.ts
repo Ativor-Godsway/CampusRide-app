@@ -18,6 +18,7 @@ import { NoAwaitingOtpPaymentError } from "../services/payment/errors";
 import type { MoolreChannel } from "../services/payment/constants";
 import { paymentService } from "../services/active";
 import { config } from "../config";
+import { riderRideDetailSelect, riderRideListSelect } from "./selects";
 import { startMockDriverForRide } from "../dev/mockDriver";
 
 /**
@@ -175,7 +176,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
     const rides = await prisma.ride.findMany({
       where: { riderId },
-      include: { pickupZone: true, dropoffZone: true },
+      select: riderRideListSelect,
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -190,7 +191,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
     const ride = await prisma.ride.findUnique({
       where: { id },
-      include: { pickupZone: true, dropoffZone: true, passengers: true },
+      select: riderRideDetailSelect,
     });
 
     if (!ride) {

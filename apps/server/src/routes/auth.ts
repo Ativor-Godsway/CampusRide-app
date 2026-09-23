@@ -22,6 +22,7 @@ import {
   UserNotFoundError,
 } from "../services/auth/errors";
 import { requireAuth } from "../middleware/auth";
+import { meSelect } from "./selects";
 import { config } from "../config";
 
 /** Shared window for the per-IP auth rate limits (max counts come from config). */
@@ -216,9 +217,11 @@ export function registerAuthRoutes(
   });
 
   app.get("/me", { preHandler: requireAuth }, async (request, reply) => {
+    // Explicit select (routes/selects.ts) so a future User column is not
+    // published to clients just by existing.
     const user = await prisma.user.findUnique({
       where: { id: request.user!.userId },
-      include: { driver: true },
+      select: meSelect,
     });
 
     if (!user) {
