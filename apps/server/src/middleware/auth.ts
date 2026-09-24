@@ -29,3 +29,23 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
     reply.code(401).send({ error: "Invalid or expired access token" });
   }
 }
+
+/**
+ * Role gate for the admin surface, mirroring `requireDriver` in
+ * routes/driver.ts: run it as the FIRST line of a handler that already has
+ * `requireAuth` as its preHandler, and bail when it returns false.
+ *
+ *   app.post("/admin/...", { preHandler: requireAuth }, async (req, reply) => {
+ *     if (!(await requireAdmin(req, reply))) return;
+ *
+ * ADMIN is never self-assignable: POST /auth/signup only accepts
+ * RIDER|DRIVER (see SignupRole), so the only way a token can carry this role
+ * is src/scripts/seedAdmin.ts, run by hand against the database.
+ */
+export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
+  if (request.user?.role !== "ADMIN") {
+    reply.code(403).send({ error: "Admin role required" });
+    return false;
+  }
+  return true;
+}

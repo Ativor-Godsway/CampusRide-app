@@ -386,3 +386,28 @@ model CommissionLedger {
 
   @@index([driverUserId])
 }
+
+/// Phase 5: an append-only record of every action an admin takes in the admin
+/// app. Approving or rejecting a driver is an irreversible-feeling, real-world
+/// decision (it decides who can earn), so each one must be attributable to a
+/// named admin after the fact. Deliberately NOT a relation-heavy model:
+/// `target` is a free-form id (today a Driver.id) and `actor` is a User.id
+/// held as a plain column, so a row survives the referenced user being
+/// anonymized by DELETE /me. Rows are never updated or deleted.
+model AdminAuditLog {
+  id        String   @id @default(cuid())
+  /// User.id of the admin who performed the action. Plain column, not a FK —
+  /// the log must outlive the account.
+  actor     String
+  /// Machine-readable verb, e.g. "driver.approve" / "driver.reject".
+  action    String
+  /// Id of the thing acted on — a Driver.id for the approval actions.
+  target    String
+  /// Optional operator-supplied justification (the reject reason).
+  reason    String?
+  timestamp DateTime @default(now())
+
+  @@index([actor])
+  @@index([target])
+  @@index([timestamp])
+}

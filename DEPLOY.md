@@ -202,3 +202,44 @@ also reports stale entries so the list shrinks as things get fixed.
 
 To accept a new finding, add an entry with a real justification — not just an
 id. To see the current state locally: `node scripts/audit-check.mjs`.
+
+---
+
+## Admin app (Phase 5) — manual Render step
+
+`render.yaml` now describes a second service, `campusride-admin`: the static
+Vite/React SPA in `apps/admin` that runs the driver approval queue and the ride
+oversight list. **The blueprint file does not create the service.** Connecting
+it is a dashboard action, and must be done by hand:
+
+1. Render dashboard → **New → Static Site**, pointing at this repository.
+2. **Name:** `campusride-admin` · **Region:** same as `campusride-server`.
+3. **Build command:** `npm install && npm run build:admin`
+4. **Publish directory:** `apps/admin/dist`
+5. **Redirects/Rewrites:** add a rewrite `/*` → `/index.html` (SPA routing —
+   without it a page refresh returns 404).
+6. **Environment → `VITE_API_URL`**: the public URL of `campusride-server`,
+   e.g. `https://campusride-server.onrender.com`, with no trailing slash.
+   Vite inlines this at build time, so changing it needs a **redeploy**.
+7. Once Render assigns the static site its URL, go back to
+   **campusride-server → Environment** and add that origin to
+   `CORS_ALLOWED_ORIGINS` (comma-separated alongside any existing value), then
+   let the server redeploy. The admin app is a browser client; in production
+   the API grants no origin that is not on this list, so until this is done
+   every admin request fails in the browser while the API itself is healthy.
+
+### Creating the first admin account
+
+No one can sign up as an admin: `POST /auth/signup` accepts `RIDER|DRIVER`
+only. The first admin is promoted by hand, against the target database:
+
+```bash
+# The person must already have an account (sign up in the rider app first).
+cd apps/server
+DATABASE_URL="<production pooled connection string>" \
+  npx ts-node -r tsconfig-paths/register src/scripts/seedAdmin.ts 0XXXXXXXXX
+```
+
+The promotion is itself written to `AdminAuditLog` (actor `script:seedAdmin`).
+The promoted user must log out and back in — an access token issued before the
+change still carries the old role.

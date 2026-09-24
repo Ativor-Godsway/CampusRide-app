@@ -136,6 +136,26 @@ export default tseslint.config(
     },
   },
 
+  // ── Browser workspace (the Vite admin SPA) ────────────────────────────────
+  // Separate from the React Native block: this one runs in a real browser, so
+  // it gets the DOM globals and none of React Native's injected ones.
+  {
+    files: ["apps/admin/**/*.{ts,tsx}"],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.es2021 },
+      parserOptions: { ecmaFeatures: { jsx: true }, ecmaVersion: 2022, sourceType: "module" },
+    },
+    plugins: { react, "react-hooks": reactHooks },
+    settings: { react: { version: "detect" } },
+    rules: {
+      ...react.configs.flat.recommended.rules,
+      "react/react-in-jsx-scope": "off",
+      "react/prop-types": "off",
+      "react-hooks/rules-of-hooks": "error",
+      "react-hooks/exhaustive-deps": "warn",
+    },
+  },
+
   // ── Tooling config files (babel/metro) ─────────────────────────────────────
   // CommonJS by necessity: Babel and Metro load these with require(), so
   // `module.exports`, `require` and `__dirname` are correct here, not smells.
