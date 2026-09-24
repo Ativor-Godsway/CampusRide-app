@@ -1,30 +1,29 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# DEPLOYMENT GATING — ACTION REQUIRED IN THE GITHUB UI
+# DEPLOYMENT GATING — IN PLACE
 #
-# Render auto-deploys this service from `main` on every push. Nothing in this
-# file, and nothing in .github/workflows/ci.yml, can stop a deploy on its own:
-# Render watches the branch, not the CI result. So a commit that fails the
-# build or the tests still reaches production unless GitHub refuses the push
-# or merge in the first place.
+# Render auto-deploys this service from `main` on every push, and watches the
+# branch rather than the CI result: nothing in this file, and nothing in
+# .github/workflows/ci.yml, can stop a deploy on its own. What stops a broken
+# commit is GitHub refusing the merge in the first place.
 #
-# Closing that gap is a MANUAL, ONE-TIME step in the GitHub repo settings
-# (Settings → Branches → Add branch ruleset / protection rule for `main`):
+# That is now switched on. A repository ruleset on `main` requires a pull
+# request plus all three CI checks:
 #
-#   1. Require a pull request before merging.
-#   2. Require status checks to pass, and select all three CI jobs:
-#        - "Lint, typecheck & shared tests"
-#        - "Server tests (Postgres)"
-#        - "Dependency audit"
-#   3. Require branches to be up to date before merging.
-#   4. Optionally, restrict who can push directly to `main`.
+#   - "Lint, typecheck & shared tests"
+#   - "Server tests (Postgres)"
+#   - "Dependency audit"
 #
-# Until that is switched on, CI reports pass/fail but blocks nothing.
+# So a commit reaches `main` — and therefore production — only after those
+# pass on a PR. Direct pushes to `main` do not bypass it.
 #
-# Belt and braces (also a dashboard action, in Render): set the service's
-# Auto-Deploy to "After CI checks pass" if the plan offers it, or disable
-# auto-deploy and deploy from the Render dashboard once CI is green.
+# If that ruleset is ever disabled, this gap reopens silently: CI keeps
+# reporting pass/fail on PRs while blocking nothing. Check
+# Settings → Rules → Rulesets before assuming a red build cannot deploy.
+#
+# Belt and braces (a Render dashboard action, not a file change): set the
+# service's Auto-Deploy to "After CI checks pass" if the plan offers it, or
+# disable auto-deploy and deploy manually once CI is green.
 # ─────────────────────────────────────────────────────────────────────────────
-
 services:
   - type: web
     name: campusride-server
