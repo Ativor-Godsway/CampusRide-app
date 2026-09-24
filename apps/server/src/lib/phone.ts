@@ -35,3 +35,42 @@ export function normalizePhone(input: string): string | null {
 export function isValidGhanaPhone(input: string): boolean {
   return normalizePhone(input) !== null;
 }
+
+/**
+ * The form Moolre's SMS/VAS API wants: "233XXXXXXXXX", no leading "+".
+ * Returns null for anything that isn't a Ghanaian number, so callers can
+ * decide whether to fall back or refuse.
+ */
+export function toMsisdn(input: string): string | null {
+  const canonical = normalizePhone(input);
+  return canonical ? canonical.slice(1) : null;
+}
+
+/**
+ * Every stored form a given number might plausibly appear as in User.phone.
+ *
+ * This exists because the auth routes do NOT normalize: signup and login use
+ * whatever string the client sent as the unique key (see
+ * services/auth/authService.ts), so a user who typed "0548608146" is stored
+ * in exactly that form, while the USSD and demo-OTP paths DO normalize and
+ * store "+233548608146". The column therefore holds a mix of formats, and a
+ * lookup by any single form misses rows written by the other paths.
+ *
+ * Returns the canonical form first, then the other equivalents, then the raw
+ * input, de-duplicated and preserving that order. For a non-Ghanaian or
+ * unparseable input it degrades to just the trimmed raw value.
+ *
+ * Use this for LOOKUPS, never for writes — the fix for the mixed-format
+ * column is a migration, not a second write format. See docs/phone-formats.md.
+ */
+export function phoneVariants(input: string): string[] {
+  const raw = input.trim();
+  const canonical = normalizePhone(raw);
+
+  if (!canonical) return raw ? [raw] : [];
+
+  const local = `0${canonical.slice("+233".length)}`;
+  const withoutPlus = canonical.slice(1);
+
+  return [...new Set([canonical, local, withoutPlus, raw])].filter(Boolean);
+}
