@@ -5,10 +5,11 @@ by phone.
 
 ## The short version
 
-`User.phone` is **not consistently normalized**. The column holds a mix of
-formats, depending on which code path created the row. Always look users up
-with `findUserByPhone` / `findUsersByPhone` (`src/services/user/findUserByPhone.ts`),
-never with a bare `findUnique({ where: { phone } })`.
+`User.phone` is **always** canonical `+233XXXXXXXXX`. The auth routes normalize
+at the edge (`routes/auth.ts`) and a CHECK constraint enforces it. To look a
+user up from a number that came from a human or an external system, use
+`findUserByPhone` / `findUsersByPhone` (`src/services/user/findUserByPhone.ts`),
+which accepts any spelling.
 
 ## The three forms in play
 
@@ -24,19 +25,23 @@ never with a bare `findUnique({ where: { phone } })`.
 - `toMsisdn(input)` → `233XXXXXXXXX` or `null`
 - `phoneVariants(input)` → every equivalent stored form, canonical first
 
-## Why the column is mixed
+## Why the column used to be mixed
 
-The **auth routes do not normalize**. `signup()` and `login()` in
-`src/services/auth/authService.ts` use `input.phone` verbatim as the unique
-key, so whatever the app sent is what got stored — usually the local form,
-because that is how people type their number.
+The auth routes did not normalize: `signup()` and `login()` used `input.phone`
+verbatim as the unique key, so whatever the app sent was stored — usually the
+local form, because that is how people type their number. The USSD and
+demo-OTP paths *did* normalize.
 
-The **USSD and demo-OTP paths do normalize** (`findOrCreateRiderByPhone`,
-`ussdHandler`, `services/demoOtp`), storing the canonical form.
+That produced **shadow accounts**. A rider signed up in the app as
+`0548608146`; later they dialled the USSD line; `findOrCreateRiderByPhone`
+normalized their number to `+233548608146`, found no match, and created a
+second account. Production held three such pairs — in every case a real named
+account in local form plus a later auto-provisioned `USSD Rider`.
 
-So the same human can end up as **two rows**: one from the app
-(`0548608146`) and one from USSD (`+233548608146`). `findUsersByPhone` exists
-to surface that case rather than silently pick one.
+Migration `20260924210000_phone_canonicalisation` merged those pairs
+(repointing the shadow's rides onto the real account, then removing the
+shadow), backfilled the column, and added the constraint. The route-level
+normalization stops new ones being created.
 
 ## Sending SMS
 
@@ -60,23 +65,34 @@ of a broken send. It is still worth doing:
 - One canonical recipient makes delivery logs and support lookups match the
   number a human would search for.
 
-## The fix this is a workaround for
+## The constraint
 
-The real fix is to normalize on the **write** side and backfill the column:
+```sql
+ALTER TABLE "User" ADD CONSTRAINT "User_phone_canonical_check"
+  CHECK (phone LIKE '+233%' OR phone LIKE 'deleted:%');
+```
 
-1. Call `normalizePhone` in `signup()` and `login()` (and reject what it
-   rejects), so every new row is canonical.
-2. Find rows that would collide once normalized:
-   ```sql
-   SELECT regexp_replace(phone, '^(\+?233|0)', '') AS subscriber,
-          count(*), array_agg(phone), array_agg(id)
-   FROM "User"
-   GROUP BY 1 HAVING count(*) > 1;
-   ```
-3. Merge those by hand — they are the same person with two ride histories, and
-   `Ride.riderId` is `onDelete: Restrict`, so neither row can just be deleted.
-4. Only then backfill the rest and add a `CHECK (phone LIKE '+233%')`.
+The `deleted:%` arm is **required**, not a convenience: `DELETE /me` rewrites
+`phone` to `deleted:<userId>` (see `services/auth/deleteAccount.ts`) to keep
+the unique index satisfied while making the row unloggable-into. Without that
+arm every future account deletion would fail.
 
-Step 3 is why this has not been done automatically: it needs a human decision
-per duplicate, and getting it wrong loses somebody's ride or commission
-history.
+## Consequences for test fixtures
+
+Fixtures can no longer invent phone strings like `+233-auth-test-123`. Both the
+route validation and the CHECK reject them. Use `uniqueGhanaPhone()` from
+`src/test/testPhone.ts`, which produces structurally valid, unique numbers.
+
+## If a duplicate ever appears again
+
+It should not — the unique index plus the CHECK make two equivalent rows
+impossible. But if one does, `findUsersByPhone` returns both and `seedAdmin`
+refuses to act rather than promoting an arbitrary one. Find them with:
+
+```sql
+SELECT regexp_replace(phone, '^(\+?233|0)', '') AS subscriber,
+       count(*), array_agg(phone), array_agg(id)
+FROM "User"
+WHERE "deletedAt" IS NULL AND phone NOT LIKE 'deleted:%'
+GROUP BY 1 HAVING count(*) > 1;
+```
