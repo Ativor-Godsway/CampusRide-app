@@ -34,7 +34,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "SERVER_URL": "http://localhost:3000"
+      "SERVER_URL": "https://campusride-server-aaum.onrender.com"
     }
   }
 }

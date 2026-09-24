@@ -15,6 +15,18 @@ dotenv.config({ path: path.join(serverRoot, ".env") });
 
 export const APP_NAME = "CampusRide";
 
+/**
+ * First value that is set AND not blank. `??` alone is wrong for the CORS
+ * fallback: a var set to "" in a dashboard is not null/undefined, so it would
+ * shadow the legacy name with an empty allowlist rather than falling through.
+ */
+function firstNonBlank(...values: Array<string | undefined>): string {
+  for (const value of values) {
+    if (value !== undefined && value.trim() !== "") return value;
+  }
+  return "";
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   databaseUrl: process.env.DATABASE_URL ?? "",
@@ -109,7 +121,10 @@ export const config = {
    * convenience. Native apps send no Origin header, so this never affects
    * the rider/driver apps. See lib/security.ts#resolveCorsOrigin.
    */
-  corsAllowedOrigins: process.env.CORS_ALLOWED_ORIGINS ?? process.env.DEMO_OTP_CORS_ORIGINS ?? "",
+  corsAllowedOrigins: firstNonBlank(
+    process.env.CORS_ALLOWED_ORIGINS,
+    process.env.DEMO_OTP_CORS_ORIGINS,
+  ),
   /**
    * Raw TRUST_PROXY value; interpreted by lib/security.ts#resolveTrustProxy.
    * Unset means 1 hop in production (Render's TLS proxy) and no trust
