@@ -7,7 +7,7 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import { cloudinaryAvatar } from "./cloudinaryAvatar";
 import type { PaymentMethod, RideCompletedFareSummary, RideType } from "@rida/shared";
-import { getSharedFarePerRider, priceLoneRide } from "@rida/shared";
+import { estimateEtaMinutes, formatEta, getSharedFarePerRider, priceLoneRide } from "@rida/shared";
 import {
   ActiveRideExistsError,
   Badge,
@@ -19,10 +19,12 @@ import {
   ProgressBar,
   ServiceIcon,
   Text,
+  callPhone,
   cancelRide,
   colors,
   createRide,
   formatGhs,
+  raiseSos,
   radii,
   regionForCoordinates,
   rideQueryKey,
@@ -38,7 +40,6 @@ import {
 } from "@rida/mobile-shared";
 
 const BROADCAST_WINDOW_MS = 90_000;
-const DUMMY_ETA_MINUTES = 4;
 const STARS = [1, 2, 3, 4, 5];
 const SEARCHING_MESSAGES = [
   "Finding your driver…",
@@ -179,6 +180,25 @@ export default function RideTypeScreen() {
   const dropoffCoord = useMemo(
     () => ({ latitude: Number(params.dropoffLat), longitude: Number(params.dropoffLng) }),
     [params.dropoffLat, params.dropoffLng],
+  );
+
+  /**
+   * Phase 4 ETA. Straight-line distance from the driver's last reported
+   * position, padded for road circuity (see @rida/shared estimateEtaMinutes)
+   * — there is no routing or traffic data in this project, and the copy says
+   * "about" so it reads as the estimate it is.
+   *
+   * Null until the first driver_location ping arrives, which is why the
+   * caller falls back to "Your driver is getting ready" rather than showing
+   * a number invented from nothing.
+   */
+  const etaToPickup = useMemo(
+    () => estimateEtaMinutes(driverLocation, pickupCoord),
+    [driverLocation, pickupCoord],
+  );
+  const etaToDropoff = useMemo(
+    () => estimateEtaMinutes(driverLocation, dropoffCoord),
+    [driverLocation, dropoffCoord],
   );
 
   const region = useMemo(() => {
@@ -339,12 +359,19 @@ export default function RideTypeScreen() {
                 (myLegStatus === "DROPPED_OFF" ? (
                   <MyLegDoneContent dropoffZoneName={params.dropoffZoneName} />
                 ) : myLegStatus === "PICKED_UP" ? (
-                  <InProgressContent driver={driver} dropoffZoneName={params.dropoffZoneName} />
+                  <InProgressContent
+                    driver={driver}
+                    dropoffZoneName={params.dropoffZoneName}
+                    etaMinutes={etaToDropoff}
+                    rideId={ride.id}
+                  />
                 ) : (
                   <DriverFoundContent
                     arrived={myLegStatus === "ARRIVED"}
                     driver={driver}
                     hasLocation={!!driverLocation}
+                    etaMinutes={etaToPickup}
+                    rideId={ride.id}
                     onCancel={() => void handleCancel()}
                     cancelling={cancelling}
                   />
@@ -694,10 +721,100 @@ function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
   );
 }
 
+/**
+ * Phase 4: the actions a rider needs while a ride is live — reach the driver,
+ * or raise an alarm. Rendered in every in-ride state (driver assigned, en
+ * route, on the trip) so its position never moves; a safety control that
+ * relocates between screens is one the rider has to hunt for.
+ */
+function RideSafetyActions({ rideId, driver }: { rideId: string; driver: RideDriverInfo }) {
+  const [sending, setSending] = useState(false);
+
+  function confirmSos() {
+    Alert.alert(
+      "Send an SOS?",
+      "We'll text your emergency contact where you are, who your driver is, and a link to follow this trip.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Send SOS",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              setSending(true);
+              try {
+                const result = await raiseSos(rideId);
+
+                // Report exactly who was actually reached, rather than a
+                // blanket "sent" — in an emergency the difference matters.
+                const reached: string[] = [];
+                if (result.smsDelivered && result.contactName) reached.push(result.contactName);
+                if (result.supportNotified) reached.push("CampusRide support");
+
+                if (reached.length > 0) {
+                  const nudge = result.hasEmergencyContact
+                    ? ""
+                    : "\n\nAdd an emergency contact in Account → Safety so someone you know is alerted too.";
+                  Alert.alert(
+                    "SOS sent",
+                    `${reached.join(" and ")} ${reached.length === 1 ? "has" : "have"} been sent a link to follow your trip.${nudge}`,
+                  );
+                } else {
+                  // Nothing got through — hand over the link so the rider can
+                  // still get help through some other channel.
+                  Alert.alert(
+                    "SOS raised, but we couldn't send a message",
+                    `Share this link with someone you trust, or call them directly:\n\n${result.trackingUrl}`,
+                  );
+                }
+              } catch {
+                Alert.alert("Couldn't send SOS", "Please try again, or call someone directly.");
+              } finally {
+                setSending(false);
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }
+
+  return (
+    <View style={styles.safetyRow}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Call ${driver.name}`}
+        onPress={() => void callPhone(driver.phone, driver.name)}
+        style={styles.callButton}
+      >
+        <Ionicons name="call" size={18} color={colors.primary[600]} />
+        <Text variant="bodySmall" color="primary">
+          Call driver
+        </Text>
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Send an emergency SOS"
+        onPress={confirmSos}
+        disabled={sending}
+        style={[styles.sosButton, sending && styles.sosButtonBusy]}
+      >
+        <Ionicons name="alert-circle" size={18} color={colors.surface} />
+        <Text variant="bodySmall" color="inverse">
+          {sending ? "Sending…" : "SOS"}
+        </Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function DriverFoundContent({
   arrived,
   driver,
   hasLocation,
+  etaMinutes,
+  rideId,
   onCancel,
   cancelling,
 }: {
@@ -707,6 +824,9 @@ function DriverFoundContent({
   arrived: boolean;
   driver: RideDriverInfo;
   hasLocation: boolean;
+  /** Minutes until the driver reaches the pickup point, or null if unknown. */
+  etaMinutes: number | null;
+  rideId: string;
   onCancel: () => void;
   cancelling: boolean;
 }) {
@@ -726,13 +846,15 @@ function DriverFoundContent({
             {arrived
               ? "Head to your pickup point — your driver is waiting."
               : hasLocation
-                ? `About ${DUMMY_ETA_MINUTES} min away`
+                ? `${formatEta(etaMinutes)} away`
                 : "Your driver is getting ready"}
           </Text>
         </View>
       </View>
 
       <PremiumDriverCard driver={driver} />
+
+      <RideSafetyActions rideId={rideId} driver={driver} />
 
       <Button label="Cancel ride" variant="secondary" onPress={onCancel} loading={cancelling} />
     </View>
@@ -742,9 +864,14 @@ function DriverFoundContent({
 function InProgressContent({
   driver,
   dropoffZoneName,
+  etaMinutes,
+  rideId,
 }: {
   driver: RideDriverInfo;
   dropoffZoneName: string;
+  /** Minutes until the dropoff point, or null if the driver's location is unknown. */
+  etaMinutes: number | null;
+  rideId: string;
 }) {
   return (
     <View style={styles.section}>
@@ -753,12 +880,14 @@ function InProgressContent({
         <View style={styles.stateHeading}>
           <Text variant="h2">On your way</Text>
           <Text variant="bodySmall" color="muted">
-            Heading to {dropoffZoneName} · ~{DUMMY_ETA_MINUTES} min
+            Heading to {dropoffZoneName} · {formatEta(etaMinutes)}
           </Text>
         </View>
       </View>
 
       <PremiumDriverCard driver={driver} />
+
+      <RideSafetyActions rideId={rideId} driver={driver} />
     </View>
   );
 }
@@ -985,6 +1114,31 @@ function CancelledContent({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  // Phase 4: in-ride safety + contact row.
+  safetyRow: { flexDirection: "row", gap: spacing.sm },
+  callButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    borderWidth: 1.5,
+    borderColor: colors.primary[500],
+    backgroundColor: colors.primary[50],
+  },
+  sosButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.md,
+    borderRadius: radii.md,
+    backgroundColor: colors.error,
+  },
+  sosButtonBusy: { opacity: 0.6 },
   container: { flex: 1 },
   sheetBackground: {
     backgroundColor: colors.white,

@@ -23,6 +23,7 @@ import {
 } from "../services/auth/errors";
 import { requireAuth } from "../middleware/auth";
 import { meSelect } from "./selects";
+import { InvalidEmergencyContactError, updateRiderProfile } from "../services/auth/profile";
 import {
   AccountAlreadyDeletedError,
   ActiveRideBlocksDeletionError,
@@ -233,6 +234,62 @@ export function registerAuthRoutes(
       return reply.code(404).send({ error: "User not found" });
     }
 
+    return reply.code(200).send({ user });
+  });
+
+  /**
+   * Partial profile update for the signed-in user — the rider-side mirror of
+   * PATCH /driver/profile. Handles the display name and the single emergency
+   * contact used by POST /rides/:id/sos.
+   *
+   * `phone` is not updatable here: it is the login identity, so changing it
+   * needs a fresh OTP verification of the new number (its own flow, not this
+   * one).
+   */
+  app.patch("/me", { preHandler: requireAuth }, async (request, reply) => {
+    const body = (request.body ?? {}) as {
+      name?: unknown;
+      emergencyContactName?: unknown;
+      emergencyContactPhone?: unknown;
+    };
+
+    // `null` is meaningful for the contact fields — it CLEARS them — so it is
+    // accepted, while any other non-string is a client bug.
+    const input: {
+      name?: string;
+      emergencyContactName?: string | null;
+      emergencyContactPhone?: string | null;
+    } = {};
+
+    if (body.name !== undefined) {
+      if (typeof body.name !== "string") {
+        return reply.code(400).send({ error: "name must be a string" });
+      }
+      input.name = body.name;
+    }
+    for (const field of ["emergencyContactName", "emergencyContactPhone"] as const) {
+      const value = body[field];
+      if (value === undefined) continue;
+      if (value !== null && typeof value !== "string") {
+        return reply.code(400).send({ error: `${field} must be a string or null` });
+      }
+      input[field] = value;
+    }
+
+    try {
+      await updateRiderProfile(prisma, request.user!.userId, input);
+    } catch (err) {
+      if (err instanceof InvalidEmergencyContactError) {
+        return reply.code(400).send({ error: err.message });
+      }
+      throw err;
+    }
+
+    // Return the same shape as GET /me so the client can swap it straight in.
+    const user = await prisma.user.findUnique({
+      where: { id: request.user!.userId },
+      select: meSelect,
+    });
     return reply.code(200).send({ user });
   });
 

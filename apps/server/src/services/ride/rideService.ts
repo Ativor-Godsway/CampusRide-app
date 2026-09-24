@@ -30,8 +30,9 @@ const TX_OPTIONS = { timeout: 20000 } as const;
  * - ARRIVED -> IN_PROGRESS (departure): stamps departedAt; lockedFares freeze
  *   permanently from this point (no further recompute calls are made).
  * - IN_PROGRESS -> COMPLETED: stamps completedAt.
- * - * -> REQUESTED: stamps broadcastStartedAt = now and clears decisionStartedAt
- *   (a fresh broadcast/dispatch window starts).
+ * - * -> REQUESTED: stamps broadcastStartedAt = now, clears decisionStartedAt
+ *   and discards any driver rejections (a fresh broadcast/dispatch window
+ *   starts, so drivers who declined the previous offer are offered it again).
  * - * -> AWAITING_RIDER_DECISION: stamps decisionStartedAt = now (the 90s
  *   grace period for the rider's decision starts).
  *
@@ -81,6 +82,13 @@ async function transitionRideTx(
   if (toStatus === "REQUESTED") {
     data.broadcastStartedAt = now;
     data.decisionStartedAt = null;
+    // Phase 4: a fresh broadcast window is a fresh offer, so previous
+    // declines are discarded and every eligible driver — including the ones
+    // who passed last time — sees it again. A rejection says "not this
+    // offer", not "never this ride"; the driver's circumstances (location,
+    // whether they already have a fare) have very likely changed by the time
+    // a ride comes back around.
+    await tx.rideRejection.deleteMany({ where: { rideId } });
   }
   if (toStatus === "AWAITING_RIDER_DECISION") {
     data.decisionStartedAt = now;

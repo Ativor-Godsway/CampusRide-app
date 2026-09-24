@@ -8,3 +8,4 @@ export * from "./maps";
 export * from "./location";
 export * from "./realtime";
 export * from "./navigation";
+export * from "./contact";

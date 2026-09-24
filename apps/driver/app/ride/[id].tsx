@@ -1,9 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
-import { Alert, Dimensions, StyleSheet, View } from "react-native";
+import { Alert, Dimensions, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { DRIVER_CLIENT_EVENTS, getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
+import {
+  DRIVER_CLIENT_EVENTS,
+  estimateEtaMinutes,
+  formatEta,
+  getLoneFare,
+  getSharedFarePerRider,
+  splitFare,
+} from "@rida/shared";
 import type { PaymentMethod, RideStatus } from "@rida/shared";
 import {
   Button,
@@ -12,13 +19,17 @@ import {
   LoadingState,
   Screen,
   Text,
+  callPhone,
   colors,
   formatGhs,
   getRideSocket,
   getDriverActiveRide,
+  getRateableRiders,
+  rateRider,
   driverMarkArrived,
   driverDepart,
   driverComplete,
+  openDirections,
   radii,
   RouteStops,
   shadows,
@@ -26,7 +37,7 @@ import {
   typography,
   useAuth,
 } from "@rida/mobile-shared";
-import type { RideWithZones } from "@rida/mobile-shared";
+import type { RateableRider, RideWithZones } from "@rida/mobile-shared";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
 const MAP_HEIGHT = SCREEN_HEIGHT * 0.55;
@@ -55,6 +66,87 @@ function statusLabel(step: ActionStep): string {
   if (step === "complete") return "Ride in progress";
   if (step === "done") return "Ride completed";
   return "";
+}
+
+/**
+ * Phase 4: the driver rates their rider(s) after completion — the other half
+ * of a rating system that previously only ran rider -> driver.
+ *
+ * Shown on the completion screen rather than as a blocking step: a driver's
+ * next fare matters more than a rating prompt, so this is skippable by simply
+ * tapping "Back to Home".
+ */
+function RateRidersPanel({ rideId }: { rideId: string }) {
+  const [riders, setRiders] = useState<RateableRider[]>([]);
+  const [submitting, setSubmitting] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getRateableRiders(rideId)
+      .then((result) => {
+        if (!cancelled) setRiders(result);
+      })
+      // A failed rating prompt must never disrupt the completion screen —
+      // the driver has already been paid and needs to move on.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [rideId]);
+
+  async function handleRate(riderId: string, stars: number) {
+    setSubmitting(riderId);
+    // Optimistic: the star row is the only feedback, so it should respond
+    // immediately rather than after a round trip.
+    setRiders((current) =>
+      current.map((r) => (r.riderId === riderId ? { ...r, stars } : r)),
+    );
+    try {
+      await rateRider({ rideId, riderId, stars });
+    } catch {
+      Alert.alert("Couldn't save rating", "Please try again.");
+      setRiders((current) =>
+        current.map((r) => (r.riderId === riderId ? { ...r, stars: null } : r)),
+      );
+    } finally {
+      setSubmitting(null);
+    }
+  }
+
+  if (riders.length === 0) return null;
+
+  return (
+    <Card style={styles.rateCard}>
+      <Text variant="label" color="muted">
+        {riders.length === 1 ? "RATE YOUR RIDER" : "RATE YOUR RIDERS"}
+      </Text>
+      {riders.map((rider) => (
+        <View key={rider.riderId} style={styles.rateRow}>
+          <Text variant="bodyMedium" style={styles.rateName}>
+            {rider.name}
+          </Text>
+          <View style={styles.starRow}>
+            {[1, 2, 3, 4, 5].map((value) => (
+              <Pressable
+                key={value}
+                accessibilityRole="button"
+                accessibilityLabel={`${value} star${value === 1 ? "" : "s"} for ${rider.name}`}
+                disabled={submitting === rider.riderId}
+                onPress={() => void handleRate(rider.riderId, value)}
+                hitSlop={4}
+              >
+                <Ionicons
+                  name={rider.stars != null && value <= rider.stars ? "star" : "star-outline"}
+                  size={26}
+                  color={colors.accent[500]}
+                />
+              </Pressable>
+            ))}
+          </View>
+        </View>
+      ))}
+    </Card>
+  );
 }
 
 export default function ActiveRideScreen() {
@@ -188,6 +280,14 @@ export default function ActiveRideScreen() {
   const pickup = { latitude: ride.pickupZone.latitude, longitude: ride.pickupZone.longitude };
   const dropoff = { latitude: ride.dropoffZone.latitude, longitude: ride.dropoffZone.longitude };
 
+  /**
+   * Phase 4 ETA for the leg the driver is currently on: to the pickup until
+   * the rider is aboard, to the dropoff once the trip is under way.
+   * Straight-line with a road-circuity pad (see @rida/shared) — no routing
+   * API here — and null until the device reports a position.
+   */
+  const etaMinutes = estimateEtaMinutes(driverCoords, step === "complete" ? dropoff : pickup);
+
   const midLat = (pickup.latitude + dropoff.latitude) / 2;
   const midLng = (pickup.longitude + dropoff.longitude) / 2;
   const latDelta = Math.max(Math.abs(pickup.latitude - dropoff.latitude) * 1.8, 0.01);
@@ -241,6 +341,9 @@ export default function ActiveRideScreen() {
           <Text variant="bodySmall" color="muted" style={styles.doneBody}>
             {ride.pickupZone.name} → {ride.dropoffZone.name}
           </Text>
+
+          <RateRidersPanel rideId={ride.id} />
+
           <Button label="Back to Home" onPress={handleDone} size="lg" />
         </View>
       </Screen>
@@ -268,6 +371,7 @@ export default function ActiveRideScreen() {
           <View style={styles.statusDot} />
           <Text variant="bodySmall" color="inverse">
             {statusLabel(step)}
+            {etaMinutes !== null ? ` · ${formatEta(etaMinutes)}` : ""}
           </Text>
         </View>
 
@@ -290,6 +394,34 @@ export default function ActiveRideScreen() {
           }
         />
 
+        {/*
+          Phase 4: hand-off to the platform maps app. Drivers previously had
+          only the zone NAME to go on, with no way to get turn-by-turn
+          directions to it. Targets the pickup until the rider is aboard,
+          then the dropoff — which is the leg the driver is actually
+          navigating at each step.
+        */}
+        <View style={styles.driverActionRow}>
+          <Button
+            label={step === "complete" ? "Navigate to dropoff" : "Navigate to pickup"}
+            variant="secondary"
+            onPress={() =>
+              void openDirections(
+                step === "complete"
+                  ? { ...dropoff, label: ride.dropoffZone.name }
+                  : { ...pickup, label: ride.pickupZone.name },
+              )
+            }
+          />
+          {ride.riderPhone ? (
+            <Button
+              label="Call rider"
+              variant="secondary"
+              onPress={() => void callPhone(ride.riderPhone, ride.riderName ?? "your rider")}
+            />
+          ) : null}
+        </View>
+
         {/* Primary action */}
         <Button
           label={stepLabel(step)}
@@ -303,6 +435,12 @@ export default function ActiveRideScreen() {
 }
 
 const styles = StyleSheet.create({
+  // Phase 4: maps hand-off + call rider, side by side above the main action.
+  driverActionRow: { flexDirection: "row", gap: spacing.sm },
+  rateCard: { width: "100%", gap: spacing.md, marginBottom: spacing.lg },
+  rateRow: { gap: spacing.xs },
+  rateName: { marginBottom: spacing.xs },
+  starRow: { flexDirection: "row", gap: spacing.sm },
   sheet: {
     flex: 1,
     backgroundColor: colors.white,

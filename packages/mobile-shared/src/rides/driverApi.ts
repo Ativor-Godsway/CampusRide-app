@@ -18,6 +18,13 @@ export interface RideWithZones extends Ride {
   dropoffZone: Zone;
   /** Phase 6b-3: each passenger's own zone names, for the per-passenger driving view. */
   passengers: PassengerInCar[];
+  /**
+   * Phase 4: the ride owner's contact details, so the driver can call them at
+   * pickup. Present only on the driver's own ACTIVE ride. Null on a LONE ride
+   * whose owner record could not be read.
+   */
+  riderName?: string | null;
+  riderPhone?: string | null;
 }
 
 export interface SubmitDriverProfileInput {
@@ -80,6 +87,37 @@ export async function setDriverAvailability(
 }
 
 /** Returns the driver's currently active ride (MATCHED/ARRIVED/IN_PROGRESS) or null. */
+export interface RateableRider {
+  riderId: string;
+  name: string;
+  /** Stars this driver has already given, or null if not rated yet. */
+  stars: number | null;
+}
+
+/** The riders on a completed ride that this driver may rate. */
+export async function getRateableRiders(rideId: string): Promise<RateableRider[]> {
+  const res = await api.get<{ riders: RateableRider[] }>(`/rides/${rideId}/rateable-riders`);
+  return res.data.riders;
+}
+
+/** Driver rates one of their completed ride's riders. Upserts. */
+export async function rateRider(input: {
+  rideId: string;
+  riderId: string;
+  stars: number;
+  comment?: string;
+}): Promise<void> {
+  await api.post("/ratings/rider", input);
+}
+
+/**
+ * Explicitly decline a broadcast ride. Hides it from THIS driver's list
+ * without withdrawing it from anyone else. Idempotent server-side.
+ */
+export async function rejectRide(rideId: string): Promise<void> {
+  await api.post(`/rides/${rideId}/reject`);
+}
+
 export async function getDriverActiveRide(): Promise<RideWithZones | null> {
   const res = await api.get<{ ride: RideWithZones | null }>("/driver/rides/active");
   return res.data.ride;
@@ -157,6 +195,17 @@ export interface DriverRideHistorySummary {
   totalRides: number;
   /** Sum of per-ride driver gross, pesewas. Gross accrued, not settled. */
   totalGrossPesewas: number;
+  /**
+   * Phase 4: total 15% platform commission recorded against this driver on
+   * completed CASH rides (CommissionLedger). An unenforced debt record — no
+   * settlement mechanism exists yet — so this is everything on file, not an
+   * unpaid balance.
+   */
+  commissionOwedPesewas: number;
+  /** Gross minus commission owed. May be negative; deliberately not clamped. */
+  netPesewas: number;
+  /** How many completed rides carry a commission row (CASH rides only). */
+  commissionRidesCount: number;
 }
 
 export interface DriverRideHistory {
@@ -176,6 +225,9 @@ export async function getDriverRideHistory(): Promise<DriverRideHistory> {
 export interface PassengerInCar {
   id: string;
   riderId: string;
+  /** Phase 4: so the driver can identify and call this passenger at pickup. */
+  riderName?: string | null;
+  riderPhone?: string | null;
   pickupZoneName: string;
   dropoffZoneName: string;
   /** The passenger's current downward-ratcheted fare in pesewas. */

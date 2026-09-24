@@ -77,6 +77,12 @@ export const config = {
     ussdCallbackMax: Number(process.env.RATE_LIMIT_USSD_CALLBACK ?? 60),
     /** POST /uploads/driver-photo/signature — per 15 min (each authorizes a Cloudinary write). */
     uploadSignatureMax: Number(process.env.RATE_LIMIT_UPLOAD_SIGNATURE ?? 10),
+    /**
+     * POST /rides/:id/sos — per 15 min. Each SOS sends a real SMS, so this is
+     * bounded, but set high enough that a frightened rider tapping the button
+     * repeatedly is never the person it blocks.
+     */
+    sosMax: Number(process.env.RATE_LIMIT_SOS ?? 20),
   },
   /**
    * Selects the OTP delivery provider. One of "moolre" | "mnotify" | "dummy".
@@ -111,6 +117,24 @@ export const config = {
    * and bypass every per-IP rate limit.
    */
   trustProxy: process.env.TRUST_PROXY,
+  /**
+   * Public origin this server is reachable at, used to build the SOS ride
+   * tracking link (GET /track/:token) that goes out by SMS. Must be the
+   * externally-visible URL, not the bind address — an emergency contact
+   * opens it on their own phone. Falls back to localhost for dev.
+   */
+  publicBaseUrl: process.env.PUBLIC_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3000}`,
+  /**
+   * Phase 4 safety backstop. Every SOS is also texted to this number, so a
+   * rider who never saved an emergency contact still reaches a human. Unset
+   * means support is simply not notified — the SOS still succeeds and still
+   * texts the rider's own contact — so an unconfigured deployment degrades
+   * rather than breaking the button.
+   *
+   * Full SOS visibility belongs in the Phase 5 admin panel; this is the
+   * stopgap until then.
+   */
+  supportContactPhone: process.env.SUPPORT_CONTACT_PHONE ?? "",
   /**
    * Cloudinary credentials for SIGNED driver-photo uploads. The apiSecret is
    * server-only and must never be exposed to the apps — it is what replaces

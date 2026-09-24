@@ -90,6 +90,10 @@ export const meSelect = {
   name: true,
   role: true,
   createdAt: true,
+  // Phase 4 safety: the rider's single emergency contact, so the account
+  // screen can show and edit what is currently set.
+  emergencyContactName: true,
+  emergencyContactPhone: true,
   driver: {
     select: {
       id: true,

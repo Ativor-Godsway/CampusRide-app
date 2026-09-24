@@ -99,6 +99,48 @@ export async function submitRating(input: SubmitRatingInput): Promise<void> {
   await api.post("/ratings", input);
 }
 
+export interface SosResult {
+  /** Public tracking page URL that was texted out. */
+  trackingUrl: string;
+  /** Null when the rider has saved no emergency contact. */
+  contactName: string | null;
+  contactPhone: string | null;
+  /** True when the rider's OWN contact was texted successfully. */
+  smsDelivered: boolean;
+  /** True when the fixed support number was texted successfully. */
+  supportNotified: boolean;
+  /** False when the rider should be nudged to add a contact. */
+  hasEmergencyContact: boolean;
+}
+
+/**
+ * Raises an SOS on an active ride. The server texts the rider's emergency
+ * contact AND support with the current ride state and a live tracking link.
+ *
+ * Having no emergency contact is no longer an error — support is alerted
+ * either way, and `hasEmergencyContact` tells the caller whether to nudge.
+ */
+export async function raiseSos(rideId: string): Promise<SosResult> {
+  const res = await api.post<SosResult>(`/rides/${rideId}/sos`);
+  return res.data;
+}
+
+/** One page of the rider's history, newest first. */
+export interface RidePage {
+  rides: RideSummary[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+/**
+ * A page of the signed-in rider's past rides. Pass the previous page's
+ * `nextCursor` to continue; omit it for the first page.
+ */
+export async function getMyRidesPage(cursor?: string, limit = 20): Promise<RidePage> {
+  const res = await api.get<RidePage>("/rides/mine", { params: { cursor, limit } });
+  return res.data;
+}
+
 export type MoolreNetwork = "MTN" | "TELECEL" | "AT";
 
 /**

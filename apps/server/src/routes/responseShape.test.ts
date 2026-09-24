@@ -72,7 +72,18 @@ describe("GET /me", () => {
     expect(res.statusCode).toBe(200);
     const { user } = res.json();
     expect(Object.keys(user).sort()).toEqual(
-      ["id", "phone", "name", "role", "createdAt", "driver"].sort(),
+      [
+        "id",
+        "phone",
+        "name",
+        "role",
+        "createdAt",
+        "driver",
+        // Phase 4: the rider's single emergency contact, needed by the
+        // account screen to show and edit what is currently set.
+        "emergencyContactName",
+        "emergencyContactPhone",
+      ].sort(),
     );
     // updatedAt is internal bookkeeping and must not be published.
     expect(user).not.toHaveProperty("updatedAt");

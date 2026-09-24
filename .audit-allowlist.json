@@ -9,42 +9,17 @@
     "match anything are reported as stale so they get deleted rather than",
     "silently widening the exception over time.",
     "",
-    "All current entries trace to expo@54's build toolchain and were accepted",
-    "in Phase 2: clearing them requires expo 54 -> 57, a three-major React",
-    "Native migration that is its own piece of work."
+    "CURRENTLY EMPTY. Phase 3B upgraded Expo SDK 54 -> 57, which cleared all",
+    "four previously-accepted entries (image-size x2, postcss x2 — they came",
+    "from expo@54's build toolchain). The gate reported them as stale, which",
+    "is how they were found and removed. Any high/critical advisory now fails",
+    "CI until it is fixed or deliberately listed here.",
+    "",
+    "The 14 findings that remain are all MODERATE and therefore below this",
+    "gate's threshold. They sit in @expo/* build tooling and expo-router's",
+    "query-string/decode-uri-component chain at the latest published SDK, so",
+    "there is no version to upgrade to; npm's suggested 'fixes' for them are",
+    "downgrades to expo@46 / expo-router@5 and are not real."
   ],
-  "allow": [
-    {
-      "id": "GHSA-w3rx-r6r6-pgpr",
-      "package": "image-size",
-      "severity": "high",
-      "reason": "Denial of service in the ICNS parser. Reached only via @expo/cli/metro at BUILD time, parsing our own app icons on a trusted machine — never at runtime and never on attacker-supplied input. Fix requires expo@57.",
-      "acceptedIn": "Phase 2",
-      "reviewBy": "2026-12-31"
-    },
-    {
-      "id": "GHSA-5p2g-fcmc-qvqq",
-      "package": "image-size",
-      "severity": "high",
-      "reason": "Denial of service in the JXL/HEIF parsers. Same build-time-only exposure as GHSA-w3rx-r6r6-pgpr. Fix requires expo@57.",
-      "acceptedIn": "Phase 2",
-      "reviewBy": "2026-12-31"
-    },
-    {
-      "id": "GHSA-6g55-p6wh-862q",
-      "package": "postcss",
-      "severity": "high",
-      "reason": "Arbitrary file read via a crafted stylesheet. postcss is pulled in by the Metro bundler at BUILD time and processes only our own source; the server ships no postcss and the app bundle contains no postcss runtime. Fix requires expo@57.",
-      "acceptedIn": "Phase 2",
-      "reviewBy": "2026-12-31"
-    },
-    {
-      "id": "GHSA-r28c-9q8g-f849",
-      "package": "postcss",
-      "severity": "high",
-      "reason": "Path traversal in source-map auto-loading. Same build-time-only exposure as GHSA-6g55-p6wh-862q. Fix requires expo@57.",
-      "acceptedIn": "Phase 2",
-      "reviewBy": "2026-12-31"
-    }
-  ]
+  "allow": []
 }

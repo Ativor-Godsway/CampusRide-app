@@ -1,3 +1,4 @@
+import { useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -17,19 +18,25 @@ import {
 interface QuickAction {
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
+  /** Route to open; tiles without one are still placeholders. */
+  href?: "/safety";
 }
 
 // No Wallet tile: CampusRide is cash-only for now (digital payment is
 // disabled server-side), so there is no balance to show and no stub to leave.
 const QUICK_ACTIONS: QuickAction[] = [
   { label: "Help", icon: "help-buoy-outline" },
-  { label: "Safety", icon: "shield-checkmark-outline" },
+  // Phase 4: a real screen now — the rider's emergency contact, which the
+  // in-ride SOS button uses.
+  { label: "Safety", icon: "shield-checkmark-outline", href: "/safety" },
   { label: "Inbox", icon: "mail-outline" },
 ];
 
 /** Account tab — profile header, Uber-style quick-action grid, settings list, and logout. */
 export default function AccountTab() {
+  const router = useRouter();
   const { user, signOut, deleteAccount } = useAuth();
+  const hasEmergencyContact = Boolean(user?.emergencyContactName && user?.emergencyContactPhone);
 
   const confirmLogout = () => {
     Alert.alert("Log out", "Are you sure you want to log out?", [
@@ -71,7 +78,7 @@ export default function AccountTab() {
           <Pressable
             key={action.label}
             style={styles.quickTilePressable}
-            onPress={() => showComingSoon(action.label)}
+            onPress={() => (action.href ? router.push(action.href) : showComingSoon(action.label))}
             accessibilityRole="button"
           >
             <Card noPadding style={styles.quickTile}>
@@ -92,7 +99,19 @@ export default function AccountTab() {
         <ListRow
           title="Edit profile"
           leading={<ListRow.Icon name="person-outline" />}
-          onPress={() => showComingSoon("Editing your profile")}
+          onPress={() => router.push("/profile")}
+        />
+        <View style={styles.divider} />
+        <ListRow
+          title="Emergency contact"
+          // Surfaced in Settings too, not just the Safety tile: an unset
+          // contact means the SOS button cannot work, so it is worth a
+          // visible prompt rather than hiding behind an icon grid.
+          subtitle={
+            hasEmergencyContact ? (user?.emergencyContactName ?? undefined) : "Not set up yet"
+          }
+          leading={<ListRow.Icon name="shield-checkmark-outline" />}
+          onPress={() => router.push("/safety")}
         />
         <View style={styles.divider} />
         <ListRow

@@ -137,6 +137,12 @@ services:
       # send no Origin header, so they are unaffected; set this to the
       # showcase site's exact origin (e.g. https://campusride.example) before
       # expecting any browser client to work.
+      #
+      # PHASE 5: the admin app (campusride-admin, below) is a browser client,
+      # so its origin MUST be in this list — otherwise every admin request is
+      # blocked by CORS and the app appears to be broken while the API is
+      # fine. Comma-separate multiple origins, e.g.
+      #   https://campusride.example,https://campusride-admin.onrender.com
       - key: CORS_ALLOWED_ORIGINS
         sync: false
 
@@ -151,6 +157,25 @@ services:
       - key: TRUST_PROXY
         value: "1"
 
+      # ── Safety (Phase 4) ───────────────────────────────────────────────────
+
+      # Public origin used to build the SOS ride-tracking link that is texted
+      # to a rider's emergency contact. MUST be the externally-reachable URL
+      # of this service — the recipient opens it on their own phone. If it is
+      # unset the link falls back to http://localhost:PORT and the SOS arrives
+      # pointing nowhere, which defeats the feature.
+      # Set to this service's Render URL, e.g. https://campusride-server.onrender.com
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+      # Fixed number texted on EVERY SOS, in addition to the rider's own
+      # emergency contact. This is the backstop that stops an SOS from a rider
+      # who never saved a contact reaching nobody at all. Leave unset and the
+      # SOS still works — it just won't reach support. Full SOS visibility is
+      # a Phase 5 admin-panel item; this is the stopgap.
+      - key: SUPPORT_CONTACT_PHONE
+        sync: false
+
       # ── Cloudinary (signed driver-photo uploads) ───────────────────────────
       # The app no longer holds any Cloudinary credential: it requests a
       # short-lived signature from POST /uploads/driver-photo/signature.
@@ -163,4 +188,59 @@ services:
         sync: false
 
       - key: CLOUDINARY_API_SECRET
+        sync: false
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # ADMIN APP (Phase 5) — CONFIGURATION ONLY, NOT YET CONNECTED
+  #
+  # This block describes the service; it does not create it. Adding the
+  # service to the account is a manual step in the Render dashboard (see
+  # DEPLOY.md → "Admin app"), because it needs a dashboard login.
+  #
+  # apps/admin is a static Vite/React SPA with no server of its own — it talks
+  # to campusride-server over the same public API the mobile apps use. So it
+  # is a `static` service, not a `web` one: nothing to keep running, and no
+  # Node process to pay for.
+  #
+  # TWO SETTINGS MUST MATCH EACH OTHER, or the app loads and every request
+  # fails in the browser console:
+  #   1. VITE_API_URL below = the server service's public URL.
+  #   2. campusride-server's CORS_ALLOWED_ORIGINS must CONTAIN this static
+  #      site's origin (e.g. https://campusride-admin.onrender.com). The API
+  #      grants no browser origin at all in production unless it is on that
+  #      list, and the admin app IS a browser client — unlike the native
+  #      rider/driver apps, which send no Origin header.
+  # ───────────────────────────────────────────────────────────────────────────
+  - type: web
+    name: campusride-admin
+    runtime: static
+    region: oregon
+
+    # Installs the whole workspace (npm workspaces hoists to the root), then
+    # builds only apps/admin. The build typechecks first, so a type error
+    # fails the deploy rather than shipping.
+    buildCommand: npm install && npm run build:admin
+    staticPublishPath: apps/admin/dist
+
+    # Client-side app with a single entry point: every path must serve
+    # index.html, or a refresh on any screen 404s.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+    headers:
+      # An internal operator tool has no business being framed or indexed.
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex, nofollow
+
+    envVars:
+      # Vite inlines this at BUILD time — changing it requires a redeploy, not
+      # just a restart. Set it to the campusride-server service's public URL,
+      # e.g. https://campusride-server.onrender.com (no trailing slash).
+      - key: VITE_API_URL
         sync: false

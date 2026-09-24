@@ -19,6 +19,9 @@ export interface AuthUser {
   phone: string;
   name: string;
   role: UserRole;
+  /** Phase 4 safety: the single contact notified by an SOS. Null until set. */
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
   /** Populated for DRIVER accounts (from /me with include: { driver: true }). */
   driver?: AuthDriverProfile | null;
 }
@@ -95,6 +98,23 @@ export async function logout(refreshToken: string): Promise<void> {
  */
 export async function deleteAccount(): Promise<void> {
   await api.delete("/me");
+}
+
+export interface UpdateProfileInput {
+  name?: string;
+  /** Pass null for BOTH contact fields to clear the emergency contact. */
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+}
+
+/**
+ * Partial profile update (PATCH /me). Omitted fields are left unchanged.
+ * `phone` is intentionally absent: it is the login identity and changing it
+ * requires re-verifying the new number, which is a separate flow.
+ */
+export async function updateProfile(input: UpdateProfileInput): Promise<AuthUser> {
+  const res = await api.patch<{ user: AuthUser }>("/me", input);
+  return res.data.user;
 }
 
 export async function getMe(): Promise<{ user: AuthUser }> {

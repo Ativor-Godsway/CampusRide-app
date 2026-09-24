@@ -8,13 +8,14 @@
     "@rida/shared": "*"
   },
   "devDependencies": {
-    "typescript": "~5.9.2"
+    "typescript": "~6.0.3"
   },
   "peerDependencies": {
     "@expo/vector-icons": "*",
     "@tanstack/react-query": "^5.40.0",
     "axios": "^1.20.0",
     "expo-constants": "*",
+    "expo-file-system": "*",
     "expo-linking": "*",
     "expo-location": "*",
     "expo-router": "*",
@@ -29,5 +30,49 @@
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "peerDependenciesMeta": {
+    "@expo/vector-icons": {
+      "optional": true
+    },
+    "@tanstack/react-query": {
+      "optional": true
+    },
+    "axios": {
+      "optional": true
+    },
+    "expo-constants": {
+      "optional": true
+    },
+    "expo-file-system": {
+      "optional": true
+    },
+    "expo-linking": {
+      "optional": true
+    },
+    "expo-location": {
+      "optional": true
+    },
+    "expo-router": {
+      "optional": true
+    },
+    "expo-secure-store": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    },
+    "react-native-maps": {
+      "optional": true
+    },
+    "react-native-safe-area-context": {
+      "optional": true
+    },
+    "socket.io-client": {
+      "optional": true
+    }
   }
 }
