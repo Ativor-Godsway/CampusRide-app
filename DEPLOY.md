@@ -151,7 +151,7 @@ Render dashboard after the service is created.
 
 ---
 
-## CI, and the manual step that makes it a deploy gate
+## CI, and the ruleset that makes it a deploy gate
 
 `.github/workflows/ci.yml` runs on every push to `main` and every PR
 targeting `main`, in three parallel jobs:
@@ -165,25 +165,25 @@ targeting `main`, in three parallel jobs:
 Coverage is printed but **not** threshold-gated: there is no agreed baseline
 yet. Today it sits at ~96% for `packages/shared` and ~64% for `apps/server`.
 
-### ⚠️ Required manual step: branch protection
+### Branch protection — in place
 
 **CI does not block deploys on its own.** Render watches the `main` branch,
-not the CI result, so a red build still auto-deploys unless GitHub refuses
-the push or merge first. A workflow file cannot grant itself that authority —
-it has to be switched on by hand, once, in the GitHub UI:
+not the CI result, so a red build would auto-deploy unless GitHub refuses the
+merge first. A workflow file cannot grant itself that authority.
 
-> **Settings → Branches → Add branch ruleset** (or *Add protection rule*) for `main`
->
-> 1. **Require a pull request before merging**
-> 2. **Require status checks to pass before merging**, selecting all three:
->    - `Lint, typecheck & shared tests`
->    - `Server tests (Postgres)`
->    - `Dependency audit`
-> 3. **Require branches to be up to date before merging**
-> 4. Optionally restrict direct pushes to `main`
->
-> The status checks only appear in that picker *after* the workflow has run at
-> least once, so push this commit first, then add the rule.
+That gate is now switched on: a repository ruleset on `main` requires a pull
+request plus all three status checks —
+
+- `Lint, typecheck & shared tests`
+- `Server tests (Postgres)`
+- `Dependency audit`
+
+— so a commit reaches `main`, and therefore production, only after CI passes
+on a PR.
+
+> If the ruleset is ever disabled the gap reopens **silently**: CI keeps
+> reporting pass/fail on PRs while blocking nothing. Check
+> **Settings → Rules → Rulesets** before assuming a red build cannot ship.
 
 Optionally also set the Render service's auto-deploy to *After CI checks
 pass* (Render dashboard → service → Settings → Build & Deploy), or turn
