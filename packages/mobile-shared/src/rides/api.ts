@@ -100,37 +100,29 @@ export async function submitRating(input: SubmitRatingInput): Promise<void> {
 }
 
 export interface SosResult {
-  /** Public tracking page URL that was texted to the emergency contact. */
+  /** Public tracking page URL that was texted out. */
   trackingUrl: string;
-  contactName: string;
-  contactPhone: string;
-  /** False when the SMS provider is off or the send failed — the URL is still usable. */
+  /** Null when the rider has saved no emergency contact. */
+  contactName: string | null;
+  contactPhone: string | null;
+  /** True when the rider's OWN contact was texted successfully. */
   smsDelivered: boolean;
-}
-
-/** Raised when the rider has no emergency contact saved yet. */
-export class NoEmergencyContactError extends Error {
-  constructor() {
-    super("No emergency contact set");
-    this.name = "NoEmergencyContactError";
-  }
+  /** True when the fixed support number was texted successfully. */
+  supportNotified: boolean;
+  /** False when the rider should be nudged to add a contact. */
+  hasEmergencyContact: boolean;
 }
 
 /**
- * Raises an SOS on an active ride: the server texts the rider's emergency
- * contact the current ride state and a live tracking link.
+ * Raises an SOS on an active ride. The server texts the rider's emergency
+ * contact AND support with the current ride state and a live tracking link.
+ *
+ * Having no emergency contact is no longer an error — support is alerted
+ * either way, and `hasEmergencyContact` tells the caller whether to nudge.
  */
 export async function raiseSos(rideId: string): Promise<SosResult> {
-  try {
-    const res = await api.post<SosResult>(`/rides/${rideId}/sos`);
-    return res.data;
-  } catch (err) {
-    const data = (err as { response?: { data?: { code?: string } } }).response?.data;
-    if (data?.code === "NO_EMERGENCY_CONTACT") {
-      throw new NoEmergencyContactError();
-    }
-    throw err;
-  }
+  const res = await api.post<SosResult>(`/rides/${rideId}/sos`);
+  return res.data;
 }
 
 /** One page of the rider's history, newest first. */

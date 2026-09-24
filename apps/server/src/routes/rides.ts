@@ -213,7 +213,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       return reply.code(403).send({ error: "Forbidden" });
     }
 
-    const driver = ride.driverId ? await getDriverInfo(prisma, ride.driverId) : null;
+    // Pass the ride so the driver's phone drops out of the payload once the
+    // trip has been finished for more than 24h (services/user/driverInfo.ts).
+    const driver = ride.driverId ? await getDriverInfo(prisma, ride.driverId, ride) : null;
 
     // Include fare summary when COMPLETED so polling self-contains the full
     // completion signal (no socket required to show the rating/fare screen).

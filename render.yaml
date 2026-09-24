@@ -151,6 +151,25 @@ services:
       - key: TRUST_PROXY
         value: "1"
 
+      # ── Safety (Phase 4) ───────────────────────────────────────────────────
+
+      # Public origin used to build the SOS ride-tracking link that is texted
+      # to a rider's emergency contact. MUST be the externally-reachable URL
+      # of this service — the recipient opens it on their own phone. If it is
+      # unset the link falls back to http://localhost:PORT and the SOS arrives
+      # pointing nowhere, which defeats the feature.
+      # Set to this service's Render URL, e.g. https://campusride-server.onrender.com
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+      # Fixed number texted on EVERY SOS, in addition to the rider's own
+      # emergency contact. This is the backstop that stops an SOS from a rider
+      # who never saved a contact reaching nobody at all. Leave unset and the
+      # SOS still works — it just won't reach support. Full SOS visibility is
+      # a Phase 5 admin-panel item; this is the stopgap.
+      - key: SUPPORT_CONTACT_PHONE
+        sync: false
+
       # ── Cloudinary (signed driver-photo uploads) ───────────────────────────
       # The app no longer holds any Cloudinary credential: it requests a
       # short-lived signature from POST /uploads/driver-photo/signature.

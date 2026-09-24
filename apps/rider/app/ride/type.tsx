@@ -25,7 +25,6 @@ import {
   createRide,
   formatGhs,
   raiseSos,
-  NoEmergencyContactError,
   radii,
   regionForCoordinates,
   rideQueryKey,
@@ -745,22 +744,31 @@ function RideSafetyActions({ rideId, driver }: { rideId: string; driver: RideDri
               setSending(true);
               try {
                 const result = await raiseSos(rideId);
-                Alert.alert(
-                  result.smsDelivered ? "SOS sent" : "SOS raised",
-                  result.smsDelivered
-                    ? `${result.contactName} has been texted a link to follow your trip.`
-                    : `We couldn't text ${result.contactName} just now. Share this link with someone you trust:\n\n${result.trackingUrl}`,
-                );
-              } catch (error) {
-                if (error instanceof NoEmergencyContactError) {
-                  // The one failure with an obvious fix — say what it is.
+
+                // Report exactly who was actually reached, rather than a
+                // blanket "sent" — in an emergency the difference matters.
+                const reached: string[] = [];
+                if (result.smsDelivered && result.contactName) reached.push(result.contactName);
+                if (result.supportNotified) reached.push("CampusRide support");
+
+                if (reached.length > 0) {
+                  const nudge = result.hasEmergencyContact
+                    ? ""
+                    : "\n\nAdd an emergency contact in Account → Safety so someone you know is alerted too.";
                   Alert.alert(
-                    "No emergency contact",
-                    "Add an emergency contact in Account → Safety so we know who to alert.",
+                    "SOS sent",
+                    `${reached.join(" and ")} ${reached.length === 1 ? "has" : "have"} been sent a link to follow your trip.${nudge}`,
                   );
                 } else {
-                  Alert.alert("Couldn't send SOS", "Please try again, or call someone directly.");
+                  // Nothing got through — hand over the link so the rider can
+                  // still get help through some other channel.
+                  Alert.alert(
+                    "SOS raised, but we couldn't send a message",
+                    `Share this link with someone you trust, or call them directly:\n\n${result.trackingUrl}`,
+                  );
                 }
+              } catch {
+                Alert.alert("Couldn't send SOS", "Please try again, or call someone directly.");
               } finally {
                 setSending(false);
               }

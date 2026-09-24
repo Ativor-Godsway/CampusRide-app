@@ -16,7 +16,8 @@ export type { RiderDecisionAction };
  *   (handled by applyRideTransition's `* -> REQUESTED` side effect).
  * - SWITCH_TO_LONE: only valid with exactly one active passenger. Converts
  *   the ride to type LONE, locks that passenger's fare at the flat lone
- *   fare, and re-broadcasts (REQUESTED, broadcastStartedAt resets).
+ *   fare, and re-broadcasts (REQUESTED, broadcastStartedAt resets, driver
+ *   rejections cleared).
  * - CANCEL: rider gives up — CANCELLED with reason RIDER_CANCELLED.
  *
  * `now` is injectable so the broadcastStartedAt reset can be driven by
@@ -67,6 +68,11 @@ async function switchToLone(prisma: PrismaClient, rideId: string, now: Date) {
       where: { id: activePassengers[0]!.id },
       data: { lockedFare: getLoneFare() },
     });
+
+    // Same reasoning as the `* -> REQUESTED` branch in rideService: this is a
+    // re-broadcast, so previous declines are discarded and drivers who passed
+    // on the SHARED offer get to see it again now that it is a LONE ride.
+    await tx.rideRejection.deleteMany({ where: { rideId } });
 
     return tx.ride.update({
       where: { id: rideId },

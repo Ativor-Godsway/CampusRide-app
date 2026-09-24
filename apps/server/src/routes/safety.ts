@@ -2,11 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
 import { config } from "../config";
-import {
-  NoEmergencyContactError,
-  RideNotActiveError,
-  raiseSos,
-} from "../services/safety/sos";
+import { RideNotActiveError, raiseSos } from "../services/safety/sos";
+import { rideStatusLabel } from "../services/safety/rideStatusLabels";
 
 /** Minimal HTML escaping for the values interpolated into the tracking page. */
 function escapeHtml(value: string): string {
@@ -17,16 +14,6 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 }
-
-const STATUS_LABELS: Record<string, string> = {
-  REQUESTED: "Looking for a driver",
-  AWAITING_RIDER_DECISION: "Waiting on the rider",
-  MATCHED: "Driver on the way",
-  ARRIVED: "Driver has arrived",
-  IN_PROGRESS: "On the trip",
-  COMPLETED: "Trip completed",
-  CANCELLED: "Trip cancelled",
-};
 
 /**
  * Registers the Phase 4 safety routes.
@@ -63,15 +50,15 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
       if (!onRide) return reply.code(403).send({ error: "Forbidden" });
 
       try {
-        const result = await raiseSos(prisma, rideId, userId, config.publicBaseUrl);
+        const result = await raiseSos(
+          prisma,
+          rideId,
+          userId,
+          config.publicBaseUrl,
+          config.supportContactPhone,
+        );
         return reply.code(200).send(result);
       } catch (err) {
-        if (err instanceof NoEmergencyContactError) {
-          return reply.code(409).send({
-            error: "Add an emergency contact in your account before using SOS",
-            code: "NO_EMERGENCY_CONTACT",
-          });
-        }
         if (err instanceof RideNotActiveError) {
           return reply.code(409).send({ error: err.message, code: "RIDE_NOT_ACTIVE" });
         }
@@ -113,7 +100,7 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
       ? await prisma.user.findUnique({ where: { id: ride.driverId }, include: { driver: true } })
       : null;
 
-    const statusLabel = STATUS_LABELS[ride.status] ?? ride.status;
+    const statusLabel = rideStatusLabel(ride.status);
     const vehicle = driver
       ? [driver.driver?.carColor, driver.driver?.carMake, driver.driver?.carModel]
           .filter(Boolean)
@@ -137,6 +124,31 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     const finished = ride.status === "COMPLETED" || ride.status === "CANCELLED";
 
+    /**
+     * The "what do I actually do now" prompt. It lives here rather than in
+     * the SMS because the message has to fit one 160-character segment and
+     * the link is worth more of that budget than advice is — whereas this
+     * page has room to say it properly.
+     *
+     * It offers calling the RIDER, not the driver: the person who raised the
+     * alarm is who the recipient wants to reach, and the rider's number is
+     * one this recipient already has (they are the rider's chosen contact),
+     * so showing it here reveals nothing new. The driver's number is
+     * deliberately still withheld.
+     */
+    const nudge = finished
+      ? '<p class="sub">This trip has ended.</p>'
+      : `<div class="nudge">
+           <p class="nudgeTitle">${escapeHtml(rider?.name ?? "This rider")} asked you to keep an eye on this trip.</p>
+           <p class="nudgeBody">If something looks wrong, call them now.</p>
+           ${
+             rider?.phone
+               ? `<a class="cta" href="tel:${escapeHtml(rider.phone.replace(/[\s()-]/g, ""))}">Call ${escapeHtml(rider.name)}</a>`
+               : ""
+           }
+         </div>
+         <p class="sub">This page refreshes automatically.</p>`;
+
     return reply
       .code(200)
       .type("text/html; charset=utf-8")
@@ -149,7 +161,7 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
           `<h1>CampusRide trip</h1>
            <p class="sub">Shared with you from an SOS alert.</p>
            <div class="card">${rows}</div>
-           ${finished ? '<p class="sub">This trip has ended.</p>' : '<p class="sub">This page refreshes automatically.</p>'}`,
+           ${nudge}`,
           finished ? undefined : 15,
         ),
       );
@@ -182,6 +194,12 @@ ${refreshSeconds ? `<meta http-equiv="refresh" content="${refreshSeconds}">` : "
   .row:last-child { border-bottom:0; }
   .label { color:var(--muted); font-size:14px; }
   .value { font-weight:600; text-align:right; }
+  .nudge { margin-top:16px; padding:14px; border-radius:12px;
+           background:rgba(178,58,58,0.08); border:1px solid rgba(178,58,58,0.35); }
+  .nudgeTitle { margin:0 0 4px; font-weight:600; }
+  .nudgeBody { margin:0 0 12px; color:var(--muted); font-size:14px; }
+  .cta { display:block; text-align:center; text-decoration:none; font-weight:600;
+         padding:12px 16px; border-radius:10px; background:var(--brand); color:#fff; }
 </style>
 </head>
 <body><main>${body}</main></body>

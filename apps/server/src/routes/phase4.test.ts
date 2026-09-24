@@ -9,6 +9,7 @@ import { describe, it, expect, vi, afterEach, afterAll, beforeAll } from "vitest
 import Fastify, { type FastifyInstance } from "fastify";
 import { getLoneFare, splitFare } from "@rida/shared";
 import { prisma } from "../db/prisma";
+import { config } from "../config";
 import { registerAuthRoutes } from "./auth";
 import { registerRideRoutes } from "./rides";
 import { registerDriverRoutes } from "./driver";
@@ -16,6 +17,8 @@ import { registerRatingRoutes } from "./ratings";
 import { registerSafetyRoutes } from "./safety";
 import { signAccessToken } from "../services/auth/tokens";
 import { otpService } from "../services/active";
+import { applyRideTransition } from "../services/ride/rideService";
+import { riderDecision } from "../services/ride/riderDecision";
 import {
   createTestDriver,
   createTestRide,
@@ -29,6 +32,15 @@ vi.mock("../services/sms/sendSms", () => ({
   sendSms: vi.fn().mockResolvedValue({ success: true }),
 }));
 import { sendSms } from "../services/sms/sendSms";
+import { SMS_SEGMENT_LIMIT } from "../services/safety/sos";
+
+/**
+ * The support backstop number. Injected into config for these tests — the
+ * real value comes from SUPPORT_CONTACT_PHONE and is unset in .env.test, so
+ * without this the support path would be silently skipped.
+ */
+const SUPPORT_PHONE = "+233555000999";
+vi.spyOn(config, "supportContactPhone", "get").mockReturnValue(SUPPORT_PHONE);
 
 let app: FastifyInstance;
 const createdRideIds: string[] = [];
@@ -52,7 +64,9 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
-  vi.mocked(sendSms).mockClear();
+  // Reset (not just clear): some tests install their own implementation.
+  vi.mocked(sendSms).mockReset();
+  vi.mocked(sendSms).mockResolvedValue({ success: true });
   while (createdRideIds.length > 0) await cleanupRide(createdRideIds.pop()!);
   while (createdDriverUserIds.length > 0) await cleanupDriver(createdDriverUserIds.pop()!);
   while (multiRideRiderIds.length > 0) {
@@ -254,11 +268,16 @@ describe("POST /rides/:id/sos", () => {
     expect(body.contactName).toBe("Auntie Akos");
     expect(body.trackingUrl).toContain("/track/");
 
-    expect(sendSms).toHaveBeenCalledTimes(1);
-    const [toPhone, message] = vi.mocked(sendSms).mock.calls[0]!;
-    expect(toPhone).toBe("+233240000111");
+    // Two recipients now: the rider's contact and the support backstop.
+    expect(sendSms).toHaveBeenCalledTimes(2);
+    const contactCall = vi
+      .mocked(sendSms)
+      .mock.calls.find(([phone]) => phone === "+233240000111");
+    expect(contactCall).toBeDefined();
+
+    const message = contactCall![1];
     expect(message).toContain("SOS");
-    expect(message).toContain("IN_PROGRESS");
+    expect(message).toContain("On the trip");
     expect(message).toContain("GR-4321-24");
     expect(message).toContain(body.trackingUrl);
   });
@@ -273,7 +292,9 @@ describe("POST /rides/:id/sos", () => {
     expect(first.json().trackingUrl).toBe(second.json().trackingUrl);
   });
 
-  it("409s with a typed code when no emergency contact is set", async () => {
+  it("still reaches support when the rider saved no emergency contact", async () => {
+    // The whole point of the support backstop: an SOS from a rider who never
+    // set a contact used to be refused outright and reached nobody.
     const driver = await createTestDriver({ isOnline: true, isApproved: true });
     createdDriverUserIds.push(driver.user.id);
     const { ride, rider } = await createTestRide({
@@ -286,9 +307,45 @@ describe("POST /rides/:id/sos", () => {
 
     const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
 
-    expect(res.statusCode).toBe(409);
-    expect(res.json().code).toBe("NO_EMERGENCY_CONTACT");
-    expect(sendSms).not.toHaveBeenCalled();
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.hasEmergencyContact).toBe(false);
+    expect(body.contactName).toBeNull();
+    expect(body.supportNotified).toBe(true);
+    expect(body.trackingUrl).toContain("/track/");
+
+    // Exactly one SMS: support only.
+    expect(sendSms).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(sendSms).mock.calls[0]![0]).toBe(SUPPORT_PHONE);
+  });
+
+  it("texts BOTH the rider's contact and support when a contact is set", async () => {
+    const { ride, token } = await rideWithSosReadyRider();
+
+    const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().smsDelivered).toBe(true);
+    expect(res.json().supportNotified).toBe(true);
+
+    const recipients = vi.mocked(sendSms).mock.calls.map((c) => c[0]);
+    expect(recipients).toHaveLength(2);
+    expect(recipients).toContain("+233240000111");
+    expect(recipients).toContain(SUPPORT_PHONE);
+  });
+
+  it("still reaches support when the rider's own contact fails", async () => {
+    // The two sends are independent — neither may take the other down.
+    vi.mocked(sendSms).mockImplementation(async (phone: string) =>
+      phone === SUPPORT_PHONE ? { success: true } : Promise.reject(new Error("unreachable")),
+    );
+    const { ride, token } = await rideWithSosReadyRider();
+
+    const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().smsDelivered).toBe(false);
+    expect(res.json().supportNotified).toBe(true);
   });
 
   it("refuses on a ride that is no longer active", async () => {
@@ -316,14 +373,34 @@ describe("POST /rides/:id/sos", () => {
 
   it("still returns the tracking URL when the SMS provider fails", async () => {
     // A half-working SOS must not look like a broken button.
-    vi.mocked(sendSms).mockRejectedValueOnce(new Error("provider down"));
+    vi.mocked(sendSms).mockRejectedValue(new Error("provider down"));
     const { ride, token } = await rideWithSosReadyRider();
 
     const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().smsDelivered).toBe(false);
+    expect(res.json().supportNotified).toBe(false);
     expect(res.json().trackingUrl).toContain("/track/");
+  });
+
+  it("uses the human status label, never the raw enum, and fits one SMS segment", async () => {
+    const { ride, token } = await rideWithSosReadyRider();
+
+    await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+
+    const message = vi.mocked(sendSms).mock.calls[0]![1];
+    expect(message).toContain("On the trip");
+    expect(message).not.toContain("IN_PROGRESS");
+    expect(message.length).toBeLessThanOrEqual(SMS_SEGMENT_LIMIT);
+  });
+
+  it("does not put a 'call them' nudge in the SMS — that lives on the page", async () => {
+    const { ride, token } = await rideWithSosReadyRider();
+    await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+
+    const message = vi.mocked(sendSms).mock.calls[0]![1];
+    expect(message.toLowerCase()).not.toContain("call");
   });
 });
 
@@ -342,20 +419,204 @@ describe("GET /track/:token", () => {
     expect(res.headers["cache-control"]).toBe("no-store");
   });
 
-  it("does not leak phone numbers to the link holder", async () => {
-    const { ride, rider, driver, token } = await rideWithSosReadyRider();
+  it("never exposes the DRIVER's phone to the link holder", async () => {
+    // The rider's own number IS shown (it powers the "call them now" nudge,
+    // and the recipient is the rider's chosen contact who already has it).
+    // The driver never consented to that, so their number must not appear in
+    // any form — raw or dial-normalised.
+    const { ride, driver, token } = await rideWithSosReadyRider();
     const sos = await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
     const trackPath = new URL(sos.json().trackingUrl).pathname;
 
     const res = await app.inject({ method: "GET", url: trackPath });
 
-    expect(res.body).not.toContain(rider.phone);
+    const normalise = (value: string) => value.replace(/[\s()-]/g, "");
     expect(res.body).not.toContain(driver.user.phone);
+    expect(normalise(res.body)).not.toContain(normalise(driver.user.phone));
+  });
+
+  it("carries the 'call them now' nudge that the SMS deliberately omits", async () => {
+    const { ride, rider, token } = await rideWithSosReadyRider();
+    const sos = await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+    const trackPath = new URL(sos.json().trackingUrl).pathname;
+
+    const res = await app.inject({ method: "GET", url: trackPath });
+
+    expect(res.body).toContain("call them now");
+    // The nudge offers the RIDER's number — the person who raised the alarm,
+    // and one this recipient already has. The DRIVER's stays withheld.
+    expect(res.body).toContain(`tel:${rider.phone.replace(/[\s()-]/g, "")}`);
+  });
+
+  it("shows no call-to-action once the trip has ended", async () => {
+    const { ride, token } = await rideWithSosReadyRider();
+    const sos = await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+    const trackPath = new URL(sos.json().trackingUrl).pathname;
+
+    await prisma.ride.update({ where: { id: ride.id }, data: { status: "COMPLETED" } });
+    const res = await app.inject({ method: "GET", url: trackPath });
+
+    expect(res.body).toContain("This trip has ended");
+    expect(res.body).not.toContain("call them now");
+  });
+
+  it("uses human status labels, not raw enums", async () => {
+    const { ride, token } = await rideWithSosReadyRider();
+    const sos = await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+    const trackPath = new URL(sos.json().trackingUrl).pathname;
+
+    const res = await app.inject({ method: "GET", url: trackPath });
+
+    expect(res.body).toContain("On the trip");
+    expect(res.body).not.toContain("IN_PROGRESS");
   });
 
   it("404s on an unknown token", async () => {
     const res = await app.inject({ method: "GET", url: "/track/deadbeefdeadbeefdeadbeefdeadbeef" });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+// ── Driver phone visibility window (24h after completion) ────────────────────
+
+describe("GET /rides/:id — driver phone TTL", () => {
+  /** A ride with a driver, completed `hoursAgo` ago (0 = still running). */
+  async function rideCompleted(hoursAgo: number | null) {
+    const driver = await createTestDriver({ isOnline: true, isApproved: true });
+    createdDriverUserIds.push(driver.user.id);
+
+    const { ride, rider } = await createTestRide({
+      type: "LONE",
+      status: hoursAgo === null ? "IN_PROGRESS" : "COMPLETED",
+      driverId: driver.user.id,
+    });
+    createdRideIds.push(ride.id);
+
+    if (hoursAgo !== null) {
+      await prisma.ride.update({
+        where: { id: ride.id },
+        data: { completedAt: new Date(Date.now() - hoursAgo * 60 * 60 * 1000) },
+      });
+    }
+
+    return { ride, driver, token: signAccessToken({ userId: rider.id, role: "RIDER" }) };
+  }
+
+  it("exposes the driver's phone during the ride", async () => {
+    const { ride, driver, token } = await rideCompleted(null);
+
+    const res = await app.inject({ method: "GET", url: `/rides/${ride.id}`, headers: auth(token) });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().driver.phone).toBe(driver.user.phone);
+  });
+
+  it("still exposes it the next morning — the 'I left my bag' case", async () => {
+    const { ride, driver, token } = await rideCompleted(12);
+
+    const res = await app.inject({ method: "GET", url: `/rides/${ride.id}`, headers: auth(token) });
+
+    expect(res.json().driver.phone).toBe(driver.user.phone);
+  });
+
+  it("withholds it once the ride is more than 24h old", async () => {
+    const { ride, token } = await rideCompleted(25);
+
+    const res = await app.inject({ method: "GET", url: `/rides/${ride.id}`, headers: auth(token) });
+
+    expect(res.statusCode).toBe(200);
+    // The rest of the driver payload stays — only the number goes.
+    expect(res.json().driver.phone).toBeNull();
+    expect(res.json().driver.name).toBeTruthy();
+  });
+});
+
+// ── Rejections clear on re-broadcast ─────────────────────────────────────────
+
+describe("RideRejection lifecycle", () => {
+  it("clears a driver's rejection when the ride is re-broadcast", async () => {
+    const { pickup, dropoff } = await getTestZones();
+    const driver = await authedDriver();
+    await prisma.driver.update({
+      where: { userId: driver.user.id },
+      data: { currentZoneId: pickup.id },
+    });
+
+    const { ride } = await createTestRide({
+      type: "LONE",
+      status: "REQUESTED",
+      pickupZoneId: pickup.id,
+      dropoffZoneId: dropoff.id,
+      broadcastStartedAt: new Date(),
+    });
+    createdRideIds.push(ride.id);
+
+    await app.inject({
+      method: "POST",
+      url: `/rides/${ride.id}/reject`,
+      headers: auth(driver.token),
+    });
+    expect(await prisma.rideRejection.count({ where: { rideId: ride.id } })).toBe(1);
+
+    // The dispatch window expires with no claim, the rider keeps waiting, and
+    // the ride goes back out to everyone.
+    await applyRideTransition(prisma, ride.id, "AWAITING_RIDER_DECISION");
+    await riderDecision(prisma, ride.id, "KEEP_WAITING");
+
+    expect(await prisma.rideRejection.count({ where: { rideId: ride.id } })).toBe(0);
+
+    // And the driver who passed sees it offered again.
+    const eligible = await app.inject({
+      method: "GET",
+      url: "/driver/rides/eligible",
+      headers: auth(driver.token),
+    });
+    expect(eligible.json().rides.map((r: { rideId: string }) => r.rideId)).toContain(ride.id);
+  });
+
+  it("clears rejections when a SHARED ride is switched to LONE and re-broadcast", async () => {
+    const { pickup, dropoff } = await getTestZones();
+    const driver = await authedDriver();
+
+    const { ride, rider } = await createTestRide({
+      type: "SHARED",
+      status: "AWAITING_RIDER_DECISION",
+      pickupZoneId: pickup.id,
+      dropoffZoneId: dropoff.id,
+      decisionStartedAt: new Date(),
+    });
+    createdRideIds.push(ride.id);
+    await prisma.ridePassenger.create({
+      data: {
+        rideId: ride.id,
+        riderId: rider.id,
+        pickupZoneId: pickup.id,
+        dropoffZoneId: dropoff.id,
+        status: "WAITING",
+      },
+    });
+    await prisma.rideRejection.create({
+      data: { rideId: ride.id, driverUserId: driver.user.id },
+    });
+
+    await riderDecision(prisma, ride.id, "SWITCH_TO_LONE");
+
+    expect(await prisma.rideRejection.count({ where: { rideId: ride.id } })).toBe(0);
+  });
+
+  it("keeps the rejection while the ride stays in the same broadcast window", async () => {
+    const { ride } = await createTestRide({ type: "LONE", status: "REQUESTED" });
+    createdRideIds.push(ride.id);
+    const driver = await authedDriver();
+
+    await app.inject({
+      method: "POST",
+      url: `/rides/${ride.id}/reject`,
+      headers: auth(driver.token),
+    });
+
+    // Nothing re-broadcasts here, so the decline must stick.
+    expect(await prisma.rideRejection.count({ where: { rideId: ride.id } })).toBe(1);
   });
 });
 

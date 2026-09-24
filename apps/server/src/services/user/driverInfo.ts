@@ -10,16 +10,40 @@ import type { PrismaClient } from "@prisma/client";
  * had to be made twice and could silently drift between the socket event and
  * the REST fallback.
  */
+/**
+ * How long after a ride completes the driver's number stays visible to the
+ * rider. Long enough to cover "I left my bag in the car" the next morning,
+ * short enough that a months-old trip is not a standing line to a stranger.
+ */
+export const DRIVER_CONTACT_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether the driver's phone should still be shown for a ride completed at
+ * `completedAt`.
+ *
+ * A ride that has not completed is in progress, so the number is always
+ * visible — that is the case the call button exists for.
+ */
+export function isDriverContactVisible(
+  completedAt: Date | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!completedAt) return true;
+  return now.getTime() - completedAt.getTime() < DRIVER_CONTACT_TTL_MS;
+}
+
 export interface DriverInfo {
   driverId: string;
   name: string;
   /**
    * The driver's phone, so a matched rider can call them at pickup
-   * (Phase 4 rider<->driver contact). Only ever returned once a driver is
-   * assigned to the ride, since every caller looks the driver up from
-   * `ride.driverId`.
+   * (Phase 4 rider<->driver contact).
+   *
+   * Null once the ride has been finished for longer than
+   * DRIVER_CONTACT_TTL_MS — the trip that justified sharing the number is
+   * over, so the number goes away with it.
    */
-  phone: string;
+  phone: string | null;
   carMake: string | null;
   carModel: string | null;
   carColor: string | null;
@@ -32,6 +56,12 @@ export interface DriverInfo {
 export async function getDriverInfo(
   prisma: PrismaClient,
   driverId: string,
+  /**
+   * The ride this driver is being looked up for. Omit for a ride that is
+   * still running (the claim path), where the number is always visible.
+   */
+  ride?: { completedAt: Date | null },
+  now: Date = new Date(),
 ): Promise<DriverInfo | null> {
   const [driver, { _avg }] = await Promise.all([
     prisma.user.findUnique({ where: { id: driverId }, include: { driver: true } }),
@@ -42,7 +72,7 @@ export async function getDriverInfo(
   return {
     driverId: driver.id,
     name: driver.name,
-    phone: driver.phone,
+    phone: isDriverContactVisible(ride?.completedAt, now) ? driver.phone : null,
     carMake: driver.driver?.carMake ?? null,
     carModel: driver.driver?.carModel ?? null,
     carColor: driver.driver?.carColor ?? null,

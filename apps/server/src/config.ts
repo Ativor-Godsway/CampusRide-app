@@ -125,6 +125,17 @@ export const config = {
    */
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3000}`,
   /**
+   * Phase 4 safety backstop. Every SOS is also texted to this number, so a
+   * rider who never saved an emergency contact still reaches a human. Unset
+   * means support is simply not notified — the SOS still succeeds and still
+   * texts the rider's own contact — so an unconfigured deployment degrades
+   * rather than breaking the button.
+   *
+   * Full SOS visibility belongs in the Phase 5 admin panel; this is the
+   * stopgap until then.
+   */
+  supportContactPhone: process.env.SUPPORT_CONTACT_PHONE ?? "",
+  /**
    * Cloudinary credentials for SIGNED driver-photo uploads. The apiSecret is
    * server-only and must never be exposed to the apps — it is what replaces
    * the old unsigned upload preset that shipped inside the app bundle.
