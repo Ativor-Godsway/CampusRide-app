@@ -9,13 +9,24 @@ export type CorsOrigin = string[] | boolean;
 
 /**
  * Parses a comma-separated origin allowlist ("https://a.com, https://b.com").
+ *
+ * Each entry is normalized to the exact form a browser puts in its `Origin`
+ * header, because @fastify/cors compares the two as plain strings:
+ *
+ *   - surrounding whitespace is trimmed, so "a, b" works as well as "a,b";
+ *   - TRAILING SLASHES ARE STRIPPED. A browser never sends one ("https://x.com",
+ *     not "https://x.com/"), but a value pasted out of a URL bar or a Render
+ *     dashboard almost always has one, and "https://x.com/" silently matches
+ *     nothing. This was a real outage: the allowlist looked correct in the
+ *     dashboard and every request was still blocked.
+ *
  * Blank entries are dropped so a trailing comma or an empty env var is
  * simply an empty allowlist rather than an origin named "".
  */
 export function parseOriginAllowlist(raw: string): string[] {
   return raw
     .split(",")
-    .map((o) => o.trim())
+    .map((o) => o.trim().replace(/\/+$/, ""))
     .filter(Boolean);
 }
 

@@ -20,6 +20,33 @@ describe("parseOriginAllowlist", () => {
     expect(parseOriginAllowlist("   ")).toEqual([]);
     expect(parseOriginAllowlist(",,,")).toEqual([]);
   });
+
+  /**
+   * A browser's Origin header is scheme+host+port with NO path and no trailing
+   * slash, and @fastify/cors compares it to the allowlist as a plain string.
+   * A value pasted from a URL bar or a Render dashboard usually carries the
+   * slash, which used to match nothing while looking perfectly correct — the
+   * failure mode that took the admin site down.
+   */
+  it("strips trailing slashes so a pasted URL still matches a real Origin header", () => {
+    expect(parseOriginAllowlist("https://campusride-admin.onrender.com/")).toEqual([
+      "https://campusride-admin.onrender.com",
+    ]);
+    expect(parseOriginAllowlist("https://a.com///")).toEqual(["https://a.com"]);
+  });
+
+  it("handles spaces and trailing slashes together, the way a pasted list arrives", () => {
+    expect(
+      parseOriginAllowlist("  https://a.com/ ,\thttps://b.com ,  https://c.com//  "),
+    ).toEqual(["https://a.com", "https://b.com", "https://c.com"]);
+  });
+
+  it("does not mangle a bare origin that was already correct", () => {
+    expect(parseOriginAllowlist("https://a.com,http://localhost:5173")).toEqual([
+      "https://a.com",
+      "http://localhost:5173",
+    ]);
+  });
 });
 
 describe("resolveCorsOrigin", () => {

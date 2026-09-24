@@ -219,7 +219,7 @@ it is a dashboard action, and must be done by hand:
 5. **Redirects/Rewrites:** add a rewrite `/*` → `/index.html` (SPA routing —
    without it a page refresh returns 404).
 6. **Environment → `VITE_API_URL`**: the public URL of `campusride-server`,
-   e.g. `https://campusride-server.onrender.com`, with no trailing slash.
+   `https://campusride-server-aaum.onrender.com`, with no trailing slash.
    Vite inlines this at build time, so changing it needs a **redeploy**.
 7. Once Render assigns the static site its URL, go back to
    **campusride-server → Environment** and add that origin to

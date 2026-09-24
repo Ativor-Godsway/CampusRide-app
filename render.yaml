@@ -142,7 +142,15 @@ services:
       # so its origin MUST be in this list — otherwise every admin request is
       # blocked by CORS and the app appears to be broken while the API is
       # fine. Comma-separate multiple origins, e.g.
-      #   https://campusride.example,https://campusride-admin.onrender.com
+      #   https://campusride-admin.onrender.com
+      #
+      # NO TRAILING SLASHES, though the parser now strips them defensively: a
+      # browser's Origin header is scheme+host+port only, so "…onrender.com/"
+      # matches nothing. A blocked request is invisible server-side (the API
+      # returns 200 and the browser discards the response for the missing
+      # Access-Control-Allow-Origin header), so the server now logs the
+      # resolved allowlist at boot — check that line first when a browser
+      # client "cannot reach" a healthy API.
       - key: CORS_ALLOWED_ORIGINS
         sync: false
 
@@ -164,7 +172,7 @@ services:
       # of this service — the recipient opens it on their own phone. If it is
       # unset the link falls back to http://localhost:PORT and the SOS arrives
       # pointing nowhere, which defeats the feature.
-      # Set to this service's Render URL, e.g. https://campusride-server.onrender.com
+      # Set to this service's Render URL: https://campusride-server-aaum.onrender.com
       - key: PUBLIC_BASE_URL
         sync: false
 
@@ -206,7 +214,7 @@ services:
   # fails in the browser console:
   #   1. VITE_API_URL below = the server service's public URL.
   #   2. campusride-server's CORS_ALLOWED_ORIGINS must CONTAIN this static
-  #      site's origin (e.g. https://campusride-admin.onrender.com). The API
+  #      site's origin (https://campusride-admin.onrender.com). The API
   #      grants no browser origin at all in production unless it is on that
   #      list, and the admin app IS a browser client — unlike the native
   #      rider/driver apps, which send no Origin header.
@@ -239,8 +247,12 @@ services:
         value: noindex, nofollow
 
     envVars:
-      # Vite inlines this at BUILD time — changing it requires a redeploy, not
-      # just a restart. Set it to the campusride-server service's public URL,
-      # e.g. https://campusride-server.onrender.com (no trailing slash).
+      # Vite inlines this at BUILD time — changing it requires a REDEPLOY, not
+      # just a restart, and a stale value here sends the admin app at the old
+      # server no matter what CORS says on the new one.
+      #
+      # Set as a literal (not sync:false) because it is a public URL, not a
+      # secret, and because a missing value here fails in a confusing way:
+      # the app builds fine and falls back to http://localhost:3000.
       - key: VITE_API_URL
-        sync: false
+        value: https://campusride-server-aaum.onrender.com

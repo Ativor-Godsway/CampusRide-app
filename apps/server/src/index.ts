@@ -87,10 +87,31 @@ async function bootstrap() {
   // send no Origin header, so none of this affects the rider/driver apps.
   const corsAllowlist = parseOriginAllowlist(config.corsAllowedOrigins);
   const corsOrigin = resolveCorsOrigin(corsAllowlist, config.nodeEnv);
-  if (corsAllowlist.length === 0 && config.nodeEnv !== "production") {
-    app.log.warn(
-      "CORS_ALLOWED_ORIGINS is unset — reflecting any browser origin. This is permitted outside production only.",
-    );
+
+  // Always state the resolved allowlist at boot. A CORS rejection is INVISIBLE
+  // server-side — @fastify/cors blocks by omitting Access-Control-Allow-Origin,
+  // so the request still returns 200 with its body and the browser is what
+  // discards it. Without this line the logs show nothing but healthy traffic
+  // while every browser client is broken.
+  app.log.info(
+    { corsAllowlist, nodeEnv: config.nodeEnv },
+    `CORS allowlist resolved (${corsAllowlist.length} origin(s))`,
+  );
+
+  if (corsAllowlist.length === 0) {
+    if (config.nodeEnv === "production") {
+      app.log.warn(
+        "CORS_ALLOWED_ORIGINS is EMPTY in production — NO browser origin can call this API, " +
+          "so the admin site will fail on every request while this server keeps returning 200. " +
+          "Set CORS_ALLOWED_ORIGINS to a comma-separated list of origins with no trailing slash, " +
+          "e.g. https://campusride-admin.onrender.com. Native rider/driver apps send no Origin " +
+          "header and are unaffected.",
+      );
+    } else {
+      app.log.warn(
+        "CORS_ALLOWED_ORIGINS is unset — reflecting any browser origin. This is permitted outside production only.",
+      );
+    }
   }
   await app.register(cors, { origin: corsOrigin });
   // Parser for application/x-www-form-urlencoded, scoped to that
