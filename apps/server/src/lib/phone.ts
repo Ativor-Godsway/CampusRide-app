@@ -49,19 +49,18 @@ export function toMsisdn(input: string): string | null {
 /**
  * Every stored form a given number might plausibly appear as in User.phone.
  *
- * This exists because the auth routes do NOT normalize: signup and login use
- * whatever string the client sent as the unique key (see
- * services/auth/authService.ts), so a user who typed "0548608146" is stored
- * in exactly that form, while the USSD and demo-OTP paths DO normalize and
- * store "+233548608146". The column therefore holds a mix of formats, and a
- * lookup by any single form misses rows written by the other paths.
+ * The column is canonical since migration 20260924210000, so in practice only
+ * the canonical variant matches a row today. The other forms are kept because
+ * the INPUT is still arbitrary — an operator typing a local number, a USSD
+ * msisdn, a pasted string — and because a lookup that tolerates all of them
+ * cannot regress the way the original bug did.
  *
  * Returns the canonical form first, then the other equivalents, then the raw
  * input, de-duplicated and preserving that order. For a non-Ghanaian or
  * unparseable input it degrades to just the trimmed raw value.
  *
- * Use this for LOOKUPS, never for writes — the fix for the mixed-format
- * column is a migration, not a second write format. See docs/phone-formats.md.
+ * Use this for LOOKUPS, never for writes: writes go through normalizePhone so
+ * the column stays single-format. See docs/phone-formats.md.
  */
 export function phoneVariants(input: string): string[] {
   const raw = input.trim();

@@ -1,4 +1,5 @@
 import { prisma } from "../../db/prisma";
+import { uniqueGhanaPhone } from "../../test/testPhone";
 import type { PassengerStatus, RideSource, RideStatus, RideType } from "@rida/shared";
 
 let counter = 0;
@@ -7,7 +8,9 @@ export async function createTestUser(role: "RIDER" | "DRIVER" = "RIDER") {
   counter += 1;
   return prisma.user.create({
     data: {
-      phone: `+233-2a-test-${Date.now()}-${counter}`,
+      // Must be a real Ghanaian number: User_phone_canonical_check rejects
+      // anything that is not "+233XXXXXXXXX". See src/test/testPhone.ts.
+      phone: uniqueGhanaPhone(),
       name: `Phase2a Test ${role} ${counter}`,
       role,
     },

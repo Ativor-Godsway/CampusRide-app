@@ -86,6 +86,14 @@ enum PaymentMethod {
 
 model User {
   id        String   @id @default(cuid())
+  /// ALWAYS canonical "+233XXXXXXXXX". Normalized at the edge of the auth
+  /// routes (routes/auth.ts) and enforced by a CHECK constraint that Prisma
+  /// cannot express here:
+  ///   User_phone_canonical_check:
+  ///     phone LIKE '+233%' OR phone LIKE 'deleted:%'
+  /// (migration 20260924210000_phone_canonicalisation). The 'deleted:%' arm
+  /// covers DELETE /me, which rewrites this to "deleted:<userId>".
+  /// Never write a raw user-typed number here — run normalizePhone first.
   phone     String   @unique
   name      String
   role      UserRole

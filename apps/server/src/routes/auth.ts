@@ -30,6 +30,7 @@ import {
   deleteAccount,
 } from "../services/auth/deleteAccount";
 import { config } from "../config";
+import { normalizePhone } from "../lib/phone";
 
 /** Shared window for the per-IP auth rate limits (max counts come from config). */
 const AUTH_RATE_WINDOW = "15 minutes";
@@ -49,6 +50,20 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+/**
+ * PHONE CANONICALIZATION. Every route below keys on the phone string:
+ * OtpCode.phone, User.phone, and the signed verification token whose payload
+ * verifyVerificationToken compares byte-for-byte. They must all agree on ONE
+ * spelling, or a code requested as "0548608146" cannot be verified as
+ * "+233548608146", and a token minted by one endpoint is rejected by the next.
+ *
+ * So each handler runs `normalizePhone` on the way in and passes only the
+ * canonical "+233XXXXXXXXX" downstream — nothing below this layer, including
+ * the database, ever sees a local or bare-msisdn form. A number that does not
+ * normalize is a 400 here rather than a row nobody can log into later.
+ */
+const PHONE_NOT_GHANAIAN = "phone is not a valid Ghanaian number";
+
 export function registerAuthRoutes(
   app: FastifyInstance,
   prisma: PrismaClient,
@@ -64,8 +79,13 @@ export function registerAuthRoutes(
       return reply.code(400).send({ error: "phone and purpose (SIGNUP|LOGIN) are required" });
     }
 
+    const phone = normalizePhone(body.phone);
+    if (!phone) {
+      return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
+    }
+
     try {
-      await requestOtp(prisma, otpService, body.phone, body.purpose);
+      await requestOtp(prisma, otpService, phone, body.purpose);
       return reply.code(200).send({ ok: true });
     } catch (err) {
       if (err instanceof OtpRateLimitExceededError) {
@@ -90,7 +110,12 @@ export function registerAuthRoutes(
     }
 
     try {
-      const result = await verifyOtp(prisma, body.phone, body.code, body.purpose);
+      const phone = normalizePhone(body.phone);
+      if (!phone) {
+        return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
+      }
+
+      const result = await verifyOtp(prisma, phone, body.code, body.purpose);
       return reply.code(200).send(result);
     } catch (err) {
       if (
@@ -126,9 +151,14 @@ export function registerAuthRoutes(
         .send({ error: "phone, name, role (RIDER|DRIVER), and verifiedToken are required" });
     }
 
+    const phone = normalizePhone(body.phone);
+    if (!phone) {
+      return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
+    }
+
     try {
       const result = await signup(prisma, {
-        phone: body.phone,
+        phone,
         name: body.name,
         role: body.role,
         verifiedToken: body.verifiedToken,
@@ -155,9 +185,14 @@ export function registerAuthRoutes(
       return reply.code(400).send({ error: "phone and verifiedToken are required" });
     }
 
+    const phone = normalizePhone(body.phone);
+    if (!phone) {
+      return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
+    }
+
     try {
       const result = await login(prisma, {
-        phone: body.phone,
+        phone,
         verifiedToken: body.verifiedToken,
       });
       return reply.code(200).send(result);
