@@ -23,7 +23,8 @@
  */
 import { config } from "../config";
 import { prisma } from "../db/prisma";
-import { normalizePhone } from "../lib/phone";
+import { isValidGhanaPhone, normalizePhone, phoneVariants } from "../lib/phone";
+import { findUsersByPhone } from "../services/user/findUserByPhone";
 
 async function main() {
   const raw = process.argv[2] ?? process.env.ADMIN_PHONE;
@@ -32,21 +33,44 @@ async function main() {
     process.exit(1);
   }
 
-  const phone = normalizePhone(raw);
-  if (!phone) {
+  if (!isValidGhanaPhone(raw)) {
     console.error(`"${raw}" is not a valid Ghanaian phone number (expected 0XXXXXXXXX or +233XXXXXXXXX).`);
     process.exit(1);
     return;
   }
 
-  const user = await prisma.user.findUnique({ where: { phone } });
+  const phone = normalizePhone(raw)!;
 
-  if (!user) {
+  /**
+   * Look the account up in EVERY equivalent format, not just the canonical
+   * one. User.phone is a mix: the auth routes store whatever the user typed
+   * ("0548608146"), while USSD/demo-OTP normalize first ("+233548608146").
+   * Matching only the canonical form made this script report "no user" for
+   * accounts that obviously existed.
+   */
+  const matches = await findUsersByPhone(prisma, raw);
+
+  if (matches.length === 0) {
     console.error(
-      `No user with phone ${phone}. Sign that number up in the app first, then re-run this script.`,
+      `No user with phone ${phone} (looked for ${phoneVariants(raw).join(", ")}).`,
     );
+    console.error("Sign that number up in the app first, then re-run this script.");
     process.exit(1);
   }
+
+  if (matches.length > 1) {
+    // The same human registered through two paths that stored two formats.
+    // Promoting one arbitrarily would leave a confusing half-admin, so stop
+    // and let a person decide which row is the real account.
+    console.error(`${matches.length} accounts share this number in different stored formats:`);
+    for (const m of matches) {
+      console.error(`  - ${m.id}  phone=${m.phone}  role=${m.role}  name=${m.name}`);
+    }
+    console.error("Merge or delete the duplicate first, then re-run.");
+    process.exit(1);
+  }
+
+  const user = matches[0]!;
 
   if (user.deletedAt) {
     console.error(`User ${phone} is deleted and cannot be promoted.`);
@@ -72,7 +96,7 @@ async function main() {
     }),
   ]);
 
-  console.log(`Promoted ${user.name} (${phone}) from ${previousRole} to ADMIN.`);
+  console.log(`Promoted ${user.name} (stored as ${user.phone}) from ${previousRole} to ADMIN.`);
   console.log("They must log out and log back in — existing access tokens still carry the old role.");
 }
 
