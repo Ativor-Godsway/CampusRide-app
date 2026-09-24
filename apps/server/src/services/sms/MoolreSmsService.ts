@@ -1,3 +1,4 @@
+import { toMsisdn } from "../../lib/phone";
 const SMS_SEND_PATH = "/open/sms/send";
 const TYPE_SMS = 1;
 const SMS_STATUS_SUCCESS = 1;
@@ -64,7 +65,31 @@ export async function sendMoolreSms(
   return { success: data.status === SMS_STATUS_SUCCESS || data.status === String(SMS_STATUS_SUCCESS) };
 }
 
-/** Moolre SMS expects recipients without a leading "+" (e.g. "233XXXXXXXXX"). */
+/**
+ * Moolre SMS expects recipients as "233XXXXXXXXX" — country code, no leading
+ * "+", no leading 0.
+ *
+ * This used to only strip a "+", which assumed every caller already held a
+ * canonical "+233…" number. They do not: the auth routes store whatever the
+ * user typed, so a rider who entered "0548608146" was sent to Moolre in that
+ * local form.
+ *
+ * In practice Moolre ACCEPTS the local form and those messages are delivered
+ * (verified in production) — so this is a correctness and consistency fix,
+ * not a repair of a broken send. Reasons to normalize anyway:
+ *
+ *   - "233XXXXXXXXX" is the documented contract. Local-form acceptance is
+ *     undocumented behaviour that could change under us, and it would change
+ *     silently, on the login path.
+ *   - `ref` (our idempotency key) is derived from the recipient, so the same
+ *     person reached via two stored formats produced two different refs.
+ *   - One canonical recipient makes delivery logs and support lookups match
+ *     the number a human would search for.
+ *
+ * Anything that isn't a Ghanaian number falls back to the old strip-the-plus
+ * behaviour rather than being dropped: an unusual emergency contact should
+ * still get its best-effort attempt.
+ */
 function toMoolreRecipient(phone: string): string {
-  return phone.startsWith("+") ? phone.slice(1) : phone;
+  return toMsisdn(phone) ?? (phone.startsWith("+") ? phone.slice(1) : phone);
 }
