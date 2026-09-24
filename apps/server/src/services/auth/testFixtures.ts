@@ -1,12 +1,16 @@
 import type { OtpResult, OtpService } from "../otp/OtpService";
 import { prisma } from "../../db/prisma";
+import { uniqueGhanaPhone } from "../../test/testPhone";
 
-let counter = 0;
-
-/** Returns a fresh, unique phone number for each call. */
+/**
+ * Returns a fresh, unique phone number for each call.
+ *
+ * Must be a STRUCTURALLY VALID Ghanaian number: the auth routes normalize at
+ * the edge and 400 anything else, and the User_phone_canonical_check
+ * constraint rejects it at the database. See src/test/testPhone.ts.
+ */
 export function uniqueTestPhone(): string {
-  counter += 1;
-  return `+233-auth-test-${Date.now()}-${counter}`;
+  return uniqueGhanaPhone();
 }
 
 /** Captures sent OTP codes in-memory so tests can read the real (unhashed) code. */
