@@ -1,12 +1,18 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "../../db/prisma";
 import { handleUssdRequest, type MoolreUssdRequest } from "./ussdHandler";
+import { uniqueGhanaMsisdn } from "../../test/testPhone";
 
-let counter = 0;
-/** A unique, valid (per lib/phone.ts) 233-format msisdn for each test. */
+/**
+ * A unique, valid 233-format msisdn for each test, using the reserved
+ * synthetic prefix so a row created here can never be mistaken for a real
+ * USSD rider. See src/test/testPhone.ts — USSD fixtures matter most here,
+ * because findOrCreateRiderByPhone names every row it creates "USSD Rider",
+ * so the phone number is the only thing distinguishing a fixture from a
+ * customer.
+ */
 function testMsisdn(): string {
-  counter += 1;
-  return `23320${String(Date.now()).slice(-6)}${counter}`;
+  return uniqueGhanaMsisdn();
 }
 
 const createdUserIds: string[] = [];
