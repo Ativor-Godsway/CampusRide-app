@@ -5,6 +5,7 @@ import rateLimit from "@fastify/rate-limit";
 import { Server as SocketServer } from "socket.io";
 import { APP_NAME, config } from "./config";
 import { prisma } from "./db/prisma";
+import { assertDatabaseAllowedForEnv } from "./db/dbHostGuard";
 import {
   parseOriginAllowlist,
   resolveCorsOrigin,
@@ -39,6 +40,12 @@ const TIMEOUT_POLL_INTERVAL_MS = 30_000;
 export { paymentService, routeService, otpService };
 
 async function bootstrap() {
+  // Fail loud before binding a port: a LOCAL server must never come up against
+  // the live database. db/prisma.ts enforces this at connection construction
+  // too, but say it here as well so the refusal is the first thing in the log
+  // rather than a stack trace from an import.
+  assertDatabaseAllowedForEnv(config.databaseUrl, config.nodeEnv, "server startup");
+
   // Fail loud before binding a port: a production server that cannot deliver
   // login OTPs is not serviceable (see services/active.ts).
   assertOtpServiceAllowedInProduction(otpService, config.nodeEnv);
