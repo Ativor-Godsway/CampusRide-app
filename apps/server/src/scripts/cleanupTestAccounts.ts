@@ -5,12 +5,16 @@
  * See docs/incident-2026-09-24-test-rows-in-production.md.
  *
  *   # 1. DRY RUN (the default — prints the plan, writes nothing)
- *   DATABASE_URL="postgres://…" npx ts-node -r tsconfig-paths/register \
- *     src/scripts/cleanupTestAccounts.ts
+ *   ALLOW_PRODUCTION_DB=1 DATABASE_URL="postgres://…" \
+ *     npx ts-node -r tsconfig-paths/register src/scripts/cleanupTestAccounts.ts
  *
  *   # 2. Apply, after reading the plan
- *   DATABASE_URL="postgres://…" npx ts-node -r tsconfig-paths/register \
- *     src/scripts/cleanupTestAccounts.ts --apply
+ *   ALLOW_PRODUCTION_DB=1 DATABASE_URL="postgres://…" \
+ *     npx ts-node -r tsconfig-paths/register src/scripts/cleanupTestAccounts.ts --apply
+ *
+ * ALLOW_PRODUCTION_DB=1 is required because db/prisma.ts refuses to open a
+ * connection to a known production host from a non-production process. Paste
+ * the production URL inline for the one-off; it should not live in any .env.
  *
  * WHAT IT TARGETS: only accounts whose phone CANNOT be a real number —
  * "+233-2a-test-…", "+233-auth-test-…" (the old fixture generators) and the

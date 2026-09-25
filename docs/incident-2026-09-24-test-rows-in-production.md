@@ -14,52 +14,90 @@ So production contains roughly 353 accounts created by the test suite.
 
 ## How they got there
 
-`apps/server/.env.test` used to point `DATABASE_URL` at a **Neon** host
-(`ep-blue-union-…`). It now points at local Postgres, with the Neon URL left
-commented out directly beneath it. Any test run made while that line was live
-wrote fixtures wherever it pointed.
+**The fixtures predate the guard by a month.** Their phone numbers embed the
+timestamp at which they were created:
+
+| Fixture | Created |
+| --- | --- |
+| `+233-2a-test-1781866008245-34` | 2026-06-19 |
+| `+233-auth-test-1780948084350-1` | 2026-06-08 |
+
+Commit `f39c252` — *"split dev/test/prod databases with local Postgres test
+runner"*, which introduced **both** `.env.test` **and** `assertNotProdDatabase`
+— landed **2026-07-15**.
+
+Before that commit there was no `.env.test` and no guard in
+`src/test/setup.ts`. `npm test` is `vitest run`, which loads whatever
+`config.ts` resolves — and with no env-specific file, that is the base `.env`,
+**which points at `ep-ancient-butterfly`: production**. So the suite connected
+to the live database and wrote fixtures there, with nothing in the way.
+
+### The `ep-blue-union` red herring
+
+An earlier version of this document blamed `.env.test` pointing at
+`ep-blue-union`. That cannot be the cause: the fixtures are in
+`ep-ancient-butterfly`. `ep-blue-union` was configured *later*, as a Neon test
+target, and has since been commented out in favour of local Postgres. It is
+unrelated to this incident, and is listed in `KNOWN_PROD_DB_HOSTS` only as a
+precaution until someone confirms what it actually is.
 
 The hosts each env file targets today:
 
 | File | Host |
 | --- | --- |
-| `.env` | `ep-ancient-butterfly-…` (Neon) |
-| `.env.development` | `ep-flat-rain-…` (Neon) |
-| `.env.test` | `localhost:5432/rida_test` — with `ep-blue-union-…` commented out below it |
+| `.env` | **was** `ep-ancient-butterfly` (production) — now repointed at the dev branch |
+| `.env.development` | `ep-flat-rain-…` (Neon dev) |
+| `.env.test` | `localhost:5432/rida_test`, with `ep-blue-union-…` commented out |
 
-### Why the guard did not catch it
+### Does `npm test` run `db:guard`?
 
-It ran. It just could not see the problem.
-
-`assertNotProdDatabase` was a **denylist naming exactly one host**:
-
-```ts
-export const PROD_DB_HOST = "ep-ancient-butterfly";
-if (url.includes(PROD_DB_HOST)) throw ...
-```
-
-`.env.test` pointed at `ep-blue-union-…`, which is not that string, so the
-check passed and the suite ran. A denylist fails **open**: it only stops the
-one address it has heard of, and production addresses change — new accounts,
-new branches, restores, renames. The guard protected against the database it
-was written for, not against production in general.
+**No.** `npm test` is `vitest run`. The `db:guard` script is only chained into
+`db:migrate:test`, `db:seed:test` and `db:reset:*`. The suite's only protection
+was a statement in `src/test/setup.ts` — one file, loaded via
+`vitest.config.ts` → `setupFiles`. Remove it, reorder it, or reach the database
+by any path that does not load it, and there is no check at all.
 
 ## The fix
 
-The guard is now an **allowlist** that fails closed (`src/db/dbHostGuard.ts`):
+### 1. The gate moved to the connection itself
 
-- local Postgres is always allowed;
-- any other host is refused unless the operator names it exactly in
-  `ALLOW_TEST_DB_HOST`;
-- a known production host is refused **even if** someone names it;
-- a missing or unparseable `DATABASE_URL` is refused rather than assumed safe.
+`src/db/prisma.ts` is where every database connection in the server is created,
+so `assertDatabaseAllowedForEnv` now runs there, as the client is constructed.
+vitest, any `ts-node` script and the dev server all inherit it regardless of
+entry point. **A test can no longer open a connection to a database it is not
+allowed to touch, whatever the setup files say.**
 
-`KNOWN_PROD_DB_HOSTS` lists both `ep-ancient-butterfly` and `ep-blue-union`.
-The second is listed as production until proven otherwise — if it is genuinely
-a disposable branch, remove it there deliberately rather than working around it.
+Rules by environment:
 
-`src/db/dbHostGuard.test.ts` pins all of it, including the exact case that
-failed: an unnamed remote Neon host is now refused.
+| `NODE_ENV` | Allowed |
+| --- | --- |
+| `production` | anything — production connects to production |
+| `test` | local Postgres, or a host named exactly in `ALLOW_TEST_DB_HOST` |
+| anything else | anything **except** a known production host |
+
+`src/index.ts` repeats the check at startup so a misconfigured dev server fails
+with a clear first line rather than a stack trace from an import.
+
+### 2. The guard itself fails closed
+
+`assertNotProdDatabase` was a denylist naming one host. It is now an allowlist:
+local is fine, any other host must be named in `ALLOW_TEST_DB_HOST`, a known
+production host is refused even if named, and a missing or unparseable URL is
+refused rather than assumed safe.
+
+### 3. Deliberate production access, for the scripts that need it
+
+`seedAdmin` and `cleanupTestAccounts` are *supposed* to touch production. They
+opt in per command with `ALLOW_PRODUCTION_DB=1`, which prints a warning naming
+the host. It is unreachable from `NODE_ENV=test` — a test can never unlock
+production, whatever is exported in the shell.
+
+### 4. `.env` no longer holds production credentials
+
+The base `.env` — the fallback for anything that does not load a more specific
+file, which is exactly what caused this — now points at the dev branch.
+Production credentials live in Render. For a one-off against production, paste
+the URL inline alongside `ALLOW_PRODUCTION_DB=1`.
 
 ### Fixtures are now identifiable
 

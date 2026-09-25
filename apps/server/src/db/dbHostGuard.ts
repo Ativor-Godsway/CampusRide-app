@@ -93,3 +93,69 @@ export function assertNotProdDatabase(url: string, context: string): void {
       `See docs/environments.md.`,
   );
 }
+
+/**
+ * The environment-aware gate, enforced at the point a database CONNECTION is
+ * created (src/db/prisma.ts) rather than in one setup file.
+ *
+ * `npm test` is `vitest run` — it does NOT run the `db:guard` script; only
+ * db:migrate:test / db:seed:test / db:reset:* do. For a long time the only
+ * thing standing between the suite and a live database was whichever env file
+ * happened to be loaded, and before 2026-07-15 not even that: there was no
+ * .env.test and no guard, so `npm test` used the base `.env` — which points at
+ * production. That is how ~353 fixture accounts were written there.
+ *
+ * Putting the check in prisma.ts means every consumer inherits it: vitest, any
+ * ts-node script, the dev server. A test cannot open a connection to a
+ * database it is not allowed to touch, whatever the setup files say.
+ *
+ * Rules by environment:
+ *   - production  -> anything. Production legitimately connects to production.
+ *   - test        -> local Postgres, or a host named in ALLOW_TEST_DB_HOST.
+ *                    Fixtures are created and deleted here; nothing else is
+ *                    safe.
+ *   - development -> anything EXCEPT a known production host. A dev Neon
+ *                    branch is fine; the live database is not.
+ */
+export function assertDatabaseAllowedForEnv(
+  url: string,
+  nodeEnv: string,
+  context: string,
+): void {
+  if (nodeEnv === "production") return;
+
+  if (nodeEnv === "test") {
+    assertNotProdDatabase(url, context);
+    return;
+  }
+
+  const host = dbHostFromUrl(url);
+  if (!host) return; // dev with no DATABASE_URL fails later, and more usefully
+
+  const prodMatch = KNOWN_PROD_DB_HOSTS.find((prod) => host.includes(prod));
+  if (prodMatch) {
+    // Deliberate escape hatch for operator scripts that are SUPPOSED to touch
+    // production — seedAdmin, cleanupTestAccounts. It is opt-in per command,
+    // shows up in shell history, and is unreachable from `nodeEnv === "test"`
+    // because that branch returned above: a test can never unlock production,
+    // no matter what is exported in the shell.
+    if (process.env.ALLOW_PRODUCTION_DB === "1") {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[${context}] ALLOW_PRODUCTION_DB=1 — connecting to the PRODUCTION database ` +
+          `("${host}"). Every write here affects real users.`,
+      );
+      return;
+    }
+
+    throw new Error(
+      `[${context}] REFUSING TO CONNECT: NODE_ENV="${nodeEnv}" but DATABASE_URL points at ` +
+        `"${host}", which matches the known PRODUCTION host "${prodMatch}". A local process ` +
+        `must never open a connection to the live database — one stray script or test run ` +
+        `writes to real user accounts. Point apps/server/.env at local Postgres or the dev ` +
+        `branch; production credentials belong in Render only. If this IS a deliberate ` +
+        `one-off against production (seedAdmin, cleanupTestAccounts), re-run it with ` +
+        `ALLOW_PRODUCTION_DB=1. See docs/environments.md.`,
+    );
+  }
+}

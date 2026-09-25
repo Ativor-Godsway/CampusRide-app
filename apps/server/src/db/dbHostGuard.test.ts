@@ -1,19 +1,33 @@
 /**
- * This guard failed open once, and ~353 test-fixture accounts were written
- * into the production database as a result. It was a denylist naming a single
- * Neon host; a .env.test pointing at a different Neon host passed straight
- * through. These tests pin the inverted rule: local is fine, everything else
- * must be named deliberately, production is never allowed.
+ * ~353 test-fixture accounts were written into the production database.
+ *
+ * The actual path: before 2026-07-15 there was no .env.test and no guard at
+ * all, so `npm test` loaded the base .env — which pointed at production. The
+ * fixture timestamps (2026-06-08, 2026-06-19) predate the guard by a month.
+ *
+ * The guard added afterwards was still a DENYLIST naming one host, which
+ * fails open against any host it has not heard of. These tests pin the
+ * inverted rule, and — more importantly — the connection-level gate below,
+ * because `npm test` never runs the db:guard script and a check that lives
+ * only in a setup file protects only the paths that load it.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { assertNotProdDatabase, dbHostFromUrl, KNOWN_PROD_DB_HOSTS } from "./dbHostGuard";
+import {
+  assertNotProdDatabase,
+  assertDatabaseAllowedForEnv,
+  dbHostFromUrl,
+  KNOWN_PROD_DB_HOSTS,
+} from "./dbHostGuard";
 
 const CTX = "test";
 const originalAllow = process.env.ALLOW_TEST_DB_HOST;
+const originalProdOptIn = process.env.ALLOW_PRODUCTION_DB;
 
 afterEach(() => {
   if (originalAllow === undefined) delete process.env.ALLOW_TEST_DB_HOST;
   else process.env.ALLOW_TEST_DB_HOST = originalAllow;
+  if (originalProdOptIn === undefined) delete process.env.ALLOW_PRODUCTION_DB;
+  else process.env.ALLOW_PRODUCTION_DB = originalProdOptIn;
 });
 
 const local = "postgresql://user:pw@localhost:5432/rida_test";
@@ -90,5 +104,75 @@ describe("dbHostFromUrl", () => {
   it("returns null for junk", () => {
     expect(dbHostFromUrl("")).toBeNull();
     expect(dbHostFromUrl("nonsense")).toBeNull();
+  });
+});
+
+
+/**
+ * The connection-level gate. This is the one that actually closes the hole:
+ * `npm test` is `vitest run` and never invokes the db:guard script, so a check
+ * that lives only in a setup file protects only the paths that load it.
+ */
+describe("assertDatabaseAllowedForEnv", () => {
+  describe("NODE_ENV=test", () => {
+    it("allows local Postgres", () => {
+      expect(() => assertDatabaseAllowedForEnv(local, "test", CTX)).not.toThrow();
+    });
+
+    it("REFUSES production — the exact path that polluted the live database", () => {
+      // Before .env.test existed, `npm test` fell back to the base .env, which
+      // pointed here. Nothing stopped it.
+      expect(() => assertDatabaseAllowedForEnv(neonProd, "test", CTX)).toThrow(
+        /known\s+PRODUCTION host/,
+      );
+    });
+
+    it("REFUSES an unnamed remote host", () => {
+      expect(() => assertDatabaseAllowedForEnv(neonTest, "test", CTX)).toThrow(/REFUSING TO RUN/);
+    });
+
+    it("cannot be unlocked by the production opt-in", () => {
+      // A test must NEVER reach production, whatever is exported in the shell.
+      process.env.ALLOW_PRODUCTION_DB = "1";
+      expect(() => assertDatabaseAllowedForEnv(neonProd, "test", CTX)).toThrow(
+        /known\s+PRODUCTION host/,
+      );
+    });
+  });
+
+  describe("NODE_ENV=development", () => {
+    it("allows the dev Neon branch", () => {
+      const dev = "postgresql://u:p@ep-flat-rain-apsyo6mp-pooler.c-7.us-east-1.aws.neon.tech/neondb";
+      expect(() => assertDatabaseAllowedForEnv(dev, "development", CTX)).not.toThrow();
+    });
+
+    it("allows local Postgres", () => {
+      expect(() => assertDatabaseAllowedForEnv(local, "development", CTX)).not.toThrow();
+    });
+
+    it("REFUSES a production host, so the dev server cannot boot against it", () => {
+      expect(() => assertDatabaseAllowedForEnv(neonProd, "development", CTX)).toThrow(
+        /REFUSING TO CONNECT/,
+      );
+    });
+
+    it("allows production ONLY with the deliberate per-command opt-in", () => {
+      // seedAdmin / cleanupTestAccounts are supposed to touch production.
+      process.env.ALLOW_PRODUCTION_DB = "1";
+      expect(() => assertDatabaseAllowedForEnv(neonProd, "development", CTX)).not.toThrow();
+    });
+
+    it("does not accept a truthy-looking value other than exactly \"1\"", () => {
+      process.env.ALLOW_PRODUCTION_DB = "true";
+      expect(() => assertDatabaseAllowedForEnv(neonProd, "development", CTX)).toThrow(
+        /REFUSING TO CONNECT/,
+      );
+    });
+  });
+
+  describe("NODE_ENV=production", () => {
+    it("allows production to connect to production", () => {
+      expect(() => assertDatabaseAllowedForEnv(neonProd, "production", CTX)).not.toThrow();
+    });
   });
 });

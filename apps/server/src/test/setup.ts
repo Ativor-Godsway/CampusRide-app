@@ -4,13 +4,22 @@
 import "../config";
 import { beforeAll } from "vitest";
 import { prisma } from "../db/prisma";
-import { assertNotProdDatabase } from "../db/dbHostGuard";
+import { config } from "../config";
+import { assertDatabaseAllowedForEnv } from "../db/dbHostGuard";
 
-// SAFETY GATE: the test suite creates and deletes rows, so it must NEVER run
-// against production. Uses the shared host guard (src/db/dbHostGuard.ts) — the
-// same check the db:reset/seed/migrate scripts run. Throws at module load,
-// failing fast for every test file before any query.
-assertNotProdDatabase(process.env.DATABASE_URL ?? "", "test setup");
+/**
+ * SAFETY GATE. The suite creates and deletes rows, so it must never run
+ * against production — or against any remote database nobody named.
+ *
+ * NOTE ON ORDER: this statement runs AFTER the imports above, because ES
+ * module imports are hoisted. That is fine, and deliberately not the only
+ * protection: the real gate is inside db/prisma.ts, which runs the same check
+ * as it constructs the client. So the connection is refused at its source even
+ * if this file were removed, reordered, or dropped from vitest's setupFiles.
+ * `npm test` is `vitest run` and never invokes the `db:guard` script, so a
+ * check that lives only here protects only the paths that remember to load it.
+ */
+assertDatabaseAllowedForEnv(config.databaseUrl, config.nodeEnv, "test setup");
 
 /**
  * Each test file gets a fresh Prisma Client / DB connection. Neon's pooled
