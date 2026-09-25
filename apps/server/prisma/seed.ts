@@ -1,4 +1,19 @@
 import { PrismaClient } from "@prisma/client";
+import { assertDatabaseAllowedForEnv } from "../src/db/dbHostGuard";
+
+/**
+ * This file builds its OWN PrismaClient rather than importing src/db/prisma.ts
+ * (it runs as a standalone script under ts-node, including as the seed step of
+ * `prisma migrate reset`). That means it does not inherit the connection guard
+ * from db/prisma.ts, so it has to run the same check itself — otherwise the
+ * one command that rebuilds a database from scratch is the one command with no
+ * protection at all.
+ */
+assertDatabaseAllowedForEnv(
+  process.env.DATABASE_URL ?? "",
+  process.env.NODE_ENV ?? "development",
+  "prisma seed",
+);
 
 const prisma = new PrismaClient();
 
