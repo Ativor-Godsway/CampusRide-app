@@ -5,11 +5,14 @@
  * existing transforms/version, which stays valid Cloudinary). `size` is the
  * on-screen point size; the rendition is requested at 2× for retina.
  *
- * Non-Cloudinary URLs (or anything without an `/upload/` segment) pass through
- * unchanged. Never throws.
+ * Anything that is not a res.cloudinary.com delivery URL — a local file:// URI
+ * straight from the image picker, a URL on another host, or anything without
+ * an `/upload/` segment — passes through unchanged. Never throws.
+ *
+ * Shared by the rider app (driver card) and the driver app (its own photo).
  */
 export function cloudinaryAvatar(url: string, size: number): string {
-  if (typeof url !== "string" || url.length === 0) return url;
+  if (typeof url !== "string" || !url.startsWith("https://res.cloudinary.com/")) return url;
   const marker = "/upload/";
   const index = url.indexOf(marker);
   if (index === -1) return url;

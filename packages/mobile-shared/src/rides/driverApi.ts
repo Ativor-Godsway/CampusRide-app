@@ -1,4 +1,5 @@
 import type { PassengerStatus, Ride, RideSource, RideType, Zone } from "@rida/shared";
+import { asArray, readList } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
 export interface DriverProfile {
@@ -99,7 +100,7 @@ export interface RateableRider {
 /** The riders on a completed ride that this driver may rate. */
 export async function getRateableRiders(rideId: string): Promise<RateableRider[]> {
   const res = await api.get<{ riders: RateableRider[] }>(`/rides/${rideId}/rateable-riders`);
-  return res.data.riders;
+  return readList<RateableRider>(res.data, "riders");
 }
 
 /** Driver rates one of their completed ride's riders. Upserts. */
@@ -122,7 +123,8 @@ export async function rejectRide(rideId: string): Promise<void> {
 
 export async function getDriverActiveRide(): Promise<RideWithZones | null> {
   const res = await api.get<{ ride: RideWithZones | null }>("/driver/rides/active");
-  return res.data.ride;
+  const ride = res.data?.ride;
+  return ride ? { ...ride, passengers: asArray(ride.passengers) } : null;
 }
 
 /** Atomically claim a REQUESTED ride. Throws with status 409 if already claimed. */
@@ -174,7 +176,7 @@ export interface EligibleRideItem {
 /** Fetch the list of REQUESTED rides this driver is currently eligible to claim. */
 export async function getEligibleRides(): Promise<EligibleRideItem[]> {
   const res = await api.get<{ rides: EligibleRideItem[] }>("/driver/rides/eligible");
-  return res.data.rides;
+  return readList<EligibleRideItem>(res.data, "rides");
 }
 
 // ─── Completed-ride history (read-only, derived earnings) ────────────────────
@@ -215,10 +217,21 @@ export interface DriverRideHistory {
   summary: DriverRideHistorySummary;
 }
 
+const EMPTY_HISTORY_SUMMARY: DriverRideHistorySummary = {
+  totalRides: 0,
+  totalGrossPesewas: 0,
+  commissionOwedPesewas: 0,
+  netPesewas: 0,
+  commissionRidesCount: 0,
+};
+
 /** Fetch the authenticated driver's completed rides + derived earnings summary. */
 export async function getDriverRideHistory(): Promise<DriverRideHistory> {
   const res = await api.get<DriverRideHistory>("/driver/rides/history");
-  return res.data;
+  return {
+    rides: readList<DriverRideHistoryItem>(res.data, "rides"),
+    summary: { ...EMPTY_HISTORY_SUMMARY, ...res.data?.summary },
+  };
 }
 
 // ─── Fill-your-car assembly (Phase 6b-2) ─────────────────────────────────────
@@ -271,7 +284,11 @@ export interface AddPassengerResult {
  */
 export async function getFillSuggestions(rideId: string): Promise<FillSuggestionsResult> {
   const res = await api.get<FillSuggestionsResult>(`/rides/${rideId}/fill-suggestions`);
-  return res.data;
+  return {
+    ...res.data,
+    passengers: readList<PassengerInCar>(res.data, "passengers"),
+    suggestions: readList<FillSuggestion>(res.data, "suggestions"),
+  };
 }
 
 /**
@@ -285,7 +302,7 @@ export async function addPassenger(
   const res = await api.post<AddPassengerResult>(`/rides/${rideId}/add-passenger`, {
     requestRideId,
   });
-  return res.data;
+  return { ...res.data, passengers: readList<PassengerInCar>(res.data, "passengers") };
 }
 
 // ─── Per-passenger lifecycle (Phase 6b-3) ────────────────────────────────────

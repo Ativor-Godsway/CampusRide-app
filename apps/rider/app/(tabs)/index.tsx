@@ -12,7 +12,8 @@ import {
   Text,
   colors,
   illustrations,
-  getMyRides,
+  getRecentRides,
+  myRidesQueryKeys,
   radii,
   spacing,
   useAuth,
@@ -31,7 +32,11 @@ function getGreeting(): { label: string; icon: keyof typeof Ionicons.glyphMap } 
 export default function HomeTab() {
   const router = useRouter();
   const { user } = useAuth();
-  const { data: rides } = useQuery<RideSummary[]>({ queryKey: ["myRides"], queryFn: getMyRides });
+  // Own cache key: the Rides tab caches history pages, a different shape.
+  const { data: rides } = useQuery<RideSummary[]>({
+    queryKey: myRidesQueryKeys.recent,
+    queryFn: () => getRecentRides(3),
+  });
 
   const greeting = getGreeting();
   const firstName = user?.name?.split(" ")[0] ?? "Rider";

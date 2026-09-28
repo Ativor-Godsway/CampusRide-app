@@ -1,9 +1,11 @@
+import type { ReactElement } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
+  type RefreshControlProps,
   TouchableWithoutFeedback,
   View,
   type ViewProps,
@@ -19,6 +21,8 @@ export interface ScreenProps extends ViewProps {
   noKeyboardHandling?: boolean;
   /** Removes the default horizontal/top padding (for full-bleed hero layouts). */
   noPadding?: boolean;
+  /** Pull-to-refresh for a `scroll` screen. */
+  refreshControl?: ReactElement<RefreshControlProps>;
 }
 
 /** Safe-area + consistent horizontal padding wrapper — the root of every screen. Handles keyboard avoidance and tap-outside-to-dismiss by default. */
@@ -27,6 +31,7 @@ export function Screen({
   edges = ["top", "bottom"],
   noKeyboardHandling = false,
   noPadding = false,
+  refreshControl,
   style,
   children,
   ...rest
@@ -37,6 +42,7 @@ export function Screen({
       contentContainerStyle={[styles.grow, !noPadding && styles.content, style]}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
+      refreshControl={refreshControl}
       {...rest}
     >
       {children}

@@ -5,9 +5,14 @@ import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-n
 import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import { cloudinaryAvatar } from "./cloudinaryAvatar";
 import type { PaymentMethod, RideCompletedFareSummary, RideType } from "@rida/shared";
-import { estimateEtaMinutes, formatEta, getSharedFarePerRider, priceLoneRide } from "@rida/shared";
+import {
+  cloudinaryAvatar,
+  estimateEtaMinutes,
+  formatEta,
+  getSharedFarePerRider,
+  priceLoneRide,
+} from "@rida/shared";
 import {
   ActiveRideExistsError,
   Badge,

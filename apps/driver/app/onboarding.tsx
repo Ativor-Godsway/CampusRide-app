@@ -19,6 +19,7 @@ import {
   submitDriverProfile,
   useAuth,
 } from "@rida/mobile-shared";
+import { cloudinaryAvatar } from "@rida/shared";
 import { DriverPhotoCard } from "../components/DriverPhotoCard";
 import { SignOutLink } from "../components/SignOutLink";
 import { driverSetupRoute } from "../lib/driverGate";
@@ -186,7 +187,10 @@ export default function OnboardingScreen() {
               accessibilityLabel="Change your photo"
               style={styles.photoSummary}
             >
-              <Image source={{ uri: photo.photoUrl }} style={styles.photoThumb} />
+              <Image
+                source={{ uri: cloudinaryAvatar(photo.photoUrl, 44) }}
+                style={styles.photoThumb}
+              />
               <View style={styles.photoSummaryText}>
                 <Text variant="bodyMedium">Photo added</Text>
                 <Text variant="caption" color="muted">

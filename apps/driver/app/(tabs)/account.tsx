@@ -19,6 +19,7 @@ import {
   updateDriverProfile,
   useAuth,
 } from "@rida/mobile-shared";
+import { cloudinaryAvatar } from "@rida/shared";
 import { useDriverPhotoUpload, type DriverPhotoResult, type PhotoSource } from "../../lib/useDriverPhotoUpload";
 
 /** Account tab — view profile (name, vehicle, photo, approval) and edit it in place. */
@@ -133,7 +134,7 @@ export default function AccountTab() {
           accessibilityLabel={editing ? "Change profile photo" : undefined}
         >
           {shownPhoto ? (
-            <Image source={{ uri: shownPhoto }} style={styles.avatarImage} />
+            <Image source={{ uri: cloudinaryAvatar(shownPhoto, 60) }} style={styles.avatarImage} />
           ) : (
             <View style={styles.avatar}>
               <Text variant="h2" color="inverse">

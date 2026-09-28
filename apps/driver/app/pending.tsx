@@ -15,6 +15,7 @@ import {
   spacing,
   useAuth,
 } from "@rida/mobile-shared";
+import { cloudinaryAvatar } from "@rida/shared";
 import { SignOutLink } from "../components/SignOutLink";
 import { driverSetupRoute } from "../lib/driverGate";
 
@@ -106,7 +107,7 @@ export default function PendingApprovalScreen() {
         <Card style={styles.summary}>
           <View style={styles.summaryRow}>
             {driver.photoUrl ? (
-              <Image source={{ uri: driver.photoUrl }} style={styles.photo} />
+              <Image source={{ uri: cloudinaryAvatar(driver.photoUrl, 56) }} style={styles.photo} />
             ) : (
               <View style={[styles.photo, styles.photoPlaceholder]}>
                 <Ionicons name="person" size={24} color={colors.primary[300]} />

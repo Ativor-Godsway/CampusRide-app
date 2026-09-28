@@ -10,3 +10,5 @@ export * from "./ranking/ranking";
 export * from "./ranking/bestFit";
 export * from "./navigation/deepLinks";
 export * from "./eta/eta";
+export * from "./api/responses";
+export * from "./media/cloudinaryAvatar";
