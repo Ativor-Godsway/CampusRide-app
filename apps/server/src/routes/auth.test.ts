@@ -355,7 +355,6 @@ describe("driver profile route", () => {
         carModel: "Civic",
         carColor: "Black",
         plate: "GE-9999-26",
-        photoUrl: "https://placeholder.example.com/civic.jpg",
       },
     });
     expect(profileRes.statusCode).toBe(200);

@@ -8,8 +8,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "eslint app",
-    "lint:fix": "eslint app --fix",
+    "lint": "eslint app components lib",
+    "lint:fix": "eslint app components lib --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

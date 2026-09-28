@@ -10,6 +10,11 @@ export interface AuthHeroProps {
   /** Smaller hero with a back button — used by OTP/signup steps. */
   compact?: boolean;
   onBack?: () => void;
+  /**
+   * Short tag shown beside the wordmark (e.g. "DRIVER"), in the amber accent,
+   * so the two apps' front doors can't be mistaken for each other.
+   */
+  badge?: string;
 }
 
 /**
@@ -17,7 +22,7 @@ export interface AuthHeroProps {
  * sign-in/sign-up/OTP screens a distinctive "front door" identity instead
  * of a plain centered form.
  */
-export function AuthHero({ title, subtitle, compact = false, onBack }: AuthHeroProps) {
+export function AuthHero({ title, subtitle, compact = false, onBack, badge }: AuthHeroProps) {
   return (
     <View style={[styles.hero, compact ? styles.heroCompact : styles.heroFull]}>
       <View style={styles.blobOne} />
@@ -41,6 +46,11 @@ export function AuthHero({ title, subtitle, compact = false, onBack }: AuthHeroP
               <Image source={illustrations.logoMark} style={styles.logoImage} resizeMode="contain" />
             </View>
             <Text style={styles.wordmark}>CampusRide</Text>
+            {badge ? (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{badge}</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
         <Text style={compact ? styles.titleCompact : styles.title}>{title}</Text>
@@ -121,6 +131,18 @@ const styles = StyleSheet.create({
     fontSize: typography.size.lg,
     fontWeight: typography.weight.bold,
     letterSpacing: typography.letterSpacing.tight,
+  },
+  badge: {
+    backgroundColor: colors.accent[300],
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+  },
+  badgeText: {
+    color: colors.primary[900],
+    fontSize: typography.size.xs,
+    fontWeight: typography.weight.extrabold,
+    letterSpacing: 1,
   },
   title: {
     color: colors.white,

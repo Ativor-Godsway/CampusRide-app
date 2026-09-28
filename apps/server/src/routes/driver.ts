@@ -340,9 +340,14 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // when Cloudinary is unconfigured, so local dev can still set a photo.
     if (provided.photoUrl !== undefined && config.cloudinary.cloudName) {
       if (!isValidDriverPhotoUrl(provided.photoUrl, config.cloudinary.cloudName, userId)) {
-        return reply
-          .code(400)
-          .send({ error: "photoUrl must be an image uploaded through this app" });
+        request.log.warn(
+          { event: "driver_profile_save_failed", reason: "invalid_photo_url", userId, photoUrl: provided.photoUrl },
+          "Driver profile update refused: photoUrl is not this driver's Cloudinary upload",
+        );
+        return reply.code(400).send({
+          error: "photoUrl must be an image uploaded through this app",
+          code: "INVALID_PHOTO_URL",
+        });
       }
     }
 
@@ -358,6 +363,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return tx.user.findUniqueOrThrow({ where: { id: userId }, include: { driver: true } });
     });
 
+    request.log.info(
+      { event: "driver_profile_saved", userId, fields: Object.keys(provided) },
+      "Driver profile updated",
+    );
     const driver = user.driver;
     return reply.code(200).send({
       profile: {

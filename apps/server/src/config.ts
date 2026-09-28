@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import path from "node:path";
+import { resolveCloudinaryConfig } from "./services/uploads/cloudinaryConfig";
 
 // Per-environment .env loading (dev/test/prod split — see docs/environments.md).
 // NODE_ENV picks the file: `.env.development` (default), `.env.test` (vitest
@@ -155,13 +156,12 @@ export const config = {
    * server-only and must never be exposed to the apps — it is what replaces
    * the old unsigned upload preset that shipped inside the app bundle.
    * cloudName is public (it appears in every image URL).
+   *
+   * Read from CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET
+   * (or CLOUDINARY_URL), trimmed — see services/uploads/cloudinaryConfig.ts.
+   * `apiSecret` is the upload signing key: never log it.
    */
-  cloudinary: {
-    cloudName: process.env.CLOUDINARY_CLOUD_NAME ?? "",
-    apiKey: process.env.CLOUDINARY_API_KEY ?? "",
-    /** Never log. Signing key for upload tickets. */
-    apiSecret: process.env.CLOUDINARY_API_SECRET ?? "",
-  },
+  cloudinary: resolveCloudinaryConfig(process.env),
   /**
    * Phase 5c dev-only mock driver: when true, every ride created via
    * POST /rides is driven through MATCHED -> ARRIVED -> IN_PROGRESS ->

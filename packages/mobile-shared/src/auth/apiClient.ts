@@ -28,6 +28,34 @@ api.interceptors.request.use((config) => {
 });
 
 /**
+ * Called when the server has definitively rejected this session: the refresh
+ * token is unknown, revoked or belongs to a deleted account. AuthProvider
+ * registers a handler that clears the signed-in user, so the app returns to
+ * the phone-number screen instead of sitting on a screen whose every request
+ * now fails.
+ */
+let sessionRejectedHandler: (() => void) | null = null;
+
+const NO_STORED_REFRESH_TOKEN = "No stored refresh token";
+
+export function setSessionRejectedHandler(handler: (() => void) | null): void {
+  sessionRejectedHandler = handler;
+}
+
+/**
+ * True when the server ANSWERED and refused the session — 400/401 from
+ * /auth/refresh, or 404 from /me for an account that no longer exists — as
+ * opposed to the request never getting an answer. A phone on a bad
+ * connection, or a Render server still waking up, must not be logged out;
+ * nor must a 429 rate-limit.
+ */
+export function isSessionRejection(error: unknown): boolean {
+  if (error instanceof Error && error.message === NO_STORED_REFRESH_TOKEN) return true;
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  return status === 400 || status === 401 || status === 404;
+}
+
+/**
  * In-flight refresh, shared by every request that 401s at the same time.
  *
  * The server rotates refresh tokens on every use and treats a SECOND use of
@@ -45,7 +73,7 @@ async function refreshAccessToken(): Promise<string> {
   inFlightRefresh = (async () => {
     const refreshToken = await getStoredRefreshToken();
     if (!refreshToken) {
-      throw new Error("No stored refresh token");
+      throw new Error(NO_STORED_REFRESH_TOKEN);
     }
 
     const { data } = await rawApi.post<{ accessToken: string; refreshToken: string }>(
@@ -83,8 +111,11 @@ api.interceptors.response.use(
       originalRequest.headers.Authorization = `Bearer ${accessToken}`;
       return api(originalRequest);
     } catch (refreshError) {
-      setAccessToken(null);
-      await clearStoredRefreshToken();
+      if (isSessionRejection(refreshError)) {
+        setAccessToken(null);
+        await clearStoredRefreshToken();
+        sessionRejectedHandler?.();
+      }
       return Promise.reject(refreshError);
     }
   },
