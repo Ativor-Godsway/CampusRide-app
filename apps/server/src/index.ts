@@ -30,6 +30,7 @@ import { registerAdminRoutes } from "./routes/admin";
 import { registerUssdRoutes } from "./routes/ussd";
 import { registerUploadRoutes } from "./routes/uploads";
 import { registerSafetyRoutes } from "./routes/safety";
+import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
 
 // 15s was too aggressive for Neon's pooled connection budget alongside
@@ -189,6 +190,10 @@ async function bootstrap() {
 
   await prisma.$connect();
   app.log.info("Database connected");
+
+  // One log line saying whether driver photo uploads can work. Not awaited:
+  // it calls out to Cloudinary and must never hold up or crash startup.
+  void checkCloudinaryAtStartup(config.cloudinary, app.log);
 
   // Periodically sweep REQUESTED/AWAITING_RIDER_DECISION rides for the 90s
   // dispatch and decision-grace timeouts (see services/ride/timeouts.ts).

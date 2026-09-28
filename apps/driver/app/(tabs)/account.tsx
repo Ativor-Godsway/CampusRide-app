@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, View } from "react-native";
-import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Badge,
@@ -13,12 +12,14 @@ import {
   colors,
   confirmDeleteAccount,
   describeDeleteAccountError,
+  describeDriverPhotoError,
+  describeProfileSaveError,
   radii,
   spacing,
   updateDriverProfile,
-  uploadImageToCloudinary,
   useAuth,
 } from "@rida/mobile-shared";
+import { useDriverPhotoUpload, type DriverPhotoResult, type PhotoSource } from "../../lib/useDriverPhotoUpload";
 
 /** Account tab — view profile (name, vehicle, photo, approval) and edit it in place. */
 export default function AccountTab() {
@@ -31,8 +32,10 @@ export default function AccountTab() {
   const [carModel, setCarModel] = useState(driver?.carModel ?? "");
   const [carColor, setCarColor] = useState(driver?.carColor ?? "");
   const [plate, setPlate] = useState(driver?.plate ?? "");
-  const [photoUrl, setPhotoUrl] = useState<string | null>(driver?.photoUrl ?? null);
-  const [uploading, setUploading] = useState(false);
+  // Same pick-and-upload code as the onboarding photo step.
+  const photo = useDriverPhotoUpload(driver?.photoUrl ?? null);
+  const uploading = photo.isUploading;
+  const photoUrl = photo.photoUrl;
   const [saving, setSaving] = useState(false);
 
   function startEdit() {
@@ -42,47 +45,27 @@ export default function AccountTab() {
     setCarModel(driver?.carModel ?? "");
     setCarColor(driver?.carColor ?? "");
     setPlate(driver?.plate ?? "");
-    setPhotoUrl(driver?.photoUrl ?? null);
+    photo.reset(driver?.photoUrl ?? null);
     setEditing(true);
   }
 
-  async function handlePickPhoto() {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) {
-      Alert.alert("Permission needed", "Allow photo access to change your picture.");
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-    });
-    if (result.canceled || !result.assets?.[0]) return;
+  function showPhotoResult(result: DriverPhotoResult) {
+    if (!result || !("error" in result)) return;
+    const { title, message } = describeDriverPhotoError(result.error);
+    const retryable = result.error.kind !== "permission_denied";
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel" },
+      ...(retryable ? [{ text: "Try again", onPress: () => void photo.retry().then(showPhotoResult) }] : []),
+    ]);
+  }
 
-    setUploading(true);
-    try {
-      // fileSize lets the upload fail fast on an oversized pick; the binding
-      // limits are the server-signed ones Cloudinary enforces.
-      const asset = result.assets[0];
-      const url = await uploadImageToCloudinary(asset.uri, asset.fileSize);
-      setPhotoUrl(url);
-    } catch (error) {
-      // The server answers 503 when Cloudinary isn't configured; anything
-      // else is a genuine upload failure or an oversized file.
-      const status = (error as { response?: { status?: number } })?.response?.status;
-      if (status === 503) {
-        Alert.alert("Photo upload unavailable", "Image hosting isn't configured yet.");
-      } else {
-        const message =
-          error instanceof Error && error.message.includes("too large")
-            ? error.message
-            : "Couldn't upload that photo. Please try again.";
-        Alert.alert("Upload failed", message);
-      }
-    } finally {
-      setUploading(false);
-    }
+  function handlePickPhoto() {
+    const pickFrom = (source: PhotoSource) => void photo.pick(source).then(showPhotoResult);
+    Alert.alert("Change profile photo", undefined, [
+      { text: "Take a selfie", onPress: () => pickFrom("camera") },
+      { text: "Choose from gallery", onPress: () => pickFrom("library") },
+      { text: "Cancel", style: "cancel" },
+    ]);
   }
 
   async function handleSave() {
@@ -102,8 +85,9 @@ export default function AccountTab() {
       });
       await refreshMe();
       setEditing(false);
-    } catch {
-      Alert.alert("Couldn't save", "Please check your connection and try again.");
+    } catch (error) {
+      const { title, message } = describeProfileSaveError(error);
+      Alert.alert(title, message);
     } finally {
       setSaving(false);
     }
@@ -125,13 +109,24 @@ export default function AccountTab() {
     });
 
   const initial = user?.name?.charAt(0).toUpperCase() ?? "?";
-  const shownPhoto = editing ? photoUrl : driver?.photoUrl ?? null;
+  const { state: photoState } = photo;
+  const editPreview =
+    photoState.status === "uploading"
+      ? photoState.localUri
+      : photoState.status === "done"
+        ? photoState.url
+        : driver?.photoUrl ?? null;
+  const shownPhoto = editing ? editPreview : driver?.photoUrl ?? null;
+  const uploadPercent =
+    photoState.status === "uploading" && photoState.progress !== null
+      ? Math.round(photoState.progress * 100)
+      : null;
 
   return (
     <Screen scroll style={styles.content}>
       <View style={styles.header}>
         <Pressable
-          onPress={editing ? () => void handlePickPhoto() : undefined}
+          onPress={editing ? handlePickPhoto : undefined}
           disabled={!editing || uploading}
           style={styles.avatarWrap}
           accessibilityRole={editing ? "button" : undefined}
@@ -170,6 +165,18 @@ export default function AccountTab() {
           )}
         </View>
       </View>
+
+      {editing && (
+        <Text variant="caption" color="muted" style={styles.photoHint} accessibilityLiveRegion="polite">
+          {uploading
+            ? uploadPercent === null
+              ? "Preparing your photo upload…"
+              : `Uploading your photo… ${uploadPercent}%`
+            : photoState.status === "done" && photoState.localUri
+              ? "New photo uploaded — tap Save to keep it."
+              : "Tap your photo to change it."}
+        </Text>
+      )}
 
       {!editing && (
         <Badge
@@ -229,7 +236,10 @@ export default function AccountTab() {
             <Button
               label="Cancel"
               variant="secondary"
-              onPress={() => setEditing(false)}
+              onPress={() => {
+                photo.reset(driver?.photoUrl ?? null);
+                setEditing(false);
+              }}
               disabled={saving || uploading}
             />
           </View>
@@ -316,6 +326,10 @@ const styles = StyleSheet.create({
   profileInfo: {
     flex: 1,
     gap: spacing.xs,
+  },
+  photoHint: {
+    marginTop: -spacing.md,
+    marginBottom: spacing.xl,
   },
   approvalBadge: {
     alignSelf: "flex-start",

@@ -15,6 +15,7 @@ import {
   setStoredRefreshToken,
 } from "./storage";
 import { getAccessToken, setAccessToken } from "./tokenStore";
+import { isSessionRejection, setSessionRejectedHandler } from "./apiClient";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -28,6 +29,11 @@ interface AuthContextValue {
     verifiedToken: string;
   }) => Promise<void>;
   completeLogin: (input: { phone: string; verifiedToken: string }) => Promise<void>;
+  /**
+   * Ends the session on this device: clears the stored credentials and the
+   * signed-in user immediately, then revokes the refresh token on the server
+   * in the background (so a slow or sleeping server never holds up leaving).
+   */
   signOut: () => Promise<void>;
   /**
    * Permanently closes the account, then clears local credentials exactly as
@@ -44,10 +50,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const refreshMe = useCallback(async () => {
-    const { user: me } = await getMe();
-    setUser(me);
+  const clearLocalSession = useCallback(async () => {
+    setAccessToken(null);
+    await clearStoredRefreshToken();
+    setUser(null);
   }, []);
+
+  // The API client reports a session the server has refused mid-use (revoked
+  // token, deleted account); drop the user so every screen's auth gate sends
+  // them back to the phone-number screen.
+  useEffect(() => {
+    setSessionRejectedHandler(() => setUser(null));
+    return () => setSessionRejectedHandler(null);
+  }, []);
+
+  const refreshMe = useCallback(async () => {
+    try {
+      const { user: me } = await getMe();
+      setUser(me);
+    } catch (error) {
+      // 404: the account behind this still-valid token no longer exists.
+      if (isSessionRejection(error)) await clearLocalSession();
+      throw error;
+    }
+  }, [clearLocalSession]);
 
   useEffect(() => {
     (async () => {
@@ -62,9 +88,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setAccessToken(tokens.accessToken);
         await setStoredRefreshToken(tokens.refreshToken);
         await refreshMe();
-      } catch {
+      } catch (error) {
+        // Only forget the stored session when the server refused it. On a
+        // network failure it is kept, so the next launch can try again.
         setAccessToken(null);
-        await clearStoredRefreshToken();
+        if (isSessionRejection(error)) await clearStoredRefreshToken();
       } finally {
         setIsLoading(false);
       }
@@ -87,24 +115,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const storedRefreshToken = await getStoredRefreshToken();
+    await clearLocalSession();
     if (storedRefreshToken) {
-      await apiLogout(storedRefreshToken);
+      // Best effort, not awaited: apiLogout already swallows its own errors.
+      void apiLogout(storedRefreshToken);
     }
-    setAccessToken(null);
-    await clearStoredRefreshToken();
-    setUser(null);
-  }, []);
+  }, [clearLocalSession]);
 
   const deleteAccount = useCallback(async () => {
     // Server first: if it refuses (409 active ride, network error), we must
     // NOT clear local state — the account still exists and the user is still
     // signed in.
     await apiDeleteAccount();
-
-    setAccessToken(null);
-    await clearStoredRefreshToken();
-    setUser(null);
-  }, []);
+    await clearLocalSession();
+  }, [clearLocalSession]);
 
   const value: AuthContextValue = {
     user,

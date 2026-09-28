@@ -11,10 +11,14 @@ type SignupRole = "RIDER" | "DRIVER";
 export interface SignupScreenProps {
   /** Restrict the role picker — e.g. the driver app only ever signs up drivers. */
   allowedRoles?: SignupRole[];
+  subtitle?: string;
 }
 
 /** Name + role entry — final step of signup, shared by both apps. */
-export function SignupScreen({ allowedRoles = ["RIDER", "DRIVER"] }: SignupScreenProps) {
+export function SignupScreen({
+  allowedRoles = ["RIDER", "DRIVER"],
+  subtitle = "One more step before you're ready to ride",
+}: SignupScreenProps) {
   const router = useRouter();
   const { completeSignup } = useAuth();
   const { phone, verifiedToken } = useLocalSearchParams<{ phone: string; verifiedToken: string }>();
@@ -43,7 +47,7 @@ export function SignupScreen({ allowedRoles = ["RIDER", "DRIVER"] }: SignupScree
 
   return (
     <Screen scroll noPadding edges={["top"]}>
-      <AuthHero compact title="Tell us about you" subtitle="One more step before you're ready to ride" onBack={() => router.back()} />
+      <AuthHero compact title="Tell us about you" subtitle={subtitle} onBack={() => router.back()} />
       <View style={styles.panel}>
         <Input label="Full name" placeholder="Full name" autoComplete="name" value={name} onChangeText={setName} />
 

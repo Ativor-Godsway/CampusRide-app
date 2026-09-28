@@ -27,6 +27,13 @@
           "locationWhenInUsePermission": "CampusRide Driver uses your location to show riders where you are and to match you with nearby rides."
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "CampusRide Driver uses your photos so you can add a profile photo for approval.",
+          "cameraPermission": "CampusRide Driver uses your camera so you can take a profile photo for approval."
+        }
+      ],
       "expo-asset",
       "expo-font",
       "expo-status-bar"

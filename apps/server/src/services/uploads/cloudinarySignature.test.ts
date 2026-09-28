@@ -43,9 +43,12 @@ describe("buildDriverPhotoUploadTicket", () => {
   it("pins folder, public id, formats and transformation into the SIGNED params", () => {
     const ticket = buildDriverPhotoUploadTicket(CFG, "user-1", 1700000000);
 
-    expect(ticket.params.folder).toBe(DRIVER_PHOTO_FOLDER);
-    expect(ticket.params.public_id).toBe("driver_user-1");
+    // The folder travels inside the public id (not a `folder` param), so it
+    // appears in the stored URL on fixed- AND dynamic-folder accounts.
+    expect(ticket.params.public_id).toBe(`${DRIVER_PHOTO_FOLDER}/driver_user-1`);
+    expect(ticket.params).not.toHaveProperty("folder");
     expect(ticket.params.allowed_formats).toBe(ALLOWED_IMAGE_FORMATS.join(","));
+    expect(ticket.params.format).toBe("jpg");
     expect(ticket.params.transformation).toContain("c_limit");
     expect(ticket.params.timestamp).toBe(1700000000);
 
@@ -80,10 +83,28 @@ describe("buildDriverPhotoUploadTicket", () => {
 });
 
 describe("isValidDriverPhotoUrl", () => {
-  const good = `https://res.cloudinary.com/campusride/image/upload/v1/${DRIVER_PHOTO_FOLDER}/${driverPhotoPublicId("user-1")}.jpg`;
+  const good = `https://res.cloudinary.com/campusride/image/upload/v1/${driverPhotoPublicId("user-1")}.jpg`;
 
   it("accepts a genuine upload for that driver", () => {
     expect(isValidDriverPhotoUrl(good, "campusride", "user-1")).toBe(true);
+  });
+
+  it("accepts a genuine upload without a version segment", () => {
+    expect(isValidDriverPhotoUrl(good.replace("/v1/", "/"), "campusride", "user-1")).toBe(true);
+  });
+
+  it("rejects a driver whose id merely starts with this driver's id", () => {
+    const longer = good.replace("driver_user-1", "driver_user-10");
+    expect(isValidDriverPhotoUrl(longer, "campusride", "user-1")).toBe(false);
+  });
+
+  it("rejects a photo outside the driver-photos folder", () => {
+    const loose = `https://res.cloudinary.com/campusride/image/upload/v1/driver_user-1.jpg`;
+    expect(isValidDriverPhotoUrl(loose, "campusride", "user-1")).toBe(false);
+  });
+
+  it("rejects a string that is not a URL", () => {
+    expect(isValidDriverPhotoUrl("not a url", "campusride", "user-1")).toBe(false);
   });
 
   it("rejects an arbitrary third-party URL", () => {

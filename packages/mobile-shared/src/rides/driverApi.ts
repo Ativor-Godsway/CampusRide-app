@@ -32,9 +32,11 @@ export interface SubmitDriverProfileInput {
   carModel: string;
   carColor: string;
   plate: string;
+  /** The Cloudinary URL from uploadDriverPhoto; required by onboarding. */
+  photoUrl?: string;
 }
 
-/** Submit / update the driver's car details (POST /driver/profile). */
+/** Submit / update the driver's car details and photo (POST /driver/profile). */
 export async function submitDriverProfile(input: SubmitDriverProfileInput): Promise<DriverProfile> {
   const res = await api.post<{ driver: DriverProfile }>("/driver/profile", input);
   return res.data.driver;

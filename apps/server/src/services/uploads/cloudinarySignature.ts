@@ -18,6 +18,14 @@ import { createHash } from "node:crypto";
 /** Formats a driver photo may be uploaded as. Signed, so Cloudinary enforces it. */
 export const ALLOWED_IMAGE_FORMATS = ["jpg", "jpeg", "png", "webp"] as const;
 
+/**
+ * Anything outside ALLOWED_IMAGE_FORMATS (an iPhone HEIC, say) is converted
+ * to this instead of rejected — Cloudinary's documented behaviour when
+ * `format` accompanies `allowed_formats`. Every stored photo therefore
+ * displays on both platforms.
+ */
+export const CONVERT_OTHER_FORMATS_TO = "jpg";
+
 /** Advisory ceiling on the uploaded file, pre-checked by the client. */
 export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
@@ -35,9 +43,16 @@ export const DRIVER_PHOTO_FOLDER = "campusride/driver-photos";
  * again overwrites that driver's own image. Because the id is part of the
  * signed parameters, a driver cannot overwrite anyone else's photo even if
  * they replay someone else's signature request.
+ *
+ * The folder is written INTO the public id rather than sent as a separate
+ * `folder` parameter. Cloudinary accounts created since 2024 use "dynamic
+ * folders", where `folder` only files the asset in the Media Library and no
+ * longer appears in its URL — so the stored URL would miss the folder,
+ * fail isValidDriverPhotoUrl, and the profile save would be refused. A
+ * slash-separated public id lands in the URL the same way in both modes.
  */
 export function driverPhotoPublicId(userId: string): string {
-  return `driver_${userId}`;
+  return `${DRIVER_PHOTO_FOLDER}/driver_${userId}`;
 }
 
 export interface CloudinarySignatureParams {
@@ -89,7 +104,7 @@ export function buildDriverPhotoUploadTicket(
 ): DriverPhotoUploadTicket {
   const params: CloudinarySignatureParams = {
     allowed_formats: ALLOWED_IMAGE_FORMATS.join(","),
-    folder: DRIVER_PHOTO_FOLDER,
+    format: CONVERT_OTHER_FORMATS_TO,
     invalidate: true,
     overwrite: true,
     public_id: driverPhotoPublicId(userId),
@@ -114,9 +129,24 @@ export function buildDriverPhotoUploadTicket(
  * The client still reports the resulting URL back via the profile update, so
  * without this check a driver could submit ANY url — pointing our UI at
  * arbitrary third-party content. A genuine upload always lands on this
- * account's Cloudinary host, in our folder, under that driver's own public id.
+ * account's Cloudinary host under that driver's own public id, so the path
+ * must be exactly `/<cloud>/image/upload/[v<version>/]<public id>.<ext>`.
  */
 export function isValidDriverPhotoUrl(url: string, cloudName: string, userId: string): boolean {
-  if (!url.startsWith(`https://res.cloudinary.com/${cloudName}/`)) return false;
-  return url.includes(`${DRIVER_PHOTO_FOLDER}/${driverPhotoPublicId(userId)}`);
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== "res.cloudinary.com") return false;
+
+  const expectedPath = new RegExp(
+    `^/${escapeRegExp(cloudName)}/image/upload/(?:v\\d+/)?${escapeRegExp(driverPhotoPublicId(userId))}\\.[A-Za-z0-9]+$`,
+  );
+  return expectedPath.test(parsed.pathname);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

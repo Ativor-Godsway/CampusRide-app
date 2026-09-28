@@ -30,6 +30,7 @@ import {
   deleteAccount,
 } from "../services/auth/deleteAccount";
 import { config } from "../config";
+import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { normalizePhone } from "../lib/phone";
 
 /** Shared window for the per-IP auth rate limits (max counts come from config). */
@@ -379,14 +380,49 @@ export function registerAuthRoutes(
       return reply.code(403).send({ error: "Only DRIVER accounts have a driver profile" });
     }
 
-    const driver = await completeDriverProfile(prisma, request.user!.userId, {
-      carMake: body.carMake,
-      carModel: body.carModel,
-      carColor: body.carColor,
-      plate: body.plate,
-      ...(isNonEmptyString(body.photoUrl) ? { photoUrl: body.photoUrl } : {}),
-    });
+    const userId = request.user!.userId;
+    const photoUrl = isNonEmptyString(body.photoUrl) ? body.photoUrl.trim() : undefined;
 
+    // Same check as PATCH /driver/profile: a photo must be this driver's own
+    // upload to our Cloudinary account, not any URL on the internet. Skipped
+    // when Cloudinary is unconfigured, so local dev can still onboard.
+    const { cloudName } = config.cloudinary;
+    if (photoUrl !== undefined && cloudName && !isValidDriverPhotoUrl(photoUrl, cloudName, userId)) {
+      request.log.warn(
+        { event: "driver_profile_save_failed", reason: "invalid_photo_url", userId, photoUrl },
+        "Driver onboarding refused: photoUrl is not this driver's Cloudinary upload",
+      );
+      return reply.code(400).send({
+        error: "photoUrl must be an image uploaded through this app",
+        code: "INVALID_PHOTO_URL",
+      });
+    }
+
+    let driver;
+    try {
+      driver = await completeDriverProfile(prisma, userId, {
+        carMake: body.carMake.trim(),
+        carModel: body.carModel.trim(),
+        carColor: body.carColor.trim(),
+        plate: body.plate.trim().toUpperCase(),
+        ...(photoUrl !== undefined ? { photoUrl } : {}),
+      });
+    } catch (err) {
+      // P2025: no Driver row for this user (e.g. the account was deleted).
+      if ((err as { code?: string }).code === "P2025") {
+        request.log.warn(
+          { event: "driver_profile_save_failed", reason: "driver_row_missing", userId },
+          "Driver onboarding refused: no driver profile exists for this account",
+        );
+        return reply.code(404).send({ error: "Driver profile not found", code: "DRIVER_NOT_FOUND" });
+      }
+      throw err;
+    }
+
+    request.log.info(
+      { event: "driver_profile_saved", userId, hasPhoto: photoUrl !== undefined },
+      "Driver onboarding profile saved",
+    );
     return reply.code(200).send({ driver });
   });
 }

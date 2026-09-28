@@ -1,8 +1,9 @@
 import { Redirect, Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LoadingState, RoleMismatchScreen, Screen, colors, shadows, useAuth } from "@rida/mobile-shared";
+import { driverSetupRoute } from "../../lib/driverGate";
 
-/** Bottom tab shell — Home / Rides / Account. Re-checks auth, role, and onboarding so a signed-out, mismatched-role, or not-yet-onboarded user can't land here directly. */
+/** Bottom tab shell — Home / Rides / Account. Re-checks auth, role, onboarding and approval so a signed-out, mismatched-role, not-yet-onboarded or not-yet-approved user can't land here directly. */
 export default function TabsLayout() {
   const { isLoading, isAuthenticated, user, signOut } = useAuth();
 
@@ -22,8 +23,9 @@ export default function TabsLayout() {
     return <RoleMismatchScreen expectedRole="DRIVER" onSignOut={signOut} />;
   }
 
-  if (!user.driver || !user.driver.carMake) {
-    return <Redirect href="/onboarding" />;
+  const setupRoute = driverSetupRoute(user);
+  if (setupRoute) {
+    return <Redirect href={setupRoute} />;
   }
 
   return (

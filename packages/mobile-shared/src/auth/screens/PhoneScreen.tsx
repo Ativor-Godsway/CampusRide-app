@@ -6,8 +6,21 @@ import { Button, Screen, Text, Input, colors, radii, spacing } from "../../desig
 import { errorMessage } from "../errorMessage";
 import { AuthHero } from "./AuthHero";
 
+export interface PhoneScreenProps {
+  /** Tag beside the wordmark — the driver app passes "DRIVER". */
+  badge?: string;
+  title?: string;
+  subtitle?: string;
+  signupLabel?: string;
+}
+
 /** Phone entry — start of the auth flow for both rider and driver apps. */
-export function PhoneScreen() {
+export function PhoneScreen({
+  badge,
+  title = "Campus rides, on demand",
+  subtitle = "Fast, affordable trips around campus — book in seconds.",
+  signupLabel = "Create an account",
+}: PhoneScreenProps = {}) {
   const router = useRouter();
   const [phone, setPhone] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,10 +46,7 @@ export function PhoneScreen() {
 
   return (
     <Screen scroll noPadding edges={["top"]}>
-      <AuthHero
-        title="Campus rides, on demand"
-        subtitle="Fast, affordable trips around campus — book in seconds."
-      />
+      <AuthHero badge={badge} title={title} subtitle={subtitle} />
       <View style={styles.panel}>
         <Input
           label="Phone number"
@@ -52,7 +62,7 @@ export function PhoneScreen() {
         <View style={styles.actions}>
           <Button label="Log in" loading={isSubmitting} onPress={() => void handleContinue("LOGIN")} />
           <Button
-            label="Create an account"
+            label={signupLabel}
             variant="secondary"
             loading={isSubmitting}
             onPress={() => void handleContinue("SIGNUP")}
