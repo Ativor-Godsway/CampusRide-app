@@ -9,11 +9,28 @@ import type {
   RideType,
   Zone,
 } from "@rida/shared";
+import { asArray, readCursorPage, readList } from "@rida/shared";
 import { api } from "../auth/apiClient";
+
+/**
+ * React Query cache keys for the rider's ride lists.
+ *
+ * Each key must hold ONE data shape. Home and the Rides tab both used
+ * ["myRides"]: Home cached a plain array, the Rides tab read the same entry
+ * as infinite-query pages, and React Query crashed reading `pages.length`
+ * ("Cannot read property 'length' of undefined") on the Rides tab.
+ * Both share the "myRides" prefix, so invalidating ["myRides"] refreshes both.
+ */
+export const myRidesQueryKeys = {
+  /** Home's "recent" strip — a plain RideSummary[]. */
+  recent: ["myRides", "recent"] as const,
+  /** Rides tab history — useInfiniteQuery pages of RidePage. */
+  history: ["myRides", "history"] as const,
+};
 
 export async function getZones(): Promise<Zone[]> {
   const res = await api.get<{ zones: Zone[] }>("/zones");
-  return res.data.zones;
+  return readList<Zone>(res.data, "zones");
 }
 
 export interface CreateRideInput {
@@ -65,7 +82,8 @@ export interface GetRideResult {
 
 export async function getRide(rideId: string): Promise<GetRideResult> {
   const res = await api.get<GetRideResult>(`/rides/${rideId}`);
-  return res.data;
+  const { ride } = res.data;
+  return { ...res.data, ride: { ...ride, passengers: asArray(ride.passengers) } };
 }
 
 export interface RideSummary extends Ride {
@@ -73,10 +91,9 @@ export interface RideSummary extends Ride {
   dropoffZone: Zone;
 }
 
-/** The signed-in rider's past rides, newest first. */
-export async function getMyRides(): Promise<RideSummary[]> {
-  const res = await api.get<{ rides: RideSummary[] }>("/rides/mine");
-  return res.data.rides;
+/** The signed-in rider's most recent rides, newest first (Home's "recent" strip). */
+export async function getRecentRides(limit = 3): Promise<RideSummary[]> {
+  return (await getMyRidesPage(undefined, limit)).rides;
 }
 
 export async function submitRideDecision(rideId: string, action: RiderDecisionAction): Promise<Ride> {
@@ -138,7 +155,8 @@ export interface RidePage {
  */
 export async function getMyRidesPage(cursor?: string, limit = 20): Promise<RidePage> {
   const res = await api.get<RidePage>("/rides/mine", { params: { cursor, limit } });
-  return res.data;
+  const { items, nextCursor, hasMore } = readCursorPage<RideSummary>(res.data, "rides");
+  return { rides: items, nextCursor, hasMore };
 }
 
 export type MoolreNetwork = "MTN" | "TELECEL" | "AT";

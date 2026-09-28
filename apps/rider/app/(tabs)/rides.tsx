@@ -1,6 +1,6 @@
 import { useRouter } from "expo-router";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Pressable, StyleSheet, View } from "react-native";
+import { Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { RideStatus } from "@rida/shared";
 import {
@@ -16,6 +16,7 @@ import {
   Button,
   formatGhs,
   getMyRidesPage,
+  myRidesQueryKeys,
   spacing,
 } from "@rida/mobile-shared";
 
@@ -53,15 +54,35 @@ export default function RidesTab() {
    * Cursor-based (see GET /rides/mine): an offset would shift under the
    * rider if they booked a ride mid-scroll, duplicating or skipping a row.
    */
-  const { data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage } =
-    useInfiniteQuery({
-      queryKey: ["myRides"],
-      queryFn: ({ pageParam }: { pageParam: string | undefined }) => getMyRidesPage(pageParam),
-      initialPageParam: undefined as string | undefined,
-      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-    });
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+  } = useInfiniteQuery({
+    // Own key — Home's "recent" query caches a plain array, and sharing
+    // ["myRides"] with it is what crashed this tab.
+    queryKey: myRidesQueryKeys.history,
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) => getMyRidesPage(pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage) => lastPage?.nextCursor ?? undefined,
+  });
 
-  const rides = data?.pages.flatMap((page) => page.rides) ?? [];
+  const rides = data?.pages.flatMap((page) => page?.rides ?? []) ?? [];
+
+  const refreshControl = (
+    <RefreshControl
+      refreshing={isRefetching && !isFetchingNextPage}
+      onRefresh={() => void refetch()}
+      tintColor={colors.primary[500]}
+      colors={[colors.primary[500]]}
+    />
+  );
 
   if (isLoading) {
     return (
@@ -71,13 +92,15 @@ export default function RidesTab() {
     );
   }
 
-  if (isError) {
+  // First page failed: nothing to show, so offer a retry instead.
+  if (isError && rides.length === 0) {
     return (
       <Screen>
         <EmptyState
           title="Couldn't load your rides"
-          message="Pull down to try again."
+          message="Check your connection and try again."
           illustration="offline"
+          action={<Button label="Retry" onPress={() => void refetch()} loading={isRefetching} />}
         />
       </Screen>
     );
@@ -85,7 +108,7 @@ export default function RidesTab() {
 
   if (rides.length === 0) {
     return (
-      <Screen>
+      <Screen scroll refreshControl={refreshControl}>
         <View style={styles.header}>
           <Text variant="h1">Your rides</Text>
         </View>
@@ -99,7 +122,7 @@ export default function RidesTab() {
   }
 
   return (
-    <Screen scroll>
+    <Screen scroll refreshControl={refreshControl}>
       <View style={styles.header}>
         <Text variant="h1">Your rides</Text>
       </View>
@@ -180,8 +203,13 @@ export default function RidesTab() {
 
       {hasNextPage && (
         <View style={styles.loadMore}>
+          {isFetchNextPageError && !isFetchingNextPage ? (
+            <Text variant="bodySmall" color="error" style={styles.loadMoreError}>
+              Couldn&apos;t load older rides. Check your connection and try again.
+            </Text>
+          ) : null}
           <Button
-            label={isFetchingNextPage ? "Loading…" : "Load older rides"}
+            label={isFetchNextPageError ? "Try again" : "Load older rides"}
             variant="secondary"
             onPress={() => void fetchNextPage()}
             loading={isFetchingNextPage}
@@ -193,7 +221,8 @@ export default function RidesTab() {
 }
 
 const styles = StyleSheet.create({
-  loadMore: { marginTop: spacing.lg },
+  loadMore: { marginTop: spacing.lg, gap: spacing.sm },
+  loadMoreError: { textAlign: "center" },
   header: {
     marginBottom: spacing.xl,
   },
