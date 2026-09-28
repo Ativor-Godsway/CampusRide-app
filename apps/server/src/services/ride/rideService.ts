@@ -79,6 +79,12 @@ async function transitionRideTx(
   if (toStatus === "COMPLETED") {
     data.completedAt = new Date();
   }
+  if (toStatus === "CANCELLED" && ctx.riderCancel) {
+    // Same write as the status change, so a cancel can never be recorded
+    // without the reason the rider gave for it.
+    data.riderCancelReason = ctx.riderCancel.reason;
+    data.riderCancelNote = ctx.riderCancel.note;
+  }
   if (toStatus === "REQUESTED") {
     data.broadcastStartedAt = now;
     data.decisionStartedAt = null;

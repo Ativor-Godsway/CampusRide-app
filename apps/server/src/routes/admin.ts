@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient, Prisma } from "@prisma/client";
+import { FLAGGED_RIDER_CANCEL_REASONS, RIDER_CANCEL_REASON_LABELS } from "@rida/shared";
 import { requireAuth, requireAdmin } from "../middleware/auth";
 
 /**
@@ -35,6 +36,8 @@ const ADMIN_RIDE_SELECT = {
   paymentStatus: true,
   paymentMethod: true,
   cancelReason: true,
+  riderCancelReason: true,
+  riderCancelNote: true,
   createdAt: true,
   completedAt: true,
   rider: { select: { id: true, name: true, phone: true } },
@@ -184,6 +187,18 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
       take: parseLimit(query.limit),
     });
 
-    return reply.send({ rides });
+    // The readable label and the "driver problem" flag come from
+    // @rida/shared, so the admin site never keeps its own copy.
+    return reply.send({
+      rides: rides.map((ride) => ({
+        ...ride,
+        riderCancelReasonLabel: ride.riderCancelReason
+          ? RIDER_CANCEL_REASON_LABELS[ride.riderCancelReason]
+          : null,
+        riderCancelFlagged:
+          ride.riderCancelReason !== null &&
+          FLAGGED_RIDER_CANCEL_REASONS.includes(ride.riderCancelReason),
+      })),
+    });
   });
 }

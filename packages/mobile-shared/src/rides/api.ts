@@ -5,6 +5,7 @@ import type {
   Ride,
   RideCompletedFareSummary,
   RidePassenger,
+  RiderCancelReason,
   RiderDecisionAction,
   RideType,
   Zone,
@@ -101,9 +102,36 @@ export async function submitRideDecision(rideId: string, action: RiderDecisionAc
   return res.data.ride;
 }
 
-export async function cancelRide(rideId: string): Promise<Ride> {
-  const res = await api.post<{ ride: Ride }>(`/rides/${rideId}/cancel`);
+export interface CancelRideInput {
+  /** What the rider picked in the cancel sheet. */
+  reason?: RiderCancelReason;
+  /** Optional free text (with "Other"); at most RIDER_CANCEL_NOTE_MAX chars. */
+  note?: string;
+}
+
+export async function cancelRide(rideId: string, input: CancelRideInput = {}): Promise<Ride> {
+  const note = input.note?.trim();
+  const res = await api.post<{ ride: Ride }>(`/rides/${rideId}/cancel`, {
+    ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.reason && note ? { note } : {}),
+  });
   return res.data.ride;
+}
+
+export interface SwitchRideTypeResult {
+  ride: Ride;
+  /** The rider's new locked fare, in pesewas. */
+  farePesewas: number;
+}
+
+/**
+ * Switches a still-searching ride between SHARED and LONE in place
+ * (POST /rides/:id/switch). The server refuses with 409 once a driver has
+ * claimed the ride; the rider then simply has their matched ride.
+ */
+export async function switchRideType(rideId: string, type: RideType): Promise<SwitchRideTypeResult> {
+  const res = await api.post<SwitchRideTypeResult>(`/rides/${rideId}/switch`, { type });
+  return res.data;
 }
 
 export interface SubmitRatingInput {

@@ -60,6 +60,21 @@ enum RideCancelReason {
   MERGED_INTO_ANOTHER_RIDE
 }
 
+/// Why the RIDER cancelled, as chosen in the app's cancel sheet. Product
+/// feedback only, deliberately separate from RideCancelReason (the SYSTEM's
+/// reason, which app logic depends on). Mirrors RIDER_CANCEL_REASONS in
+/// @rida/shared.
+enum RiderCancelReason {
+  WAITING_TOO_LONG
+  CHANGED_PLANS
+  WRONG_ADDRESS
+  FOUND_ANOTHER_RIDE
+  PRICE
+  DRIVER_TOO_SLOW
+  DRIVER_ASKED_TO_CANCEL
+  OTHER
+}
+
 enum PaymentType {
   COLLECTION
   DISBURSEMENT
@@ -198,6 +213,11 @@ model Ride {
   paymentMethod PaymentMethod @default(CASH)
   /// Reason recorded on every CANCELLED transition; null otherwise
   cancelReason  RideCancelReason?
+  /// Rider's own answer in the cancel sheet (null for system cancels and
+  /// for cancels from app builds that predate the sheet).
+  riderCancelReason RiderCancelReason?
+  /// Optional free text, usually with OTHER. Max 200 chars (RIDER_CANCEL_NOTE_MAX).
+  riderCancelNote   String?           @db.VarChar(200)
   createdAt     DateTime      @default(now())
   departedAt    DateTime?
   completedAt   DateTime?

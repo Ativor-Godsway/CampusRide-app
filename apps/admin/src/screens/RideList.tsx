@@ -18,6 +18,28 @@ function formatFare(pesewas: number | null): string {
   return `GHS ${(pesewas / 100).toFixed(2)}`;
 }
 
+/**
+ * The rider's own reason (from the app's cancel sheet) when there is one,
+ * otherwise the system reason. "Driver asked me to cancel" is flagged: it can
+ * mean a driver dodging a trip while keeping their acceptance rate.
+ */
+function CancelReason({ ride }: { ride: AdminRide }) {
+  if (ride.riderCancelReasonLabel) {
+    return (
+      <div className="cancel-reason">
+        {ride.riderCancelFlagged ? (
+          <span className="badge badge-flagged" title="May signal a driver problem">
+            ⚠ Check driver
+          </span>
+        ) : null}
+        <span>{ride.riderCancelReasonLabel}</span>
+        {ride.riderCancelNote ? <q className="muted">{ride.riderCancelNote}</q> : null}
+      </div>
+    );
+  }
+  return <span className="muted">{ride.cancelReason ?? "—"}</span>;
+}
+
 /** Read-only oversight list. v1 filters: status and a createdAt window. */
 export function RideList() {
   const token = useToken();
@@ -107,11 +129,12 @@ export function RideList() {
                 <th>Route</th>
                 <th>Fare</th>
                 <th>Payment</th>
+                <th>Cancel reason</th>
               </tr>
             </thead>
             <tbody>
               {rides.map((ride) => (
-                <tr key={ride.id}>
+                <tr key={ride.id} className={ride.riderCancelFlagged ? "row-flagged" : undefined}>
                   <td>{new Date(ride.createdAt).toLocaleString()}</td>
                   <td>
                     <span className={`badge badge-${ride.status.toLowerCase()}`}>{ride.status}</span>
@@ -128,6 +151,9 @@ export function RideList() {
                   <td>{formatFare(ride.fareTotal)}</td>
                   <td>
                     {ride.paymentMethod} · {ride.paymentStatus}
+                  </td>
+                  <td>
+                    <CancelReason ride={ride} />
                   </td>
                 </tr>
               ))}

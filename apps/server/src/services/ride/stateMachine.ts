@@ -2,6 +2,7 @@ import type {
   PassengerStatus,
   RideCancelReason,
   RideStatus,
+  RiderCancelReason,
 } from "@rida/shared";
 import { InvalidTransitionError } from "./errors";
 
@@ -37,6 +38,11 @@ export const ACTIVE_DRIVER_STATUSES: readonly RideStatus[] = ["MATCHED", "ARRIVE
 export interface RideTransitionContext {
   /** Required when toStatus is "CANCELLED". */
   cancelReason?: RideCancelReason;
+  /**
+   * The rider's own answer from the cancel sheet, stored alongside (never
+   * instead of) the system cancelReason. Only meaningful with CANCELLED.
+   */
+  riderCancel?: { reason: RiderCancelReason | null; note: string | null };
 }
 
 export interface RideTransitionResult {

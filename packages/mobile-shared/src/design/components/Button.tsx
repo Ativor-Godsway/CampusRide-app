@@ -2,7 +2,8 @@ import { ActivityIndicator, Pressable, StyleSheet, type PressableProps } from "r
 import { colors, radii, shadows, spacing, touchTarget } from "../tokens";
 import { Text } from "./Text";
 
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+/** `dangerSecondary`: outlined red — a destructive action that shouldn't shout (e.g. "Cancel ride" beside "Keep waiting"). */
+export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "dangerSecondary";
 export type ButtonSize = "md" | "lg";
 
 export interface ButtonProps extends Omit<PressableProps, "style" | "children"> {
@@ -28,7 +29,8 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ disabled: isDisabled }}
+      accessibilityLabel={label}
+      accessibilityState={{ disabled: isDisabled, busy: loading }}
       disabled={isDisabled}
       style={({ pressed }) => [
         styles.base,
@@ -41,7 +43,15 @@ export function Button({
       {...rest}
     >
       {loading ? (
-        <ActivityIndicator color={variant === "primary" || variant === "danger" ? colors.white : colors.primary[500]} />
+        <ActivityIndicator
+          color={
+            variant === "primary" || variant === "danger"
+              ? colors.white
+              : variant === "dangerSecondary"
+                ? colors.error
+                : colors.primary[500]
+          }
+        />
       ) : (
         <Text variant="bodyMedium" color={textColor[variant]} style={styles.label}>
           {label}
@@ -51,11 +61,12 @@ export function Button({
   );
 }
 
-const textColor: Record<ButtonVariant, "inverse" | "primary" | "default"> = {
+const textColor: Record<ButtonVariant, "inverse" | "primary" | "default" | "error"> = {
   primary: "inverse",
   secondary: "primary",
   ghost: "primary",
   danger: "inverse",
+  dangerSecondary: "error",
 };
 
 const styles = StyleSheet.create({
@@ -91,4 +102,5 @@ const variantStyles = StyleSheet.create({
   secondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.primary[200] },
   ghost: { backgroundColor: "transparent" },
   danger: { backgroundColor: colors.danger, ...shadows.sm },
+  dangerSecondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.error },
 });

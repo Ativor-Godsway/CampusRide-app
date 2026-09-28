@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { Image, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Easing, Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import MapView, { Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
+import MapView, { Circle, Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
+import { useReduceMotion } from "../design/components/Illustration";
 import { colors, radii, shadows } from "../design/tokens";
 import { illustrations } from "../design/illustrations";
 import type { LatLng } from "./projection";
@@ -30,6 +31,11 @@ export interface CampusMapViewProps {
   showRecenter?: boolean;
   /** Rounded corners — set false for a full-bleed map. Defaults to true. */
   rounded?: boolean;
+  /**
+   * Id of a zone to draw a soft, expanding pulse around (e.g. the pickup
+   * while searching for a driver). Skipped when Reduce Motion is on.
+   */
+  pulseZoneId?: string;
 }
 
 /**
@@ -47,8 +53,10 @@ export function CampusMapView({
   light,
   showRecenter,
   rounded = true,
+  pulseZoneId,
 }: CampusMapViewProps) {
   const mapRef = useRef<MapView>(null);
+  const pulseZone = pulseZoneId ? zones.find((z) => z.id === pulseZoneId) : undefined;
 
   return (
     <View style={[styles.container, { height }, !rounded && styles.unrounded]}>
@@ -62,6 +70,8 @@ export function CampusMapView({
         toolbarEnabled={false}
         userInterfaceStyle={light ? "light" : undefined}
       >
+        {pulseZone ? <ZonePulse center={pulseZone} /> : null}
+
         {zones.map((zone) =>
           zone.role ? (
             <ArtMarker key={zone.id} zone={zone} onPress={() => onZonePress?.(zone.id)} />
@@ -152,6 +162,57 @@ function ArtMarker({ zone, onPress }: { zone: CampusMapZone; onPress: () => void
     >
       <Image source={source} style={{ width: size, height: size }} resizeMode="contain" onLoad={() => setReady(true)} />
     </Marker>
+  );
+}
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
+/** Largest radius of the pickup pulse, in metres on the ground. */
+const PULSE_MAX_RADIUS_M = 70;
+
+/**
+ * A soft ring that grows out from a map point and fades, on a loop. Drawn as
+ * a native map Circle (radius in metres) rather than an animated marker
+ * view: a custom Marker only animates on Android with tracksViewChanges on,
+ * which re-rasterizes the marker every frame.
+ */
+function ZonePulse({ center }: { center: LatLng }) {
+  const reduceMotion = useReduceMotion();
+  const progress = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (reduceMotion) return;
+    // Circle props aren't native-driver capable, so this runs on JS — but it
+    // is one small value, and only while this screen shows it.
+    const loop = Animated.loop(
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 2200,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [progress, reduceMotion]);
+
+  if (reduceMotion) return null;
+
+  return (
+    <AnimatedCircle
+      center={{ latitude: center.latitude, longitude: center.longitude }}
+      radius={progress.interpolate({ inputRange: [0, 1], outputRange: [8, PULSE_MAX_RADIUS_M] })}
+      fillColor={progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: ["rgba(25,116,60,0.28)", "rgba(25,116,60,0)"],
+      })}
+      strokeColor={progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: ["rgba(25,116,60,0.55)", "rgba(25,116,60,0)"],
+      })}
+      strokeWidth={1.5}
+      zIndex={1}
+    />
   );
 }
 
