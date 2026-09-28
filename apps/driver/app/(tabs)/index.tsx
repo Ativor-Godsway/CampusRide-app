@@ -17,6 +17,7 @@ import {
   Badge,
   Button,
   Card,
+  Illustration,
   LoadingState,
   Screen,
   Text,
@@ -406,15 +407,17 @@ function FillYourCarView({
 
           {isFull ? (
             <View style={fillStyles.fullBanner}>
-              <Ionicons name="car" size={22} color={colors.primary[500]} />
+              <Illustration name="carFull" size={48} />
               <Text variant="bodyMedium" style={fillStyles.fullText}>Car is full — 4 / 4</Text>
             </View>
           ) : suggestions.length === 0 ? (
             <View style={fillStyles.emptySuggestions}>
+              <Illustration name="searchEmpty" size={88} />
               <Text variant="bodySmall" color="muted">No compatible requests nearby right now.</Text>
             </View>
           ) : visibleSuggestions.length === 0 ? (
             <View style={fillStyles.emptySuggestions}>
+              <Illustration name="searchEmpty" size={88} />
               <Text variant="bodySmall" color="muted">No requests match this pickup and dropoff.</Text>
             </View>
           ) : (
@@ -948,7 +951,7 @@ export default function DriverHomeScreen() {
       {/* Offline: empty state */}
       {!isOnline && (
         <View style={styles.emptyState}>
-          <Ionicons name="car-outline" size={64} color={colors.ink[200]} />
+          <Illustration name="carIdle" size={180} float accessibilityLabel="Parked car" />
           <Text variant="h3" style={styles.emptyTitle}>Ready when you are</Text>
           <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
             Toggle online above to start accepting trips around campus.
@@ -986,7 +989,7 @@ export default function DriverHomeScreen() {
 
           {tabRides.length === 0 ? (
             <View style={styles.emptyList}>
-              <Ionicons name="radio-outline" size={48} color={colors.ink[200]} />
+              <Illustration name="pinRadar" size={140} pulse />
               <Text variant="h3" style={styles.emptyTitle}>Waiting for requests</Text>
               <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
                 {requestTab === "private"
@@ -1031,7 +1034,7 @@ export default function DriverHomeScreen() {
                 </View>
               ) : (
                 <View style={styles.emptyList}>
-                  <Ionicons name="funnel-outline" size={48} color={colors.ink[200]} />
+                  <Illustration name="searchEmpty" size={130} float />
                   <Text variant="h3" style={styles.emptyTitle}>No matching requests</Text>
                   <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
                     No requests match this pickup and dropoff. Tap “All” to clear the filter.
@@ -1250,6 +1253,7 @@ const fillStyles = StyleSheet.create({
   fullText: { color: colors.success },
   emptySuggestions: {
     alignItems: "center",
+    gap: spacing.sm,
     paddingVertical: spacing.xl,
   },
   // Suggestion card

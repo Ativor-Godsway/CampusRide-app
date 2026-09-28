@@ -77,7 +77,7 @@ export default function RidesTab() {
         <EmptyState
           title="Couldn't load your rides"
           message="Pull down to try again."
-          icon={<Ionicons name="cloud-offline-outline" size={48} color={colors.ink[300]} />}
+          illustration="offline"
         />
       </Screen>
     );
@@ -92,7 +92,7 @@ export default function RidesTab() {
         <EmptyState
           title="No rides yet"
           message="Your trip history will show up here once you take your first ride."
-          icon={<Ionicons name="car-outline" size={48} color={colors.ink[300]} />}
+          illustration="ridesEmpty"
         />
       </Screen>
     );

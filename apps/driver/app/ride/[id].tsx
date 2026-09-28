@@ -16,6 +16,7 @@ import {
   Button,
   CampusMapView,
   Card,
+  Illustration,
   LoadingState,
   Screen,
   Text,
@@ -36,6 +37,7 @@ import {
   spacing,
   typography,
   useAuth,
+  useCountUp,
 } from "@rida/mobile-shared";
 import type { RateableRider, RideWithZones } from "@rida/mobile-shared";
 
@@ -302,9 +304,7 @@ export default function ActiveRideScreen() {
     return (
       <Screen>
         <View style={styles.doneContainer}>
-          <View style={styles.doneIconWrap}>
-            <Ionicons name="checkmark-circle" size={72} color={colors.glowGreen} />
-          </View>
+          <Illustration name="tripComplete" size={160} pop style={styles.doneIconWrap} />
           <Text variant="h1" style={styles.doneTitle}>
             Ride Complete
           </Text>
@@ -312,9 +312,7 @@ export default function ActiveRideScreen() {
           {earnedPesewas !== null && completedPaymentMethod === "MOMO" && (
             <Card dark style={styles.earnCard}>
               <Text variant="label" color="glow">YOUR EARNINGS (85%)</Text>
-              <Text variant="h1" color="inverse" style={styles.earnAmount}>
-                {formatGhs(earnedPesewas)}
-              </Text>
+              <CountUpGhs pesewas={earnedPesewas} />
               <Text variant="caption" style={styles.earnCardSubtext}>
                 MoMo payout follows once the rider's payment clears.
               </Text>
@@ -324,9 +322,7 @@ export default function ActiveRideScreen() {
           {earnedPesewas !== null && completedPaymentMethod === "CASH" && (
             <Card dark style={styles.earnCard}>
               <Text variant="label" color="glow">COLLECT FROM RIDER</Text>
-              <Text variant="h1" color="inverse" style={styles.earnAmount}>
-                {formatGhs(earnedPesewas + commissionPesewas)}
-              </Text>
+              <CountUpGhs pesewas={earnedPesewas + commissionPesewas} />
               <View style={styles.cashBreakdown}>
                 <Text variant="bodySmall" style={styles.earnCardSubtext}>
                   Your share: {formatGhs(earnedPesewas)}
@@ -431,6 +427,16 @@ export default function ActiveRideScreen() {
         />
       </View>
     </Screen>
+  );
+}
+
+/** Big money figure that counts up from zero — a small moment of delight after a trip. */
+function CountUpGhs({ pesewas }: { pesewas: number }) {
+  const shown = useCountUp(pesewas);
+  return (
+    <Text variant="h1" color="inverse" style={styles.earnAmount}>
+      {formatGhs(shown)}
+    </Text>
   );
 }
 

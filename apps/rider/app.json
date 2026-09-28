@@ -4,6 +4,7 @@
     "slug": "campusride-rider",
     "version": "0.0.1",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "scheme": "campusride-rider",
     "userInterfaceStyle": "automatic",
     "ios": {
@@ -13,7 +14,8 @@
     "android": {
       "package": "gh.edu.ug.rida.rider",
       "adaptiveIcon": {
-        "backgroundColor": "#19743C"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#F6F7F6"
       }
     },
     "plugins": [

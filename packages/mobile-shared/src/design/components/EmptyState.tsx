@@ -1,20 +1,28 @@
 import { View, StyleSheet } from "react-native";
 import type { ReactNode } from "react";
 import { spacing } from "../tokens";
+import type { IllustrationName } from "../illustrations";
+import { Illustration } from "./Illustration";
 import { Text } from "./Text";
 
 export interface EmptyStateProps {
   title: string;
   message?: string;
   icon?: ReactNode;
+  /** 3D artwork shown above the title (takes priority over `icon`). */
+  illustration?: IllustrationName;
   action?: ReactNode;
 }
 
 /** Centered placeholder for empty lists / not-yet-available screens. */
-export function EmptyState({ title, message, icon, action }: EmptyStateProps) {
+export function EmptyState({ title, message, icon, illustration, action }: EmptyStateProps) {
   return (
     <View style={styles.container}>
-      {icon ? <View style={styles.icon}>{icon}</View> : null}
+      {illustration ? (
+        <Illustration name={illustration} size={150} float style={styles.icon} />
+      ) : icon ? (
+        <View style={styles.icon}>{icon}</View>
+      ) : null}
       <Text variant="h3" style={styles.title}>
         {title}
       </Text>

@@ -4,6 +4,7 @@ import { Alert, StyleSheet, View } from "react-native";
 import {
   Button,
   Card,
+  Illustration,
   Input,
   LoadingState,
   Screen,
@@ -71,6 +72,7 @@ export default function OnboardingScreen() {
   return (
     <Screen scroll>
       <View style={styles.header}>
+        <Illustration name="driverOnboarding" size={150} float style={styles.hero} />
         <Text variant="h1">Set up your profile</Text>
         <Text variant="bodySmall" color="muted" style={styles.subtitle}>
           Provide your car details so riders know what to look for. You can update these later.
@@ -140,6 +142,7 @@ export default function OnboardingScreen() {
 }
 
 const styles = StyleSheet.create({
+  hero: { alignSelf: "center", marginBottom: spacing.md },
   header: {
     gap: spacing.sm,
     marginBottom: spacing.xl,

@@ -1,15 +1,19 @@
-import { useRef } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
 import { colors, radii, shadows } from "../design/tokens";
+import { illustrations } from "../design/illustrations";
 import type { LatLng } from "./projection";
 
 export interface CampusMapZone extends LatLng {
   id: string;
   label: string;
-  /** "pickup" | "dropoff" | undefined — controls pin color/role. */
-  role?: "pickup" | "dropoff";
+  /**
+   * "pickup" | "dropoff" draw the 3D pins; "driver" draws the 3D top-down car
+   * that turns to face the direction it's moving. undefined = plain pin.
+   */
+  role?: "pickup" | "dropoff" | "driver";
 }
 
 export interface CampusMapViewProps {
@@ -58,21 +62,19 @@ export function CampusMapView({
         toolbarEnabled={false}
         userInterfaceStyle={light ? "light" : undefined}
       >
-        {zones.map((zone) => (
-          <Marker
-            key={zone.id}
-            coordinate={{ latitude: zone.latitude, longitude: zone.longitude }}
-            title={zone.label}
-            pinColor={
-              zone.role === "pickup"
-                ? colors.primary[500]
-                : zone.role === "dropoff"
-                  ? colors.ink[900]
-                  : colors.accent[500]
-            }
-            onPress={() => onZonePress?.(zone.id)}
-          />
-        ))}
+        {zones.map((zone) =>
+          zone.role ? (
+            <ArtMarker key={zone.id} zone={zone} onPress={() => onZonePress?.(zone.id)} />
+          ) : (
+            <Marker
+              key={zone.id}
+              coordinate={{ latitude: zone.latitude, longitude: zone.longitude }}
+              title={zone.label}
+              pinColor={colors.accent[500]}
+              onPress={() => onZonePress?.(zone.id)}
+            />
+          ),
+        )}
 
         {routeLine && routeLine.length >= 2 ? (
           <Polyline coordinates={routeLine} strokeColor={colors.primary[500]} strokeWidth={3} lineDashPattern={[8, 6]} />
@@ -90,6 +92,66 @@ export function CampusMapView({
         </Pressable>
       ) : null}
     </View>
+  );
+}
+
+/** Compass bearing in degrees (0 = north) from `a` to `b`. */
+function bearingBetween(a: LatLng, b: LatLng): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLon = toRad(b.longitude - a.longitude);
+  const y = Math.sin(dLon) * Math.cos(toRad(b.latitude));
+  const x =
+    Math.cos(toRad(a.latitude)) * Math.sin(toRad(b.latitude)) -
+    Math.sin(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.cos(dLon);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+const PIN_SIZE = 46;
+const CAR_SIZE = 52;
+
+/**
+ * Map marker drawn with the 3D artwork. The driver car rotates to face its
+ * direction of travel (worked out from its last two positions). Markers stop
+ * re-rendering once the image has loaded, which keeps Android smooth.
+ */
+function ArtMarker({ zone, onPress }: { zone: CampusMapZone; onPress: () => void }) {
+  const isCar = zone.role === "driver";
+  const [ready, setReady] = useState(false);
+  const [heading, setHeading] = useState(0);
+  const last = useRef<LatLng | null>(null);
+
+  useEffect(() => {
+    if (!isCar) return;
+    const prev = last.current;
+    const next = { latitude: zone.latitude, longitude: zone.longitude };
+    // Ignore GPS jitter under ~3 m so the car doesn't spin while parked.
+    if (prev && Math.abs(prev.latitude - next.latitude) + Math.abs(prev.longitude - next.longitude) > 0.00003) {
+      setHeading(bearingBetween(prev, next));
+    }
+    last.current = next;
+  }, [isCar, zone.latitude, zone.longitude]);
+
+  const source =
+    zone.role === "driver"
+      ? illustrations.carTopdown
+      : zone.role === "dropoff"
+        ? illustrations.pinDropoff
+        : illustrations.pinPickup;
+  const size = isCar ? CAR_SIZE : PIN_SIZE;
+
+  return (
+    <Marker
+      coordinate={{ latitude: zone.latitude, longitude: zone.longitude }}
+      title={zone.label}
+      onPress={onPress}
+      anchor={isCar ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 0.94 }}
+      rotation={isCar ? heading : 0}
+      flat={isCar}
+      tracksViewChanges={!ready}
+      zIndex={isCar ? 3 : 2}
+    >
+      <Image source={source} style={{ width: size, height: size }} resizeMode="contain" onLoad={() => setReady(true)} />
+    </Marker>
   );
 }
 

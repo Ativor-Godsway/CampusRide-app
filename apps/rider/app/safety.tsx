@@ -5,6 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   Button,
   Card,
+  Illustration,
   Input,
   Screen,
   Text,
@@ -94,6 +95,8 @@ export default function SafetyScreen() {
     <Screen scroll style={styles.content}>
       <Text variant="h2">Safety</Text>
 
+      <Illustration name="safetyShield" size={140} float style={styles.hero} />
+
       <Card style={styles.explainer}>
         <View style={styles.explainerRow}>
           <Ionicons name="shield-checkmark" size={18} color={colors.primary[600]} />
@@ -138,6 +141,7 @@ export default function SafetyScreen() {
 }
 
 const styles = StyleSheet.create({
+  hero: { alignSelf: "center" },
   content: { paddingBottom: spacing["4xl"], gap: spacing.lg },
   explainer: { backgroundColor: colors.primary[50] },
   explainerRow: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
