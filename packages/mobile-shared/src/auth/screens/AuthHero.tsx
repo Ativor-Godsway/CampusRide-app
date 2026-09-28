@@ -1,7 +1,8 @@
-import { Pressable, StyleSheet, View } from "react-native";
+import { Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, radii, spacing, typography } from "../../design/tokens";
 import { Text } from "../../design/components/Text";
+import { illustrations } from "../../design/illustrations";
 
 export interface AuthHeroProps {
   title: string;
@@ -37,7 +38,7 @@ export function AuthHero({ title, subtitle, compact = false, onBack }: AuthHeroP
         {!compact ? (
           <View style={styles.wordmarkRow}>
             <View style={styles.logoBadge}>
-              <Ionicons name="navigate" size={20} color={colors.primary[600]} />
+              <Image source={illustrations.logoMark} style={styles.logoImage} resizeMode="contain" />
             </View>
             <Text style={styles.wordmark}>CampusRide</Text>
           </View>
@@ -104,12 +105,16 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   logoBadge: {
-    width: 32,
-    height: 32,
+    width: 40,
+    height: 40,
     borderRadius: radii.full,
     backgroundColor: colors.white,
     alignItems: "center",
     justifyContent: "center",
+  },
+  logoImage: {
+    width: 30,
+    height: 30,
   },
   wordmark: {
     color: colors.white,

@@ -7,9 +7,11 @@ import {
   Card,
   ListRow,
   Screen,
+  Illustration,
   ServiceIcon,
   Text,
   colors,
+  illustrations,
   getMyRides,
   radii,
   spacing,
@@ -70,7 +72,8 @@ export default function HomeTab() {
                 name="car-sport"
                 color={colors.white}
                 background="rgba(255,255,255,0.14)"
-                size={48}
+                size={64}
+                source={illustrations.serviceRide}
               />
               <Text variant="h3" color="inverse" style={styles.tileTitle}>
                 Rides
@@ -84,7 +87,7 @@ export default function HomeTab() {
 
           <Pressable style={styles.gridCell} onPress={() => showComingSoon("Food delivery")}>
             <Card noPadding style={styles.tile}>
-              <ServiceIcon name="fast-food-outline" color={colors.accent[600]} background={colors.accent[50]} size={48} />
+              <ServiceIcon name="fast-food-outline" size={64} source={illustrations.serviceFood} />
               <Text variant="h3" style={styles.tileTitle}>
                 Food
               </Text>
@@ -98,7 +101,7 @@ export default function HomeTab() {
 
         <Pressable onPress={() => showComingSoon("Courier")}>
           <Card noPadding style={styles.fullTile}>
-            <ServiceIcon name="cube-outline" color={colors.accent[600]} background={colors.accent[50]} size={48} />
+            <ServiceIcon name="cube-outline" size={64} source={illustrations.serviceCourier} />
             <View style={styles.fullTileBody}>
               <Text variant="h3">Courier</Text>
               <Text variant="bodySmall" color="muted">
@@ -143,7 +146,8 @@ export default function HomeTab() {
         </Card>
       ) : (
         <Card style={styles.emptyRecents}>
-          <Text variant="bodySmall" color="muted">
+          <Illustration name="ridesEmpty" size={110} />
+          <Text variant="bodySmall" color="muted" style={styles.emptyRecentsText}>
             Your recent trips will show here once you take your first ride.
           </Text>
         </Card>
@@ -235,5 +239,9 @@ const styles = StyleSheet.create({
   },
   emptyRecents: {
     alignItems: "center",
+    gap: spacing.sm,
+  },
+  emptyRecentsText: {
+    textAlign: "center",
   },
 });

@@ -1,11 +1,11 @@
 import { StyleSheet, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import { Ionicons } from "@expo/vector-icons";
 import {
   Badge,
   Button,
   Card,
   EmptyState,
+  Illustration,
   LoadingState,
   RouteStops,
   Screen,
@@ -80,7 +80,7 @@ export default function RidesTab() {
     return (
       <Screen>
         <View style={styles.center}>
-          <Ionicons name="cloud-offline-outline" size={48} color={colors.ink[300]} />
+          <Illustration name="offline" size={140} float />
           <Text variant="h3" style={styles.centerTitle}>
             Couldn&apos;t load your rides
           </Text>
@@ -153,7 +153,7 @@ export default function RidesTab() {
         <EmptyState
           title="No completed rides yet"
           message="Your trip history and earnings will show up here once you complete your first ride."
-          icon={<Ionicons name="time-outline" size={48} color={colors.ink[300]} />}
+          illustration="historyEmpty"
         />
       ) : (
         <View style={styles.list}>

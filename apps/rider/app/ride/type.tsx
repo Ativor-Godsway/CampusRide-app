@@ -17,6 +17,7 @@ import {
   type CampusMapZone,
   LoadingState,
   ProgressBar,
+  Illustration,
   ServiceIcon,
   Text,
   callPhone,
@@ -213,7 +214,7 @@ export default function RideTypeScreen() {
       { id: "dropoff", ...dropoffCoord, label: params.dropoffZoneName, role: "dropoff" },
     ];
     if (driverLocation) {
-      zones.push({ id: "driver", ...driverLocation, label: "Driver" });
+      zones.push({ id: "driver", ...driverLocation, label: "Driver", role: "driver" });
     }
     return zones;
   }, [pickupCoord, dropoffCoord, driverLocation, params.pickupZoneName, params.dropoffZoneName]);
@@ -624,13 +625,7 @@ function NoDriverContent({
   return (
     <View style={styles.section}>
       <View style={styles.stateHeader}>
-        <ServiceIcon
-          name="alert-circle-outline"
-          size={48}
-          iconSize={22}
-          background={colors.warningSurface}
-          color={colors.warning}
-        />
+        <Illustration name="noDrivers" size={96} float />
         <View style={styles.stateHeading}>
           <Text variant="h2">No drivers available right now</Text>
           <Text variant="bodySmall" color="muted">

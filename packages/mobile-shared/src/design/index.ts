@@ -1,4 +1,5 @@
 export * from "./tokens";
+export * from "./illustrations";
 export * from "./components/Text";
 export * from "./components/Button";
 export * from "./components/Card";
@@ -9,6 +10,8 @@ export * from "./components/LoadingState";
 export * from "./components/EmptyState";
 export * from "./components/ListRow";
 export * from "./components/ServiceIcon";
+export * from "./components/Illustration";
+export * from "./useCountUp";
 export * from "./components/ProgressBar";
 export * from "./components/Sheet";
 export * from "./components/RouteStops";
