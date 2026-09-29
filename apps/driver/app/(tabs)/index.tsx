@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "expo-router";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Alert,
   Pressable,
@@ -10,8 +10,6 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import * as Location from "expo-location";
-import { nearestZone } from "@rida/shared";
 import { DRIVER_EVENTS } from "@rida/shared";
 import {
   Badge,
@@ -19,18 +17,14 @@ import {
   Card,
   Illustration,
   LoadingState,
+  PressableScale,
   Screen,
   Text,
   colors,
   formatCedis,
-  getZones,
   getRideSocket,
   radii,
-  setDriverAvailability,
-  driverClaimRide,
-  rejectRide,
   getDriverActiveRide,
-  getEligibleRides,
   getFillSuggestions,
   addPassenger,
   passengerArrived,
@@ -45,16 +39,14 @@ import {
   useToast,
 } from "@rida/mobile-shared";
 import type {
-  EligibleRideItem,
   FillSuggestion,
   FillSuggestionsResult,
   PassengerInCar,
   RideWithZones,
 } from "@rida/mobile-shared";
-
-type DriverStatus = "offline" | "online" | "on_ride";
-/** State A segmented toggle — "private" = LONE requests, "shared" = SHARED requests. Both come from the same /driver/rides/eligible response; this only filters which type is shown. */
-type RequestTab = "private" | "shared";
+import { driverActiveRideQueryKey, markTripOpened, wasTripOpened } from "../../lib/activeTrip";
+import { useDriverPresence } from "../../lib/presence";
+import { useRequestsNearYou } from "../../lib/requests";
 
 /** Sentinel for the "no specific location" pickup/dropoff filter option. */
 const ALL_FILTER = "ALL";
@@ -76,9 +68,6 @@ function timeAgo(isoDate: string): string {
  * ride never redirects to /ride/:id: the whole lifecycle, including driving
  * and per-passenger pickup/dropoff, lives on this screen.
  */
-/** LONE trips whose screen Home has already opened this session (see the effect below). */
-const autoOpenedTripIds = new Set<string>();
-
 function isFillingCar(ride: RideWithZones | null | undefined): boolean {
   return (
     ride !== null &&
@@ -439,52 +428,7 @@ function FillYourCarView({
   );
 }
 
-// ─── 6b-1 request-list sub-components (unchanged) ────────────────────────────
-
-interface RequestCardProps {
-  ride: EligibleRideItem;
-  claiming: boolean;
-  rejecting: boolean;
-  onAccept: () => void;
-  /** Phase 4: explicitly decline, instead of letting the offer time out. */
-  onReject: () => void;
-}
-
-function RequestCard({ ride, claiming, rejecting, onAccept, onReject }: RequestCardProps) {
-  return (
-    <Card style={styles.requestCard}>
-      {/* Absolutely positioned so it overlaps the corner instead of adding row height. */}
-      {ride.bestFit && (
-        <Badge variant="accent" label="★  Best match" style={styles.bestMatchBadge} />
-      )}
-      {/* Geometry only — the dot/line connector already conveys pickup → dropoff, no text labels. */}
-      <RouteStops
-        style={styles.routeRow}
-        origin={<Text variant="bodyMedium">{ride.pickupZoneName}</Text>}
-        destination={<Text variant="bodyMedium">{ride.dropoffZoneName}</Text>}
-      />
-      <View style={styles.requestActions}>
-        {/*
-          Decline is deliberately the quieter, secondary control: it is the
-          less common action and an accidental tap costs the driver a fare.
-        */}
-        <Button
-          label={rejecting ? "Declining…" : "Decline"}
-          variant="secondary"
-          onPress={onReject}
-          loading={rejecting}
-          disabled={claiming}
-        />
-        <Button
-          label={claiming ? "Claiming…" : "Accept"}
-          onPress={onAccept}
-          loading={claiming}
-          disabled={rejecting}
-        />
-      </View>
-    </Card>
-  );
-}
+// ─── Shared filter chips (fill-your-car suggestions) ─────────────────────────
 
 interface FilterChipRowProps {
   label: string;
@@ -527,17 +471,6 @@ function FilterChipRow({ label, options, selected, onSelect }: FilterChipRowProp
   );
 }
 
-function SectionHeader({ title, count }: { title: string; count: number }) {
-  return (
-    <View style={styles.sectionHeader}>
-      <Text variant="label" color="muted">{title}</Text>
-      <View style={styles.sectionCount}>
-        <Text variant="caption" color="muted">{count}</Text>
-      </View>
-    </View>
-  );
-}
-
 // ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function DriverHomeScreen() {
@@ -545,16 +478,6 @@ export default function DriverHomeScreen() {
   const queryClient = useQueryClient();
   const { isLoading: authLoading, isAuthenticated, user, signOut } = useAuth();
 
-  const [status, setStatus] = useState<DriverStatus>("offline");
-  const [requestTab, setRequestTab] = useState<RequestTab>("shared");
-  // Dependent location filters. Raw selections; the render normalizes them
-  // against the currently-available options (see effectivePickup/Dropoff), so
-  // a value that vanishes on a poll refresh falls back to ALL automatically.
-  const [pickupFilter, setPickupFilter] = useState<string>(ALL_FILTER);
-  const [dropoffFilter, setDropoffFilter] = useState<string>(ALL_FILTER);
-  const [claimingRideId, setClaimingRideId] = useState<string | null>(null);
-  /** Phase 4: the offer currently being declined, if any. */
-  const [rejectingRideId, setRejectingRideId] = useState<string | null>(null);
   const [addingRideId, setAddingRideId] = useState<string | null>(null);
   // Optimistic per-passenger status overlay (passengerId -> advanced status),
   // applied over server data; cleared once the server catches up, or rolled
@@ -563,16 +486,10 @@ export default function DriverHomeScreen() {
   const inFlightRef = useRef<Set<string>>(new Set());
   const { showToast, toast } = useToast();
 
-  const isOnline = status === "online" || status === "on_ride";
-
-  const { data: zones } = useQuery({
-    queryKey: ["zones"],
-    queryFn: getZones,
-    enabled: isAuthenticated,
-  });
+  const { isOnline, waking, toggle } = useDriverPresence();
 
   const { data: activeRide, isLoading: rideLoading } = useQuery({
-    queryKey: ["driverActiveRide"],
+    queryKey: driverActiveRideQueryKey,
     queryFn: getDriverActiveRide,
     enabled: isAuthenticated,
     refetchInterval: 15_000,
@@ -591,15 +508,9 @@ export default function DriverHomeScreen() {
     refetchInterval: 10_000,
   });
 
-  // Eligible-rides list — polled every 10 s when online (and not filling a car).
-  const { data: rawEligibleRides = [], refetch: refetchEligible } = useQuery({
-    queryKey: ["eligibleRides"],
-    queryFn: getEligibleRides,
-    // Not while on ANY trip: a driver with an active ride can't claim
-    // another (the server refuses), so offering requests would only fail.
-    enabled: isAuthenticated && isOnline && !activeRide,
-    refetchInterval: 10_000,
-  });
+  // "Requests near you (N)" — not while on ANY trip: a driver with an active
+  // ride can't claim another (the server refuses).
+  const { data: requests = [] } = useRequestsNearYou(isOnline && !activeRide);
 
   // Open the driving screen for a LONE trip — once per trip. SHARED rides —
   // every status including IN_PROGRESS — stay on this screen for the whole
@@ -610,112 +521,23 @@ export default function DriverHomeScreen() {
   // only once per trip, so a driver who steps back to Home isn't bounced
   // straight back; the active-trip banner is how they return.
   useEffect(() => {
-    if (!activeRide || activeRide.type !== "LONE" || autoOpenedTripIds.has(activeRide.id)) return;
-    autoOpenedTripIds.add(activeRide.id);
+    if (!activeRide || activeRide.type !== "LONE" || wasTripOpened(activeRide.id)) return;
+    markTripOpened(activeRide.id);
     router.push(`/ride/${activeRide.id}`);
   }, [activeRide, router]);
 
-  // Socket: refresh the appropriate list when a new broadcast arrives.
-  // While driving (filling but not assembling), the car is closed to new
-  // adds — there is nothing broadcast-relevant to refetch.
+  // Socket: a new broadcast may be addable to the car being filled. (The
+  // requests list refreshes itself; see useRequestsNearYou.) While driving,
+  // the car is closed to new adds, so there's nothing to refetch.
   useEffect(() => {
-    if (!isAuthenticated) return;
-    if (!filling && !isOnline) return;
+    if (!isAuthenticated || !assembling) return;
     const socket = getRideSocket();
-    const onBroadcast = () => {
-      if (assembling) {
-        void refetchFill();
-      } else if (!filling) {
-        void refetchEligible();
-      }
-    };
+    const onBroadcast = () => void refetchFill();
     socket.on(DRIVER_EVENTS.RIDE_BROADCAST, onBroadcast);
     return () => {
       socket.off(DRIVER_EVENTS.RIDE_BROADCAST, onBroadcast);
     };
-  }, [isAuthenticated, filling, assembling, isOnline, refetchFill, refetchEligible]);
-
-  const availabilityMutation = useMutation({
-    mutationFn: ({ isOnline: on, zoneId }: { isOnline: boolean; zoneId?: string }) =>
-      setDriverAvailability(on, zoneId),
-    onSuccess: (_data, vars) => {
-      setStatus(vars.isOnline ? "online" : "offline");
-      void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
-      void queryClient.invalidateQueries({ queryKey: ["eligibleRides"] });
-    },
-    onError: () => {
-      Alert.alert("Error", "Could not update availability. Make sure your account is approved.");
-    },
-  });
-
-  const handleToggle = useCallback(async () => {
-    if (status === "offline") {
-      const { status: permStatus } = await Location.requestForegroundPermissionsAsync();
-      if (permStatus !== "granted") {
-        Alert.alert("Location required", "Enable location so we can match you with nearby riders.");
-        return;
-      }
-      const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const zone = nearestZone(pos.coords.latitude, pos.coords.longitude, zones ?? []);
-      availabilityMutation.mutate({ isOnline: true, zoneId: zone?.id });
-    } else {
-      availabilityMutation.mutate({ isOnline: false });
-    }
-  }, [status, zones, availabilityMutation]);
-
-  // 6b-1: accept a request from the eligible-rides list.
-  // SHARED claims stay on this screen (fill-your-car appears when activeRide refreshes).
-  // LONE claims navigate to /ride/:id immediately.
-  const handleAccept = useCallback(
-    async (ride: EligibleRideItem) => {
-      if (claimingRideId !== null) return;
-      setClaimingRideId(ride.rideId);
-      try {
-        await driverClaimRide(ride.rideId);
-        void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
-        if (ride.type === "LONE") {
-          router.push(`/ride/${ride.rideId}`);
-        }
-        // SHARED: stay here — activeRide polling will detect MATCHED and switch to fill view
-      } catch (err) {
-        const httpStatus = (err as { response?: { status?: number } }).response?.status;
-        if (httpStatus === 409) {
-          Alert.alert("Claimed", "Another driver picked this up first.");
-        } else {
-          Alert.alert("Error", "Could not claim this ride. Try again.");
-        }
-        void refetchEligible();
-      } finally {
-        setClaimingRideId(null);
-      }
-    },
-    [claimingRideId, queryClient, router, refetchEligible],
-  );
-
-  /**
-   * Phase 4: explicitly decline an offer. Removes it from THIS driver's list
-   * immediately (the server records the rejection and filters it out of
-   * /driver/rides/eligible) while leaving it live for every other driver.
-   *
-   * Optimistic + refetch: the card should disappear on tap, and the refetch
-   * reconciles with the server. A failure is deliberately quiet — the worst
-   * case is the offer reappears on the next poll, which is self-explanatory.
-   */
-  const handleReject = useCallback(
-    async (ride: EligibleRideItem) => {
-      if (rejectingRideId !== null) return;
-      setRejectingRideId(ride.rideId);
-      try {
-        await rejectRide(ride.rideId);
-      } catch {
-        Alert.alert("Couldn't decline", "Please try again.");
-      } finally {
-        setRejectingRideId(null);
-        void refetchEligible();
-      }
-    },
-    [rejectingRideId, refetchEligible],
-  );
+  }, [isAuthenticated, assembling, refetchFill]);
 
   // Fill-your-car: add a compatible passenger.
   const handleAddPassenger = useCallback(
@@ -724,7 +546,7 @@ export default function DriverHomeScreen() {
       setAddingRideId(requestRideId);
       try {
         await addPassenger(activeRide.id, requestRideId);
-        void queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
+        void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
         void refetchFill();
       } catch (err) {
         const httpStatus = (err as { response?: { status?: number } }).response?.status;
@@ -765,7 +587,7 @@ export default function DriverHomeScreen() {
         });
       try {
         await call(rideId);
-        await queryClient.invalidateQueries({ queryKey: ["driverActiveRide"] });
+        await queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
         // Assembling shows the polled fill list; refresh it too before clearing.
         if (assembling) await refetchFill();
         clear();
@@ -848,7 +670,6 @@ export default function DriverHomeScreen() {
   }
 
   const firstName = user.name?.split(" ")[0] ?? "Driver";
-  const toggling = availabilityMutation.isPending;
 
   // ─── On a LONE trip, stepped back to Home ────────────────────────────────────
   // The trip is driven on its own screen; Home just says so and leads back.
@@ -912,49 +733,10 @@ export default function DriverHomeScreen() {
     );
   }
 
-  // ─── Normal home (6b-1 eligible-rides list) ──────────────────────────────────
-
-  // Requests for the active tab, in the server's order (newest first).
-  const tabRides = rawEligibleRides.filter((r) =>
-    requestTab === "private" ? r.type === "LONE" : r.type === "SHARED",
-  );
-
-  // Dependent pickup → dropoff filter, derived entirely from the current
-  // requests. `effective*` is the single guard that keeps the selection valid:
-  // any filter value not present in the live options (a poll refresh removed
-  // the last matching request, a tab switch, or a pickup change that narrows
-  // the dropoffs) normalizes to ALL here — for both the chip highlight and the
-  // filtering — so the list can never freeze on a stale, empty selection.
-  const pickupOptions = distinctSorted(tabRides.map((r) => r.pickupZoneName));
-  const effectivePickup = pickupOptions.includes(pickupFilter) ? pickupFilter : ALL_FILTER;
-
-  const dropoffPool =
-    effectivePickup === ALL_FILTER
-      ? tabRides
-      : tabRides.filter((r) => r.pickupZoneName === effectivePickup);
-  const dropoffOptions = distinctSorted(dropoffPool.map((r) => r.dropoffZoneName));
-  const effectiveDropoff = dropoffOptions.includes(dropoffFilter) ? dropoffFilter : ALL_FILTER;
-
-  const visibleRides = dropoffPool.filter(
-    (r) => effectiveDropoff === ALL_FILTER || r.dropoffZoneName === effectiveDropoff,
-  );
-
-  // Switching tabs starts from a clean All/All — the available locations differ
-  // per tab. Choosing a pickup resets the dropoff to All (the reachable set
-  // changes); the effective-value guard above covers everything else.
-  const selectTab = (tab: RequestTab) => {
-    setRequestTab(tab);
-    setPickupFilter(ALL_FILTER);
-    setDropoffFilter(ALL_FILTER);
-  };
-  const selectPickup = (value: string) => {
-    setPickupFilter(value);
-    setDropoffFilter(ALL_FILTER);
-  };
+  // ─── Normal home: waiting for requests ───────────────────────────────────────
 
   return (
-    <Screen scroll>
-      {/* Header — compact online toggle replaces the old avatar + full-width status card. */}
+    <Screen>
       <View style={styles.header}>
         <View>
           <Text variant="bodySmall" color="muted">Welcome back</Text>
@@ -965,19 +747,25 @@ export default function DriverHomeScreen() {
           <Text variant="bodySmall" style={styles.onlineLabel}>
             {isOnline ? "Online" : "Offline"}
           </Text>
+          {/* Flips on tap; the server is told in the background (lib/presence). */}
           <Switch
             value={isOnline}
-            onValueChange={() => void handleToggle()}
-            disabled={toggling}
+            onValueChange={toggle}
             trackColor={{ false: colors.ink[100], true: colors.primary[200] }}
             thumbColor={isOnline ? colors.primary[500] : colors.ink[300]}
-            accessibilityLabel="Online toggle"
+            accessibilityLabel="Online"
+            accessibilityHint={isOnline ? "Go offline and stop receiving requests" : "Go online to receive requests"}
           />
         </View>
       </View>
 
-      {/* Offline: empty state */}
-      {!isOnline && (
+      {waking && (
+        <Text variant="caption" color="muted" style={styles.waking} accessibilityLiveRegion="polite">
+          Connecting to CampusRide… this can take a few seconds.
+        </Text>
+      )}
+
+      {!isOnline ? (
         <View style={styles.emptyState}>
           <Illustration name="carIdle" size={180} float accessibilityLabel="Parked car" />
           <Text variant="h3" style={styles.emptyTitle}>Ready when you are</Text>
@@ -985,92 +773,32 @@ export default function DriverHomeScreen() {
             Toggle online above to start accepting trips around campus.
           </Text>
         </View>
-      )}
-
-      {/* Online: request-type toggle + sort toggle + single filtered list */}
-      {isOnline && (
+      ) : (
         <>
-          <View style={styles.requestTabPill}>
-            <Pressable
-              onPress={() => selectTab("private")}
-              style={[styles.requestTabBtn, requestTab === "private" && styles.requestTabBtnActive]}
-            >
-              <Text
-                variant="bodySmall"
-                style={requestTab === "private" ? styles.sortBtnTextActive : styles.sortBtnText}
-              >
-                Private rides
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => selectTab("shared")}
-              style={[styles.requestTabBtn, requestTab === "shared" && styles.requestTabBtnActive]}
-            >
-              <Text
-                variant="bodySmall"
-                style={requestTab === "shared" ? styles.sortBtnTextActive : styles.sortBtnText}
-              >
-                Shared rides
-              </Text>
-            </Pressable>
+          <View style={styles.hero}>
+            <Illustration name="pinRadar" size={150} pulse accessibilityLabel="Map pin" />
+            <Text variant="h3" style={styles.emptyTitle}>Waiting for requests</Text>
+            <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
+              Keep the app open. Requests near you show up below.
+            </Text>
           </View>
 
-          {tabRides.length === 0 ? (
-            <View style={styles.emptyList}>
-              <Illustration name="pinRadar" size={140} pulse />
-              <Text variant="h3" style={styles.emptyTitle}>Waiting for requests</Text>
-              <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
-                {requestTab === "private"
-                  ? "Private ride requests near your zone will appear here."
-                  : "Shared ride requests near your zone will appear here."}
-              </Text>
+          <PressableScale
+            onPress={() => router.push("/requests")}
+            style={styles.nearYouCard}
+            accessibilityRole="button"
+            accessibilityLabel={`Requests near you, ${requests.length} ${requests.length === 1 ? "request" : "requests"}`}
+            accessibilityHint="Browse and pick one yourself"
+          >
+            <View style={styles.nearYouCount}>
+              <Text variant="bodyMedium" style={styles.nearYouCountText}>{requests.length}</Text>
             </View>
-          ) : (
-            <>
-              {/* Dependent location filter — options derive from the current requests. */}
-              <View style={styles.filterGroup}>
-                <FilterChipRow
-                  label="Pickup"
-                  options={pickupOptions}
-                  selected={effectivePickup}
-                  onSelect={selectPickup}
-                />
-                <FilterChipRow
-                  label="Dropoff"
-                  options={dropoffOptions}
-                  selected={effectiveDropoff}
-                  onSelect={setDropoffFilter}
-                />
-              </View>
-
-              {visibleRides.length > 0 ? (
-                <View style={styles.section}>
-                  <SectionHeader
-                    title={requestTab === "private" ? "PRIVATE RIDES" : "SHARED RIDES"}
-                    count={visibleRides.length}
-                  />
-                  {visibleRides.map((ride) => (
-                    <RequestCard
-                      key={ride.rideId}
-                      ride={ride}
-                      claiming={claimingRideId === ride.rideId}
-                      onAccept={() => void handleAccept(ride)}
-                      rejecting={rejectingRideId === ride.rideId}
-                      onReject={() => void handleReject(ride)}
-                    />
-                  ))}
-                </View>
-              ) : (
-                <View style={styles.emptyList}>
-                  <Illustration name="searchEmpty" size={130} float />
-                  <Text variant="h3" style={styles.emptyTitle}>No matching requests</Text>
-                  <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
-                    No requests match this pickup and dropoff. Tap “All” to clear the filter.
-                  </Text>
-                </View>
-              )}
-            </>
-          )}
+            <View style={styles.nearYouText}>
+              <Text variant="bodyMedium" style={styles.nearYouTitle}>Requests near you</Text>
+              <Text variant="caption" color="muted">Browse and pick one yourself</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.ink[300]} />
+          </PressableScale>
         </>
       )}
     </Screen>
@@ -1082,8 +810,6 @@ export default function DriverHomeScreen() {
 const styles = StyleSheet.create({
   onTrip: { flex: 1, justifyContent: "center", alignItems: "stretch", gap: spacing.md },
   onTripText: { textAlign: "center" },
-  // Phase 4: Decline / Accept pair on a ride offer.
-  requestActions: { flexDirection: "row", gap: spacing.sm },
   // Wraps the fill-your-car Screen so the toast can pin to the viewport bottom.
   screenRoot: { flex: 1 },
   header: {
@@ -1112,34 +838,9 @@ const styles = StyleSheet.create({
     paddingTop: spacing["4xl"],
     paddingBottom: spacing["4xl"],
   },
-  emptyList: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    paddingVertical: spacing["4xl"],
-  },
   emptyTitle: { marginTop: spacing.sm },
   emptyBody: { textAlign: "center", maxWidth: 260 },
-  requestTabPill: {
-    flexDirection: "row",
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.full,
-    padding: 3,
-    gap: 2,
-    marginBottom: spacing.lg,
-  },
-  requestTabBtn: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: spacing.sm,
-    borderRadius: radii.full,
-  },
-  requestTabBtnActive: { backgroundColor: colors.white, ...shadows.sm },
-  // Shared by the request-type pill (Private/Shared) text.
-  sortBtnText: { color: colors.ink[500] },
-  sortBtnTextActive: { color: colors.ink[900], fontWeight: "600" as const },
-  // Dependent pickup/dropoff filter — two scrollable chip lines.
-  filterGroup: { gap: spacing.sm, marginBottom: spacing.lg },
+  // Pickup/dropoff filter over the car's addable requests — two scrollable chip lines.
   filterRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   filterLabel: { width: 52 },
   filterChips: { gap: spacing.xs, paddingRight: spacing.md },
@@ -1152,27 +853,36 @@ const styles = StyleSheet.create({
   filterChipActive: { backgroundColor: colors.primary[500] },
   filterChipText: { color: colors.ink[500] },
   filterChipTextActive: { color: colors.white, fontWeight: typography.weight.semibold },
-  section: { gap: spacing.md, marginBottom: spacing.xl },
-  sectionHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: spacing.xs,
-    marginBottom: spacing.xs,
-  },
-  sectionCount: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.full,
-    minWidth: 22,
-    height: 22,
+  waking: { marginTop: -spacing.md, marginBottom: spacing.md, textAlign: "right" },
+  hero: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: spacing.sm,
+    gap: spacing.sm,
+    paddingBottom: spacing["3xl"],
   },
-  requestCard: { gap: spacing.md },
-  // Overlaps the top-right corner (absolute) so it never adds row height.
-  bestMatchBadge: { position: "absolute", top: spacing.sm, right: spacing.sm, zIndex: 1 },
-  routeRow: { paddingVertical: spacing.xs },
+  nearYouCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    backgroundColor: colors.white,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.lg,
+    ...shadows.sm,
+  },
+  nearYouCount: {
+    width: 32,
+    height: 32,
+    borderRadius: radii.full,
+    backgroundColor: colors.primary[50],
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  nearYouCountText: { color: colors.primary[500], fontWeight: typography.weight.extrabold },
+  nearYouText: { flex: 1, gap: 1 },
+  nearYouTitle: { fontWeight: typography.weight.bold },
 });
 
 // Fill-your-car styles (separate namespace to stay organised)

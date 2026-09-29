@@ -19,3 +19,5 @@ export * from "./places/placeSuggestions";
 export * from "./geo/fitPadding";
 export * from "./rides/activeRideStatus";
 export * from "./rides/driverTripStatus";
+export * from "./driver/zoneUpdate";
+export * from "./driver/requestsNearYou";
