@@ -1,11 +1,19 @@
-import { Redirect, Tabs } from "expo-router";
+import { View } from "react-native";
+import { Redirect, Tabs, usePathname } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LoadingState, RoleMismatchScreen, Screen, colors, shadows, useAuth } from "@rida/mobile-shared";
 import { driverSetupRoute } from "../../lib/driverGate";
+import { ActiveTripBanner } from "../../components/ActiveTripBanner";
+import { useDriverActiveTrip } from "../../lib/activeTrip";
 
 /** Bottom tab shell — Home / Rides / Account. Re-checks auth, role, onboarding and approval so a signed-out, mismatched-role, not-yet-onboarded or not-yet-approved user can't land here directly. */
 export default function TabsLayout() {
   const { isLoading, isAuthenticated, user, signOut } = useAuth();
+  const pathname = usePathname();
+  const { data: activeTrip } = useDriverActiveTrip();
+  // Home shows the trip itself (the SHARED car, or a "Return to trip" card),
+  // so the banner is for the other tabs.
+  const showTripBanner = Boolean(activeTrip) && pathname !== "/";
 
   if (isLoading) {
     return (
@@ -29,6 +37,9 @@ export default function TabsLayout() {
   }
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Above the tabs, so a trip is one tap away from every tab. */}
+      {showTripBanner && activeTrip ? <ActiveTripBanner ride={activeTrip} /> : null}
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -77,5 +88,6 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    </View>
   );
 }

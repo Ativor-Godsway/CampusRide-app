@@ -19,6 +19,7 @@ import {
   updateDriverProfile,
   useAuth,
 } from "@rida/mobile-shared";
+import { useDriverActiveTrip } from "../../lib/activeTrip";
 import { cloudinaryAvatar } from "@rida/shared";
 import { useDriverPhotoUpload, type DriverPhotoResult, type PhotoSource } from "../../lib/useDriverPhotoUpload";
 
@@ -94,8 +95,13 @@ export default function AccountTab() {
     }
   }
 
+  const { data: activeTrip } = useDriverActiveTrip();
   const confirmLogout = () => {
-    Alert.alert("Log out", "Are you sure you want to log out?", [
+    // Logging out never ends a trip; say so, so it isn't done by mistake.
+    const message = activeTrip
+      ? "You're on a trip. Logging out won't end it — your rider is still expecting you. Log back in to carry on."
+      : "Are you sure you want to log out?";
+    Alert.alert("Log out", message, [
       { text: "Cancel", style: "cancel" },
       { text: "Log out", style: "destructive", onPress: () => void signOut() },
     ]);

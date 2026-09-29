@@ -3,9 +3,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { RIDER_DEEP_LINK_POLICY } from "@rida/shared";
-import { AuthProvider, useDeepLinkGuard } from "@rida/mobile-shared";
+import { AuthProvider, installAppStateFocusManager, useDeepLinkGuard } from "@rida/mobile-shared";
+import { useResetCacheOnAccountChange } from "../lib/activeRide";
 
 const queryClient = new QueryClient();
+
+// Coming back from the background refetches active queries — the
+// active-ride banner and a ride's status included.
+installAppStateFocusManager();
 
 /**
  * Drops inbound deep links that aren't on the rider allowlist. The app
@@ -20,12 +25,19 @@ function DeepLinkGuard() {
   return null;
 }
 
+/** Must sit inside both QueryClientProvider and AuthProvider. */
+function SessionCacheReset() {
+  useResetCacheOnAccountChange();
+  return null;
+}
+
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <DeepLinkGuard />
+          <SessionCacheReset />
           <Stack screenOptions={{ headerShown: false }} />
         </AuthProvider>
       </QueryClientProvider>

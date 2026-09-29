@@ -2,16 +2,11 @@ import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, RideSource, RideStatus, RideType } from "@rida/shared";
 import { getLoneFare, getSharedFarePerRider } from "@rida/shared";
 import { broadcastRide } from "./dispatch";
+import { findActiveRideForRider } from "./activeRide";
 import { logger } from "../../lib/logger";
 
 /** Rides in any of these statuses count as "active" — a rider may have at most one at a time. */
-export const ACTIVE_RIDE_STATUSES: RideStatus[] = [
-  "REQUESTED",
-  "MATCHED",
-  "ARRIVED",
-  "IN_PROGRESS",
-  "AWAITING_RIDER_DECISION",
-];
+export { ACTIVE_RIDE_STATUSES } from "./activeRide";
 
 /** Thrown by createRide when pickupZoneId and dropoffZoneId are the same. */
 export class SameZoneError extends Error {
@@ -31,9 +26,9 @@ export class ZoneNotFoundError extends Error {
 
 /** Thrown by createRide when the rider already has an active ride. */
 export class ActiveRideExistsError extends Error {
-  readonly existingRide: { id: string };
+  readonly existingRide: { id: string; status: RideStatus };
 
-  constructor(existingRide: { id: string }) {
+  constructor(existingRide: { id: string; status: RideStatus }) {
     super("Rider already has an active ride");
     this.name = "ActiveRideExistsError";
     this.existingRide = existingRide;
@@ -74,11 +69,15 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
     throw new SameZoneError();
   }
 
-  const [pickupZone, dropoffZone, existingActiveRide] = await Promise.all([
+  // One-active-ride rule, through the same lookup as GET /rides/active: it
+  // also sees a rider who is a passenger in someone else's car (merged), who
+  // a riderId-only check let book a second ride mid-trip.
+  const [pickupZone, dropoffZone, existingActive] = await Promise.all([
     prisma.zone.findUnique({ where: { id: pickupZoneId } }),
     prisma.zone.findUnique({ where: { id: dropoffZoneId } }),
-    prisma.ride.findFirst({ where: { riderId, status: { in: ACTIVE_RIDE_STATUSES } } }),
+    findActiveRideForRider(prisma, riderId),
   ]);
+  const existingActiveRide = existingActive?.ride ?? null;
 
   if (!pickupZone || !dropoffZone) {
     throw new ZoneNotFoundError();

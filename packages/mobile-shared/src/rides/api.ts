@@ -1,5 +1,6 @@
 import type {
   DriverAssignedPayload,
+  PassengerStatus,
   PaymentMethod,
   PaymentStatus,
   Ride,
@@ -7,6 +8,7 @@ import type {
   RidePassenger,
   RiderCancelReason,
   RiderDecisionAction,
+  RideStatus,
   RideType,
   Zone,
 } from "@rida/shared";
@@ -48,9 +50,12 @@ export interface CreateRideConflictError extends Error {
 /** Thrown when the rider already has an active ride (backend returns 409). */
 export class ActiveRideExistsError extends Error implements CreateRideConflictError {
   readonly isActiveRideConflict = true as const;
-  constructor() {
+  /** The ride in the way, so the app can go straight to it (null from very old servers). */
+  readonly activeRideId: string | null;
+  constructor(activeRideId: string | null = null) {
     super("You already have an active ride");
     this.name = "ActiveRideExistsError";
+    this.activeRideId = activeRideId;
   }
 }
 
@@ -59,12 +64,45 @@ export async function createRide(input: CreateRideInput): Promise<Ride> {
     const res = await api.post<{ ride: Ride & { passengers: RidePassenger[] } }>("/rides", input);
     return res.data.ride;
   } catch (err) {
-    const status = (err as { response?: { status?: number } }).response?.status;
-    if (status === 409) {
-      throw new ActiveRideExistsError();
+    const response = (err as { response?: { status?: number; data?: unknown } }).response;
+    if (response?.status === 409) {
+      const data = (response.data ?? {}) as { activeRideId?: unknown; ride?: { id?: unknown } };
+      const id = typeof data.activeRideId === "string" ? data.activeRideId : data.ride?.id;
+      throw new ActiveRideExistsError(typeof id === "string" ? id : null);
     }
     throw err;
   }
+}
+
+/** Minimal zone info the active-ride banner and ride screen need. */
+export interface ActiveRideZone {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** The rider's ride that is still going on (GET /rides/active). */
+export interface ActiveRideSummary {
+  id: string;
+  status: RideStatus;
+  type: RideType;
+  /** This rider's own leg; null if they have no seat row. */
+  legStatus: PassengerStatus | null;
+  /** The rider's OWN pickup/drop-off (differs from the ride's for a merged rider). */
+  pickupZone: ActiveRideZone;
+  dropoffZone: ActiveRideZone;
+  driver: { firstName: string } | null;
+}
+
+/** One cache entry for "the rider's active ride", shared by the banner, launch check and ride screen. */
+export const activeRideQueryKey = ["activeRide"] as const;
+
+/** The rider's active ride, or null. Anything malformed reads as null rather than throwing in a render. */
+export async function getActiveRide(): Promise<ActiveRideSummary | null> {
+  const res = await api.get<{ ride: ActiveRideSummary | null }>("/rides/active");
+  const ride = res.data?.ride;
+  return ride && typeof ride.id === "string" && ride.pickupZone && ride.dropoffZone ? ride : null;
 }
 
 export interface RideWithDetails extends Ride {
