@@ -306,6 +306,24 @@ tbody tr:last-child td {
   border-color: #c2d7fb;
 }
 
+.badge-flagged {
+  background: #fff4e0;
+  border-color: #f0c47a;
+  color: #7a4b00;
+}
+
+.row-flagged td {
+  background: #fffaf0;
+}
+
+.cancel-reason {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.2rem;
+  max-width: 16rem;
+}
+
 @media (max-width: 720px) {
   .driver-card {
     grid-template-columns: 1fr;

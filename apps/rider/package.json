@@ -8,8 +8,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "eslint app",
-    "lint:fix": "eslint app --fix",
+    "lint": "eslint app components lib",
+    "lint:fix": "eslint app components lib --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -27,6 +27,7 @@
     "expo-constants": "~57.0.19",
     "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
+    "expo-haptics": "~57.0.3",
     "expo-image": "~57.0.5",
     "expo-keep-awake": "~57.0.2",
     "expo-linking": "~57.0.11",

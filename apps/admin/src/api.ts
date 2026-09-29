@@ -104,6 +104,13 @@ export interface AdminRide {
   paymentStatus: string;
   paymentMethod: string;
   cancelReason: string | null;
+  /** What the rider chose in the app's cancel sheet, e.g. "DRIVER_ASKED_TO_CANCEL". */
+  riderCancelReason: string | null;
+  /** Readable form of riderCancelReason, e.g. "Driver asked me to cancel". */
+  riderCancelReasonLabel: string | null;
+  riderCancelNote: string | null;
+  /** True for reasons that may signal a driver problem. */
+  riderCancelFlagged: boolean;
   createdAt: string;
   completedAt: string | null;
   rider: { id: string; name: string; phone: string } | null;

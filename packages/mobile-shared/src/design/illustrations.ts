@@ -12,11 +12,15 @@ import type { ImageSourcePropType } from "react-native";
  *
  *  To ADD an image:  put the PNG in that folder and add one line below.
  *
- *  Tips: transparent background, square, about 512×512 px.
+ *  Tips: transparent background, square, about 512×512 px. Non-square art
+ *  (the 720×540 cars) is fine too — render it with <Illustration width={…}>.
  *  Both the rider and driver apps read from here.
  */
 export const illustrations = {
   // Cars
+  /** Realistic 4:3 cars for the rider's ride-choice list. Use with `width`, not `size`. */
+  carStandard: require("../../assets/illustrations/car-standard.png"),
+  carShared: require("../../assets/illustrations/car-shared.png"),
   carIdle: require("../../assets/illustrations/car-idle.png"),
   carFull: require("../../assets/illustrations/car-full.png"),
   carTopdown: require("../../assets/illustrations/car-topdown.png"),

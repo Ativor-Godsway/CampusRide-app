@@ -45,13 +45,24 @@ export class DriverHasActiveRideError extends Error {
  * Thrown by riderDecision(SWITCH_TO_LONE) when the ride does not have
  * exactly one active passenger.
  */
-export class InvalidSwitchToLoneError extends Error {
+/**
+ * A ride-type switch (Shared <-> Ride alone) was refused: the ride is no
+ * longer searching (a driver claimed it first, it was cancelled, …), or it
+ * already is the requested type. Nothing was changed.
+ */
+export class RideSwitchNotAllowedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RideSwitchNotAllowedError";
+  }
+}
+
+/** A switch was refused because the car holds more than one active rider. */
+export class InvalidSwitchToLoneError extends RideSwitchNotAllowedError {
   readonly activePassengerCount: number;
 
   constructor(activePassengerCount: number) {
-    super(
-      `riderDecision(SWITCH_TO_LONE) requires exactly 1 active passenger, found ${activePassengerCount}`,
-    );
+    super(`Switching ride type requires exactly 1 active passenger, found ${activePassengerCount}`);
     this.name = "InvalidSwitchToLoneError";
     this.activePassengerCount = activePassengerCount;
   }

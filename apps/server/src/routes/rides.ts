@@ -1,10 +1,12 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, RideStatus, RideType } from "@rida/shared";
+import { FLAGGED_RIDER_CANCEL_REASONS, parseRiderCancelInput } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { applyRideTransition } from "../services/ride/rideService";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
-import { InvalidSwitchToLoneError, InvalidTransitionError } from "../services/ride/errors";
+import { InvalidTransitionError, RideSwitchNotAllowedError } from "../services/ride/errors";
+import { fareForType, switchRideType } from "../services/ride/switchRideType";
 import { emitRideEvent } from "../realtime/rideSocket";
 import { broadcastRide } from "../services/ride/dispatch";
 import {
@@ -65,6 +67,23 @@ async function requireRider(request: Parameters<typeof requireAuth>[0], reply: P
     return false;
   }
   return true;
+}
+
+/**
+ * Per-USER rate limit for a route behind requireAuth. Runs as a preHandler
+ * so it comes after requireAuth has set request.user; keying on the user id
+ * means one rider on a shared campus Wi-Fi IP can't use up everyone's quota,
+ * and switching networks doesn't reset a rider's own.
+ */
+function perUserRateLimit(max: number) {
+  return {
+    rateLimit: {
+      max,
+      timeWindow: "15 minutes",
+      hook: "preHandler" as const,
+      keyGenerator: (request: FastifyRequest) => `user:${request.user?.userId ?? request.ip}`,
+    },
+  };
 }
 
 /** Statuses from which a rider can still cancel (IN_PROGRESS is the point of no return). */
@@ -279,14 +298,24 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
       return reply.code(200).send({ ride: updated });
     } catch (err) {
-      if (err instanceof InvalidSwitchToLoneError) {
+      // Includes InvalidSwitchToLoneError (more than one rider in the car).
+      if (err instanceof RideSwitchNotAllowedError) {
         return reply.code(409).send({ error: err.message });
       }
       throw err;
     }
   });
 
-  app.post("/rides/:id/cancel", { preHandler: requireAuth }, async (request, reply) => {
+  /**
+   * Rider cancels their own ride. Optional body `{ reason, note }` from the
+   * app's cancel sheet (see parseRiderCancelInput): stored in
+   * riderCancelReason / riderCancelNote, separate from the system
+   * cancelReason, and written in the same update as the status change.
+   */
+  app.post(
+    "/rides/:id/cancel",
+    { preHandler: requireAuth, config: perUserRateLimit(config.rateLimit.rideCancelMax) },
+    async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
     const { id } = request.params as { id: string };
@@ -302,11 +331,30 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       return reply.code(409).send({ error: "Ride can no longer be cancelled" });
     }
 
+    const input = parseRiderCancelInput(request.body, { hasDriver: ride.driverId !== null });
+    if (!input.ok) {
+      return reply.code(400).send({ error: input.error });
+    }
+
     try {
       const updated = await applyRideTransition(prisma, id, "CANCELLED", {
         cancelReason: "RIDER_CANCELLED",
+        riderCancel: { reason: input.reason, note: input.note },
       });
       emitRideEvent(id, "ride:status", { rideId: id, status: updated.status });
+
+      const flagged = input.reason !== null && FLAGGED_RIDER_CANCEL_REASONS.includes(input.reason);
+      request.log[flagged ? "warn" : "info"](
+        {
+          event: "ride_cancelled_by_rider",
+          rideId: id,
+          driverId: ride.driverId,
+          fromStatus: ride.status,
+          riderCancelReason: input.reason,
+          flagged,
+        },
+        flagged ? "Rider cancelled: driver asked them to cancel" : "Rider cancelled their ride",
+      );
       return reply.code(200).send({ ride: updated });
     } catch (err) {
       if (err instanceof InvalidTransitionError) {
@@ -314,7 +362,58 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       }
       throw err;
     }
-  });
+    },
+  );
+
+  /**
+   * Rider switches a still-searching ride between Shared and Ride alone,
+   * in place (see switchRideType). Body: `{ type: "LONE" | "SHARED" }`.
+   * Allowed while REQUESTED or AWAITING_RIDER_DECISION, i.e. before any
+   * driver holds the ride; the answer carries the ride's new locked fare.
+   */
+  app.post(
+    "/rides/:id/switch",
+    { preHandler: requireAuth, config: perUserRateLimit(config.rateLimit.rideSwitchMax) },
+    async (request, reply) => {
+      if (!(await requireRider(request, reply))) return;
+
+      const { id } = request.params as { id: string };
+      const body = (request.body ?? {}) as { type?: unknown };
+      if (body.type !== "LONE" && body.type !== "SHARED") {
+        return reply.code(400).send({ error: "type must be LONE or SHARED" });
+      }
+      const toType: RideType = body.type;
+
+      const ride = await prisma.ride.findUnique({ where: { id } });
+      if (!ride) {
+        return reply.code(404).send({ error: "Ride not found" });
+      }
+      if (ride.riderId !== request.user!.userId) {
+        return reply.code(403).send({ error: "Forbidden" });
+      }
+
+      try {
+        const updated = await switchRideType(prisma, id, toType);
+        emitRideEvent(id, "ride:status", { rideId: id, status: updated.status });
+        broadcastRide(prisma, id).catch((err) => {
+          logger.error("broadcastRide failed", { rideId: id, err });
+        });
+        if (config.enableMockDriver) {
+          startMockDriverForRide(prisma, id);
+        }
+        request.log.info(
+          { event: "ride_type_switched", rideId: id, fromType: ride.type, toType },
+          "Rider switched ride type",
+        );
+        return reply.code(200).send({ ride: updated, farePesewas: fareForType(toType) });
+      } catch (err) {
+        if (err instanceof RideSwitchNotAllowedError) {
+          return reply.code(409).send({ error: err.message, code: "RIDE_NOT_SWITCHABLE" });
+        }
+        throw err;
+      }
+    },
+  );
 
   /**
    * Rider initiates MOMO payment for their completed ride leg, and (second

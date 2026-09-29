@@ -96,6 +96,10 @@ export const config = {
      * repeatedly is never the person it blocks.
      */
     sosMax: Number(process.env.RATE_LIMIT_SOS ?? 20),
+    /** POST /rides/:id/cancel — per 15 min, PER USER (not per IP). */
+    rideCancelMax: Number(process.env.RATE_LIMIT_RIDE_CANCEL ?? 20),
+    /** POST /rides/:id/switch — per 15 min, PER USER (not per IP). */
+    rideSwitchMax: Number(process.env.RATE_LIMIT_RIDE_SWITCH ?? 10),
   },
   /**
    * Selects the OTP delivery provider. One of "moolre" | "mnotify" | "dummy".

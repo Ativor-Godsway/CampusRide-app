@@ -1,11 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import BottomSheet, { BottomSheetScrollView } from "@gorhom/bottom-sheet";
+import BottomSheet, {
+  BottomSheetFooter,
+  BottomSheetScrollView,
+  type BottomSheetFooterProps,
+} from "@gorhom/bottom-sheet";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import type { PaymentMethod, RideCompletedFareSummary, RideType } from "@rida/shared";
+import type { PaymentMethod, RideCompletedFareSummary, RiderCancelReason, RideType } from "@rida/shared";
 import {
   cloudinaryAvatar,
   estimateEtaMinutes,
@@ -15,14 +20,12 @@ import {
 } from "@rida/shared";
 import {
   ActiveRideExistsError,
-  Badge,
   Button,
   Card,
   CampusMapView,
   type CampusMapZone,
+  FadeIn,
   LoadingState,
-  ProgressBar,
-  Illustration,
   ServiceIcon,
   Text,
   callPhone,
@@ -38,33 +41,32 @@ import {
   spacing,
   submitRating,
   submitRideDecision,
+  switchRideType,
   typography,
   useAuth,
   useDriverLocation,
   useRideTracking,
   type RideDriverInfo,
 } from "@rida/mobile-shared";
+import { CancelRideSheet, type SwitchOffer } from "../../components/ride/CancelRideSheet";
+import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
+import { RideOptionCard, type RideOption } from "../../components/ride/RideOptionCard";
+import { SearchingPanel } from "../../components/ride/SearchingPanel";
+import { haptics } from "../../lib/haptics";
 
-const BROADCAST_WINDOW_MS = 90_000;
 const STARS = [1, 2, 3, 4, 5];
-const SEARCHING_MESSAGES = [
-  "Finding your driver…",
-  "Connecting you with nearby drivers…",
-  "Reaching out to drivers near you…",
-  "Hang tight, almost there…",
-] as const;
 
-interface RideOption {
-  type: RideType;
-  title: string;
-  priceLabel: string;
-  summary: string;
-  details: string;
-  icon: keyof typeof Ionicons.glyphMap;
+/** Height the sticky "Request …" footer occupies, so content can scroll clear of it. */
+const FOOTER_SPACE = 96;
+
+/** HTTP status of an axios error, if any. */
+function httpStatus(error: unknown): number | undefined {
+  return (error as { response?: { status?: number } } | null)?.response?.status;
 }
 
 export default function RideTypeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
 
   const params = useLocalSearchParams<{
@@ -82,16 +84,16 @@ export default function RideTypeScreen() {
 
   // ── Options phase ───────────────────────────────────────────────────────────
   const [selectedType, setSelectedType] = useState<RideType>("SHARED");
-  const [expandedType, setExpandedType] = useState<RideType | null>(null);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod>("CASH");
+  const [selectedPaymentMethod] = useState<PaymentMethod>("CASH");
   const [submitting, setSubmitting] = useState(false);
 
   // ── Tracking phase (null = options phase, string = post-request or resume) ───
   const [activeRideId, setActiveRideId] = useState<string | null>(params.rideId ?? null);
   const [driverLocation, setDriverLocation] = useState<{ latitude: number; longitude: number } | null>(null);
-  const [decisionSubmitting, setDecisionSubmitting] = useState(false);
+  const [decisionBusy, setDecisionBusy] = useState<"search" | "switch" | null>(null);
+  const [cancelSheetOpen, setCancelSheetOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  const [switching, setSwitching] = useState(false);
 
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -127,12 +129,6 @@ export default function RideTypeScreen() {
         ? myPassenger.status
         : "WAITING";
 
-  useEffect(() => {
-    if (ride?.status !== "REQUESTED") return;
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, [ride?.status]);
-
   // #7 merged-rider reach: this request may have been absorbed into another
   // driver's car (CANCELLED / MERGED_INTO_ANOTHER_RIDE). Follow the pointer to
   // the anchor ride so useRideTracking listens on the correct room and
@@ -149,34 +145,53 @@ export default function RideTypeScreen() {
     }
   }, [isMerged, ride?.mergedIntoRideId, activeRideId]);
 
+  // A driver accepted: one success buzz, only on the live transition (not
+  // when reopening a ride that was already matched).
+  const previousStatus = useRef(ride?.status);
+  useEffect(() => {
+    const before = previousStatus.current;
+    previousStatus.current = ride?.status;
+    if ((before === "REQUESTED" || before === "AWAITING_RIDER_DECISION") && ride?.status === "MATCHED") {
+      haptics.success();
+    }
+  }, [ride?.status]);
+
   // ── Fares ───────────────────────────────────────────────────────────────────
-  // Flat per-rider SHARED fare — getSharedFarePerRider(occupancy) now returns
-  // the same 500 pesewas regardless of which occupancy (1-4) is passed in.
+  // The same @rida/shared pricing functions the server locks fares with
+  // (createRide / switchRideType), so the prices shown here are the prices
+  // charged. Shared is flat per rider regardless of occupancy.
   const sharedFare = useMemo(() => getSharedFarePerRider(1), []);
   const loneFare = useMemo(() => priceLoneRide().fare, []);
+  const fareFor = useCallback((type: RideType) => (type === "SHARED" ? sharedFare : loneFare), [sharedFare, loneFare]);
 
   const options: RideOption[] = useMemo(
     () => [
       {
         type: "SHARED",
         title: "Shared",
+        description: "Share with riders going your way",
+        hint: { icon: "people-outline", label: "Up to 4 riders · same price each" },
+        farePesewas: sharedFare,
         priceLabel: formatGhs(sharedFare),
-        summary: "Share with others & save",
-        details: "GHS 5 each, every time. Share with others heading your way.",
-        icon: "people",
+        recommended: true,
       },
       {
         type: "LONE",
         title: "Ride alone",
+        description: "A private car, no waiting for others",
+        hint: { icon: "person-outline", label: "Just you" },
+        farePesewas: loneFare,
         priceLabel: formatGhs(loneFare),
-        summary: "Private ride, no waiting",
-        details:
-          "Skip the wait for other riders — a car is dispatched just for you, leaving as soon as it's matched.",
-        icon: "car-sport",
       },
     ],
     [sharedFare, loneFare],
   );
+  const selectedOption = options.find((o) => o.type === selectedType) ?? options[0]!;
+
+  // Once a ride exists, the SERVER's type is the truth (it may have been
+  // switched, or this may be a resumed ride of either type).
+  const rideType: RideType = ride?.type ?? selectedType;
+  const priceLabel = formatGhs(fareFor(rideType));
 
   // ── Map coords & region ─────────────────────────────────────────────────────
   const pickupCoord = useMemo(
@@ -224,17 +239,27 @@ export default function RideTypeScreen() {
     return zones;
   }, [pickupCoord, dropoffCoord, driverLocation, params.pickupZoneName, params.dropoffZoneName]);
 
-  // ── Search progress ─────────────────────────────────────────────────────────
-  const searchProgress = useMemo(() => {
-    if (!ride?.broadcastStartedAt) return 1;
-    const start = new Date(ride.broadcastStartedAt).getTime();
-    const elapsed = now - start;
-    return Math.max(0, Math.min(1, 1 - elapsed / BROADCAST_WINDOW_MS));
-  }, [ride?.broadcastStartedAt, now]);
+  // ── Phase ───────────────────────────────────────────────────────────────────
+  const isSearching = activeRideId !== null && (!ride || ride.status === "REQUESTED" || isMerged);
+  const hasDriver = ride?.status === "MATCHED" || ride?.status === "ARRIVED";
 
-  const priceLabel = selectedType === "SHARED" ? formatGhs(sharedFare) : formatGhs(loneFare);
-
-  const canSwitchToLone = ride?.type === "SHARED" && ride?.occupancy === 1;
+  // Still unclaimed and holding only this rider: the server will accept a
+  // type switch (POST /rides/:id/switch — same rule, checked again there).
+  const canSwitch =
+    !!ride &&
+    !isMerged &&
+    (ride.status === "REQUESTED" || ride.status === "AWAITING_RIDER_DECISION") &&
+    ride.occupancy === 1;
+  const switchTarget: RideType = rideType === "SHARED" ? "LONE" : "SHARED";
+  const switchOffer: SwitchOffer | null = canSwitch
+    ? {
+        toType: switchTarget,
+        label:
+          switchTarget === "LONE"
+            ? `Switch to Ride alone — ${formatGhs(loneFare)}, no waiting for others`
+            : `Switch to Shared — ${formatGhs(sharedFare)}, share and save`,
+      }
+    : null;
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   async function handleSubmit() {
@@ -259,36 +284,89 @@ export default function RideTypeScreen() {
     }
   }
 
-  async function handleDecision(action: "KEEP_WAITING" | "SWITCH_TO_LONE" | "CANCEL") {
+  async function refreshRide() {
+    if (activeRideId) await queryClient.invalidateQueries({ queryKey: rideQueryKey(activeRideId) });
+  }
+
+  async function handleSearchAgain() {
     if (!activeRideId) return;
-    setDecisionSubmitting(true);
+    setDecisionBusy("search");
     try {
-      await submitRideDecision(activeRideId, action);
-      if (action === "CANCEL") {
-        router.replace("/");
-      } else {
-        // Refetch so broadcastStartedAt is fresh for the restarted slider.
-        await queryClient.invalidateQueries({ queryKey: rideQueryKey(activeRideId) });
-      }
+      await submitRideDecision(activeRideId, "KEEP_WAITING");
+      // Refetch so broadcastStartedAt is fresh for the restarted countdown.
+      await refreshRide();
     } catch {
       Alert.alert("Something went wrong", "Please try again.");
     } finally {
-      setDecisionSubmitting(false);
+      setDecisionBusy(null);
     }
   }
 
-  async function handleCancel() {
+  /** In-place switch; the ride keeps its id, so there is never a second (or no) ride. */
+  async function handleSwitch(toType: RideType, source: "sheet" | "no_drivers") {
+    if (!activeRideId) return;
+    if (source === "sheet") setSwitching(true);
+    else setDecisionBusy("switch");
+    try {
+      await switchRideType(activeRideId, toType);
+      haptics.success();
+      setCancelSheetOpen(false);
+      await refreshRide();
+    } catch (err) {
+      await refreshRide();
+      if (httpStatus(err) === 409) {
+        Alert.alert(
+          "Couldn't switch",
+          "Your ride just changed — a driver may have accepted it. Check the latest status.",
+        );
+      } else {
+        Alert.alert("Couldn't switch", "Please check your connection and try again.");
+      }
+    } finally {
+      setSwitching(false);
+      setDecisionBusy(null);
+    }
+  }
+
+  async function handleConfirmCancel(reason: RiderCancelReason, note: string) {
     if (!activeRideId) return;
     setCancelling(true);
     try {
-      await cancelRide(activeRideId);
+      await cancelRide(activeRideId, { reason, note });
+      setCancelSheetOpen(false);
       router.replace("/");
-    } catch {
-      Alert.alert("Couldn't cancel", "Please try again.");
+    } catch (err) {
+      if (httpStatus(err) === 409) {
+        await refreshRide();
+        setCancelSheetOpen(false);
+        Alert.alert("Can't cancel now", "This ride can no longer be cancelled.");
+      } else {
+        Alert.alert("Couldn't cancel", "Please check your connection and try again.");
+      }
     } finally {
       setCancelling(false);
     }
   }
+
+  const renderFooter = useCallback(
+    (props: BottomSheetFooterProps) => (
+      <BottomSheetFooter {...props}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+          <Button
+            label={`Request ${selectedOption.title} · ${selectedOption.priceLabel}`}
+            size="lg"
+            onPress={() => void handleSubmit()}
+            loading={submitting}
+          />
+        </View>
+      </BottomSheetFooter>
+    ),
+    // handleSubmit reads the same state listed here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [insets.bottom, selectedOption, submitting, selectedType, params.pickupZoneId, params.dropoffZoneId],
+  );
+
+  const inOptions = activeRideId === null;
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -301,31 +379,32 @@ export default function RideTypeScreen() {
         light
         showRecenter
         rounded={false}
+        pulseZoneId={isSearching ? "pickup" : undefined}
       />
 
       <BottomSheet
-        snapPoints={["40%", "85%"]}
+        snapPoints={inOptions ? ["62%", "90%"] : ["55%", "90%"]}
         index={0}
         backgroundStyle={styles.sheetBackground}
         handleIndicatorStyle={styles.sheetHandle}
+        footerComponent={inOptions ? renderFooter : undefined}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
       >
-        <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
-          {activeRideId === null && (
+        <BottomSheetScrollView
+          contentContainerStyle={[styles.sheetContent, inOptions && { paddingBottom: FOOTER_SPACE + insets.bottom }]}
+        >
+          {inOptions && (
             <OptionsContent
               options={options}
               selectedType={selectedType}
-              expandedType={expandedType}
-              onSelectType={setSelectedType}
-              onToggleExpand={(t) => setExpandedType((e) => (e === t ? null : t))}
-              selectedPaymentMethod={selectedPaymentMethod}
-              onSelectPaymentMethod={setSelectedPaymentMethod}
+              onSelectType={(type) => {
+                if (type !== selectedType) haptics.selection();
+                setSelectedType(type);
+              }}
               pickupZoneName={params.pickupZoneName}
               dropoffZoneName={params.dropoffZoneName}
-              submitting={submitting}
-              onSubmit={() => void handleSubmit()}
             />
           )}
 
@@ -338,24 +417,35 @@ export default function RideTypeScreen() {
               />
             ) : (
             <>
-              {(!ride || ride.status === "REQUESTED" || isMerged) && (
-                <SearchingContent
-                  pickupZoneName={params.pickupZoneName}
-                  dropoffZoneName={params.dropoffZoneName}
-                  priceLabel={priceLabel}
-                  rideType={selectedType}
-                  progress={ride ? searchProgress : 1}
-                  onCancel={() => void handleCancel()}
-                  cancelling={cancelling}
-                />
+              {isSearching && (
+                <FadeIn key="searching">
+                  <SearchingPanel
+                    pickupZoneName={params.pickupZoneName}
+                    dropoffZoneName={params.dropoffZoneName}
+                    rideType={rideType}
+                    priceLabel={priceLabel}
+                    broadcastStartedAt={ride?.broadcastStartedAt}
+                    onCancel={() => setCancelSheetOpen(true)}
+                  />
+                </FadeIn>
               )}
 
               {ride?.status === "AWAITING_RIDER_DECISION" && (
-                <NoDriverContent
-                  canSwitchToLone={canSwitchToLone ?? false}
-                  submitting={decisionSubmitting}
-                  onAction={(action) => void handleDecision(action)}
-                />
+                <FadeIn key="no-drivers">
+                  <NoDriversPanel
+                    switchOffer={
+                      canSwitch
+                        ? switchTarget === "LONE"
+                          ? `Switch to Ride alone · ${formatGhs(loneFare)}`
+                          : `Switch to Shared · ${formatGhs(sharedFare)}`
+                        : null
+                    }
+                    busy={decisionBusy}
+                    onSearchAgain={() => void handleSearchAgain()}
+                    onSwitch={() => void handleSwitch(switchTarget, "no_drivers")}
+                    onCancel={() => setCancelSheetOpen(true)}
+                  />
+                </FadeIn>
               )}
 
               {(ride?.status === "MATCHED" ||
@@ -363,33 +453,40 @@ export default function RideTypeScreen() {
                 ride?.status === "IN_PROGRESS") &&
                 driver &&
                 (myLegStatus === "DROPPED_OFF" ? (
-                  <MyLegDoneContent dropoffZoneName={params.dropoffZoneName} />
+                  <FadeIn key="leg-done">
+                    <MyLegDoneContent dropoffZoneName={params.dropoffZoneName} />
+                  </FadeIn>
                 ) : myLegStatus === "PICKED_UP" ? (
-                  <InProgressContent
-                    driver={driver}
-                    dropoffZoneName={params.dropoffZoneName}
-                    etaMinutes={etaToDropoff}
-                    rideId={ride.id}
-                  />
+                  <FadeIn key="in-progress">
+                    <InProgressContent
+                      driver={driver}
+                      dropoffZoneName={params.dropoffZoneName}
+                      etaMinutes={etaToDropoff}
+                      rideId={ride.id}
+                    />
+                  </FadeIn>
                 ) : (
-                  <DriverFoundContent
-                    arrived={myLegStatus === "ARRIVED"}
-                    driver={driver}
-                    hasLocation={!!driverLocation}
-                    etaMinutes={etaToPickup}
-                    rideId={ride.id}
-                    onCancel={() => void handleCancel()}
-                    cancelling={cancelling}
-                  />
+                  <FadeIn key="driver-found">
+                    <DriverFoundContent
+                      arrived={myLegStatus === "ARRIVED"}
+                      driver={driver}
+                      hasLocation={!!driverLocation}
+                      etaMinutes={etaToPickup}
+                      rideId={ride.id}
+                      onCancel={() => setCancelSheetOpen(true)}
+                    />
+                  </FadeIn>
                 ))}
 
               {ride?.status === "COMPLETED" && (
-                <CompletedContent
-                  rideId={ride.id}
-                  rideType={ride.type}
-                  fareSummary={trackingData?.fareSummary}
-                  onDone={() => router.replace("/")}
-                />
+                <FadeIn key="completed">
+                  <CompletedContent
+                    rideId={ride.id}
+                    rideType={ride.type}
+                    fareSummary={trackingData?.fareSummary}
+                    onDone={() => router.replace("/")}
+                  />
+                </FadeIn>
               )}
 
               {ride?.status === "CANCELLED" && !isMerged && (
@@ -399,264 +496,90 @@ export default function RideTypeScreen() {
             ))}
         </BottomSheetScrollView>
       </BottomSheet>
+
+      {activeRideId !== null ? (
+        <CancelRideSheet
+          visible={cancelSheetOpen}
+          stage={hasDriver ? "driver_assigned" : "searching"}
+          switchOffer={switchOffer}
+          switching={switching}
+          cancelling={cancelling}
+          onDismiss={() => setCancelSheetOpen(false)}
+          onSwitch={(toType) => void handleSwitch(toType, "sheet")}
+          onConfirmCancel={(reason, note) => void handleConfirmCancel(reason, note)}
+        />
+      ) : null}
     </View>
   );
 }
 
 // ── Options phase ─────────────────────────────────────────────────────────────
 
-// Cash-only launch (Phase 1): MoMo is intentionally not offered here. A ride
-// created as MOMO could not be settled at all while digital payment is
-// disabled server-side, and it would also skip the CASH commission ledger.
-const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { value: "CASH", label: "Cash", icon: "cash-outline" },
-];
-
 function OptionsContent({
   options,
   selectedType,
-  expandedType,
   onSelectType,
-  onToggleExpand,
-  selectedPaymentMethod,
-  onSelectPaymentMethod,
   pickupZoneName,
   dropoffZoneName,
-  submitting,
-  onSubmit,
 }: {
   options: RideOption[];
   selectedType: RideType;
-  expandedType: RideType | null;
   onSelectType: (t: RideType) => void;
-  onToggleExpand: (t: RideType) => void;
-  selectedPaymentMethod: PaymentMethod;
-  onSelectPaymentMethod: (m: PaymentMethod) => void;
   pickupZoneName: string;
   dropoffZoneName: string;
-  submitting: boolean;
-  onSubmit: () => void;
 }) {
   return (
     <>
-      <Text variant="h1">Choose your ride</Text>
-
-      <RouteStops
-        style={styles.route}
-        connectorHeight={14}
-        origin={
-          <Text variant="bodySmall" numberOfLines={1}>
-            {pickupZoneName}
-          </Text>
-        }
-        destination={
-          <Text variant="bodySmall" numberOfLines={1}>
-            {dropoffZoneName}
-          </Text>
-        }
-      />
-
-      {options.map((option) => {
-        const isSelected = selectedType === option.type;
-        const isExpanded = expandedType === option.type;
-        return (
-          <Pressable
-            key={option.type}
-            accessibilityRole="button"
-            onPress={() => onSelectType(option.type)}
-          >
-            <Card style={[styles.option, isSelected && styles.optionSelected]}>
-              <View style={styles.optionRow}>
-                <ServiceIcon
-                  name={option.icon}
-                  size={52}
-                  iconSize={26}
-                  background={isSelected ? colors.primary[50] : colors.surface}
-                  color={isSelected ? colors.primary[600] : colors.ink[500]}
-                />
-                <View style={styles.optionInfo}>
-                  <View style={styles.optionHeader}>
-                    <Text variant="h3">{option.title}</Text>
-                    {option.type === "SHARED" ? (
-                      <Badge label="Recommended" variant="success" />
-                    ) : null}
-                  </View>
-                  <Text variant="h2" color={isSelected ? "primary" : undefined} style={styles.price}>
-                    {option.priceLabel}
-                  </Text>
-                  <Text variant="bodySmall" color="muted">
-                    {option.summary}
-                  </Text>
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={isExpanded ? "Hide details" : "Show details"}
-                  onPress={() => onToggleExpand(option.type)}
-                  style={styles.chevron}
-                >
-                  <Ionicons
-                    name={isExpanded ? "chevron-up" : "chevron-down"}
-                    size={20}
-                    color={colors.ink[400]}
-                  />
-                </Pressable>
-              </View>
-              {isExpanded ? (
-                <Text variant="bodySmall" color="muted" style={styles.details}>
-                  {option.details}
-                </Text>
-              ) : null}
-            </Card>
-          </Pressable>
-        );
-      })}
-
-      <View style={styles.paymentSection}>
-        <Text variant="label" color="muted">
-          PAYMENT METHOD
+      <View style={styles.optionsHeader}>
+        <Text variant="h2" accessibilityRole="header">
+          Choose a ride
         </Text>
-        <View style={styles.paymentRow}>
-          {PAYMENT_METHOD_OPTIONS.map((opt) => {
-            const selected = selectedPaymentMethod === opt.value;
-            return (
-              <Pressable
-                key={opt.value}
-                accessibilityRole="button"
-                onPress={() => onSelectPaymentMethod(opt.value)}
-                style={[styles.paymentOption, selected && styles.paymentOptionSelected]}
-              >
-                <Ionicons
-                  name={opt.icon}
-                  size={18}
-                  color={selected ? colors.primary[600] : colors.ink[400]}
-                />
-                <Text variant="bodySmall" color={selected ? "primary" : "muted"}>
-                  {opt.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <RouteStops
+          connectorHeight={10}
+          origin={
+            <Text variant="bodySmall" color="muted" numberOfLines={1}>
+              {pickupZoneName}
+            </Text>
+          }
+          destination={
+            <Text variant="bodySmall" color="muted" numberOfLines={1}>
+              {dropoffZoneName}
+            </Text>
+          }
+        />
       </View>
 
-      <View style={styles.footer}>
-        {submitting ? (
-          <LoadingState message="Requesting your ride..." />
-        ) : (
-          <Button
-            label={selectedType === "SHARED" ? "Request shared ride" : "Request solo ride"}
-            onPress={onSubmit}
+      <View style={styles.optionList} accessibilityRole="radiogroup">
+        {options.map((option) => (
+          <RideOptionCard
+            key={option.type}
+            option={option}
+            selected={selectedType === option.type}
+            onSelect={() => onSelectType(option.type)}
           />
-        )}
+        ))}
+      </View>
+
+      {/* Cash-only launch (Phase 1): MoMo is intentionally not offered. A
+          ride created as MOMO could not be settled while digital payment is
+          disabled server-side, and it would skip the CASH commission ledger.
+          So this is a statement, not a picker — no chevron promising choice. */}
+      <View style={styles.paymentRow} accessible accessibilityLabel="Payment method: cash. Pay your driver at the end of the trip.">
+        <View style={styles.paymentIcon}>
+          <Ionicons name="cash-outline" size={18} color={colors.primary[600]} />
+        </View>
+        <View style={styles.paymentText}>
+          <Text variant="bodyMedium">Cash</Text>
+          <Text variant="caption" color="muted">
+            Pay your driver at the end of the trip
+          </Text>
+        </View>
       </View>
     </>
   );
 }
 
 // ── Tracking phase content ────────────────────────────────────────────────────
-
-function SearchingContent({
-  pickupZoneName,
-  dropoffZoneName,
-  priceLabel,
-  rideType,
-  progress,
-  onCancel,
-  cancelling,
-}: {
-  pickupZoneName: string;
-  dropoffZoneName: string;
-  priceLabel: string;
-  rideType: RideType;
-  progress: number;
-  onCancel: () => void;
-  cancelling: boolean;
-}) {
-  const [msgIdx, setMsgIdx] = useState(0);
-
-  useEffect(() => {
-    const timer = setInterval(
-      () => setMsgIdx((i) => (i + 1) % SEARCHING_MESSAGES.length),
-      20000,
-    );
-    return () => clearInterval(timer);
-  }, []);
-
-  return (
-    <View style={styles.section}>
-      <View style={styles.stateHeader}>
-        <ServiceIcon name="search" size={48} iconSize={22} />
-        <View style={styles.stateHeading}>
-          <Text variant="h2">{SEARCHING_MESSAGES[msgIdx]}</Text>
-          <Text variant="bodySmall" color="muted">
-            {pickupZoneName} → {dropoffZoneName}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.progressSection}>
-        <ProgressBar progress={progress} />
-        <Text variant="caption" color="subtle" style={styles.progressLabel}>
-          Contacting available drivers nearby
-        </Text>
-      </View>
-
-      <Card style={styles.infoCard}>
-        <View style={styles.infoRow}>
-          <Ionicons name="car-outline" size={16} color={colors.ink[400]} />
-          <Text variant="bodySmall" color="muted" style={styles.infoLabel}>
-            {rideType === "SHARED" ? "Shared ride" : "Solo ride"}
-          </Text>
-          <Text variant="bodySmall">{priceLabel}</Text>
-        </View>
-      </Card>
-
-      <View style={styles.buttonGroup}>
-        <Button label="Cancel request" variant="ghost" onPress={onCancel} loading={cancelling} />
-      </View>
-    </View>
-  );
-}
-
-function NoDriverContent({
-  canSwitchToLone,
-  submitting,
-  onAction,
-}: {
-  canSwitchToLone: boolean;
-  submitting: boolean;
-  onAction: (action: "KEEP_WAITING" | "SWITCH_TO_LONE" | "CANCEL") => void;
-}) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.stateHeader}>
-        <Illustration name="noDrivers" size={96} float />
-        <View style={styles.stateHeading}>
-          <Text variant="h2">No drivers available right now</Text>
-          <Text variant="bodySmall" color="muted">
-            Try again — campus driver availability changes quickly.
-          </Text>
-        </View>
-      </View>
-
-      {submitting ? (
-        <LoadingState message="Updating your ride..." />
-      ) : (
-        <View style={styles.buttonGroup}>
-          <Button label="Search again" onPress={() => onAction("KEEP_WAITING")} />
-          {canSwitchToLone && (
-            <Button
-              label="Switch to solo ride"
-              variant="secondary"
-              onPress={() => onAction("SWITCH_TO_LONE")}
-            />
-          )}
-          <Button label="Cancel" variant="ghost" onPress={() => onAction("CANCEL")} />
-        </View>
-      )}
-    </View>
-  );
-}
 
 function DriverAvatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) {
   const [failed, setFailed] = useState(false);
@@ -816,7 +739,6 @@ function DriverFoundContent({
   etaMinutes,
   rideId,
   onCancel,
-  cancelling,
 }: {
   /** Ride-level ARRIVED (LONE) OR this rider's own passenger row is ARRIVED
    * (SHARED, Phase 6b-3 — the ride itself may still be MATCHED if this
@@ -827,8 +749,8 @@ function DriverFoundContent({
   /** Minutes until the driver reaches the pickup point, or null if unknown. */
   etaMinutes: number | null;
   rideId: string;
+  /** Opens the cancel sheet (reason required). */
   onCancel: () => void;
-  cancelling: boolean;
 }) {
   return (
     <View style={styles.section}>
@@ -856,7 +778,7 @@ function DriverFoundContent({
 
       <RideSafetyActions rideId={rideId} driver={driver} />
 
-      <Button label="Cancel ride" variant="secondary" onPress={onCancel} loading={cancelling} />
+      <Button label="Cancel ride" variant="secondary" onPress={onCancel} />
     </View>
   );
 }
@@ -1152,22 +1074,34 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   // ── Options
-  route: { marginTop: spacing.xs, marginBottom: spacing.lg },
-  option: { marginBottom: spacing.lg, borderWidth: 2, borderColor: "transparent" },
-  optionSelected: { borderColor: colors.primary[500] },
-  optionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  optionInfo: { flex: 1, gap: 2 },
-  optionHeader: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  price: { marginTop: 2 },
-  chevron: { padding: spacing.xs },
-  details: { marginTop: spacing.md },
-  footer: { marginTop: spacing.sm, marginBottom: spacing.xl, minHeight: 80 },
+  optionsHeader: { gap: spacing.md },
+  optionList: { gap: spacing.md },
+  paymentRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  paymentIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: radii.full,
+    backgroundColor: colors.primary[50],
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  paymentText: { flex: 1, gap: 2 },
+  footer: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    backgroundColor: colors.white,
+    borderTopWidth: 1,
+    borderTopColor: colors.hairline,
+  },
   // ── State panels
   section: { gap: spacing.md },
   stateHeader: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   stateHeading: { flex: 1, gap: 4 },
-  progressSection: { gap: spacing.xs },
-  progressLabel: { textAlign: "center" },
   savingsNote: {
     flexDirection: "row",
     alignItems: "center",
@@ -1211,23 +1145,4 @@ const styles = StyleSheet.create({
   // ── Rating
   ratingSection: { alignItems: "center", gap: spacing.sm },
   starsRow: { flexDirection: "row", gap: spacing.sm },
-  // ── Payment method selector (options screen)
-  paymentSection: { gap: spacing.sm },
-  paymentRow: { flexDirection: "row", gap: spacing.sm },
-  paymentOption: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.xs,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    backgroundColor: colors.surface,
-  },
-  paymentOptionSelected: {
-    borderColor: colors.primary[500],
-    backgroundColor: colors.primary[50],
-  },
 });

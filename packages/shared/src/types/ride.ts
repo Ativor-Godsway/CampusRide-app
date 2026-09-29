@@ -1,3 +1,4 @@
+import type { RiderCancelReason } from "../rides/riderCancel";
 export type RideType = "LONE" | "SHARED";
 
 /** USSD vs app-originated ride — drives SMS vs push notification on transitions. */
@@ -47,6 +48,9 @@ export interface Ride {
   paymentStatus: PaymentStatus;
   paymentMethod: PaymentMethod;
   cancelReason: RideCancelReason | null;
+  /** What the RIDER said when they cancelled (feedback); null if not a rider cancel. */
+  riderCancelReason?: RiderCancelReason | null;
+  riderCancelNote?: string | null;
   /** Set when this request was absorbed into another car (CANCELLED /
    *  MERGED_INTO_ANOTHER_RIDE) — points at the anchor ride to follow. */
   mergedIntoRideId: string | null;

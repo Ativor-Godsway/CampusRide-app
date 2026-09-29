@@ -1,10 +1,11 @@
 import type { PrismaClient } from "@prisma/client";
-import { RIDE_EVENTS, type RideSource } from "@rida/shared";
+import { DISPATCH_WINDOW_MS, RIDE_EVENTS, type RideSource } from "@rida/shared";
 import { applyRideTransition } from "./rideService";
 import { emitRideEvent } from "../../realtime/rideSocket";
 import { notifyUssdRider } from "../sms/notifyUssdRiders";
 
-const BROADCAST_TIMEOUT_MS = 90_000;
+/** Shared with the rider app's countdown, so the two can never disagree. */
+const BROADCAST_TIMEOUT_MS = DISPATCH_WINDOW_MS;
 const DECISION_GRACE_MS = 90_000;
 
 const NO_DRIVER_NUDGE = "No driver yet. Dial *919*4007# and choose Check Status.";

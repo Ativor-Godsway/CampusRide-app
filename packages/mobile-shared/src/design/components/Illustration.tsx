@@ -15,8 +15,14 @@ import { illustrations, type IllustrationName } from "../illustrations";
 export interface IllustrationProps {
   /** Which artwork to show. See `design/illustrations.ts`. */
   name: IllustrationName;
-  /** Square size in points. Defaults to 140. */
+  /** Square size in points. Defaults to 140. Ignored when `width` is set. */
   size?: number;
+  /**
+   * Width in points for NON-square art (e.g. the 4:3 cars). The height comes
+   * from the image's own aspect ratio, so the art is never squashed or
+   * letterboxed into a square box.
+   */
+  width?: number;
   /** Gentle up-and-down float with a soft shadow underneath. */
   float?: boolean;
   /** Radar-style rings pulsing out from behind the art ("waiting" states). */
@@ -47,9 +53,22 @@ export function useReduceMotion(): boolean {
  * Animated (native driver), so it's Expo Go safe and costs nothing on the JS
  * thread. All motion is skipped when Reduce Motion is on.
  */
+/** Points to draw an illustration at: `size`×`size`, or `width` × the art's own aspect. */
+export function illustrationDimensions(
+  name: IllustrationName,
+  size: number,
+  width?: number,
+): { width: number; height: number } {
+  if (width === undefined) return { width: size, height: size };
+  const asset = Image.resolveAssetSource(illustrations[name]);
+  const aspect = asset?.width && asset?.height ? asset.width / asset.height : 1;
+  return { width, height: Math.round(width / aspect) };
+}
+
 export function Illustration({
   name,
   size = 140,
+  width: widthProp,
   float = false,
   pulse = false,
   pop = false,
@@ -102,7 +121,11 @@ export function Illustration({
     return () => loop.stop();
   }, [ring, pulse, reduceMotion]);
 
-  const lift = Math.max(4, Math.round(size * 0.045));
+  const { width, height } = illustrationDimensions(name, size, widthProp);
+  // Motion scales with the art's shorter side, so a wide car bobs as gently
+  // as a square pin of the same height.
+  const extent = Math.min(width, height);
+  const lift = Math.max(4, Math.round(extent * 0.045));
   const translateY = bob.interpolate({ inputRange: [0, 1], outputRange: [0, -lift] });
   const shadowScale = bob.interpolate({ inputRange: [0, 1], outputRange: [1, 0.86] });
   const shadowOpacity = bob.interpolate({ inputRange: [0, 1], outputRange: [1, 0.7] });
@@ -117,9 +140,9 @@ export function Illustration({
         style={[
           styles.ring,
           {
-            width: size * 0.9,
-            height: size * 0.9,
-            borderRadius: size,
+            width: extent * 0.9,
+            height: extent * 0.9,
+            borderRadius: extent,
             opacity: progress.interpolate({ inputRange: [0, 0.15, 1], outputRange: [0, 0.45, 0] }),
             transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1.45] }) }],
           },
@@ -131,7 +154,7 @@ export function Illustration({
   return (
     <Animated.View
       style={[
-        { width: size, height: size + (float ? lift * 2 : 0), alignItems: "center", justifyContent: "center" },
+        { width, height: height + (float ? lift * 2 : 0), alignItems: "center", justifyContent: "center" },
         { opacity: enter, transform: [{ scale: enterScale }] },
         style,
       ]}
@@ -152,8 +175,8 @@ export function Illustration({
           style={[
             styles.shadow,
             {
-              width: size * 0.5,
-              height: Math.max(6, size * 0.06),
+              width: width * 0.5,
+              height: Math.max(6, extent * 0.06),
               bottom: 0,
               opacity: reduceMotion ? 1 : shadowOpacity,
               transform: [{ scaleX: reduceMotion ? 1 : shadowScale }],
@@ -163,7 +186,7 @@ export function Illustration({
       ) : null}
 
       <Animated.View style={{ transform: [{ translateY: float && !reduceMotion ? translateY : 0 }] }}>
-        <Image source={illustrations[name]} style={{ width: size, height: size }} resizeMode="contain" />
+        <Image source={illustrations[name]} style={{ width, height }} resizeMode="contain" />
       </Animated.View>
     </Animated.View>
   );
