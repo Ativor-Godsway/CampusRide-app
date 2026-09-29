@@ -14,6 +14,7 @@ import {
   spacing,
   useAuth,
 } from "@rida/mobile-shared";
+import { TAB_SCREEN_BOTTOM_PADDING } from "../../lib/layout";
 
 interface QuickAction {
   label: string;
@@ -58,7 +59,7 @@ export default function AccountTab() {
     Alert.alert(`${label} is coming soon`, "We're working on it — check back in a future update.");
 
   return (
-    <Screen scroll style={styles.content}>
+    <Screen scroll edges={["top"]} style={styles.content}>
       <View style={styles.header}>
         <View style={styles.avatar}>
           <Text variant="h2" color="inverse">
@@ -82,7 +83,7 @@ export default function AccountTab() {
             accessibilityRole="button"
           >
             <Card noPadding style={styles.quickTile}>
-              <ServiceIcon name={action.icon} color={colors.primary[600]} background={colors.primary[50]} size={44} />
+              <ServiceIcon name={action.icon} color={colors.primary[500]} background={colors.primary[50]} size={44} />
               <Text variant="bodyMedium" style={styles.quickLabel}>
                 {action.label}
               </Text>
@@ -148,7 +149,7 @@ export default function AccountTab() {
 
 const styles = StyleSheet.create({
   content: {
-    paddingBottom: spacing["4xl"],
+    paddingBottom: TAB_SCREEN_BOTTOM_PADDING,
   },
   header: {
     flexDirection: "row",

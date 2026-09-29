@@ -11,7 +11,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "paths": {
+      "@rida/shared": ["../../packages/shared/src/index.ts"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }

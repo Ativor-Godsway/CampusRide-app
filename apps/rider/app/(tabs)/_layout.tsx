@@ -28,17 +28,18 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: colors.primary[500],
         tabBarInactiveTintColor: colors.ink[300],
+        // No fixed height/paddingBottom: the tab bar then adds the phone's
+        // bottom safe-area inset itself. A hard-coded height of 64 used to
+        // override it, pushing labels into the home-indicator / gesture area.
         tabBarStyle: {
           backgroundColor: colors.white,
           borderTopColor: colors.border,
           borderTopWidth: 1,
-          height: 64,
-          paddingTop: 8,
-          paddingBottom: 10,
+          paddingTop: 6,
           ...shadows.sm,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: "600",
         },
       }}

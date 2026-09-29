@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -12,6 +13,14 @@ import react from "@vitejs/plugin-react";
  */
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    // @rida/shared is consumed from SOURCE (as the mobile apps and the server
+    // tests do), so the admin build doesn't depend on packages/shared having
+    // been compiled first — Render's admin build runs only build:admin.
+    alias: {
+      "@rida/shared": fileURLToPath(new URL("../../packages/shared/src/index.ts", import.meta.url)),
+    },
+  },
   server: { port: 5173 },
   build: { outDir: "dist" },
 });

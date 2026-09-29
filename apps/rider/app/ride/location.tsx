@@ -1,329 +1,360 @@
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "expo-router";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { Pressable, StyleSheet, TextInput, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { Zone } from "@rida/shared";
-import { nearestZone } from "@rida/shared";
+import { placeSuggestions, recentDestinations } from "@rida/shared";
 import {
   Button,
   Card,
-  LoadingState,
+  ListRow,
   Screen,
+  SkeletonGroup,
+  SkeletonListRows,
   Text,
   colors,
-  getZones,
+  getRecentRides,
+  myRidesQueryKeys,
   radii,
+  shadows,
   spacing,
-  useCurrentLocation,
+  typography,
+  type RideSummary,
 } from "@rida/mobile-shared";
+import { chooseRideParams, useResolvePickup, useZones } from "../../lib/chooseRide";
 
-type ActiveField = "pickup" | "dropoff" | null;
+type Field = "pickup" | "dropoff";
 
-export default function LocationScreen() {
+/**
+ * Plan your ride: a light pickup/drop-off card, then "Recent" and "Popular
+ * on campus", filtered as the rider types. Tapping a place fills the active
+ * field; once both ends are known it goes straight to Choose a ride — there
+ * is no Continue button.
+ *
+ * Optional params pre-fill the fields: `dropoffZoneId` (a recent place from
+ * Home when we couldn't tell where the rider is) and `pickupZoneId` (Edit
+ * route from Choose a ride).
+ */
+export default function PlanRideScreen() {
   const router = useRouter();
-  const { requestLocation } = useCurrentLocation();
+  const params = useLocalSearchParams<{ pickupZoneId?: string; dropoffZoneId?: string }>();
+  const resolvePickup = useResolvePickup();
 
-  const { data: zones, isLoading, isError } = useQuery<Zone[]>({
-    queryKey: ["zones"],
-    queryFn: getZones,
+  const { data: zones, isLoading: zonesLoading, isError: zonesError, refetch: refetchZones } = useZones();
+  const { data: rides, isLoading: ridesLoading } = useQuery<RideSummary[]>({
+    queryKey: myRidesQueryKeys.recent,
+    queryFn: () => getRecentRides(10),
   });
 
-  const zoneList: Zone[] = zones ?? [];
-
+  const [pickup, setPickup] = useState<Zone | null>(null);
+  const [dropoff, setDropoff] = useState<Zone | null>(null);
   const [pickupText, setPickupText] = useState("");
   const [dropoffText, setDropoffText] = useState("");
-  const [activeField, setActiveField] = useState<ActiveField>("dropoff");
-  const [located, setLocated] = useState(false);
+  const [active, setActive] = useState<Field>("dropoff");
+  const [locating, setLocating] = useState(false);
+  const pickupInput = useRef<TextInput>(null);
+  const dropoffInput = useRef<TextInput>(null);
 
+  // Pre-fill once the zone list is in: from params, else pickup = where the
+  // rider is now (nearest campus zone).
+  const prefilled = useRef(false);
   useEffect(() => {
-    if (located || zoneList.length === 0) return;
-    setLocated(true);
-    void (async () => {
-      const coords = await requestLocation();
-      if (!coords) return;
-      const zone = nearestZone(coords.latitude, coords.longitude, zoneList);
-      if (zone) setPickupText(zone.name);
-    })();
-  }, [located, zoneList, requestLocation]);
-
-  const pickupZone = useMemo(
-    () => zoneList.find((zone) => zone.name.toLowerCase() === pickupText.trim().toLowerCase()) ?? null,
-    [zoneList, pickupText],
-  );
-  const dropoffZone = useMemo(
-    () => zoneList.find((zone) => zone.name.toLowerCase() === dropoffText.trim().toLowerCase()) ?? null,
-    [zoneList, dropoffText],
-  );
-
-  const activeText = activeField === "pickup" ? pickupText : activeField === "dropoff" ? dropoffText : "";
-  const activeZone = activeField === "pickup" ? pickupZone : activeField === "dropoff" ? dropoffZone : null;
-
-  const suggestions = useMemo(() => {
-    const query = activeText.trim().toLowerCase();
-    if (!activeField || !query || activeZone) return [];
-    return zoneList.filter((zone) => zone.name.toLowerCase().includes(query)).slice(0, 6);
-  }, [zoneList, activeText, activeField, activeZone]);
-
-  const showSuggestions = Boolean(activeField && activeText.trim() && !activeZone);
-  const showNoMatch = showSuggestions && suggestions.length === 0;
-
-  function selectSuggestion(zone: Zone) {
-    if (activeField === "dropoff") {
-      setDropoffText(zone.name);
-      setActiveField(pickupZone ? null : "pickup");
-    } else {
-      setPickupText(zone.name);
-      setActiveField(dropoffZone ? null : "dropoff");
+    if (prefilled.current || !zones) return;
+    prefilled.current = true;
+    const byId = (id?: string) => (id ? (zones.find((z) => z.id === id) ?? null) : null);
+    const presetDropoff = byId(params.dropoffZoneId);
+    const presetPickup = byId(params.pickupZoneId);
+    if (presetDropoff) {
+      setDropoff(presetDropoff);
+      setDropoffText(presetDropoff.name);
     }
-  }
+    if (presetPickup) {
+      setPickup(presetPickup);
+      setPickupText(presetPickup.name);
+      return;
+    }
+    if (presetDropoff) {
+      // Destination known, start unknown: ask for the start.
+      setActive("pickup");
+      pickupInput.current?.focus();
+    }
+    setLocating(true);
+    void resolvePickup()
+      .then((zone) => {
+        if (!zone || zone.id === presetDropoff?.id) return;
+        // Only fill if the rider hasn't typed their own pickup meanwhile.
+        setPickup((current) => current ?? zone);
+        setPickupText((current) => current || zone.name);
+      })
+      .finally(() => setLocating(false));
+  }, [zones, params.dropoffZoneId, params.pickupZoneId, resolvePickup]);
 
-  function handleContinue() {
-    if (!pickupZone || !dropoffZone) return;
-    router.push({
-      pathname: "/ride/type",
-      params: {
-        pickupZoneId: pickupZone.id,
-        dropoffZoneId: dropoffZone.id,
-        pickupZoneName: pickupZone.name,
-        dropoffZoneName: dropoffZone.name,
-        pickupLat: String(pickupZone.latitude),
-        pickupLng: String(pickupZone.longitude),
-        dropoffLat: String(dropoffZone.latitude),
-        dropoffLng: String(dropoffZone.longitude),
-      },
-    });
-  }
+  const recent = useMemo(() => recentDestinations(rides ?? [], 3), [rides]);
 
-  if (isLoading) {
-    return (
-      <Screen>
-        <LoadingState message="Loading campus zones..." />
-      </Screen>
-    );
-  }
+  // A field showing its selected zone's own name isn't a search — show the
+  // full lists so the rider can pick something else.
+  const activeText = active === "pickup" ? pickupText : dropoffText;
+  const activeZone = active === "pickup" ? pickup : dropoff;
+  const query = activeZone && activeText === activeZone.name ? "" : activeText;
+  const otherZone = active === "pickup" ? dropoff : pickup;
 
-  if (isError || !zones) {
-    return (
-      <Screen>
-        <View style={styles.errorContent}>
-          <Text variant="h2">Couldn't load zones</Text>
-          <Text variant="body" color="muted" style={styles.errorBody}>
-            Check your connection and try again.
-          </Text>
-          <Button label="Back" variant="secondary" onPress={() => router.back()} />
-        </View>
-      </Screen>
-    );
-  }
-
-  const canContinue = Boolean(
-    pickupZone && dropoffZone && pickupZone.id !== dropoffZone.id,
+  const suggestions = useMemo(
+    () =>
+      placeSuggestions({
+        zones: zones ?? [],
+        recent,
+        query,
+        excludeZoneId: otherZone?.id ?? null,
+      }),
+    [zones, recent, query, otherZone?.id],
   );
+
+  function goBack() {
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
+  }
+
+  function choose(zone: Zone) {
+    const nextPickup = active === "pickup" ? zone : pickup;
+    const nextDropoff = active === "dropoff" ? zone : dropoff;
+    if (active === "pickup") {
+      setPickup(zone);
+      setPickupText(zone.name);
+    } else {
+      setDropoff(zone);
+      setDropoffText(zone.name);
+    }
+
+    if (nextPickup && nextDropoff && nextPickup.id !== nextDropoff.id) {
+      router.push({ pathname: "/ride/type", params: chooseRideParams(nextPickup, nextDropoff, "plan") });
+      return;
+    }
+    // The other end is still missing: move straight to it.
+    const next: Field = active === "pickup" ? "dropoff" : "pickup";
+    setActive(next);
+    (next === "pickup" ? pickupInput : dropoffInput).current?.focus();
+  }
+
+  const listsLoading = zonesLoading || ridesLoading;
+  const placesTitle = query ? "Places" : "Popular on campus";
 
   return (
     <Screen scroll>
-      <Text variant="h1">Plan your ride</Text>
-      <Text variant="bodySmall" color="muted" style={styles.subtitle}>
-        Choose where you're starting and where you're headed.
+      <Pressable
+        onPress={goBack}
+        accessibilityRole="button"
+        accessibilityLabel="Back"
+        hitSlop={8}
+        style={styles.back}
+      >
+        <Ionicons name="arrow-back" size={24} color={colors.ink[900]} />
+      </Pressable>
+
+      <Text variant="h2" accessibilityRole="header" style={styles.title}>
+        Plan your ride
       </Text>
 
-      <Card dark glow={false} style={styles.planCard}>
-        <View style={[styles.fieldRow, activeField === "pickup" && styles.fieldRowActive]}>
-          <View style={styles.markerCol}>
-            <View style={styles.originRing}>
-              <View style={styles.pickupDot} />
-            </View>
-            <View style={styles.connector} />
-          </View>
-          <View style={styles.fieldTextCol}>
-            <Text variant="label" style={styles.fieldLabel}>
-              PICKUP
-            </Text>
-            <TextInput
-              value={pickupText}
-              onChangeText={(text) => {
-                setPickupText(text);
-                setActiveField("pickup");
-              }}
-              onFocus={() => setActiveField("pickup")}
-              placeholder="Current location"
-              placeholderTextColor="rgba(255,255,255,0.4)"
-              style={styles.fieldInput}
-              autoCorrect={false}
-              autoCapitalize="words"
-            />
-          </View>
+      <View style={styles.inputCard}>
+        <View style={[styles.fieldRow, active === "pickup" && styles.fieldRowActive]}>
+          <View style={styles.pickupDot} />
+          <TextInput
+            ref={pickupInput}
+            value={pickupText}
+            onChangeText={(text) => {
+              setPickupText(text);
+              if (pickup && text !== pickup.name) setPickup(null);
+            }}
+            onFocus={() => setActive("pickup")}
+            placeholder={locating ? "Finding where you are…" : "Pickup"}
+            placeholderTextColor={colors.ink[300]}
+            style={styles.input}
+            autoCorrect={false}
+            autoCapitalize="words"
+            selectTextOnFocus
+            returnKeyType="search"
+            accessibilityLabel="Pickup"
+          />
           {pickupText ? (
             <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Clear pickup"
               onPress={() => {
                 setPickupText("");
-                setActiveField("pickup");
+                setPickup(null);
+                setActive("pickup");
+                pickupInput.current?.focus();
               }}
-              style={styles.clearButton}
+              accessibilityRole="button"
+              accessibilityLabel="Clear pickup"
+              hitSlop={8}
             >
-              <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+              <Ionicons name="close-circle" size={20} color={colors.ink[300]} />
             </Pressable>
           ) : null}
         </View>
 
-        <View style={[styles.fieldRow, activeField === "dropoff" && styles.fieldRowActive]}>
-          <View style={styles.markerCol}>
-            <View style={styles.destSquare} />
-          </View>
-          <View style={styles.fieldTextCol}>
-            <Text variant="label" style={styles.fieldLabel}>
-              DROPOFF
-            </Text>
-            <TextInput
-              value={dropoffText}
-              onChangeText={(text) => {
-                setDropoffText(text);
-                setActiveField("dropoff");
-              }}
-              onFocus={() => setActiveField("dropoff")}
-              placeholder="Where to?"
-              placeholderTextColor="rgba(255,255,255,0.4)"
-              style={styles.fieldInput}
-              autoCorrect={false}
-              autoCapitalize="words"
-              autoFocus
-            />
-          </View>
+        <View style={styles.inputDivider} />
+
+        <View style={[styles.fieldRow, active === "dropoff" && styles.fieldRowActive]}>
+          <View style={styles.dropoffSquare} />
+          <TextInput
+            ref={dropoffInput}
+            value={dropoffText}
+            onChangeText={(text) => {
+              setDropoffText(text);
+              if (dropoff && text !== dropoff.name) setDropoff(null);
+            }}
+            onFocus={() => setActive("dropoff")}
+            placeholder="Where to?"
+            placeholderTextColor={colors.ink[300]}
+            style={[styles.input, styles.inputStrong]}
+            autoCorrect={false}
+            autoCapitalize="words"
+            autoFocus={!params.dropoffZoneId}
+            selectTextOnFocus
+            returnKeyType="search"
+            accessibilityLabel="Drop-off"
+          />
           {dropoffText ? (
             <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Clear dropoff"
               onPress={() => {
                 setDropoffText("");
-                setActiveField("dropoff");
+                setDropoff(null);
+                setActive("dropoff");
+                dropoffInput.current?.focus();
               }}
-              style={styles.clearButton}
+              accessibilityRole="button"
+              accessibilityLabel="Clear drop-off"
+              hitSlop={8}
             >
-              <Ionicons name="close-circle" size={18} color="rgba(255,255,255,0.5)" />
+              <Ionicons name="close-circle" size={20} color={colors.ink[300]} />
             </Pressable>
           ) : null}
         </View>
-      </Card>
-
-      {showSuggestions ? (
-        <Card noPadding style={styles.suggestionsCard}>
-          {suggestions.map((zone, index) => (
-            <Pressable
-              key={zone.id}
-              accessibilityRole="button"
-              onPress={() => selectSuggestion(zone)}
-              style={[styles.suggestionRow, index > 0 && styles.suggestionRowDivider]}
-            >
-              <Ionicons name="location-outline" size={18} color={colors.ink[400]} />
-              <View style={styles.suggestionTextCol}>
-                <Text variant="bodyMedium">{zone.name}</Text>
-                <Text variant="caption" color="muted">
-                  {zone.quadrant}
-                </Text>
-              </View>
-            </Pressable>
-          ))}
-        </Card>
-      ) : null}
-
-      {showNoMatch ? (
-        <Text variant="bodySmall" color="error" style={styles.noMatch}>
-          No matching zone
-        </Text>
-      ) : null}
-
-      <View style={styles.continueButton}>
-        <Button label="Continue" onPress={handleContinue} disabled={!canContinue} />
       </View>
+
+      {zonesError ? (
+        <View style={styles.error}>
+          <Text variant="bodySmall" color="muted">
+            Couldn&apos;t load campus places. Check your connection.
+          </Text>
+          <Button label="Try again" variant="secondary" onPress={() => void refetchZones()} />
+        </View>
+      ) : listsLoading ? (
+        <>
+          <Text variant="h3" style={styles.sectionTitle}>
+            Recent
+          </Text>
+          <Card>
+            <SkeletonGroup label="Loading places">
+              <SkeletonListRows count={4} />
+            </SkeletonGroup>
+          </Card>
+        </>
+      ) : (
+        <>
+          {suggestions.recent.length > 0 ? (
+            <PlaceSection title="Recent" icon="time-outline" places={suggestions.recent} onChoose={choose} />
+          ) : null}
+          {suggestions.places.length > 0 ? (
+            <PlaceSection title={placesTitle} icon="location-outline" places={suggestions.places} onChoose={choose} />
+          ) : null}
+          {suggestions.noMatch ? (
+            <Text variant="bodySmall" color="muted" style={styles.noMatch}>
+              No campus places match “{query.trim()}”.
+            </Text>
+          ) : null}
+        </>
+      )}
     </Screen>
   );
 }
 
+function PlaceSection({
+  title,
+  icon,
+  places,
+  onChoose,
+}: {
+  title: string;
+  icon: "time-outline" | "location-outline";
+  places: Zone[];
+  onChoose: (zone: Zone) => void;
+}) {
+  return (
+    <>
+      <Text variant="h3" style={styles.sectionTitle} accessibilityRole="header">
+        {title}
+      </Text>
+      <Card style={styles.list}>
+        {places.map((zone, index) => (
+          <View key={zone.id}>
+            <ListRow
+              title={zone.name}
+              leading={<ListRow.Icon name={icon} color={colors.ink[500]} background={colors.surfaceMuted} />}
+              showChevron={false}
+              onPress={() => onChoose(zone)}
+              accessibilityLabel={zone.name}
+            />
+            {index < places.length - 1 ? <View style={styles.divider} /> : null}
+          </View>
+        ))}
+      </Card>
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
-  subtitle: { marginTop: spacing.xs, marginBottom: spacing.lg },
-  planCard: { gap: 0 },
+  back: {
+    width: 44,
+    height: 44,
+    marginLeft: -spacing.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: { marginTop: spacing.xs, marginBottom: spacing.lg },
+  inputCard: {
+    backgroundColor: colors.white,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    ...shadows.md,
+  },
   fieldRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
-    paddingVertical: spacing.sm,
+    minHeight: 52,
     paddingHorizontal: spacing.sm,
     borderRadius: radii.md,
   },
-  fieldRowActive: {
-    backgroundColor: "rgba(255,255,255,0.08)",
-  },
-  markerCol: {
-    width: 20,
-    alignItems: "center",
-  },
-  originRing: {
-    width: 20,
-    height: 20,
-    borderRadius: radii.full,
-    backgroundColor: "rgba(232, 243, 236, 0.22)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  fieldRowActive: { backgroundColor: colors.surface },
   pickupDot: {
     width: 10,
     height: 10,
     borderRadius: radii.full,
-    backgroundColor: colors.primary[400],
+    backgroundColor: colors.primary[500],
   },
-  destSquare: {
-    width: 12,
-    height: 12,
-    borderRadius: radii.sm,
-    backgroundColor: colors.white,
+  dropoffSquare: {
+    width: 10,
+    height: 10,
+    borderRadius: 2,
+    backgroundColor: colors.ink[900],
   },
-  connector: {
-    width: 2,
-    height: 20,
-    backgroundColor: colors.borderDark,
-    marginVertical: 4,
-  },
-  fieldTextCol: {
+  input: {
     flex: 1,
-    gap: 2,
+    fontSize: typography.size.md,
+    color: colors.ink[900],
+    paddingVertical: spacing.sm,
   },
-  fieldLabel: {
-    color: "rgba(255,255,255,0.5)",
+  inputStrong: { fontWeight: typography.weight.semibold },
+  inputDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginLeft: spacing.sm + 10 + spacing.md,
   },
-  fieldInput: {
-    color: colors.white,
-    fontSize: 16,
-    paddingVertical: 0,
-    margin: 0,
-  },
-  clearButton: {
-    padding: spacing.xs,
-  },
-  suggestionsCard: {
-    marginTop: spacing.md,
-  },
-  suggestionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-  },
-  suggestionRowDivider: {
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-  },
-  suggestionTextCol: {
-    flex: 1,
-    gap: 2,
-  },
-  noMatch: {
-    marginTop: spacing.sm,
-  },
-  continueButton: { marginTop: spacing.xl, marginBottom: spacing.xl },
-  errorContent: { flex: 1, justifyContent: "center", gap: spacing.lg },
-  errorBody: { marginBottom: spacing.md },
+  sectionTitle: { marginTop: spacing.xl, marginBottom: spacing.sm },
+  list: { paddingVertical: spacing.xs },
+  divider: { height: 1, backgroundColor: colors.border, marginVertical: spacing.xs },
+  noMatch: { marginTop: spacing.xl, textAlign: "center" },
+  error: { marginTop: spacing.xl, gap: spacing.md },
 });

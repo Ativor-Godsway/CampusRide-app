@@ -3,7 +3,8 @@ import { colors, radii, shadows, spacing, touchTarget } from "../tokens";
 import { Text } from "./Text";
 
 /** `dangerSecondary`: outlined red — a destructive action that shouldn't shout (e.g. "Cancel ride" beside "Keep waiting"). */
-export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger" | "dangerSecondary";
+export type ButtonVariant =
+  "primary" | "secondary" | "ghost" | "danger" | "dangerSecondary" | "neutral";
 export type ButtonSize = "md" | "lg";
 
 export interface ButtonProps extends Omit<PressableProps, "style" | "children"> {
@@ -61,12 +62,14 @@ export function Button({
   );
 }
 
+/** `neutral`: plain white with ink text — for "Back"/"Close", where green would suggest progress. */
 const textColor: Record<ButtonVariant, "inverse" | "primary" | "default" | "error"> = {
   primary: "inverse",
   secondary: "primary",
   ghost: "primary",
   danger: "inverse",
   dangerSecondary: "error",
+  neutral: "default",
 };
 
 const styles = StyleSheet.create({
@@ -103,4 +106,5 @@ const variantStyles = StyleSheet.create({
   ghost: { backgroundColor: "transparent" },
   danger: { backgroundColor: colors.danger, ...shadows.sm },
   dangerSecondary: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.error },
+  neutral: { backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.border },
 });

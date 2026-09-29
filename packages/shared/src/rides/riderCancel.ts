@@ -36,14 +36,18 @@ export const FLAGGED_RIDER_CANCEL_REASONS: readonly RiderCancelReason[] = [
   "DRIVER_ASKED_TO_CANCEL",
 ];
 
-/** Rider-facing wording; the admin site uses the same labels. */
+/**
+ * Rider-facing wording, kept short enough to sit on a chip; the admin site
+ * shows the same labels. Display only — the stored values (the keys) never
+ * change when these do.
+ */
 export const RIDER_CANCEL_REASON_LABELS: Record<RiderCancelReason, string> = {
   WAITING_TOO_LONG: "Waiting too long",
-  CHANGED_PLANS: "Changed my plans",
-  WRONG_ADDRESS: "Wrong pickup or destination",
+  CHANGED_PLANS: "Changed plans",
+  WRONG_ADDRESS: "Wrong location",
   FOUND_ANOTHER_RIDE: "Found another ride",
   PRICE: "Price",
-  DRIVER_TOO_SLOW: "Driver is taking too long",
+  DRIVER_TOO_SLOW: "Driver too slow",
   DRIVER_ASKED_TO_CANCEL: "Driver asked me to cancel",
   OTHER: "Other",
 };

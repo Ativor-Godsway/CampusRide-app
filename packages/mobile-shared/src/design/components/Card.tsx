@@ -1,5 +1,5 @@
 import { View, StyleSheet, type ViewProps } from "react-native";
-import { colors, radii, shadows, spacing } from "../tokens";
+import { colors, radii, shadows, spacing, withAlpha } from "../tokens";
 
 export interface CardProps extends ViewProps {
   /** Removes padding for cards that manage their own inner layout. */
@@ -78,6 +78,6 @@ const styles = StyleSheet.create({
     width: 180,
     height: 180,
     borderRadius: 90,
-    backgroundColor: "rgba(25, 116, 60, 0.35)",
+    backgroundColor: withAlpha(colors.primary[500], 0.35),
   },
 });

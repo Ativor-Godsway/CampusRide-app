@@ -56,7 +56,7 @@ export function ListRow({
 /** Pre-styled leading icon in a tinted circle — common pattern for ListRow. */
 ListRow.Icon = function ListRowIcon({
   name,
-  color = colors.primary[600],
+  color = colors.primary[500],
   background = colors.primary[50],
 }: {
   name: keyof typeof Ionicons.glyphMap;

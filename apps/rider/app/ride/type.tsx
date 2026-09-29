@@ -2,11 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import BottomSheet, {
-  BottomSheetFooter,
-  BottomSheetScrollView,
-  type BottomSheetFooterProps,
-} from "@gorhom/bottom-sheet";
+import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -16,6 +12,7 @@ import {
   estimateEtaMinutes,
   formatEta,
   getSharedFarePerRider,
+  mapFitPadding,
   priceLoneRide,
 } from "@rida/shared";
 import {
@@ -32,13 +29,16 @@ import {
   cancelRide,
   colors,
   createRide,
-  formatGhs,
+  formatCedis,
   raiseSos,
   radii,
   regionForCoordinates,
+  shadows,
   rideQueryKey,
-  RouteStops,
+  Skeleton,
+  SkeletonGroup,
   spacing,
+  spokenCedis,
   submitRating,
   submitRideDecision,
   switchRideType,
@@ -56,8 +56,11 @@ import { haptics } from "../../lib/haptics";
 
 const STARS = [1, 2, 3, 4, 5];
 
-/** Height the sticky "Request …" footer occupies, so content can scroll clear of it. */
-const FOOTER_SPACE = 96;
+/** The floating route pill: its height, and its gap below the status bar. */
+const PILL_HEIGHT = 48;
+const PILL_TOP_GAP = spacing.sm;
+/** A first guess at the options sheet's height, until it reports its real one. */
+const OPTIONS_SHEET_ESTIMATE = 300;
 
 /** HTTP status of an axios error, if any. */
 function httpStatus(error: unknown): number | undefined {
@@ -80,6 +83,8 @@ export default function RideTypeScreen() {
     dropoffLng: string;
     /** Present when resuming an active ride from the "Your rides" tab. */
     rideId?: string;
+    /** "plan" when opened from Plan your ride, so Edit can simply go back. */
+    from?: string;
   }>();
 
   // ── Options phase ───────────────────────────────────────────────────────────
@@ -169,19 +174,17 @@ export default function RideTypeScreen() {
       {
         type: "SHARED",
         title: "Shared",
-        description: "Share with riders going your way",
-        hint: { icon: "people-outline", label: "Up to 4 riders · same price each" },
+        subtitle: "Up to 4 riders",
         farePesewas: sharedFare,
-        priceLabel: formatGhs(sharedFare),
+        priceLabel: formatCedis(sharedFare),
         recommended: true,
       },
       {
         type: "LONE",
         title: "Ride alone",
-        description: "A private car, no waiting for others",
-        hint: { icon: "person-outline", label: "Just you" },
+        subtitle: "Private car",
         farePesewas: loneFare,
-        priceLabel: formatGhs(loneFare),
+        priceLabel: formatCedis(loneFare),
       },
     ],
     [sharedFare, loneFare],
@@ -191,7 +194,7 @@ export default function RideTypeScreen() {
   // Once a ride exists, the SERVER's type is the truth (it may have been
   // switched, or this may be a resumed ride of either type).
   const rideType: RideType = ride?.type ?? selectedType;
-  const priceLabel = formatGhs(fareFor(rideType));
+  const priceLabel = formatCedis(fareFor(rideType));
 
   // ── Map coords & region ─────────────────────────────────────────────────────
   const pickupCoord = useMemo(
@@ -254,10 +257,9 @@ export default function RideTypeScreen() {
   const switchOffer: SwitchOffer | null = canSwitch
     ? {
         toType: switchTarget,
-        label:
-          switchTarget === "LONE"
-            ? `Switch to Ride alone — ${formatGhs(loneFare)}, no waiting for others`
-            : `Switch to Shared — ${formatGhs(sharedFare)}, share and save`,
+        label: switchTarget === "LONE" ? "Switch to Ride alone" : "Switch to Shared",
+        priceLabel: formatCedis(fareFor(switchTarget)),
+        priceSpoken: spokenCedis(fareFor(switchTarget)),
       }
     : null;
 
@@ -348,25 +350,56 @@ export default function RideTypeScreen() {
     }
   }
 
-  const renderFooter = useCallback(
-    (props: BottomSheetFooterProps) => (
-      <BottomSheetFooter {...props}>
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
-          <Button
-            label={`Request ${selectedOption.title} · ${selectedOption.priceLabel}`}
-            size="lg"
-            onPress={() => void handleSubmit()}
-            loading={submitting}
-          />
-        </View>
-      </BottomSheetFooter>
-    ),
-    // handleSubmit reads the same state listed here.
+  const inOptions = activeRideId === null;
+
+  // ── Map framing ─────────────────────────────────────────────────────────────
+  // Fit pickup + drop-off (and the driver, once there is one) into the map
+  // area the rider can actually see: below the route pill, above the sheet.
+  // The sheet reports its height whenever it settles, so the map re-fits
+  // when the sheet grows or shrinks.
+  const [sheetHeight, setSheetHeight] = useState(inOptions ? OPTIONS_SHEET_ESTIMATE : windowHeight * 0.55);
+  const onSheetChange = useCallback(
+    (_index: number, position: number) => {
+      if (position > 0) setSheetHeight(Math.round(windowHeight - position));
+    },
+    [windowHeight],
+  );
+  const hasDriverPin = driverLocation !== null;
+  const fitTo = useMemo(
+    () => (hasDriverPin && driverLocation ? [pickupCoord, dropoffCoord, driverLocation] : [pickupCoord, dropoffCoord]),
+    // Re-fit when the driver first appears, not on every GPS ping.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [insets.bottom, selectedOption, submitting, selectedType, params.pickupZoneId, params.dropoffZoneId],
+    [pickupCoord, dropoffCoord, hasDriverPin],
+  );
+  const fitPadding = useMemo(
+    () =>
+      mapFitPadding({
+        mapHeight: windowHeight,
+        topOverlay: insets.top + PILL_TOP_GAP + PILL_HEIGHT,
+        bottomOverlay: sheetHeight,
+      }),
+    [windowHeight, insets.top, sheetHeight],
   );
 
-  const inOptions = activeRideId === null;
+  function goBack() {
+    if (router.canGoBack()) router.back();
+    else router.replace("/");
+  }
+
+  /** Back to Plan your ride with both ends filled in. */
+  function editRoute() {
+    if (params.from === "plan" && router.canGoBack()) {
+      router.back();
+      return;
+    }
+    router.replace({
+      pathname: "/ride/location",
+      params: { pickupZoneId: params.pickupZoneId, dropoffZoneId: params.dropoffZoneId },
+    });
+  }
+
+  // Reopening a ride from "Your rides": nothing to show until it loads.
+  const resumingUnloaded = Boolean(params.rideId) && !ride;
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -380,35 +413,94 @@ export default function RideTypeScreen() {
         showRecenter
         rounded={false}
         pulseZoneId={isSearching ? "pickup" : undefined}
+        fitTo={fitTo}
+        fitPadding={fitPadding}
+        controlsBottomInset={sheetHeight}
       />
 
+      <RoutePill
+        top={insets.top + PILL_TOP_GAP}
+        pickupZoneName={params.pickupZoneName}
+        dropoffZoneName={params.dropoffZoneName}
+        onBack={goBack}
+        // A requested ride's route can't change, so Edit only exists before.
+        onEdit={inOptions ? editRoute : undefined}
+      />
+
+      {inOptions ? (
+        // Sized to its content (no fixed snap points), so the Cash + Request
+        // bar is always the last thing in view and nothing sits behind it.
+        <BottomSheet
+          key="options"
+          index={0}
+          enableDynamicSizing
+          maxDynamicContentSize={windowHeight * 0.85}
+          onChange={onSheetChange}
+          backgroundStyle={styles.sheetBackground}
+          handleIndicatorStyle={styles.sheetHandle}
+        >
+          <BottomSheetView style={[styles.optionsSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+            <View style={styles.optionList} accessibilityRole="radiogroup" accessibilityLabel="Choose a ride">
+              {options.map((option) => (
+                <RideOptionCard
+                  key={option.type}
+                  option={option}
+                  selected={selectedType === option.type}
+                  onSelect={() => {
+                    if (option.type !== selectedType) haptics.selection();
+                    setSelectedType(option.type);
+                  }}
+                />
+              ))}
+            </View>
+
+            <View style={styles.requestBar}>
+              {/* Cash-only launch (Phase 1): MoMo is intentionally not
+                  offered — a MOMO ride couldn't be settled while digital
+                  payment is off server-side. A statement, not a picker. */}
+              <View
+                style={styles.cash}
+                accessible
+                accessibilityLabel="Payment: cash. Pay your driver at the end of the trip."
+              >
+                <Ionicons name="cash-outline" size={20} color={colors.primary[500]} />
+                <Text variant="bodyMedium" style={styles.cashText}>
+                  Cash
+                </Text>
+              </View>
+              <View style={styles.requestButton}>
+                <Button
+                  label={`Request ${selectedOption.title}`}
+                  size="lg"
+                  onPress={() => void handleSubmit()}
+                  loading={submitting}
+                  accessibilityHint={`${spokenCedis(selectedOption.farePesewas)}, paid in cash`}
+                />
+              </View>
+            </View>
+          </BottomSheetView>
+        </BottomSheet>
+      ) : (
       <BottomSheet
-        snapPoints={inOptions ? ["62%", "90%"] : ["55%", "90%"]}
+        key="tracking"
+        snapPoints={["55%", "90%"]}
         index={0}
+        onChange={onSheetChange}
         backgroundStyle={styles.sheetBackground}
         handleIndicatorStyle={styles.sheetHandle}
-        footerComponent={inOptions ? renderFooter : undefined}
         keyboardBehavior="interactive"
         keyboardBlurBehavior="restore"
         android_keyboardInputMode="adjustResize"
       >
-        <BottomSheetScrollView
-          contentContainerStyle={[styles.sheetContent, inOptions && { paddingBottom: FOOTER_SPACE + insets.bottom }]}
-        >
-          {inOptions && (
-            <OptionsContent
-              options={options}
-              selectedType={selectedType}
-              onSelectType={(type) => {
-                if (type !== selectedType) haptics.selection();
-                setSelectedType(type);
-              }}
-              pickupZoneName={params.pickupZoneName}
-              dropoffZoneName={params.dropoffZoneName}
-            />
-          )}
-
-          {activeRideId !== null &&
+        <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
+          {resumingUnloaded ? (
+            <SkeletonGroup label="Loading your ride" style={styles.resumeSkeleton}>
+              <Skeleton width={120} height={120} radius={radii.full} style={styles.centerSelf} />
+              <Skeleton width="60%" height={24} style={styles.centerSelf} />
+              <Skeleton width="80%" height={14} style={styles.centerSelf} />
+              <Skeleton height={120} radius={radii.lg} />
+            </SkeletonGroup>
+          ) : activeRideId !== null &&
             (myPassenger?.status === "CANCELLED" ? (
               <CancelledContent
                 onDone={() => router.replace("/")}
@@ -436,8 +528,8 @@ export default function RideTypeScreen() {
                     switchOffer={
                       canSwitch
                         ? switchTarget === "LONE"
-                          ? `Switch to Ride alone · ${formatGhs(loneFare)}`
-                          : `Switch to Shared · ${formatGhs(sharedFare)}`
+                          ? `Switch to Ride alone · ${formatCedis(loneFare)}`
+                          : `Switch to Shared · ${formatCedis(sharedFare)}`
                         : null
                     }
                     busy={decisionBusy}
@@ -496,6 +588,7 @@ export default function RideTypeScreen() {
             ))}
         </BottomSheetScrollView>
       </BottomSheet>
+      )}
 
       {activeRideId !== null ? (
         <CancelRideSheet
@@ -513,69 +606,52 @@ export default function RideTypeScreen() {
   );
 }
 
-// ── Options phase ─────────────────────────────────────────────────────────────
+// ── Route pill ────────────────────────────────────────────────────────────────
 
-function OptionsContent({
-  options,
-  selectedType,
-  onSelectType,
+/**
+ * Floats over the top of the map: back · "Pickup → Drop-off" · Edit. Takes
+ * the place of the route text that used to sit inside the sheet.
+ */
+function RoutePill({
+  top,
   pickupZoneName,
   dropoffZoneName,
+  onBack,
+  onEdit,
 }: {
-  options: RideOption[];
-  selectedType: RideType;
-  onSelectType: (t: RideType) => void;
+  top: number;
   pickupZoneName: string;
   dropoffZoneName: string;
+  onBack: () => void;
+  onEdit?: () => void;
 }) {
   return (
-    <>
-      <View style={styles.optionsHeader}>
-        <Text variant="h2" accessibilityRole="header">
-          Choose a ride
-        </Text>
-        <RouteStops
-          connectorHeight={10}
-          origin={
-            <Text variant="bodySmall" color="muted" numberOfLines={1}>
-              {pickupZoneName}
-            </Text>
-          }
-          destination={
-            <Text variant="bodySmall" color="muted" numberOfLines={1}>
-              {dropoffZoneName}
-            </Text>
-          }
-        />
-      </View>
-
-      <View style={styles.optionList} accessibilityRole="radiogroup">
-        {options.map((option) => (
-          <RideOptionCard
-            key={option.type}
-            option={option}
-            selected={selectedType === option.type}
-            onSelect={() => onSelectType(option.type)}
-          />
-        ))}
-      </View>
-
-      {/* Cash-only launch (Phase 1): MoMo is intentionally not offered. A
-          ride created as MOMO could not be settled while digital payment is
-          disabled server-side, and it would skip the CASH commission ledger.
-          So this is a statement, not a picker — no chevron promising choice. */}
-      <View style={styles.paymentRow} accessible accessibilityLabel="Payment method: cash. Pay your driver at the end of the trip.">
-        <View style={styles.paymentIcon}>
-          <Ionicons name="cash-outline" size={18} color={colors.primary[600]} />
-        </View>
-        <View style={styles.paymentText}>
-          <Text variant="bodyMedium">Cash</Text>
-          <Text variant="caption" color="muted">
-            Pay your driver at the end of the trip
+    <View style={[styles.pill, { top }]}>
+      <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={6} style={styles.pillBack}>
+        <Ionicons name="arrow-back" size={22} color={colors.ink[900]} />
+      </Pressable>
+      <Text
+        variant="bodyMedium"
+        numberOfLines={1}
+        style={styles.pillRoute}
+        accessibilityLabel={`From ${pickupZoneName} to ${dropoffZoneName}`}
+      >
+        {pickupZoneName} → {dropoffZoneName}
+      </Text>
+      {onEdit ? (
+        <Pressable
+          onPress={onEdit}
+          accessibilityRole="button"
+          accessibilityLabel="Edit route"
+          hitSlop={6}
+          style={styles.pillEdit}
+        >
+          <Text variant="bodyMedium" color="primary" style={styles.pillEditText}>
+            Edit
           </Text>
-        </View>
-      </View>
-    </>
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
 
@@ -636,7 +712,7 @@ function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
         </View>
         {driver.plate ? (
           <View style={styles.plateBadge}>
-            <Text variant="mono" style={{ fontSize: 12 }}>{driver.plate}</Text>
+            <Text variant="mono" style={styles.plateText}>{driver.plate}</Text>
           </View>
         ) : null}
       </View>
@@ -710,7 +786,7 @@ function RideSafetyActions({ rideId, driver }: { rideId: string; driver: RideDri
         onPress={() => void callPhone(driver.phone, driver.name)}
         style={styles.callButton}
       >
-        <Ionicons name="call" size={18} color={colors.primary[600]} />
+        <Ionicons name="call" size={18} color={colors.primary[500]} />
         <Text variant="bodySmall" color="primary">
           Call driver
         </Text>
@@ -760,7 +836,7 @@ function DriverFoundContent({
           size={48}
           iconSize={22}
           background={arrived ? colors.successSurface : colors.primary[50]}
-          color={arrived ? colors.success : colors.primary[600]}
+          color={arrived ? colors.success : colors.primary[500]}
         />
         <View style={styles.stateHeading}>
           <Text variant="h2">{arrived ? "Your driver has arrived" : "Driver is on the way to you"}</Text>
@@ -913,7 +989,7 @@ function SharedSavingsNote({ amountPesewas }: { amountPesewas: number }) {
     <View style={styles.savingsNote}>
       <Ionicons name="people" size={14} color={colors.success} />
       <Text variant="bodySmall" style={styles.savingsNoteText}>
-        Shared ride — you saved {formatGhs(amountPesewas)} vs. lone
+        Shared ride — you saved {formatCedis(amountPesewas)} vs. lone
       </Text>
     </View>
   );
@@ -984,7 +1060,7 @@ function CompletedContent({
         <View style={styles.stateHeading}>
           <Text variant="h2">Ride completed</Text>
           <Text variant="bodySmall" color="muted">
-            Your fare: {formatGhs(yourFarePesewas)}
+            Your fare: {formatCedis(yourFarePesewas)}
           </Text>
         </View>
       </View>
@@ -993,7 +1069,7 @@ function CompletedContent({
         <View style={styles.infoRow}>
           <Ionicons name="cash-outline" size={16} color={colors.ink[400]} />
           <Text variant="bodySmall" style={styles.infoLabel}>
-            Please pay {formatGhs(yourFarePesewas)} to your driver in cash.
+            Please pay {formatCedis(yourFarePesewas)} to your driver in cash.
           </Text>
         </View>
       </Card>
@@ -1074,30 +1150,33 @@ const styles = StyleSheet.create({
     gap: spacing.lg,
   },
   // ── Options
-  optionsHeader: { gap: spacing.md },
-  optionList: { gap: spacing.md },
-  paymentRow: {
+  optionsSheet: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, gap: spacing.md },
+  optionList: { gap: spacing.xs },
+  requestBar: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  cash: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.xs },
+  cashText: { fontWeight: typography.weight.semibold },
+  requestButton: { flex: 1 },
+  // ── Route pill
+  pill: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    height: PILL_HEIGHT,
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  paymentIcon: {
-    width: 36,
-    height: 36,
+    gap: spacing.xs,
+    paddingLeft: spacing.xs,
+    paddingRight: spacing.sm,
     borderRadius: radii.full,
-    backgroundColor: colors.primary[50],
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  paymentText: { flex: 1, gap: 2 },
-  footer: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
     backgroundColor: colors.white,
-    borderTopWidth: 1,
-    borderTopColor: colors.hairline,
+    ...shadows.md,
   },
+  pillBack: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
+  pillRoute: { flex: 1, fontWeight: typography.weight.semibold },
+  pillEdit: { minHeight: 40, justifyContent: "center", paddingHorizontal: spacing.sm },
+  pillEditText: { fontWeight: typography.weight.bold },
+  resumeSkeleton: { gap: spacing.lg, paddingTop: spacing.md },
+  centerSelf: { alignSelf: "center" },
   // ── State panels
   section: { gap: spacing.md },
   stateHeader: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
@@ -1123,6 +1202,8 @@ const styles = StyleSheet.create({
   driverRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   driverInfo: { flex: 1, gap: 2 },
   ratingRow: { flexDirection: "row", alignItems: "center" },
+  // 14pt: the plate is what a rider checks before getting in.
+  plateText: { fontSize: typography.size.sm },
   plateBadge: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
