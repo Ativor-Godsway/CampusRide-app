@@ -76,6 +76,9 @@ function timeAgo(isoDate: string): string {
  * ride never redirects to /ride/:id: the whole lifecycle, including driving
  * and per-passenger pickup/dropoff, lives on this screen.
  */
+/** LONE trips whose screen Home has already opened this session (see the effect below). */
+const autoOpenedTripIds = new Set<string>();
+
 function isFillingCar(ride: RideWithZones | null | undefined): boolean {
   return (
     ride !== null &&
@@ -592,18 +595,24 @@ export default function DriverHomeScreen() {
   const { data: rawEligibleRides = [], refetch: refetchEligible } = useQuery({
     queryKey: ["eligibleRides"],
     queryFn: getEligibleRides,
-    enabled: isAuthenticated && isOnline && !filling,
+    // Not while on ANY trip: a driver with an active ride can't claim
+    // another (the server refuses), so offering requests would only fail.
+    enabled: isAuthenticated && isOnline && !activeRide,
     refetchInterval: 10_000,
   });
 
-  // Redirect to the driving screen for LONE rides only. SHARED rides — every
-  // status including IN_PROGRESS — stay on this screen for the whole
+  // Open the driving screen for a LONE trip — once per trip. SHARED rides —
+  // every status including IN_PROGRESS — stay on this screen for the whole
   // lifecycle: assembling, then per-passenger pickup/dropoff while driving.
+  //
+  // PUSH, not replace: replacing threw the tab screens away, so mid-trip the
+  // driver couldn't reach Rides/Account and "back" had nowhere to go. And
+  // only once per trip, so a driver who steps back to Home isn't bounced
+  // straight back; the active-trip banner is how they return.
   useEffect(() => {
-    if (!activeRide) return;
-    if (activeRide.type === "LONE") {
-      router.replace(`/ride/${activeRide.id}`);
-    }
+    if (!activeRide || activeRide.type !== "LONE" || autoOpenedTripIds.has(activeRide.id)) return;
+    autoOpenedTripIds.add(activeRide.id);
+    router.push(`/ride/${activeRide.id}`);
   }, [activeRide, router]);
 
   // Socket: refresh the appropriate list when a new broadcast arrives.
@@ -841,6 +850,25 @@ export default function DriverHomeScreen() {
   const firstName = user.name?.split(" ")[0] ?? "Driver";
   const toggling = availabilityMutation.isPending;
 
+  // ─── On a LONE trip, stepped back to Home ────────────────────────────────────
+  // The trip is driven on its own screen; Home just says so and leads back.
+  if (activeRide && activeRide.type === "LONE") {
+    return (
+      <Screen>
+        <View style={styles.onTrip}>
+          <Illustration name="carIdle" size={140} float />
+          <Text variant="h2" style={styles.onTripText}>
+            You&apos;re on a trip
+          </Text>
+          <Text variant="bodySmall" color="muted" style={styles.onTripText}>
+            {activeRide.pickupZone.name} → {activeRide.dropoffZone.name}
+          </Text>
+          <Button label="Return to trip" size="lg" onPress={() => router.push(`/ride/${activeRide.id}`)} />
+        </View>
+      </Screen>
+    );
+  }
+
   // ─── Fill-your-car mode (SHARED: assembling, then driving) ──────────────────
 
   if (filling && activeRide) {
@@ -854,7 +882,7 @@ export default function DriverHomeScreen() {
           </View>
           <Pressable
             onPress={() =>
-              Alert.alert("Sign out?", "", [
+              Alert.alert("Sign out?", "Signing out won't end this trip — your riders are still expecting you.", [
                 { text: "Cancel", style: "cancel" },
                 { text: "Sign out", style: "destructive", onPress: () => void signOut() },
               ])
@@ -1052,6 +1080,8 @@ export default function DriverHomeScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  onTrip: { flex: 1, justifyContent: "center", alignItems: "stretch", gap: spacing.md },
+  onTripText: { textAlign: "center" },
   // Phase 4: Decline / Accept pair on a ride offer.
   requestActions: { flexDirection: "row", gap: spacing.sm },
   // Wraps the fill-your-car Screen so the toast can pin to the viewport bottom.

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { Alert, Dimensions, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
@@ -39,6 +40,7 @@ import {
   useAuth,
   useCountUp,
 } from "@rida/mobile-shared";
+import { driverActiveRideQueryKey } from "../../lib/activeTrip";
 import type { RateableRider, RideWithZones } from "@rida/mobile-shared";
 
 const { height: SCREEN_HEIGHT } = Dimensions.get("window");
@@ -151,9 +153,13 @@ function RateRidersPanel({ rideId }: { rideId: string }) {
   );
 }
 
+/** How often the trip screen re-checks that its trip is still live. */
+const TRIP_RECHECK_MS = 10_000;
+
 export default function ActiveRideScreen() {
   const { id: rideId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { isAuthenticated, user } = useAuth();
 
   const [ride, setRide] = useState<RideWithZones | null>(null);
@@ -168,16 +174,43 @@ export default function ActiveRideScreen() {
   const locationWatchRef = useRef<Location.LocationSubscription | null>(null);
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Load the active ride on mount.
+  /**
+   * True when this screen's trip is no longer the driver's active trip — the
+   * rider cancelled, or it was closed elsewhere — so the driver isn't left
+   * pressing buttons on a ride that no longer exists.
+   */
+  const [ended, setEnded] = useState(false);
+
+  // Load the trip on mount, then keep checking it is still live. (The rider
+  // can cancel while the driver is on the way; this screen used to load once
+  // and never notice, and showed "Loading ride…" forever if the trip was
+  // already gone when it opened.)
   useEffect(() => {
     if (!isAuthenticated || !rideId) return;
-    void getDriverActiveRide().then((r) => {
-      if (r) {
-        setRide(r);
-        setStep(stepFromStatus(r.status));
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const r = await getDriverActiveRide();
+        if (cancelled) return;
+        if (r && r.id === rideId) {
+          setRide(r);
+          setStep((current) => (current === "done" ? current : stepFromStatus(r.status)));
+          setEnded(false);
+        } else {
+          setEnded(true);
+        }
+      } catch {
+        // Network blip: keep what we have and try again next tick.
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
-    });
+    };
+    void check();
+    const timer = setInterval(() => void check(), TRIP_RECHECK_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [isAuthenticated, rideId]);
 
   // Start / stop GPS location streaming based on step.
@@ -263,12 +296,35 @@ export default function ActiveRideScreen() {
     }
   }, [rideId, step, acting, stopLocationStreaming]);
 
-  const handleDone = useCallback(() => {
-    router.replace("/");
-  }, [router]);
+  /** Back to the tabs: pops the trip screen (and anything above the tabs). */
+  const goHome = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
+    if (router.canDismiss()) router.dismissAll();
+    else router.replace("/");
+  }, [router, queryClient]);
+  const handleDone = goHome;
 
   if (!isAuthenticated || !user) {
     return <Redirect href="/auth/phone" />;
+  }
+
+  // The trip ended somewhere else (rider cancelled, or it was closed) —
+  // unless the driver just completed it here and is on the summary.
+  if (ended && step !== "done") {
+    return (
+      <Screen>
+        <View style={styles.doneContainer}>
+          <Illustration name="searchEmpty" size={140} />
+          <Text variant="h2" style={styles.doneTitle}>
+            This trip has ended
+          </Text>
+          <Text variant="bodySmall" color="muted" style={styles.doneBody}>
+            The rider cancelled, or the trip was closed. You&apos;re free to take new requests.
+          </Text>
+          <Button label="Back to Home" onPress={goHome} size="lg" />
+        </View>
+      </Screen>
+    );
   }
 
   if (loading || !ride) {
@@ -360,6 +416,18 @@ export default function ActiveRideScreen() {
         rounded={false}
       />
 
+      {/* Minimise: the trip carries on; the banner on every tab (and Home's
+          "Return to trip") brings the driver back. Same as swipe/Android back. */}
+      <Pressable
+        onPress={goHome}
+        accessibilityRole="button"
+        accessibilityLabel="Go to Home. Your trip continues."
+        hitSlop={6}
+        style={styles.homeButton}
+      >
+        <Ionicons name="arrow-back" size={22} color={colors.ink[900]} />
+      </Pressable>
+
       {/* Bottom sheet */}
       <View style={styles.sheet}>
         {/* Status pill */}
@@ -441,6 +509,18 @@ function CountUpGhs({ pesewas }: { pesewas: number }) {
 }
 
 const styles = StyleSheet.create({
+  homeButton: {
+    position: "absolute",
+    top: spacing.md,
+    left: spacing.md,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.white,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadows.md,
+  },
   // Phase 4: maps hand-off + call rider, side by side above the main action.
   driverActionRow: { flexDirection: "row", gap: spacing.sm },
   rateCard: { width: "100%", gap: spacing.md, marginBottom: spacing.lg },

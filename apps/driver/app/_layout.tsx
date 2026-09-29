@@ -2,9 +2,24 @@ import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
 import { DRIVER_DEEP_LINK_POLICY } from "@rida/shared";
-import { AuthProvider, useDeepLinkGuard } from "@rida/mobile-shared";
+import {
+  AuthProvider,
+  installAppStateFocusManager,
+  useClearQueryCacheOnAccountChange,
+  useDeepLinkGuard,
+} from "@rida/mobile-shared";
 
 const queryClient = new QueryClient();
+
+// Coming back from the background refetches active queries — including the
+// driver's current trip, so the active-trip banner is never stale.
+installAppStateFocusManager();
+
+/** Drops the previous driver's cached trip data on log out / account change. */
+function SessionCacheReset() {
+  useClearQueryCacheOnAccountChange();
+  return null;
+}
 
 /**
  * Drops inbound deep links that aren't on the driver allowlist. The app
@@ -25,6 +40,7 @@ export default function RootLayout() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <DeepLinkGuard />
+        <SessionCacheReset />
         <Stack screenOptions={{ headerShown: false }} />
       </AuthProvider>
     </QueryClientProvider>

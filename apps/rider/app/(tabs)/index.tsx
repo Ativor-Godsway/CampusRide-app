@@ -115,62 +115,72 @@ export default function HomeTab() {
         <Ionicons name="search" size={20} color={colors.ink[400]} />
       </PressableScale>
 
-      <View style={styles.grid}>
-        <View style={styles.gridRow}>
-          <PressableScale
-            style={styles.gridCell}
-            onPress={planRide}
-            accessibilityRole="button"
-            accessibilityLabel="Rides around campus, live now"
-          >
-            {/* glow={false}: no decorative circle behind the car. */}
-            <Card dark glow={false} noPadding style={[styles.tile, styles.ridesTile]}>
-              {/* Clipped in its own layer: overflow:hidden on the card itself
-                  would also clip the card's shadow on iOS. */}
-              <View style={styles.carClip} pointerEvents="none">
-                <Image
-                  source={illustrations.serviceRide}
-                  style={styles.ridesCar}
-                  resizeMode="contain"
-                  accessibilityIgnoresInvertColors
-                />
-              </View>
-              <View style={styles.tileText}>
-                <Text variant="h3" color="inverse" numberOfLines={1}>
-                  Rides
-                </Text>
-                <Text variant="bodySmall" style={styles.tileSubtitleDark} numberOfLines={1}>
-                  Around campus
-                </Text>
-                <Badge label="Live" variant="success" style={styles.tileBadge} />
-              </View>
-            </Card>
-          </PressableScale>
+      {/* Rides is THE service: a full-width hero with the car running off
+          the edge. Food and Courier ("Soon") sit beneath as two equal tiles. */}
+      <PressableScale
+        onPress={planRide}
+        accessibilityRole="button"
+        accessibilityLabel="Rides around campus, live now"
+        style={styles.heroWrap}
+      >
+        {/* glow={false}: no decorative circle behind the car. */}
+        <Card dark glow={false} noPadding style={styles.heroTile}>
+          {/* Clipped in its own layer: overflow:hidden on the card itself
+              would also clip the card's shadow on iOS. */}
+          <View style={styles.carClip} pointerEvents="none">
+            <Image
+              source={illustrations.serviceRide}
+              style={styles.heroCar}
+              resizeMode="contain"
+              accessibilityIgnoresInvertColors
+            />
+          </View>
+          <View style={styles.heroText}>
+            <Badge label="Live" variant="success" style={styles.heroBadge} />
+            <Text variant="h2" color="inverse" numberOfLines={1}>
+              Rides
+            </Text>
+            <Text variant="bodySmall" style={styles.tileSubtitleDark} numberOfLines={1}>
+              Around campus
+            </Text>
+          </View>
+        </Card>
+      </PressableScale>
 
-          <Pressable style={styles.gridCell} onPress={() => showComingSoon("Food delivery")}>
-            <Card noPadding style={styles.tile}>
-              <ServiceIcon name="fast-food-outline" size={64} source={illustrations.serviceFood} />
-              <Text variant="h3" style={styles.tileTitle}>
-                Food
-              </Text>
-              <Text variant="bodySmall" color="muted" numberOfLines={2}>
-                Order from campus vendors
-              </Text>
-              <Badge label="Soon" variant="soon" style={styles.tileBadge} />
-            </Card>
-          </Pressable>
-        </View>
+      <View style={styles.gridRow}>
+        <Pressable
+          style={styles.gridCell}
+          onPress={() => showComingSoon("Food delivery")}
+          accessibilityRole="button"
+          accessibilityLabel="Food, coming soon"
+        >
+          <Card noPadding style={styles.smallTile}>
+            <ServiceIcon name="fast-food-outline" size={56} source={illustrations.serviceFood} />
+            <Text variant="h3" numberOfLines={1}>
+              Food
+            </Text>
+            <Text variant="bodySmall" color="muted" numberOfLines={1}>
+              Campus vendors
+            </Text>
+            <Badge label="Soon" variant="soon" style={styles.tileBadge} />
+          </Card>
+        </Pressable>
 
-        <Pressable onPress={() => showComingSoon("Courier")}>
-          <Card noPadding style={styles.fullTile}>
-            <ServiceIcon name="cube-outline" size={64} source={illustrations.serviceCourier} />
-            <View style={styles.fullTileBody}>
-              <Text variant="h3">Courier</Text>
-              <Text variant="bodySmall" color="muted">
-                Send packages around campus
-              </Text>
-            </View>
-            <Badge label="Soon" variant="soon" />
+        <Pressable
+          style={styles.gridCell}
+          onPress={() => showComingSoon("Courier")}
+          accessibilityRole="button"
+          accessibilityLabel="Courier, coming soon"
+        >
+          <Card noPadding style={styles.smallTile}>
+            <ServiceIcon name="cube-outline" size={56} source={illustrations.serviceCourier} />
+            <Text variant="h3" numberOfLines={1}>
+              Courier
+            </Text>
+            <Text variant="bodySmall" color="muted" numberOfLines={1}>
+              Send packages
+            </Text>
+            <Badge label="Soon" variant="soon" style={styles.tileBadge} />
           </Card>
         </Pressable>
       </View>
@@ -226,7 +236,7 @@ export default function HomeTab() {
   );
 }
 
-const TILE_HEIGHT = 168;
+const HERO_HEIGHT = 168;
 
 const styles = StyleSheet.create({
   content: {
@@ -263,25 +273,12 @@ const styles = StyleSheet.create({
     fontSize: typography.size.lg,
     fontWeight: typography.weight.semibold,
   },
-  grid: {
-    marginBottom: spacing.xl,
-  },
-  gridRow: {
-    flexDirection: "row",
-    gap: spacing.md,
+  heroWrap: {
     marginBottom: spacing.md,
   },
-  gridCell: {
-    flex: 1,
-  },
-  tile: {
-    flex: 1,
+  heroTile: {
+    minHeight: HERO_HEIGHT,
     padding: spacing.lg,
-    minHeight: TILE_HEIGHT,
-    gap: spacing.xs,
-    justifyContent: "space-between",
-  },
-  ridesTile: {
     justifyContent: "flex-end",
   },
   carClip: {
@@ -289,34 +286,39 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     overflow: "hidden",
   },
-  ridesCar: {
+  heroCar: {
     position: "absolute",
-    top: spacing.xs,
-    right: -36,
-    width: 150,
-    height: 104,
+    right: -40,
+    top: spacing.sm,
+    width: 230,
+    height: 150,
   },
-  tileText: {
+  heroText: {
+    // Keep the words clear of the car on narrow phones.
+    maxWidth: "55%",
     gap: 2,
   },
-  tileTitle: {
-    marginTop: spacing.sm,
+  heroBadge: {
+    marginBottom: spacing.xs,
   },
   tileSubtitleDark: {
     color: colors.ink[200],
   },
-  tileBadge: {
-    marginTop: spacing.xs,
-  },
-  fullTile: {
+  gridRow: {
     flexDirection: "row",
-    alignItems: "center",
     gap: spacing.md,
-    padding: spacing.lg,
+    marginBottom: spacing.xl,
   },
-  fullTileBody: {
+  gridCell: {
     flex: 1,
+  },
+  smallTile: {
+    flex: 1,
+    padding: spacing.lg,
     gap: 2,
+  },
+  tileBadge: {
+    marginTop: spacing.sm,
   },
   sectionTitle: {
     marginBottom: spacing.sm,

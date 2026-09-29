@@ -15,6 +15,7 @@ import {
   useAuth,
 } from "@rida/mobile-shared";
 import { TAB_SCREEN_BOTTOM_PADDING } from "../../lib/layout";
+import { useActiveRide } from "../../lib/activeRide";
 
 interface QuickAction {
   label: string;
@@ -39,8 +40,14 @@ export default function AccountTab() {
   const { user, signOut, deleteAccount } = useAuth();
   const hasEmergencyContact = Boolean(user?.emergencyContactName && user?.emergencyContactPhone);
 
+  const { data: activeRide } = useActiveRide();
   const confirmLogout = () => {
-    Alert.alert("Log out", "Are you sure you want to log out?", [
+    // Logging out never cancels a ride; say so, so nobody logs out thinking
+    // it does (or panics that it did).
+    const message = activeRide
+      ? `Your ride to ${activeRide.dropoffZone.name} is still going on — logging out won't cancel it. Log back in to see it.`
+      : "Are you sure you want to log out?";
+    Alert.alert("Log out", message, [
       { text: "Cancel", style: "cancel" },
       { text: "Log out", style: "destructive", onPress: () => void signOut() },
     ]);

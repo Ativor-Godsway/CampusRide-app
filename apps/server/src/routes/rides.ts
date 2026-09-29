@@ -7,6 +7,7 @@ import { applyRideTransition } from "../services/ride/rideService";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
 import { InvalidTransitionError, RideSwitchNotAllowedError } from "../services/ride/errors";
 import { fareForType, switchRideType } from "../services/ride/switchRideType";
+import { findActiveRideForRider } from "../services/ride/activeRide";
 import { emitRideEvent } from "../realtime/rideSocket";
 import { broadcastRide } from "../services/ride/dispatch";
 import {
@@ -154,7 +155,15 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         return reply.code(404).send({ error: err.message });
       }
       if (err instanceof ActiveRideExistsError) {
-        return reply.code(409).send({ error: err.message, ride: err.existingRide });
+        // activeRideId lets the app jump straight to the ride. `ride` is kept
+        // for older app builds but is now just { id, status } — it used to be
+        // the whole database row (tracking token and all).
+        return reply.code(409).send({
+          error: err.message,
+          code: "ACTIVE_RIDE_EXISTS",
+          activeRideId: err.existingRide.id,
+          ride: { id: err.existingRide.id, status: err.existingRide.status },
+        });
       }
       throw err;
     }
@@ -208,6 +217,46 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     const nextCursor = hasMore ? rides[rides.length - 1]!.id : null;
 
     return reply.code(200).send({ rides, nextCursor, hasMore });
+  });
+
+  /**
+   * The signed-in rider's ride that is still going on, or `{ ride: null }`.
+   * The app calls it on launch, on returning from the background and while
+   * a tab is open, so an active ride can never become unreachable (see
+   * findActiveRideForRider for what counts, including merged riders).
+   *
+   * Pickup/drop-off are the rider's OWN (their seat's), which differ from
+   * the ride's for a rider merged into someone else's car.
+   */
+  app.get("/rides/active", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+
+    const active = await findActiveRideForRider(prisma, request.user!.userId);
+    if (!active) return reply.code(200).send({ ride: null });
+
+    const { ride, passenger } = active;
+    const zoneSelect = { select: { id: true, name: true, latitude: true, longitude: true } } as const;
+    const [pickupZone, dropoffZone, driverUser] = await Promise.all([
+      prisma.zone.findUnique({ where: { id: passenger?.pickupZoneId ?? ride.pickupZoneId }, ...zoneSelect }),
+      prisma.zone.findUnique({ where: { id: passenger?.dropoffZoneId ?? ride.dropoffZoneId }, ...zoneSelect }),
+      ride.driverId
+        ? prisma.user.findUnique({ where: { id: ride.driverId }, select: { name: true } })
+        : Promise.resolve(null),
+    ]);
+
+    return reply.code(200).send({
+      ride: {
+        id: ride.id,
+        status: ride.status,
+        type: ride.type,
+        /** This rider's own leg (null if they have no seat row). */
+        legStatus: passenger?.status ?? null,
+        pickupZone,
+        dropoffZone,
+        // First name only: all the banner needs ("Kofi is 3 min away").
+        driver: driverUser ? { firstName: driverUser.name.trim().split(/\s+/)[0] ?? "" } : null,
+      },
+    });
   });
 
   app.get("/rides/:id", { preHandler: requireAuth }, async (request, reply) => {

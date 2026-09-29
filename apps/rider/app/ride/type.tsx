@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { usePreventRemove } from "expo-router/react-navigation";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -14,9 +15,11 @@ import {
   getSharedFarePerRider,
   mapFitPadding,
   priceLoneRide,
+  rideLeaveBehaviour,
 } from "@rida/shared";
 import {
   ActiveRideExistsError,
+  activeRideQueryKey,
   Button,
   Card,
   CampusMapView,
@@ -30,6 +33,7 @@ import {
   colors,
   createRide,
   formatCedis,
+  getActiveRide,
   raiseSos,
   radii,
   regionForCoordinates,
@@ -52,6 +56,8 @@ import { CancelRideSheet, type SwitchOffer } from "../../components/ride/CancelR
 import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
 import { RideOptionCard, type RideOption } from "../../components/ride/RideOptionCard";
 import { SearchingPanel } from "../../components/ride/SearchingPanel";
+import { RideInProgressSheet } from "../../components/ride/RideInProgressSheet";
+import { activeRideParams, useActiveRide } from "../../lib/activeRide";
 import { haptics } from "../../lib/haptics";
 
 const STARS = [1, 2, 3, 4, 5];
@@ -60,7 +66,7 @@ const STARS = [1, 2, 3, 4, 5];
 const PILL_HEIGHT = 48;
 const PILL_TOP_GAP = spacing.sm;
 /** A first guess at the options sheet's height, until it reports its real one. */
-const OPTIONS_SHEET_ESTIMATE = 300;
+const OPTIONS_SHEET_ESTIMATE = 360;
 
 /** HTTP status of an axios error, if any. */
 function httpStatus(error: unknown): number | undefined {
@@ -85,6 +91,8 @@ export default function RideTypeScreen() {
     rideId?: string;
     /** "plan" when opened from Plan your ride, so Edit can simply go back. */
     from?: string;
+    /** "1": open this ride's cancel sheet as soon as it loads ("Cancel it"). */
+    openCancel?: string;
   }>();
 
   // ── Options phase ───────────────────────────────────────────────────────────
@@ -101,6 +109,10 @@ export default function RideTypeScreen() {
   const [switching, setSwitching] = useState(false);
 
   const queryClient = useQueryClient();
+  const { data: activeRideSummary } = useActiveRide();
+  /** Set once the rider has deliberately left (cancelled, finished, minimised). */
+  const [leaving, setLeaving] = useState(false);
+  const [conflictOpen, setConflictOpen] = useState(false);
   const { user } = useAuth();
   const { data: trackingData } = useRideTracking(activeRideId ?? undefined);
 
@@ -275,9 +287,12 @@ export default function RideTypeScreen() {
         paymentMethod: selectedPaymentMethod,
       });
       setActiveRideId(created.id);
+      void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
     } catch (err) {
       if (err instanceof ActiveRideExistsError) {
-        Alert.alert("Ride in progress", "You already have an active ride request.");
+        // Not an error to show: offer the way to the ride that's in the way.
+        await queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
+        setConflictOpen(true);
       } else {
         Alert.alert("Couldn't request a ride", "Please check your connection and try again.");
       }
@@ -314,6 +329,7 @@ export default function RideTypeScreen() {
       haptics.success();
       setCancelSheetOpen(false);
       await refreshRide();
+      void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
     } catch (err) {
       await refreshRide();
       if (httpStatus(err) === 409) {
@@ -336,7 +352,9 @@ export default function RideTypeScreen() {
     try {
       await cancelRide(activeRideId, { reason, note });
       setCancelSheetOpen(false);
-      router.replace("/");
+      void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
+      // A deliberate exit: lift the leave guard, then go (see effect below).
+      setLeaving(true);
     } catch (err) {
       if (httpStatus(err) === 409) {
         await refreshRide();
@@ -347,6 +365,69 @@ export default function RideTypeScreen() {
       }
     } finally {
       setCancelling(false);
+    }
+  }
+
+  /** Pops everything above the tabs, so "home" is Home even from Plan → Choose. */
+  const goHome = useCallback(() => {
+    if (router.canDismiss()) router.dismissAll();
+    else router.replace("/");
+  }, [router]);
+
+  // ── Never lose an active ride ───────────────────────────────────────────────
+  // Back arrow, iOS swipe-back and Android back all try to REMOVE this
+  // screen; while a ride is going on that is intercepted. Still cancellable
+  // (searching, or waiting for the driver) → the cancel sheet, so leaving is
+  // a deliberate choice. On the trip → minimise to Home; the ride carries on
+  // and the banner there brings the rider back.
+  const leaveBehaviour = rideLeaveBehaviour({
+    status: ride?.status,
+    type: ride?.type ?? selectedType,
+    legStatus: myPassenger?.status ?? null,
+  });
+  usePreventRemove(!leaving && leaveBehaviour !== "leave", () => {
+    if (leaveBehaviour === "minimise") setLeaving(true);
+    else setCancelSheetOpen(true);
+  });
+  useEffect(() => {
+    // Runs after the render that switched the guard off, so the pop is allowed.
+    if (leaving) goHome();
+  }, [leaving, goHome]);
+
+  // "Cancel it" from Choose a ride lands here with openCancel=1.
+  const autoOpenedCancel = useRef(false);
+  useEffect(() => {
+    if (!params.openCancel || autoOpenedCancel.current || !ride) return;
+    autoOpenedCancel.current = true;
+    if (leaveBehaviour === "confirm") setCancelSheetOpen(true);
+  }, [params.openCancel, ride, leaveBehaviour]);
+
+  // Choose a ride opened while another ride is still going on: say so up
+  // front (the server would refuse the request anyway).
+  const conflictShownOnOpen = useRef(false);
+  useEffect(() => {
+    if (activeRideId !== null || conflictShownOnOpen.current || !activeRideSummary) return;
+    conflictShownOnOpen.current = true;
+    setConflictOpen(true);
+  }, [activeRideId, activeRideSummary]);
+
+  const [openingExisting, setOpeningExisting] = useState(false);
+  async function openExistingRide(openCancel: boolean) {
+    setOpeningExisting(true);
+    try {
+      const existing =
+        activeRideSummary ??
+        (await queryClient.fetchQuery({ queryKey: activeRideQueryKey, queryFn: getActiveRide }));
+      setConflictOpen(false);
+      if (!existing) {
+        Alert.alert("That ride has ended", "You can request a new ride now.");
+        return;
+      }
+      router.replace({ pathname: "/ride/type", params: activeRideParams(existing, { openCancel }) });
+    } catch {
+      Alert.alert("Couldn't open your ride", "Please check your connection and try again.");
+    } finally {
+      setOpeningExisting(false);
     }
   }
 
@@ -381,9 +462,10 @@ export default function RideTypeScreen() {
     [windowHeight, insets.top, sheetHeight],
   );
 
+  /** The pill's back arrow. While a ride is active the leave guard above catches it. */
   function goBack() {
     if (router.canGoBack()) router.back();
-    else router.replace("/");
+    else goHome();
   }
 
   /** Back to Plan your ride with both ends filled in. */
@@ -440,6 +522,9 @@ export default function RideTypeScreen() {
           handleIndicatorStyle={styles.sheetHandle}
         >
           <BottomSheetView style={[styles.optionsSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
+            <Text variant="h3" accessibilityRole="header" style={styles.optionsTitle}>
+              Choose a ride
+            </Text>
             <View style={styles.optionList} accessibilityRole="radiogroup" accessibilityLabel="Choose a ride">
               {options.map((option) => (
                 <RideOptionCard
@@ -503,7 +588,7 @@ export default function RideTypeScreen() {
           ) : activeRideId !== null &&
             (myPassenger?.status === "CANCELLED" ? (
               <CancelledContent
-                onDone={() => router.replace("/")}
+                onDone={() => setLeaving(true)}
                 title="Driver cancelled"
                 message="Your driver cancelled your pickup. Please request a ride again."
               />
@@ -576,19 +661,30 @@ export default function RideTypeScreen() {
                     rideId={ride.id}
                     rideType={ride.type}
                     fareSummary={trackingData?.fareSummary}
-                    onDone={() => router.replace("/")}
+                    onDone={() => setLeaving(true)}
                   />
                 </FadeIn>
               )}
 
               {ride?.status === "CANCELLED" && !isMerged && (
-                <CancelledContent onDone={() => router.replace("/")} />
+                <CancelledContent onDone={() => setLeaving(true)} />
               )}
             </>
             ))}
         </BottomSheetScrollView>
       </BottomSheet>
       )}
+
+      {inOptions ? (
+        <RideInProgressSheet
+          visible={conflictOpen}
+          ride={activeRideSummary ?? null}
+          busy={openingExisting}
+          onGoToRide={() => void openExistingRide(false)}
+          onCancelIt={() => void openExistingRide(true)}
+          onDismiss={() => setConflictOpen(false)}
+        />
+      ) : null}
 
       {activeRideId !== null ? (
         <CancelRideSheet
@@ -1151,6 +1247,7 @@ const styles = StyleSheet.create({
   },
   // ── Options
   optionsSheet: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, gap: spacing.md },
+  optionsTitle: { paddingHorizontal: spacing.xs, marginBottom: -spacing.xs },
   optionList: { gap: spacing.xs },
   requestBar: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   cash: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.xs },

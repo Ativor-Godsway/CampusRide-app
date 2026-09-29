@@ -1,10 +1,22 @@
-import { Redirect, Tabs } from "expo-router";
+import { useEffect } from "react";
+import { View } from "react-native";
+import { Redirect, Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LoadingState, RoleMismatchScreen, Screen, colors, shadows, useAuth } from "@rida/mobile-shared";
+import { ActiveRideBanner } from "../../components/ActiveRideBanner";
+import { activeRideParams, claimLaunchRideCheck, useActiveRide } from "../../lib/activeRide";
 
 /** Bottom tab shell — Home / Rides / Account. Re-checks auth (and role) so a signed-out or mismatched-role user can't land here directly. */
 export default function TabsLayout() {
   const { isLoading, isAuthenticated, user, signOut } = useAuth();
+  const router = useRouter();
+  const { data: activeRide, isFetched: activeRideChecked } = useActiveRide();
+
+  // App launched (or reopened after being killed) mid-ride: go straight to it.
+  useEffect(() => {
+    if (!activeRideChecked || !claimLaunchRideCheck()) return;
+    if (activeRide) router.push({ pathname: "/ride/type", params: activeRideParams(activeRide) });
+  }, [activeRideChecked, activeRide, router]);
 
   if (isLoading) {
     return (
@@ -23,6 +35,9 @@ export default function TabsLayout() {
   }
 
   return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {/* Above the tabs, so it shows on Home, Rides and Account alike. */}
+      {activeRide ? <ActiveRideBanner ride={activeRide} /> : null}
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -72,5 +87,6 @@ export default function TabsLayout() {
         }}
       />
     </Tabs>
+    </View>
   );
 }
