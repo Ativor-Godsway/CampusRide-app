@@ -1,15 +1,15 @@
 import { useEffect, useRef } from "react";
 import { Animated, StyleSheet, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import type { RideType } from "@rida/shared";
 import {
-  Badge,
   Illustration,
   PressableScale,
   Text,
   colors,
   radii,
   spacing,
+  spokenCedis,
+  typography,
   useReduceMotion,
 } from "@rida/mobile-shared";
 
@@ -17,21 +17,22 @@ import {
 export interface RideOption {
   type: RideType;
   title: string;
-  description: string;
-  /** A short, TRUE fact about the option (seats). No invented ETAs. */
-  hint: { icon: keyof typeof Ionicons.glyphMap; label: string };
+  /** One short, TRUE line — "Up to 4 riders" / "Private car". */
+  subtitle: string;
   farePesewas: number;
+  /** Formatted with formatCedis, e.g. "GH₵5". */
   priceLabel: string;
   recommended?: boolean;
 }
 
-const CAR_WIDTH = 92;
+const CAR_WIDTH = 72;
 
 /**
- * One row of the Bolt-style ride list: the wide car on the left, name,
- * description and a seat hint in the middle, the price right-aligned. The
- * selected row gets a green border and tint, and its car does a small
- * spring "pop" (skipped with Reduce Motion).
+ * One compact row of the ride list: car · name + one-line subtitle · price.
+ * The price is the most prominent thing in the row. The selected row gets
+ * the green border and a light green tint (unselected rows have none), and
+ * its car does a small spring "pop" (skipped with Reduce Motion).
+ * "Recommended" is a small tag sitting on the row's top edge.
  */
 export function RideOptionCard({
   option,
@@ -63,73 +64,105 @@ export function RideOptionCard({
   }, [selected, pop, reduceMotion]);
 
   return (
-    <PressableScale
-      onPress={onSelect}
-      accessibilityRole="radio"
-      accessibilityState={{ checked: selected, selected }}
-      accessibilityLabel={[
-        option.title,
-        option.priceLabel,
-        option.description,
-        option.hint.label,
-        option.recommended ? "Recommended" : null,
-      ]
-        .filter(Boolean)
-        .join(", ")}
-      style={[styles.card, selected && styles.cardSelected]}
-    >
-      <Animated.View style={{ transform: [{ scale: pop }] }}>
-        <Illustration
-          name={option.type === "SHARED" ? "carShared" : "carStandard"}
-          width={CAR_WIDTH}
-        />
-      </Animated.View>
+    <View style={option.recommended ? styles.withTag : undefined}>
+      <PressableScale
+        onPress={onSelect}
+        accessibilityRole="radio"
+        accessibilityState={{ checked: selected, selected }}
+        accessibilityLabel={[
+          option.title,
+          spokenCedis(option.farePesewas),
+          option.subtitle,
+          option.recommended ? "Recommended" : null,
+        ]
+          .filter(Boolean)
+          .join(", ")}
+        style={[styles.row, selected && styles.rowSelected]}
+      >
+        <Animated.View style={{ transform: [{ scale: pop }] }}>
+          <Illustration
+            name={option.type === "SHARED" ? "carShared" : "carStandard"}
+            width={CAR_WIDTH}
+          />
+        </Animated.View>
 
-      <View style={styles.body}>
-        <View style={styles.titleRow}>
-          <Text variant="h3" style={styles.title}>
+        {/* No numberOfLines: at normal sizes these fit on one line; at very
+            large accessibility text they wrap instead of being cut off. */}
+        <View style={styles.body}>
+          <Text variant="bodyMedium" style={styles.title}>
             {option.title}
           </Text>
-          {option.recommended ? <Badge label="Recommended" variant="success" /> : null}
-        </View>
-        <Text variant="bodySmall" color="muted">
-          {option.description}
-        </Text>
-        <View style={styles.hint}>
-          <Ionicons name={option.hint.icon} size={13} color={colors.ink[400]} />
-          <Text variant="caption" color="subtle">
-            {option.hint.label}
+          <Text variant="bodySmall" color="muted">
+            {option.subtitle}
           </Text>
         </View>
-      </View>
 
-      <Text variant="h3" color={selected ? "primary" : "default"} style={styles.price}>
-        {option.priceLabel}
-      </Text>
-    </PressableScale>
+        <Text
+          style={[styles.price, selected && styles.priceSelected]}
+          numberOfLines={1}
+          importantForAccessibility="no"
+        >
+          {option.priceLabel}
+        </Text>
+      </PressableScale>
+
+      {option.recommended ? (
+        <View
+          style={styles.tag}
+          pointerEvents="none"
+          importantForAccessibility="no-hide-descendants"
+        >
+          <Text style={styles.tagText}>Recommended</Text>
+        </View>
+      ) : null}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  // Room for the tag that sits on the row's top edge.
+  withTag: { paddingTop: spacing.sm },
+  row: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
-    paddingVertical: spacing.md,
+    minHeight: 64,
+    paddingVertical: spacing.xs,
     paddingHorizontal: spacing.md,
     borderRadius: radii.lg,
-    // Constant 2px border so selecting never shifts the layout.
-    borderWidth: 2,
-    borderColor: colors.border,
-    backgroundColor: colors.white,
+    // Constant width, transparent when unselected, so selecting never shifts
+    // the layout — unselected rows show no border.
+    borderWidth: 1.5,
+    borderColor: "transparent",
   },
-  cardSelected: {
+  rowSelected: {
     borderColor: colors.primary[500],
     backgroundColor: colors.primary[50],
   },
-  body: { flex: 1, gap: 2 },
-  titleRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
-  title: { flexShrink: 1 },
-  hint: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 },
-  price: { textAlign: "right", fontVariant: ["tabular-nums"] },
+  body: { flex: 1, minWidth: 0 },
+  title: { fontSize: typography.size.lg, fontWeight: typography.weight.bold },
+  price: {
+    fontSize: typography.size["2xl"],
+    fontWeight: typography.weight.extrabold,
+    letterSpacing: typography.letterSpacing.tight,
+    color: colors.ink[900],
+    fontVariant: ["tabular-nums"],
+  },
+  priceSelected: { color: colors.primary[500] },
+  tag: {
+    position: "absolute",
+    top: 0,
+    left: spacing.md,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 1,
+    borderRadius: radii.full,
+    backgroundColor: colors.white,
+    borderWidth: 1,
+    borderColor: colors.primary[200],
+  },
+  tagText: {
+    fontSize: typography.size.xs,
+    fontWeight: typography.weight.bold,
+    color: colors.primary[500],
+  },
 });

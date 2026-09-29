@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { View, StyleSheet, type ViewProps } from "react-native";
-import { colors, radii, spacing } from "../tokens";
+import { colors, radii, spacing, withAlpha } from "../tokens";
 
 export type RouteStopsTheme = "light" | "dark";
 
@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   originRingDark: {
-    backgroundColor: "rgba(232, 243, 236, 0.22)",
+    backgroundColor: withAlpha(colors.primary[50], 0.22),
   },
   originDot: {
     width: 10,

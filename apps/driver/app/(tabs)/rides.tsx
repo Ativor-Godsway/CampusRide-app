@@ -11,7 +11,7 @@ import {
   Screen,
   Text,
   colors,
-  formatGhs,
+  formatCedis,
   getDriverRideHistory,
   spacing,
   typography,
@@ -37,7 +37,7 @@ function HistoryRow({ item }: { item: DriverRideHistoryItem }) {
           <Badge variant={item.source === "USSD" ? "warning" : "soon"} label={item.source} />
         </View>
         <Text variant="bodyMedium" style={styles.earn}>
-          {formatGhs(item.driverGrossPesewas)}
+          {formatCedis(item.driverGrossPesewas)}
         </Text>
       </View>
 
@@ -113,7 +113,7 @@ export default function RidesTab() {
           YOUR EARNINGS
         </Text>
         <Text variant="h1" style={styles.earningsAmount}>
-          {formatGhs(summary.netPesewas)}
+          {formatCedis(summary.netPesewas)}
         </Text>
         <Text variant="caption" color="muted">
           After commission · not yet settled
@@ -124,14 +124,14 @@ export default function RidesTab() {
             <Text variant="bodySmall" color="muted">
               Gross earned
             </Text>
-            <Text variant="bodySmall">{formatGhs(summary.totalGrossPesewas)}</Text>
+            <Text variant="bodySmall">{formatCedis(summary.totalGrossPesewas)}</Text>
           </View>
           <View style={styles.breakdownRow}>
             <Text variant="bodySmall" color="muted">
               Commission owed
             </Text>
             <Text variant="bodySmall" color="error">
-              −{formatGhs(summary.commissionOwedPesewas)}
+              −{formatCedis(summary.commissionOwedPesewas)}
             </Text>
           </View>
         </View>

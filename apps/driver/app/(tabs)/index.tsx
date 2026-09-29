@@ -22,7 +22,7 @@ import {
   Screen,
   Text,
   colors,
-  formatGhs,
+  formatCedis,
   getZones,
   getRideSocket,
   radii,
@@ -200,7 +200,7 @@ function PassengerRow({ passenger, onArrived, onPickup, onDropoff, onCancel }: P
         <Text variant="bodySmall">{passenger.pickupZoneName}</Text>
         <Text variant="bodySmall">{passenger.dropoffZoneName}</Text>
         {passenger.lockedFare !== null && (
-          <Text variant="caption" color="muted">{formatGhs(passenger.lockedFare)}</Text>
+          <Text variant="caption" color="muted">{formatCedis(passenger.lockedFare)}</Text>
         )}
       </View>
       <View style={fillStyles.passengerActionCol}>

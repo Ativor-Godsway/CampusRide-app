@@ -9,19 +9,39 @@
 
 import { Platform } from "react-native";
 
+/**
+ * THE brand green. Buttons, selected states, prices and badges all use
+ * primary[500]; `success` below is the same value by reference, so there is
+ * exactly one green to change.
+ */
+const primary = {
+  50: "#E8F3EC",
+  100: "#CDE6D6",
+  200: "#9BD5AE",
+  300: "#6CC089",
+  400: "#3F9F63",
+  500: "#19743C",
+  600: "#115C2F",
+  700: "#0F5429",
+  800: "#0D3B1D",
+  900: "#082813",
+} as const;
+
+/**
+ * A token colour at the given opacity (0–1), for tints and glows — so a
+ * translucent green is still derived from the one brand green instead of a
+ * hand-copied "rgba(25,116,60,…)". Accepts "#RRGGBB".
+ */
+export function withAlpha(hex: string, alpha: number): string {
+  const value = hex.replace("#", "");
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${Math.max(0, Math.min(1, alpha))})`;
+}
+
 export const colors = {
-  primary: {
-    50: "#E8F3EC",
-    100: "#CDE6D6",
-    200: "#9BD5AE",
-    300: "#6CC089",
-    400: "#3F9F63",
-    500: "#19743C",
-    600: "#115C2F",
-    700: "#0F5429",
-    800: "#0D3B1D",
-    900: "#082813",
-  },
+  primary,
   /** Warm amber accent — used sparingly for highlights, ratings, and live/active indicators. */
   accent: {
     50: "#FBF0DA",
@@ -59,8 +79,8 @@ export const colors = {
   borderDark: "#2E362F",
   /** Accent text/dots on dark surfaces (e.g. "Live" pulse, online status, dark-card highlights). */
   glowGreen: "#7BE0A0",
-  success: "#19743C",
-  successSurface: "#E8F3EC",
+  success: primary[500],
+  successSurface: primary[50],
   error: "#B23A3A",
   errorSurface: "#FBEAEA",
   danger: "#B23A3A",

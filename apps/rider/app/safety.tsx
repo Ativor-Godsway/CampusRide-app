@@ -99,7 +99,7 @@ export default function SafetyScreen() {
 
       <Card style={styles.explainer}>
         <View style={styles.explainerRow}>
-          <Ionicons name="shield-checkmark" size={18} color={colors.primary[600]} />
+          <Ionicons name="shield-checkmark" size={18} color={colors.primary[500]} />
           <Text variant="bodySmall" style={styles.explainerText}>
             During a ride you&apos;ll see an SOS button. Tapping it texts your emergency contact
             where you are, who your driver is, and a link to follow the trip live.

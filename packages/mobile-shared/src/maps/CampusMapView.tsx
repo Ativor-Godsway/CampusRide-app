@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Easing, Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import MapView, { Circle, Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
+import type { EdgePadding } from "@rida/shared";
 import { useReduceMotion } from "../design/components/Illustration";
-import { colors, radii, shadows } from "../design/tokens";
+import { colors, radii, shadows, withAlpha } from "../design/tokens";
 import { illustrations } from "../design/illustrations";
 import type { LatLng } from "./projection";
 
@@ -36,6 +37,17 @@ export interface CampusMapViewProps {
    * while searching for a driver). Skipped when Reduce Motion is on.
    */
   pulseZoneId?: string;
+  /**
+   * Keep these points (e.g. pickup + drop-off) in view: the map fits to them
+   * once it's ready and again whenever they or `fitPadding` change — so a
+   * screen re-fits when its bottom sheet changes height. Replaces
+   * `initialRegion` as what "recenter" returns to.
+   */
+  fitTo?: LatLng[];
+  /** Points of map covered by overlays (pill, sheet) plus margin; see mapFitPadding. */
+  fitPadding?: EdgePadding;
+  /** Lifts the recenter button above a bottom sheet covering this many points. */
+  controlsBottomInset?: number;
 }
 
 /**
@@ -54,9 +66,33 @@ export function CampusMapView({
   showRecenter,
   rounded = true,
   pulseZoneId,
+  fitTo,
+  fitPadding,
+  controlsBottomInset = 0,
 }: CampusMapViewProps) {
   const mapRef = useRef<MapView>(null);
+  const reduceMotion = useReduceMotion();
+  const [mapReady, setMapReady] = useState(false);
   const pulseZone = pulseZoneId ? zones.find((z) => z.id === pulseZoneId) : undefined;
+
+  // Stable key: re-fit only when the points or padding really change, not on
+  // every render that builds a new (equal) array.
+  const fitKey = fitTo?.length
+    ? JSON.stringify([fitTo.map((p) => [p.latitude.toFixed(6), p.longitude.toFixed(6)]), fitPadding ?? null])
+    : null;
+  const fitRef = useRef({ fitTo, fitPadding });
+  fitRef.current = { fitTo, fitPadding };
+
+  const fit = useCallback((animated: boolean) => {
+    const { fitTo: points, fitPadding: padding } = fitRef.current;
+    if (!points?.length) return false;
+    mapRef.current?.fitToCoordinates(points, { edgePadding: padding, animated });
+    return true;
+  }, []);
+
+  useEffect(() => {
+    if (mapReady && fitKey) fit(!reduceMotion);
+  }, [mapReady, fitKey, fit, reduceMotion]);
 
   return (
     <View style={[styles.container, { height }, !rounded && styles.unrounded]}>
@@ -69,6 +105,7 @@ export function CampusMapView({
         showsMyLocationButton={false}
         toolbarEnabled={false}
         userInterfaceStyle={light ? "light" : undefined}
+        onMapReady={() => setMapReady(true)}
       >
         {pulseZone ? <ZonePulse center={pulseZone} /> : null}
 
@@ -95,8 +132,10 @@ export function CampusMapView({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Recenter map on route"
-          onPress={() => mapRef.current?.animateToRegion(initialRegion, 300)}
-          style={styles.recenterButton}
+          onPress={() => {
+            if (!fit(!reduceMotion)) mapRef.current?.animateToRegion(initialRegion, 300);
+          }}
+          style={[styles.recenterButton, { bottom: 12 + controlsBottomInset }]}
         >
           <Ionicons name="locate" size={20} color={colors.ink[700]} />
         </Pressable>
@@ -204,11 +243,11 @@ function ZonePulse({ center }: { center: LatLng }) {
       radius={progress.interpolate({ inputRange: [0, 1], outputRange: [8, PULSE_MAX_RADIUS_M] })}
       fillColor={progress.interpolate({
         inputRange: [0, 1],
-        outputRange: ["rgba(25,116,60,0.28)", "rgba(25,116,60,0)"],
+        outputRange: [withAlpha(colors.primary[500], 0.28), withAlpha(colors.primary[500], 0)],
       })}
       strokeColor={progress.interpolate({
         inputRange: [0, 1],
-        outputRange: ["rgba(25,116,60,0.55)", "rgba(25,116,60,0)"],
+        outputRange: [withAlpha(colors.primary[500], 0.55), withAlpha(colors.primary[500], 0)],
       })}
       strokeWidth={1.5}
       zIndex={1}

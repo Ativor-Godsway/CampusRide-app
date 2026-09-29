@@ -24,7 +24,7 @@ export interface ServiceIconProps {
  */
 export function ServiceIcon({
   name,
-  color = colors.primary[600],
+  color = colors.primary[500],
   background = colors.primary[50],
   size = 56,
   iconSize,

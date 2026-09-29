@@ -1,5 +1,6 @@
-/** Formats an integer-pesewas amount as a GHS string, e.g. 1000 -> "GHS 10". */
-export function formatGhs(pesewas: number): string {
-  const ghs = pesewas / 100;
-  return `GHS ${ghs % 1 === 0 ? ghs.toFixed(0) : ghs.toFixed(2)}`;
-}
+/**
+ * Fares are formatted in ONE place, @rida/shared's formatCedis ("GH₵5"),
+ * shared with the admin site. Re-exported here so app screens keep importing
+ * their UI helpers from @rida/mobile-shared.
+ */
+export { formatCedis, spokenCedis } from "@rida/shared";

@@ -9,7 +9,7 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
-import { colors } from "../tokens";
+import { colors, withAlpha } from "../tokens";
 import { illustrations, type IllustrationName } from "../illustrations";
 
 export interface IllustrationProps {
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     borderWidth: 2,
     borderColor: colors.primary[300],
-    backgroundColor: "rgba(108,192,137,0.08)",
+    backgroundColor: withAlpha(colors.primary[300], 0.08),
   },
   ringCenter: {
     flex: 1,

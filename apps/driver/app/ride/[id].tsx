@@ -22,7 +22,7 @@ import {
   Text,
   callPhone,
   colors,
-  formatGhs,
+  formatCedis,
   getRideSocket,
   getDriverActiveRide,
   getRateableRiders,
@@ -325,10 +325,10 @@ export default function ActiveRideScreen() {
               <CountUpGhs pesewas={earnedPesewas + commissionPesewas} />
               <View style={styles.cashBreakdown}>
                 <Text variant="bodySmall" style={styles.earnCardSubtext}>
-                  Your share: {formatGhs(earnedPesewas)}
+                  Your share: {formatCedis(earnedPesewas)}
                 </Text>
                 <Text variant="bodySmall" style={styles.earnCardSubtext}>
-                  Platform fee owed: {formatGhs(commissionPesewas)}
+                  Platform fee owed: {formatCedis(commissionPesewas)}
                 </Text>
               </View>
             </Card>
@@ -435,7 +435,7 @@ function CountUpGhs({ pesewas }: { pesewas: number }) {
   const shown = useCountUp(pesewas);
   return (
     <Text variant="h1" color="inverse" style={styles.earnAmount}>
-      {formatGhs(shown)}
+      {formatCedis(shown)}
     </Text>
   );
 }

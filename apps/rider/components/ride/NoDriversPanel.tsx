@@ -16,7 +16,7 @@ export function NoDriversPanel({
   onSwitch,
   onCancel,
 }: {
-  /** e.g. "Switch to Ride alone · GHS 15"; null when a switch isn't possible. */
+  /** e.g. "Switch to Ride alone · GH₵15"; null when a switch isn't possible. */
   switchOffer: string | null;
   busy: "search" | "switch" | null;
   onSearchAgain: () => void;

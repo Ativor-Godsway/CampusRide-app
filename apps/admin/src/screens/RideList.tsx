@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { formatCedis } from "@rida/shared";
 import { ApiError, getRides, type AdminRide } from "../api";
 import { useAuth, useToken } from "../auth";
 
@@ -12,10 +13,9 @@ const STATUSES = [
   "AWAITING_RIDER_DECISION",
 ];
 
-/** Fares are stored as integer pesewas; GHS 5.00 is 500. Never parse as a float. */
+/** Fares are integer pesewas; formatCedis is the same helper the apps use ("GH₵5"). */
 function formatFare(pesewas: number | null): string {
-  if (pesewas === null) return "—";
-  return `GHS ${(pesewas / 100).toFixed(2)}`;
+  return pesewas === null ? "—" : formatCedis(pesewas);
 }
 
 /**

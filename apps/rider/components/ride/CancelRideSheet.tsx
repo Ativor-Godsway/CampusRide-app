@@ -16,6 +16,7 @@ import {
 } from "@rida/shared";
 import {
   Button,
+  FadeIn,
   Illustration,
   PressableScale,
   Text,
@@ -28,18 +29,24 @@ import { haptics } from "../../lib/haptics";
 
 export interface SwitchOffer {
   toType: RideType;
-  /** e.g. "Switch to Ride alone — GHS 15, no waiting for others" */
+  /** "Switch to Ride alone" / "Switch to Shared" — no explanation needed. */
   label: string;
+  /** The new fare, e.g. "GH₵15". */
+  priceLabel: string;
+  /** Spoken form of the fare, for screen readers. */
+  priceSpoken: string;
 }
 
+type Step = "confirm" | "reason";
+
 /**
- * "Cancel this ride?" — replaces the old instant cancel.
+ * Cancelling a ride, in two short steps so an accidental tap costs nothing:
  *
- * The rider must pick a reason (one tap); typing is never required ("Other"
- * only reveals an optional note). While searching, it first offers the
- * other ride type at its real price. "Keep waiting" is the big, safe,
- * primary action; "Cancel ride" is the red outline one, enabled once a
- * reason is picked.
+ * 1. "Cancel this ride?" — a compact switch row (the other ride type at its
+ *    price), then "Keep waiting" (primary) and "Cancel ride" (red outline).
+ * 2. Only after "Cancel ride": "Why are you cancelling?" — one tap on a
+ *    reason chip is required, typing never is ("Other" reveals an optional
+ *    note). "Cancel ride" (solid red) confirms; "Back" returns to step 1.
  */
 export function CancelRideSheet({
   visible,
@@ -62,12 +69,14 @@ export function CancelRideSheet({
 }) {
   const sheetRef = useRef<BottomSheet>(null);
   const { height } = useWindowDimensions();
+  const [step, setStep] = useState<Step>("confirm");
   const [reason, setReason] = useState<RiderCancelReason | null>(null);
   const [note, setNote] = useState("");
 
   useEffect(() => {
     if (visible) {
-      // A fresh question every time it opens.
+      // A fresh start every time it opens.
+      setStep("confirm");
       setReason(null);
       setNote("");
       sheetRef.current?.expand();
@@ -89,7 +98,6 @@ export function CancelRideSheet({
   );
 
   const busy = switching || cancelling;
-  const reasons = riderCancelReasonsFor(stage);
   const keepLabel = stage === "searching" ? "Keep waiting" : "Keep my ride";
 
   return (
@@ -108,107 +116,122 @@ export function CancelRideSheet({
       android_keyboardInputMode="adjustResize"
     >
       <BottomSheetScrollView contentContainerStyle={styles.content} accessibilityViewIsModal>
-        <Text variant="h2" accessibilityRole="header">
-          Cancel this ride?
-        </Text>
+        {step === "confirm" ? (
+          <FadeIn key="confirm" style={styles.step}>
+            <Text variant="h2" accessibilityRole="header">
+              Cancel this ride?
+            </Text>
 
-        {switchOffer ? (
-          <PressableScale
-            onPress={() => onSwitch(switchOffer.toType)}
-            disabled={busy}
-            accessibilityRole="button"
-            accessibilityLabel={switchOffer.label}
-            accessibilityState={{ busy: switching, disabled: busy }}
-            style={styles.offer}
-          >
-            <Illustration
-              name={switchOffer.toType === "LONE" ? "carStandard" : "carShared"}
-              width={64}
-            />
-            <View style={styles.offerText}>
-              <Text variant="label" color="primary">
-                OR SWITCH INSTEAD
-              </Text>
-              <Text variant="bodyMedium">{switchOffer.label}</Text>
-            </View>
-            <Ionicons name="swap-horizontal" size={22} color={colors.primary[600]} />
-          </PressableScale>
-        ) : null}
-
-        <Text variant="bodyMedium" style={styles.question}>
-          Why are you cancelling?
-        </Text>
-        <View style={styles.chips} accessibilityRole="radiogroup">
-          {reasons.map((value) => {
-            const selected = reason === value;
-            return (
-              <Pressable
-                key={value}
-                onPress={() => {
-                  haptics.selection();
-                  setReason(value);
-                }}
+            {switchOffer ? (
+              <PressableScale
+                onPress={() => onSwitch(switchOffer.toType)}
                 disabled={busy}
-                accessibilityRole="radio"
-                accessibilityState={{ checked: selected, disabled: busy }}
-                accessibilityLabel={RIDER_CANCEL_REASON_LABELS[value]}
-                style={({ pressed }) => [
-                  styles.chip,
-                  selected && styles.chipSelected,
-                  pressed && styles.chipPressed,
-                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`${switchOffer.label}, ${switchOffer.priceSpoken}`}
+                accessibilityState={{ busy: switching, disabled: busy }}
+                style={styles.switchRow}
               >
-                {selected ? (
-                  <Ionicons name="checkmark" size={14} color={colors.primary[700]} />
-                ) : null}
-                <Text variant="bodySmall" style={selected ? styles.chipTextSelected : undefined}>
-                  {RIDER_CANCEL_REASON_LABELS[value]}
+                <Illustration
+                  name={switchOffer.toType === "LONE" ? "carStandard" : "carShared"}
+                  width={56}
+                />
+                <Text variant="bodyMedium" style={styles.switchLabel}>
+                  {switchOffer.label}
                 </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+                <Text style={styles.switchPrice} numberOfLines={1}>
+                  {switchOffer.priceLabel}
+                </Text>
+                <Ionicons name="swap-horizontal" size={20} color={colors.primary[500]} />
+              </PressableScale>
+            ) : null}
 
-        {reason === "OTHER" ? (
-          <View style={styles.noteWrap}>
-            <BottomSheetTextInput
-              value={note}
-              onChangeText={setNote}
-              placeholder="Tell us more (optional)"
-              placeholderTextColor={colors.ink[300]}
-              maxLength={RIDER_CANCEL_NOTE_MAX}
-              multiline
-              editable={!busy}
-              accessibilityLabel="Tell us more, optional"
-              style={styles.note}
-            />
-            <Text variant="caption" color="subtle" style={styles.counter}>
-              {note.length}/{RIDER_CANCEL_NOTE_MAX}
+            <View style={styles.actions}>
+              <Button
+                label={keepLabel}
+                size="lg"
+                onPress={() => sheetRef.current?.close()}
+                disabled={busy}
+              />
+              <Button
+                label="Cancel ride"
+                variant="dangerSecondary"
+                onPress={() => setStep("reason")}
+                disabled={busy}
+              />
+            </View>
+          </FadeIn>
+        ) : (
+          <FadeIn key="reason" style={styles.step}>
+            <Text variant="h2" accessibilityRole="header">
+              Why are you cancelling?
             </Text>
-          </View>
-        ) : null}
 
-        <View style={styles.actions}>
-          <Button
-            label={keepLabel}
-            size="lg"
-            onPress={() => sheetRef.current?.close()}
-            disabled={busy}
-          />
-          <Button
-            label="Cancel ride"
-            variant="dangerSecondary"
-            onPress={() => reason && onConfirmCancel(reason, note)}
-            disabled={!reason || switching}
-            loading={cancelling}
-            accessibilityHint={reason ? undefined : "Pick a reason first"}
-          />
-          {!reason ? (
-            <Text variant="caption" color="subtle" style={styles.centered}>
-              Pick a reason to cancel.
-            </Text>
-          ) : null}
-        </View>
+            <View style={styles.chips} accessibilityRole="radiogroup">
+              {riderCancelReasonsFor(stage).map((value) => {
+                const selected = reason === value;
+                return (
+                  <Pressable
+                    key={value}
+                    onPress={() => {
+                      haptics.selection();
+                      setReason(value);
+                    }}
+                    disabled={busy}
+                    accessibilityRole="radio"
+                    accessibilityState={{ checked: selected, disabled: busy }}
+                    accessibilityLabel={RIDER_CANCEL_REASON_LABELS[value]}
+                    style={({ pressed }) => [
+                      styles.chip,
+                      selected && styles.chipSelected,
+                      pressed && styles.chipPressed,
+                    ]}
+                  >
+                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                      {RIDER_CANCEL_REASON_LABELS[value]}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            {reason === "OTHER" ? (
+              <View style={styles.noteWrap}>
+                <BottomSheetTextInput
+                  value={note}
+                  onChangeText={setNote}
+                  placeholder="Tell us more (optional)"
+                  placeholderTextColor={colors.ink[300]}
+                  maxLength={RIDER_CANCEL_NOTE_MAX}
+                  multiline
+                  editable={!busy}
+                  accessibilityLabel="Tell us more, optional"
+                  style={styles.note}
+                />
+                <Text variant="caption" color="muted" style={styles.counter}>
+                  {note.length}/{RIDER_CANCEL_NOTE_MAX}
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.actions}>
+              <Button
+                label="Cancel ride"
+                variant="danger"
+                size="lg"
+                onPress={() => reason && onConfirmCancel(reason, note)}
+                disabled={!reason}
+                loading={cancelling}
+                accessibilityHint={reason ? undefined : "Pick a reason first"}
+              />
+              <Button
+                label="Back"
+                variant="neutral"
+                onPress={() => setStep("confirm")}
+                disabled={cancelling}
+              />
+            </View>
+          </FadeIn>
+        )}
       </BottomSheetScrollView>
     </BottomSheet>
   );
@@ -221,26 +244,32 @@ const styles = StyleSheet.create({
     borderTopRightRadius: radii["2xl"],
   },
   handle: { backgroundColor: colors.borderStrong, width: 40, height: 5 },
-  content: { paddingHorizontal: spacing.xl, paddingBottom: spacing["2xl"], gap: spacing.lg },
-  offer: {
+  content: { paddingHorizontal: spacing.xl, paddingTop: spacing.xs, paddingBottom: spacing["2xl"] },
+  step: { gap: spacing.lg },
+  switchRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
-    padding: spacing.md,
+    minHeight: 56,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
     borderRadius: radii.lg,
     borderWidth: 1.5,
     borderColor: colors.primary[200],
     backgroundColor: colors.primary[50],
   },
-  offerText: { flex: 1, gap: 2 },
-  question: { marginBottom: -spacing.xs },
+  switchLabel: { flex: 1, fontWeight: typography.weight.bold },
+  switchPrice: {
+    fontSize: typography.size.lg,
+    fontWeight: typography.weight.extrabold,
+    color: colors.primary[500],
+    fontVariant: ["tabular-nums"],
+  },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   chip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    minHeight: 40,
-    paddingHorizontal: spacing.md,
+    minHeight: 44,
+    justifyContent: "center",
+    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     borderRadius: radii.full,
     borderWidth: 1.5,
@@ -249,7 +278,12 @@ const styles = StyleSheet.create({
   },
   chipSelected: { borderColor: colors.primary[500], backgroundColor: colors.primary[50] },
   chipPressed: { opacity: 0.7 },
-  chipTextSelected: { color: colors.primary[700], fontWeight: typography.weight.semibold },
+  chipText: {
+    fontSize: typography.size.sm,
+    fontWeight: typography.weight.medium,
+    color: colors.ink[900],
+  },
+  chipTextSelected: { color: colors.primary[500], fontWeight: typography.weight.bold },
   noteWrap: { gap: spacing.xs },
   note: {
     minHeight: 72,
@@ -263,6 +297,5 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
   counter: { textAlign: "right" },
-  actions: { gap: spacing.md, marginTop: spacing.xs },
-  centered: { textAlign: "center" },
+  actions: { gap: spacing.md },
 });

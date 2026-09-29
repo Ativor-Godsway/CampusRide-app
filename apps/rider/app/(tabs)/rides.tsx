@@ -8,17 +8,19 @@ import {
   type BadgeVariant,
   Card,
   EmptyState,
-  LoadingState,
   ListRow,
   Screen,
+  SkeletonGroup,
+  SkeletonListRows,
   Text,
   colors,
   Button,
-  formatGhs,
+  formatCedis,
   getMyRidesPage,
   myRidesQueryKeys,
   spacing,
 } from "@rida/mobile-shared";
+import { TAB_SCREEN_BOTTOM_PADDING } from "../../lib/layout";
 
 const STATUS_BADGE: Record<RideStatus, { label: string; variant: BadgeVariant }> = {
   REQUESTED: { label: "Requested", variant: "accent" },
@@ -86,8 +88,15 @@ export default function RidesTab() {
 
   if (isLoading) {
     return (
-      <Screen>
-        <LoadingState message="Loading your rides..." />
+      <Screen edges={["top"]}>
+        <View style={styles.header}>
+          <Text variant="h1">Your rides</Text>
+        </View>
+        <Card>
+          <SkeletonGroup label="Loading your rides">
+            <SkeletonListRows count={5} twoLines />
+          </SkeletonGroup>
+        </Card>
       </Screen>
     );
   }
@@ -95,7 +104,7 @@ export default function RidesTab() {
   // First page failed: nothing to show, so offer a retry instead.
   if (isError && rides.length === 0) {
     return (
-      <Screen>
+      <Screen edges={["top"]}>
         <EmptyState
           title="Couldn't load your rides"
           message="Check your connection and try again."
@@ -108,7 +117,7 @@ export default function RidesTab() {
 
   if (rides.length === 0) {
     return (
-      <Screen scroll refreshControl={refreshControl}>
+      <Screen scroll edges={["top"]} refreshControl={refreshControl} style={styles.content}>
         <View style={styles.header}>
           <Text variant="h1">Your rides</Text>
         </View>
@@ -122,7 +131,7 @@ export default function RidesTab() {
   }
 
   return (
-    <Screen scroll refreshControl={refreshControl}>
+    <Screen scroll edges={["top"]} refreshControl={refreshControl} style={styles.content}>
       <View style={styles.header}>
         <Text variant="h1">Your rides</Text>
       </View>
@@ -165,7 +174,7 @@ export default function RidesTab() {
               >
                 <ListRow.Icon
                   name={ride.type === "SHARED" ? "people-outline" : "person-outline"}
-                  color={colors.primary[600]}
+                  color={colors.primary[500]}
                   background={colors.primary[50]}
                 />
                 <View style={styles.body}>
@@ -190,7 +199,7 @@ export default function RidesTab() {
                 </View>
                 <View style={styles.trailing}>
                   {ride.fareTotal != null ? (
-                    <Text variant="bodyMedium">{formatGhs(ride.fareTotal)}</Text>
+                    <Text variant="bodyMedium">{formatCedis(ride.fareTotal)}</Text>
                   ) : null}
                   <Badge label={status.label} variant={status.variant} />
                 </View>
@@ -221,6 +230,7 @@ export default function RidesTab() {
 }
 
 const styles = StyleSheet.create({
+  content: { paddingBottom: TAB_SCREEN_BOTTOM_PADDING },
   loadMore: { marginTop: spacing.lg, gap: spacing.sm },
   loadMoreError: { textAlign: "center" },
   header: {
