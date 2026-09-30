@@ -8,6 +8,7 @@ import {
   useClearQueryCacheOnAccountChange,
   useDeepLinkGuard,
 } from "@rida/mobile-shared";
+import { DriverPresenceProvider } from "../lib/presence";
 
 const queryClient = new QueryClient();
 
@@ -39,9 +40,11 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <DeepLinkGuard />
-        <SessionCacheReset />
-        <Stack screenOptions={{ headerShown: false }} />
+        <DriverPresenceProvider>
+          <DeepLinkGuard />
+          <SessionCacheReset />
+          <Stack screenOptions={{ headerShown: false }} />
+        </DriverPresenceProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

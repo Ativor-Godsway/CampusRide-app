@@ -155,6 +155,41 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     return reply.code(200).send({ driver: updated });
   });
 
+  /**
+   * Keep an online driver's zone current as they move. The app calls this
+   * when its GPS lands in a different zone (throttled client-side to about
+   * once every 30s — see planZoneUpdate in @rida/shared). Separate from
+   * /driver/availability so a zone update can never flip a driver online: an
+   * offline driver gets 409 and nothing changes.
+   */
+  app.patch("/driver/zone", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+
+    const body = (request.body ?? {}) as { zoneId?: unknown };
+    if (typeof body.zoneId !== "string" || body.zoneId.length === 0) {
+      return reply.code(400).send({ error: "zoneId (string) is required" });
+    }
+    const zoneId = body.zoneId;
+
+    const userId = request.user!.userId;
+    const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
+    if (!zone) return reply.code(404).send({ error: "Zone not found" });
+
+    // Conditional update: only an online driver's zone moves, decided in the
+    // same statement as the write so a concurrent "go offline" always wins.
+    const { count } = await prisma.driver.updateMany({
+      where: { userId, isOnline: true },
+      data: { currentZoneId: zoneId },
+    });
+    if (count === 0) {
+      const exists = await prisma.driver.findUnique({ where: { userId }, select: { id: true } });
+      if (!exists) return reply.code(404).send({ error: "Driver profile not found" });
+      return reply.code(409).send({ error: "You're offline. Go online to receive requests." });
+    }
+
+    return reply.code(200).send({ zoneId });
+  });
+
   /** The driver's currently active ride (MATCHED, ARRIVED, or IN_PROGRESS), if any. */
   app.get("/driver/rides/active", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
@@ -617,6 +652,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         dropoffZoneName: ride.dropoffZone.name,
         dropoffZoneId: ride.dropoffZoneId,
         type: ride.type as "LONE" | "SHARED",
+        /** Riders on this request (a fresh request is its requester alone). */
+        seats: ride.occupancy,
         farePesewas,
         driverSharePesewas: driverShare,
         createdAt: ride.createdAt.toISOString(),

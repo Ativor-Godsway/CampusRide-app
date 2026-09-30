@@ -34,3 +34,19 @@ export function tripStatusLine(ride: RideWithZones): string {
     passengerStatuses: ride.passengers.map((p) => p.status),
   });
 }
+
+/**
+ * LONE trips whose screen has already been opened this session. Home opens
+ * a newly matched LONE trip once; a driver who then steps back isn't bounced
+ * straight back (the active-trip banner is how they return). Shared with
+ * "Requests near you", which opens the trip itself after a claim.
+ */
+const openedTripIds = new Set<string>();
+
+export function markTripOpened(rideId: string): void {
+  openedTripIds.add(rideId);
+}
+
+export function wasTripOpened(rideId: string): boolean {
+  return openedTripIds.has(rideId);
+}

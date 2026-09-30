@@ -81,12 +81,26 @@ export async function updateDriverProfile(
 export async function setDriverAvailability(
   isOnline: boolean,
   zoneId?: string,
+  options?: { timeoutMs?: number },
 ): Promise<DriverProfile> {
-  const res = await api.patch<{ driver: DriverProfile }>("/driver/availability", {
-    isOnline,
-    ...(zoneId !== undefined ? { zoneId } : {}),
-  });
+  const res = await api.patch<{ driver: DriverProfile }>(
+    "/driver/availability",
+    {
+      isOnline,
+      ...(zoneId !== undefined ? { zoneId } : {}),
+    },
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
+  );
   return res.data.driver;
+}
+
+/**
+ * Move an ONLINE driver's current zone as they drive (PATCH /driver/zone).
+ * Never changes online status: the server answers 409 if the driver is
+ * offline.
+ */
+export async function updateDriverZone(zoneId: string): Promise<void> {
+  await api.patch("/driver/zone", { zoneId });
 }
 
 /** Returns the driver's currently active ride (MATCHED/ARRIVED/IN_PROGRESS) or null. */
@@ -163,6 +177,8 @@ export interface EligibleRideItem {
   dropoffZoneName: string;
   dropoffZoneId: string;
   type: RideType;
+  /** Riders on the request. Optional: servers before the driver redesign don't send it. */
+  seats?: number;
   /** Base fare for the ride in pesewas (per-rider for SHARED, flat for LONE). */
   farePesewas: number;
   /** Driver's 85% share in pesewas. */
