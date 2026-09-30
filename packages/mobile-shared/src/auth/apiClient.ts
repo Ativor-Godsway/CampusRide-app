@@ -5,6 +5,13 @@ import { clearStoredRefreshToken, getStoredRefreshToken, setStoredRefreshToken }
 
 const SERVER_URL = getServerUrl();
 
+// Development builds say which server they talk to, so it is obvious in the
+// Metro terminal whether the app is on your Mac or on production.
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  // eslint-disable-next-line no-console -- deliberate, development builds only
+  console.log(`[CampusRide] API server: ${SERVER_URL}`);
+}
+
 /** Plain axios instance with no interceptors — used for /auth/refresh itself to avoid loops. */
 export const rawApi = axios.create({
   baseURL: SERVER_URL,

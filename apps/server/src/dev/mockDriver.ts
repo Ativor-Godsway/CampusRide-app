@@ -1,11 +1,16 @@
+import type { RideStatus } from "@rida/shared";
 import type { PrismaClient } from "@prisma/client";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
-import { applyRideTransition } from "../services/ride/rideService";
+import { applyPassengerTransition, applyRideTransition } from "../services/ride/rideService";
 import { departRide } from "../services/ride/assembly";
 import { claimRide } from "../services/ride/dispatch";
-import { RideAlreadyClaimedError } from "../services/ride/errors";
-import { InvalidTransitionError } from "../services/ride/errors";
-import { emitRideEvent } from "../realtime/rideSocket";
+import { ACTIVE_DRIVER_STATUSES } from "../services/ride/stateMachine";
+import {
+  DriverHasActiveRideError,
+  InvalidTransitionError,
+  RideAlreadyClaimedError,
+} from "../services/ride/errors";
+import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
 
 const MOCK_DRIVER_PHONE = "+233000000001";
 
@@ -13,6 +18,11 @@ const ASSIGN_DELAY_MS = 4_000;
 const ARRIVED_WAIT_MS = 3_000;
 const LOCATION_STEPS = 6;
 const LOCATION_STEP_INTERVAL_MS = 2_000;
+/** How often a queued ride retries while the mock driver is busy with another. */
+const BUSY_RETRY_MS = 3_000;
+
+/** Rides this server process is driving right now. */
+const inFlight = new Set<string>();
 
 /**
  * Roughly 300m north-west of the pickup zone — gives the driver dot a
@@ -109,14 +119,61 @@ async function simulate(prisma: PrismaClient, rideId: string): Promise<void> {
 
   const driver = await getOrCreateMockDriver(prisma);
 
+  // One mock driver serves every ride, one at a time: while it is busy, a
+  // new request waits its turn (it stays REQUESTED, exactly as it would for a
+  // real busy driver) instead of failing.
   let ride;
-  try {
-    ride = await claimRide(prisma, rideId, driver.id);
-  } catch (err) {
-    if (err instanceof RideAlreadyClaimedError) return;
-    throw err;
+  for (;;) {
+    try {
+      await finishOrphanedRides(prisma, driver.id);
+      ride = await claimRide(prisma, rideId, driver.id);
+      break;
+    } catch (err) {
+      if (err instanceof RideAlreadyClaimedError) return;
+      if (!(err instanceof DriverHasActiveRideError)) throw err;
+      const current = await prisma.ride.findUnique({ where: { id: rideId }, select: { status: true } });
+      if (current?.status !== "REQUESTED") return;
+      await delay(BUSY_RETRY_MS);
+    }
   }
 
+  inFlight.add(rideId);
+  try {
+    await driveClaimedRide(prisma, driver, ride.id, ride.status);
+  } finally {
+    inFlight.delete(rideId);
+  }
+}
+
+/**
+ * A ride the mock driver still holds but no simulation in THIS process is
+ * driving was left behind by an earlier server process — `npm run dev:server`
+ * restarts on every file save. Left alone it would keep the mock driver
+ * "busy" forever (so every later request goes unanswered) and keep its rider
+ * stuck on an active ride they can never leave. Finish it straight away.
+ */
+async function finishOrphanedRides(prisma: PrismaClient, driverId: string): Promise<void> {
+  const orphans = await prisma.ride.findMany({
+    where: {
+      driverId,
+      status: { in: [...ACTIVE_DRIVER_STATUSES] },
+      id: { notIn: [...inFlight] },
+    },
+    select: { id: true },
+  });
+  for (const orphan of orphans) {
+    console.warn(`[mockDriver] finishing ride ${orphan.id}, left over from an earlier server run`);
+    await walkToCompletion(prisma, driverId, orphan.id);
+    emitRideEvent(orphan.id, "ride:status", { rideId: orphan.id, status: "COMPLETED" });
+  }
+}
+
+async function driveClaimedRide(
+  prisma: PrismaClient,
+  driver: Awaited<ReturnType<typeof getOrCreateMockDriver>>,
+  rideId: string,
+  status: RideStatus,
+): Promise<void> {
   const withZones = await prisma.ride.findUniqueOrThrow({
     where: { id: rideId },
     include: { pickupZone: true, dropoffZone: true },
@@ -127,7 +184,7 @@ async function simulate(prisma: PrismaClient, rideId: string): Promise<void> {
     _avg: { stars: true },
   });
 
-  emitRideEvent(rideId, "ride:status", { rideId, status: ride.status });
+  emitRideEvent(rideId, "ride:status", { rideId, status });
   emitRideEvent(rideId, "ride:driver_assigned", {
     rideId,
     driverId: driver.id,
@@ -152,22 +209,38 @@ async function simulate(prisma: PrismaClient, rideId: string): Promise<void> {
   await animateLocation(rideId, start, pickup);
 
   try {
-    const arrived = await applyRideTransition(prisma, rideId, "ARRIVED");
-    emitRideEvent(rideId, "ride:status", { rideId, status: arrived.status });
+    if (withZones.type === "SHARED") {
+      // Shared rides move each passenger, as the real driver app does:
+      // the rider app reads its own seat ("Kwame has arrived", "On your
+      // trip") and would otherwise sit on "on the way" for the whole trip.
+      await passengerStep(prisma, rideId, "ARRIVED");
+    } else {
+      const arrived = await applyRideTransition(prisma, rideId, "ARRIVED");
+      emitRideEvent(rideId, "ride:status", { rideId, status: arrived.status });
+    }
   } catch (err) {
-    if (err instanceof InvalidTransitionError) return;
+    if (err instanceof InvalidTransitionError) return; // cancelled meanwhile
     throw err;
   }
 
   await delay(ARRIVED_WAIT_MS);
 
-  const inProgress = await departRide(prisma, driver.id, rideId);
-  emitRideEvent(rideId, "ride:status", { rideId, status: inProgress.status });
+  if (withZones.type === "SHARED") {
+    await passengerStep(prisma, rideId, "PICKED_UP");
+    emitRideEvent(rideId, "ride:status", { rideId, status: "IN_PROGRESS" });
+  } else {
+    const inProgress = await departRide(prisma, driver.id, rideId);
+    emitRideEvent(rideId, "ride:status", { rideId, status: inProgress.status });
+  }
 
   await animateLocation(rideId, pickup, dropoff);
 
-  const completed = await applyRideTransition(prisma, rideId, "COMPLETED");
-  emitRideEvent(rideId, "ride:status", { rideId, status: completed.status });
+  if (withZones.type === "SHARED") {
+    await passengerStep(prisma, rideId, "DROPPED_OFF"); // last drop-off completes the ride
+  } else {
+    await applyRideTransition(prisma, rideId, "COMPLETED");
+  }
+  emitRideEvent(rideId, "ride:status", { rideId, status: "COMPLETED" });
 
   const summary = await getRidePaymentSummary(prisma, rideId);
   const yourShare = summary.perPassenger.find((p) => p.riderId === withZones.riderId);
@@ -180,4 +253,40 @@ async function simulate(prisma: PrismaClient, rideId: string): Promise<void> {
       paymentStatus: yourShare?.status ?? "PENDING",
     },
   });
+}
+
+/** Moves every passenger still in the car one step (WAITING → ARRIVED → PICKED_UP → DROPPED_OFF). */
+async function passengerStep(
+  prisma: PrismaClient,
+  rideId: string,
+  to: "ARRIVED" | "PICKED_UP" | "DROPPED_OFF",
+): Promise<void> {
+  const from = { ARRIVED: "WAITING", PICKED_UP: "ARRIVED", DROPPED_OFF: "PICKED_UP" } as const;
+  const passengers = await prisma.ridePassenger.findMany({
+    where: { rideId, status: from[to] },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const p of passengers) {
+    await applyPassengerTransition(prisma, p.id, to);
+    emitToRider(p.riderId, "ride:passenger_status", {
+      rideId,
+      ridePassengerId: p.id,
+      riderId: p.riderId,
+      status: to,
+    });
+  }
+}
+
+/** Finishes a held ride immediately, from whatever stage it reached. */
+async function walkToCompletion(prisma: PrismaClient, driverId: string, rideId: string): Promise<void> {
+  const ride = await prisma.ride.findUniqueOrThrow({ where: { id: rideId } });
+  if (ride.type === "SHARED") {
+    for (const step of ["ARRIVED", "PICKED_UP", "DROPPED_OFF"] as const) {
+      await passengerStep(prisma, rideId, step);
+    }
+    return;
+  }
+  if (ride.status === "MATCHED") await applyRideTransition(prisma, rideId, "ARRIVED");
+  if (ride.status === "MATCHED" || ride.status === "ARRIVED") await departRide(prisma, driverId, rideId);
+  await applyRideTransition(prisma, rideId, "COMPLETED");
 }

@@ -90,3 +90,18 @@ export function toFastifyTrustProxy(
   if (value <= 0) return false;
   return (_address: string, hop: number) => hop < value;
 }
+
+/**
+ * Rate-limit `allowList` for a DEVELOPMENT server: requests from this machine
+ * itself (loopback) are not limited, so the fake-rider simulator
+ * (npm run sim:riders, docs/testing/SOLO_TESTING.md) can request a ride every
+ * few seconds without tripping the 20-per-15-minutes ride-creation cap.
+ *
+ * Development only. Production never exempts anything, and neither does the
+ * test suite (NODE_ENV=test), whose rate-limit tests inject from 127.0.0.1.
+ * A phone on the Wi-Fi arrives from a LAN address, so it stays limited.
+ */
+export function isDevLoopbackExempt(ip: string, nodeEnv: string): boolean {
+  if (nodeEnv !== "development") return false;
+  return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+}
