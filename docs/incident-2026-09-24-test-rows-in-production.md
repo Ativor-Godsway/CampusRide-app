@@ -45,7 +45,7 @@ The hosts each env file targets today:
 
 | File | Host |
 | --- | --- |
-| `.env` | **was** `ep-ancient-butterfly` (production) — now repointed at the dev branch |
+| `.env` | **was** `ep-ancient-butterfly` (production) — repointed at the dev branch on 2026-09-30 |
 | `.env.development` | `ep-flat-rain-…` (Neon dev) |
 | `.env.test` | `localhost:5432/rida_test`, with `ep-blue-union-…` commented out |
 
@@ -96,8 +96,11 @@ production, whatever is exported in the shell.
 
 The base `.env` — the fallback for anything that does not load a more specific
 file, which is exactly what caused this — now points at the dev branch.
-Production credentials live in Render. For a one-off against production, paste
-the URL inline alongside `ALLOW_PRODUCTION_DB=1`.
+(This was first recorded as done before it actually was: until 2026-09-30 the
+local `.env` still held the production URL and secrets. It now holds dev values
+only.) Production credentials live in Render. For a one-off against production,
+export `PROD_URL` yourself and pass it inline alongside `ALLOW_PRODUCTION_DB=1`
+— see docs/environments.md.
 
 ### Fixtures are now identifiable
 

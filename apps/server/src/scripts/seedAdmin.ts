@@ -13,10 +13,11 @@
  *   npx dotenv -e .env.development -- npx ts-node -r tsconfig-paths/register \
  *     src/scripts/seedAdmin.ts 0594826328
  *
- *   # production — paste the URL inline; it should not live in any .env file.
+ *   # production — export PROD_URL yourself (copied from Render) and pass it
+ *   # inline; it must not live in any .env file.
  *   # ALLOW_PRODUCTION_DB=1 is required: db/prisma.ts refuses to connect to a
  *   # known production host from a non-production process.
- *   ALLOW_PRODUCTION_DB=1 DATABASE_URL="postgres://..." ADMIN_PHONE=0594826328 \
+ *   ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" ADMIN_PHONE=0594826328 \
  *     npx ts-node -r tsconfig-paths/register src/scripts/seedAdmin.ts
  *
  * The user must already exist (sign up in the rider app first). The promotion

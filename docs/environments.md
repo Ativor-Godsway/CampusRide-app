@@ -56,23 +56,24 @@ Migrations are **never** run casually against production. The flow:
    ```bash
    npm run db:migrate --workspace apps/server          # prisma migrate deploy, prod env
    ```
-   > `db:migrate` reads real env vars / `.env`. Do **not** run it locally once the
-   > local prod `.env` is removed — there will be no prod URL to target, which is
-   > the intended safety behavior. Run it from the Render shell / CI where the
-   > prod `DATABASE_URL`/`DIRECT_URL` are injected.
+   > `db:migrate` reads real env vars / `.env`. Locally, `.env` holds only dev
+   > values, so run there it targets the dev branch, never production. Run it
+   > from the Render shell / CI, where the prod `DATABASE_URL`/`DIRECT_URL` are
+   > injected.
 
 ### Bringing the dev branch up to date
 
-`db:migrate:dev` runs `db:guard`, which only allows local Postgres unless
-`ALLOW_TEST_DB_HOST` names the host, so it refuses the dev Neon branch as
-configured. To apply committed migrations to the dev branch, use:
+To apply migrations that are already committed (e.g. after pulling), use
+`db:deploy:dev`. `db:migrate:dev` is for **authoring** a new migration: it runs
+`prisma migrate dev`, which can offer to reset the database if it detects drift.
 
 ```bash
 npm run db:status:dev     # what is missing (read-only)
 npm run db:deploy:dev     # prisma migrate deploy against .env.development
 ```
 
-Both run `db:guard:dev` first ([src/db/devDbGuard.ts](../apps/server/src/db/devDbGuard.ts)),
+All `db:*:dev` scripts (`migrate`, `deploy`, `status`, `seed`, `reset`) run
+`db:guard:dev` first ([src/db/devDbGuard.ts](../apps/server/src/db/devDbGuard.ts)),
 which allows only local Postgres or the dev branch and refuses production with
 no override. See [testing/SOLO_TESTING.md](testing/SOLO_TESTING.md).
 
@@ -99,14 +100,27 @@ npm run db:seed:test     # zones only
 npm test                 # ~12s, deterministic
 ```
 
-All `db:*:dev` / `db:*:test` scripts run `db:guard` first
+All `db:*:test` scripts run `db:guard` first
 ([src/scripts/assertNonProdDb.ts](../apps/server/src/scripts/assertNonProdDb.ts)),
 which shares the prod-host allowlist ([src/db/dbHostGuard.ts](../apps/server/src/db/dbHostGuard.ts))
 with the vitest setup guardrail — so none of them can run against production.
+The `db:*:dev` scripts run `db:guard:dev` instead (local Postgres or the dev
+branch only), since `db:guard` would refuse the dev Neon branch.
 
-## Follow-up (after Phase 1 secret rotation)
+## The base `apps/server/.env`
 
-Once production secrets are rotated and set in Render, **delete the local
-`apps/server/.env`** (the pre-split file that pointed at production). Prod creds
-should then exist only in Render, and local `db:migrate` will safely no-op for
-lack of a prod URL.
+`apps/server/.env` (gitignored) holds the **same dev values** as
+`.env.development` and nothing from production. It matters even though
+`config.ts` loads `.env.development` first: `@prisma/client` reads `.env` the
+moment it is imported, so any script that imports Prisma before `config.ts`
+gets whatever `.env` says. It used to say production.
+
+Production credentials (database, JWT, Moolre, mNotify, Cloudinary) exist only
+in Render. For a deliberate one-off against production, pass the URL inline
+from a variable you export yourself, never from a file:
+
+```bash
+export PROD_URL="postgresql://…"      # paste from Render, in this shell only
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" \
+  npx ts-node -r tsconfig-paths/register src/scripts/cleanupTestAccounts.ts
+```
