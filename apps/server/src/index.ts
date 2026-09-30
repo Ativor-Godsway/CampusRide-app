@@ -7,6 +7,7 @@ import { APP_NAME, config } from "./config";
 import { prisma } from "./db/prisma";
 import { assertDatabaseAllowedForEnv } from "./db/dbHostGuard";
 import {
+  isDevLoopbackExempt,
   parseOriginAllowlist,
   resolveCorsOrigin,
   resolveTrustProxy,
@@ -73,6 +74,9 @@ async function bootstrap() {
     global: true,
     max: config.rateLimit.globalMax,
     timeWindow: "1 minute",
+    // Inherited by every per-route limit too. Development only — see
+    // lib/security.ts#isDevLoopbackExempt.
+    allowList: (request) => isDevLoopbackExempt(request.ip, config.nodeEnv),
   });
 
   // Security headers (HSTS, X-Content-Type-Options, frame-ancestors denial,

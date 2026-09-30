@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  isDevLoopbackExempt,
   parseOriginAllowlist,
   resolveCorsOrigin,
   resolveTrustProxy,
@@ -125,5 +126,22 @@ describe("toFastifyTrustProxy", () => {
 
   it("collapses 0 hops to false rather than a never-true predicate", () => {
     expect(toFastifyTrustProxy(0)).toBe(false);
+  });
+});
+
+describe("isDevLoopbackExempt", () => {
+  it("exempts this machine only on a development server", () => {
+    for (const ip of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
+      expect(isDevLoopbackExempt(ip, "development")).toBe(true);
+    }
+  });
+
+  it("never exempts anything in production or under the test suite", () => {
+    expect(isDevLoopbackExempt("127.0.0.1", "production")).toBe(false);
+    expect(isDevLoopbackExempt("127.0.0.1", "test")).toBe(false);
+  });
+
+  it("keeps the phone on the Wi-Fi rate-limited", () => {
+    expect(isDevLoopbackExempt("192.168.1.40", "development")).toBe(false);
   });
 });

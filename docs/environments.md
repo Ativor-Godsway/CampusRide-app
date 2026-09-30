@@ -61,6 +61,21 @@ Migrations are **never** run casually against production. The flow:
    > the intended safety behavior. Run it from the Render shell / CI where the
    > prod `DATABASE_URL`/`DIRECT_URL` are injected.
 
+### Bringing the dev branch up to date
+
+`db:migrate:dev` runs `db:guard`, which only allows local Postgres unless
+`ALLOW_TEST_DB_HOST` names the host, so it refuses the dev Neon branch as
+configured. To apply committed migrations to the dev branch, use:
+
+```bash
+npm run db:status:dev     # what is missing (read-only)
+npm run db:deploy:dev     # prisma migrate deploy against .env.development
+```
+
+Both run `db:guard:dev` first ([src/db/devDbGuard.ts](../apps/server/src/db/devDbGuard.ts)),
+which allows only local Postgres or the dev branch and refuses production with
+no override. See [testing/SOLO_TESTING.md](testing/SOLO_TESTING.md).
+
 ## Seeding
 
 Seeds are idempotent (zones seed only on an empty table; ZoneAdjacency uses
