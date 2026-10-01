@@ -142,8 +142,12 @@ export async function getDriverActiveRide(): Promise<RideWithZones | null> {
 }
 
 /** Atomically claim a REQUESTED ride. Throws with status 409 if already claimed. */
-export async function driverClaimRide(rideId: string): Promise<Ride> {
-  const res = await api.post<{ ride: Ride }>(`/rides/${rideId}/claim`);
+export async function driverClaimRide(rideId: string, options?: { timeoutMs?: number }): Promise<Ride> {
+  const res = await api.post<{ ride: Ride }>(
+    `/rides/${rideId}/claim`,
+    undefined,
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
+  );
   return res.data.ride;
 }
 
@@ -261,9 +265,14 @@ export interface PassengerInCar {
   riderPhone?: string | null;
   pickupZoneName: string;
   dropoffZoneName: string;
+  /** Zone ids, for placing the rider's stops on the map. Optional: older servers don't send them. */
+  pickupZoneId?: string;
+  dropoffZoneId?: string;
   /** The passenger's current downward-ratcheted fare in pesewas. */
   lockedFare: number | null;
   status: PassengerStatus;
+  /** ISO time the driver reached this rider's pickup (wait timer, "rider didn't show"). */
+  arrivedAt?: string | null;
 }
 
 /**
@@ -314,10 +323,13 @@ export async function getFillSuggestions(rideId: string): Promise<FillSuggestion
 export async function addPassenger(
   rideId: string,
   requestRideId: string,
+  options?: { timeoutMs?: number },
 ): Promise<AddPassengerResult> {
-  const res = await api.post<AddPassengerResult>(`/rides/${rideId}/add-passenger`, {
-    requestRideId,
-  });
+  const res = await api.post<AddPassengerResult>(
+    `/rides/${rideId}/add-passenger`,
+    { requestRideId },
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
+  );
   return { ...res.data, passengers: readList<PassengerInCar>(res.data, "passengers") };
 }
 
@@ -345,9 +357,12 @@ export interface PassengerLifecycleResult {
 export async function passengerArrived(
   rideId: string,
   passengerId: string,
+  options?: { timeoutMs?: number },
 ): Promise<PassengerLifecycleResult> {
   const res = await api.post<PassengerLifecycleResult>(
     `/rides/${rideId}/passengers/${passengerId}/arrived`,
+    undefined,
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return res.data;
 }
@@ -360,9 +375,12 @@ export async function passengerArrived(
 export async function passengerPickup(
   rideId: string,
   passengerId: string,
+  options?: { timeoutMs?: number },
 ): Promise<PassengerLifecycleResult> {
   const res = await api.post<PassengerLifecycleResult>(
     `/rides/${rideId}/passengers/${passengerId}/pickup`,
+    undefined,
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return res.data;
 }
@@ -375,11 +393,49 @@ export async function passengerPickup(
 export async function passengerDropoff(
   rideId: string,
   passengerId: string,
+  options?: { timeoutMs?: number },
 ): Promise<PassengerLifecycleResult> {
   const res = await api.post<PassengerLifecycleResult>(
     `/rides/${rideId}/passengers/${passengerId}/dropoff`,
+    undefined,
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return res.data;
+}
+
+/**
+ * "Rider didn't show": cancel a passenger who hasn't come out three minutes
+ * after the driver arrived (ARRIVED -> CANCELLED). The server checks the time.
+ */
+export async function passengerNoShow(
+  rideId: string,
+  passengerId: string,
+  options?: { timeoutMs?: number },
+): Promise<PassengerLifecycleResult> {
+  const res = await api.post<PassengerLifecycleResult>(
+    `/rides/${rideId}/passengers/${passengerId}/no-show`,
+    undefined,
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
+  );
+  return res.data;
+}
+
+/** A precomputed road route between two zones (GET /zones/routes). */
+export interface ZoneRoute {
+  fromZoneId: string;
+  toZoneId: string;
+  /** Google encoded polyline; decode with decodePolyline from @rida/shared. */
+  polyline: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  /** "osrm" | "ors" — decides the attribution the map shows. */
+  provider?: string;
+}
+
+/** Every stored zone-to-zone road route. Empty until the precompute script has run. */
+export async function getZoneRoutes(): Promise<ZoneRoute[]> {
+  const res = await api.get<{ routes: ZoneRoute[] }>("/zones/routes");
+  return readList<ZoneRoute>(res.data, "routes");
 }
 
 /**
@@ -389,9 +445,12 @@ export async function passengerDropoff(
 export async function passengerCancel(
   rideId: string,
   passengerId: string,
+  options?: { timeoutMs?: number },
 ): Promise<PassengerLifecycleResult> {
   const res = await api.post<PassengerLifecycleResult>(
     `/rides/${rideId}/passengers/${passengerId}/cancel`,
+    undefined,
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return res.data;
 }

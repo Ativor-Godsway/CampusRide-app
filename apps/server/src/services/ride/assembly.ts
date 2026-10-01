@@ -7,8 +7,8 @@ import {
   RideNotFillableError,
   RideNotReadyToDepartError,
 } from "./errors";
-import { applyRideTransition } from "./rideService";
-import { joinSharedRideTx } from "./rideService";
+import type { Ride } from "@prisma/client";
+import { applyRideTransition, joinLoadedSharedRideTx } from "./rideService";
 
 /**
  * `maxWait` (time allowed to acquire a pooled connection before the
@@ -63,51 +63,55 @@ export async function addRiderToCar(
   driverId: string,
   anchorRideId: string,
   requestRideId: string,
-): Promise<RideWithPassengers> {
+): Promise<RideWithPassengers & { changed: boolean }> {
   return prisma.$transaction(async (tx) => {
-    const anchor = await tx.ride.findUniqueOrThrow({
-      where: { id: anchorRideId },
-      include: { passengers: true },
-    });
-
+    // Lock the car first: two quick "Add" taps (or two drivers' worth of
+    // retries) could otherwise both see a free seat.
+    const [anchor] = await tx.$queryRaw<Ride[]>`SELECT * FROM "Ride" WHERE id = ${anchorRideId} FOR UPDATE`;
+    if (!anchor) throw new RideNotFillableError(anchorRideId, "MISSING");
     if (anchor.driverId !== driverId) {
       throw new NotRideOwnerError(anchorRideId, driverId);
     }
-    if (anchor.status !== "MATCHED" && anchor.status !== "ARRIVED") {
-      throw new RideNotFillableError(anchorRideId, anchor.status);
-    }
-    if (anchor.occupancy >= PRICING.MAX_SHARED_OCCUPANCY) {
-      throw new NoSeatsAvailableError(anchorRideId);
-    }
-
-    const request = await tx.ride.findUniqueOrThrow({ where: { id: requestRideId } });
-
-    if (request.status !== "REQUESTED" || request.driverId !== null || request.type !== "SHARED") {
-      throw new RequestRideUnavailableError(requestRideId);
-    }
-
-    const absorbed = await tx.ride.updateMany({
-      where: { id: requestRideId, status: "REQUESTED", driverId: null },
-      data: {
-        status: "CANCELLED",
-        cancelReason: "MERGED_INTO_ANOTHER_RIDE",
-        mergedIntoRideId: anchorRideId,
-      },
+    const passengers = await tx.ridePassenger.findMany({
+      where: { rideId: anchorRideId },
+      orderBy: { createdAt: "asc" },
     });
-    if (absorbed.count !== 1) {
+
+    // Absorb the request in one conditional statement that only one caller
+    // can win (mirrors claimRide).
+    const [request] = await tx.$queryRaw<Ride[]>`
+      UPDATE "Ride"
+      SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId}
+      WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
+        AND ${anchor.status}::text IN ('MATCHED', 'ARRIVED')
+        AND ${anchor.occupancy} < ${PRICING.MAX_SHARED_OCCUPANCY}
+      RETURNING *`;
+
+    if (!request) {
+      // A retry of an add that already landed is a success, not an error.
+      const existing = await tx.ride.findUnique({
+        where: { id: requestRideId },
+        select: { mergedIntoRideId: true },
+      });
+      if (existing?.mergedIntoRideId === anchorRideId) {
+        return { ...anchor, passengers, changed: false };
+      }
+      if (anchor.status !== "MATCHED" && anchor.status !== "ARRIVED") {
+        throw new RideNotFillableError(anchorRideId, anchor.status);
+      }
+      if (anchor.occupancy >= PRICING.MAX_SHARED_OCCUPANCY) {
+        throw new NoSeatsAvailableError(anchorRideId);
+      }
       throw new RequestRideUnavailableError(requestRideId);
     }
 
-    await joinSharedRideTx(tx, anchorRideId, {
+    const joined = await joinLoadedSharedRideTx(tx, anchor, passengers, {
       riderId: request.riderId,
       pickupZoneId: request.pickupZoneId,
       dropoffZoneId: request.dropoffZoneId,
     });
 
-    return tx.ride.findUniqueOrThrow({
-      where: { id: anchorRideId },
-      include: { passengers: true },
-    });
+    return { ...joined.ride, passengers: joined.passengers, changed: true };
   }, TX_OPTIONS);
 }
 

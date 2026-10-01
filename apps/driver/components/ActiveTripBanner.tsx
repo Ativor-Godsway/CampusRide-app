@@ -14,7 +14,7 @@ import { tripHref, tripStatusLine } from "../lib/activeTrip";
 
 /**
  * "You're on a trip" bar across the top of every driver tab. Tapping it goes
- * back to where the trip is run: the trip screen (LONE) or Home (SHARED).
+ * back to the trip screen (Ride alone and Shared alike).
  */
 export function ActiveTripBanner({ ride }: { ride: RideWithZones }) {
   const router = useRouter();
@@ -24,7 +24,7 @@ export function ActiveTripBanner({ ride }: { ride: RideWithZones }) {
   return (
     <SafeAreaView edges={["top"]} style={styles.safeArea}>
       <PressableScale
-        onPress={() => (href === "/" ? router.navigate("/") : router.push(href))}
+        onPress={() => router.push(href)}
         accessibilityRole="button"
         accessibilityLabel={`${status}. Open your trip.`}
         style={styles.banner}

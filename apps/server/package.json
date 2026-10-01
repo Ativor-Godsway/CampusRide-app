@@ -22,6 +22,7 @@
     "sim:riders": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/riders.ts",
     "sim:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/cleanupCli.ts",
     "sim:approve-driver": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/approveDriverCli.ts",
+    "routes:precompute": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/precomputeZoneRoutes.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src prisma",

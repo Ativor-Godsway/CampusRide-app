@@ -26,6 +26,8 @@ import {
   useAuth,
 } from "@rida/mobile-shared";
 import { driverActiveRideQueryKey } from "./activeTrip";
+import { useDriverLocation, useLocationDemand } from "./location";
+import { zonesQueryKey } from "./zones";
 import { eligibleRidesQueryKey } from "./requests";
 
 /**
@@ -46,7 +48,7 @@ interface DriverPresence {
   isOnline: boolean;
   /** A retry is under way because the server didn't answer in time. */
   waking: boolean;
-  /** The latest GPS fix while online (for distances), or null. */
+  /** The latest position while online (for distances), or null. Real GPS, or the dev-only fake. */
   position: LatLng | null;
   toggle: () => void;
 }
@@ -59,14 +61,12 @@ export function useDriverPresence(): DriverPresence {
   return value;
 }
 
-export const zonesQueryKey = ["zones"] as const;
+export { zonesQueryKey } from "./zones";
 
 /** Long enough for a sleeping server to wake; the switch has already flipped. */
 const AVAILABILITY_TIMEOUT_MS = 20_000;
 /** Pauses before each retry of a transient failure. Four attempts in all. */
 const RETRY_DELAYS_MS = [1_500, 3_000, 5_000];
-/** A last-known fix older than this is ignored for the zone (the driver may have moved far). */
-const LAST_KNOWN_MAX_AGE_MS = 10 * 60_000;
 
 function httpStatus(err: unknown): number | undefined {
   return (err as { response?: { status?: number } } | null)?.response?.status;
@@ -83,7 +83,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   // True once the server has agreed with `isOnline` (zone tracking waits for it).
   const [confirmed, setConfirmed] = useState(true);
   const [waking, setWaking] = useState(false);
-  const [position, setPosition] = useState<LatLng | null>(null);
+  const location = useDriverLocation();
 
   const isOnlineRef = useRef(false);
   const seqRef = useRef(0);
@@ -106,7 +106,6 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     applyOnline(id !== null && Boolean(user?.driver?.isOnline));
     setConfirmed(true);
     setWaking(false);
-    setPosition(null);
     zoneStateRef.current = { lastSentZoneId: null, lastSentAt: null };
   }, [isDriver, user, applyOnline]);
 
@@ -170,7 +169,6 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     setConfirmed(false);
 
     if (!next) {
-      setPosition(null);
       sendAvailability(seq, false, undefined);
       return;
     }
@@ -187,42 +185,40 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // The last known fix is instant; a fresh fix refines the zone later.
+      // The current or last known fix is instant; a fresh fix refines the zone later.
       let zoneId: string | undefined;
       try {
-        const [allZones, last] = await Promise.all([
+        const [allZones, coords] = await Promise.all([
           queryClient.fetchQuery({ queryKey: zonesQueryKey, queryFn: getZones, staleTime: Infinity }),
-          Location.getLastKnownPositionAsync({ maxAge: LAST_KNOWN_MAX_AGE_MS }),
+          location.currentOrLastKnown(),
         ]);
-        if (last) {
-          const coords = { latitude: last.coords.latitude, longitude: last.coords.longitude };
-          setPosition(coords);
-          zoneId = nearestZone(coords.latitude, coords.longitude, allZones)?.id;
-        }
+        if (coords) zoneId = nearestZone(coords.latitude, coords.longitude, allZones)?.id;
       } catch {
         // No zone yet: the first fresh fix sets it.
       }
       sendAvailability(seq, true, zoneId);
     })();
-  }, [applyOnline, queryClient, sendAvailability]);
+  }, [applyOnline, queryClient, sendAvailability, location]);
 
   // ─── Keep the zone current while online ─────────────────────────────────
+  // The position comes from lib/location (real GPS, or the dev-only fake), so
+  // the server's zone for this driver follows whichever one is in use.
   const trackZone = isDriver && isOnline && confirmed && Boolean(zones?.length);
-  useEffect(() => {
-    if (!trackZone || !zones) return;
-    let cancelled = false;
-    let sub: Location.LocationSubscription | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    let latestZoneId: string | null = null;
+  useLocationDemand("presence", isDriver && isOnline);
+  const zoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const latestZoneIdRef = useRef<string | null>(null);
+  const trackZoneRef = useRef(trackZone);
+  trackZoneRef.current = trackZone;
 
-    const send = async (zoneId: string) => {
+  const sendZone = useCallback(
+    async (zoneId: string) => {
       const previous = zoneStateRef.current;
       zoneStateRef.current = { lastSentZoneId: zoneId, lastSentAt: Date.now() };
       try {
         await updateDriverZone(zoneId);
         void queryClient.invalidateQueries({ queryKey: eligibleRidesQueryKey });
       } catch (err) {
-        if (cancelled) return;
+        if (!trackZoneRef.current) return;
         if (httpStatus(err) === 409) {
           // The server has this driver offline; show the truth.
           seqRef.current += 1;
@@ -233,42 +229,37 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
         // Retry on a later fix, still throttled.
         zoneStateRef.current = { ...zoneStateRef.current, lastSentZoneId: previous.lastSentZoneId };
       }
-    };
+    },
+    [queryClient, applyOnline],
+  );
 
-    const schedule = () => {
-      if (cancelled) return;
-      const plan = planZoneUpdate(zoneStateRef.current, latestZoneId, Date.now());
-      if (plan.kind === "send" && latestZoneId) void send(latestZoneId);
-      if (plan.kind === "wait" && !timer) {
-        timer = setTimeout(() => {
-          timer = null;
-          schedule();
-        }, plan.delayMs);
-      }
-    };
+  const scheduleZone = useCallback(() => {
+    if (!trackZoneRef.current) return;
+    const plan = planZoneUpdate(zoneStateRef.current, latestZoneIdRef.current, Date.now());
+    if (plan.kind === "send" && latestZoneIdRef.current) void sendZone(latestZoneIdRef.current);
+    if (plan.kind === "wait" && !zoneTimerRef.current) {
+      zoneTimerRef.current = setTimeout(() => {
+        zoneTimerRef.current = null;
+        scheduleZone();
+      }, plan.delayMs);
+    }
+  }, [sendZone]);
 
-    void (async () => {
-      const perm = await Location.getForegroundPermissionsAsync();
-      if (cancelled || perm.status !== "granted") return;
-      const subscription = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.Balanced, timeInterval: 10_000, distanceInterval: 25 },
-        (pos) => {
-          const coords = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-          setPosition(coords);
-          latestZoneId = nearestZone(coords.latitude, coords.longitude, zones)?.id ?? null;
-          schedule();
-        },
-      );
-      if (cancelled) subscription.remove();
-      else sub = subscription;
-    })();
+  const lat = location.position?.latitude;
+  const lng = location.position?.longitude;
+  useEffect(() => {
+    if (!trackZone || !zones || lat === undefined || lng === undefined) return;
+    latestZoneIdRef.current = nearestZone(lat, lng, zones)?.id ?? null;
+    scheduleZone();
+  }, [trackZone, zones, lat, lng, scheduleZone]);
 
-    return () => {
-      cancelled = true;
-      sub?.remove();
-      if (timer) clearTimeout(timer);
-    };
-  }, [trackZone, zones, queryClient, applyOnline]);
+  useEffect(() => {
+    if (trackZone) return;
+    if (zoneTimerRef.current) clearTimeout(zoneTimerRef.current);
+    zoneTimerRef.current = null;
+  }, [trackZone]);
+
+  const position = isDriver && isOnline ? location.position : null;
 
   const value = useMemo(
     () => ({ isOnline: isDriver && isOnline, waking, position, toggle }),

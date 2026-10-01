@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Ride } from "@prisma/client";
 import { getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
 import { emitDriverBroadcast } from "../../realtime/rideSocket";
 import { DriverHasActiveRideError, RideAlreadyClaimedError } from "./errors";
@@ -111,14 +111,20 @@ export async function claimRide(prisma: PrismaClient, rideId: string, driverId: 
     throw new DriverHasActiveRideError(existingActiveRide);
   }
 
-  const result = await prisma.ride.updateMany({
-    where: { id: rideId, status: "REQUESTED", driverId: null },
-    data: { driverId, status: "MATCHED" },
-  });
+  const claimed = await claimIfOpen(prisma, rideId, driverId);
+  if (!claimed) throw new RideAlreadyClaimedError(rideId);
+  return claimed;
+}
 
-  if (result.count !== 1) {
-    throw new RideAlreadyClaimedError(rideId);
-  }
-
-  return prisma.ride.findUniqueOrThrow({ where: { id: rideId } });
+/**
+ * The claim itself: one conditional UPDATE that also returns the claimed row
+ * (it used to be an update and then a second query to read the row back).
+ * Null when the ride was not open: already claimed, cancelled or timed out.
+ */
+export async function claimIfOpen(prisma: PrismaClient, rideId: string, driverId: string): Promise<Ride | null> {
+  const rows = await prisma.$queryRaw<Ride[]>`
+    UPDATE "Ride" SET "driverId" = ${driverId}, status = 'MATCHED'
+    WHERE id = ${rideId} AND status = 'REQUESTED' AND "driverId" IS NULL
+    RETURNING *`;
+  return rows[0] ?? null;
 }

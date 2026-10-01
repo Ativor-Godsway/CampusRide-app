@@ -1,21 +1,21 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import type { PaymentMethod, PassengerStatus, RideSource } from "@rida/shared";
+import type { PaymentMethod, PassengerStatus, RideSource, RideStatus } from "@rida/shared";
 import { getLoneFare, getSharedFarePerRider, getSharedTotalFare, getDriverGrossForRide, splitFare, designateBestFit, PRICING } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
 import { getDriverInfo } from "../services/user/driverInfo";
-import { claimRide } from "../services/ride/dispatch";
+import { claimIfOpen } from "../services/ride/dispatch";
 import { departRide, addRiderToCar } from "../services/ride/assembly";
-import type { RideWithPassengers } from "../services/ride/assembly";
+import { getZoneAdjacency, getZoneMap } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
 import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
 import {
-  DriverHasActiveRideError,
-  RideAlreadyClaimedError,
   InvalidTransitionError,
+  NoShowTooEarlyError,
+  PassengerNotFoundError,
   NotRideOwnerError,
   RideNotFillableError,
   NoSeatsAvailableError,
@@ -64,29 +64,48 @@ async function finalizeRideCompletion(
   prisma: PrismaClient,
   ride: { id: string; type: "LONE" | "SHARED"; occupancy: number; paymentMethod: string; source: RideSource },
   driverUserId: string,
+  /** The ride's passengers, when the caller already has them (saves reading them again). */
+  passengers?: ReadonlyArray<{ riderId: string; status: string; lockedFare: number | null }>,
 ): Promise<void> {
   const paymentMethod = ride.paymentMethod as PaymentMethod;
 
   if (paymentMethod === "CASH") {
+    // A shared car's fare is per rider actually carried. occupancy is not
+    // that: it drops as seats are cancelled, and a trip that ends by
+    // cancelling its last waiting rider completes with occupancy 0 (which
+    // getSharedFarePerRider rejects). Same count the ride history uses.
+    const carried = passengers?.filter((p) => p.status === "DROPPED_OFF").length ?? ride.occupancy;
     const farePesewasForLedger =
       ride.type === "LONE"
         ? getLoneFare()
-        : getSharedFarePerRider(ride.occupancy) * ride.occupancy;
+        : carried > 0
+          ? getSharedFarePerRider(carried) * carried
+          : 0;
     const { commission } = splitFare(farePesewasForLedger);
-    await prisma.commissionLedger.upsert({
-      where: { rideId: ride.id },
-      update: {},
-      create: { driverUserId, rideId: ride.id, amountPesewas: commission },
+    // createMany + skipDuplicates is a single INSERT … ON CONFLICT DO NOTHING
+    // (an upsert is two round trips); repeating it is harmless.
+    await prisma.commissionLedger.createMany({
+      data: [{ driverUserId, rideId: ride.id, amountPesewas: commission }],
+      skipDuplicates: true,
     });
   }
 
-  const summary = await getRidePaymentSummary(prisma, ride.id);
-  for (const p of summary.perPassenger) {
+  // A cash ride has no Payment rows, so its per-rider summary is known from
+  // the passengers alone; MoMo needs the payment records.
+  const perPassenger =
+    paymentMethod === "CASH" && passengers
+      ? passengers
+          .filter((p) => p.status !== "CANCELLED" && p.lockedFare != null)
+          .map((p) => ({ riderId: p.riderId, farePesewas: p.lockedFare ?? 0, status: "PENDING" as const }))
+      : (await getRidePaymentSummary(prisma, ride.id)).perPassenger;
+  const totalFarePesewas = perPassenger.reduce((sum, p) => sum + p.farePesewas, 0);
+
+  for (const p of perPassenger) {
     emitToRider(p.riderId, "ride:completed", {
       rideId: ride.id,
       fareSummary: {
         yourFarePesewas: p.farePesewas,
-        totalFarePesewas: summary.totalExpectedPesewas,
+        totalFarePesewas,
         paymentMethod,
         paymentStatus: p.status,
       },
@@ -95,17 +114,59 @@ async function finalizeRideCompletion(
 
   // USSD-origin riders have no app to receive ride:completed on, so they get
   // an SMS instead — covers both this ride-level /complete (LONE) and the
-  // per-passenger last-dropoff auto-completion (SHARED), since both call
-  // this function. Fire-and-forget, never throws into the transition path.
+  // per-passenger last-dropoff auto-completion, since both call this
+  // function. Fire-and-forget, never throws into the transition path.
   if (ride.source === "USSD") {
     void notifyUssdRiders(
       prisma,
-      summary.perPassenger.map((p) => p.riderId),
+      perPassenger.map((p) => p.riderId),
       "Trip complete. Thanks for riding CampusRide.",
     );
   }
 }
 
+/** A refusal the driver app shows as-is: plain words plus a stable code. */
+function refuse(reply: FastifyReply, status: number, code: string, error: string) {
+  return reply.code(status).send({ error, code });
+}
+
+/**
+ * Why a passenger action was refused, in words a driver understands.
+ * `from` is the passenger's status when the action arrived.
+ */
+function passengerRefusal(from: string, to: string): string {
+  if (from === "CANCELLED") return "This rider has cancelled.";
+  if (from === "DROPPED_OFF") return "This rider has already been dropped off.";
+  if (to === "CANCELLED" && from === "ARRIVED") {
+    return "You've already arrived. If the rider doesn't come out, use \"Rider didn't show\" after 3 minutes.";
+  }
+  if (to === "CANCELLED" && from === "PICKED_UP") return "This rider is already in the car. Drop them off instead.";
+  if (to === "PICKED_UP" && from === "WAITING") return "Mark that you're at the pickup first.";
+  if (to === "DROPPED_OFF") return "This rider hasn't been picked up yet.";
+  if (to === "ARRIVED") return "This rider has already been picked up.";
+  return "That doesn't fit where this trip is now. Pull down to refresh.";
+}
+
+/** Only these PassengerInCar fields go to the app — no internal columns. */
+function passengerForApp(
+  p: { id: string; riderId: string; pickupZoneId: string; dropoffZoneId: string; lockedFare: number | null; status: string; arrivedAt: Date | null },
+  zones: Map<string, { name: string }>,
+  rider?: { name: string; phone: string } | null,
+) {
+  return {
+    id: p.id,
+    riderId: p.riderId,
+    riderName: rider?.name ?? null,
+    riderPhone: rider?.phone ?? null,
+    pickupZoneId: p.pickupZoneId,
+    dropoffZoneId: p.dropoffZoneId,
+    pickupZoneName: zones.get(p.pickupZoneId)?.name ?? "",
+    dropoffZoneName: zones.get(p.dropoffZoneId)?.name ?? "",
+    lockedFare: p.lockedFare,
+    status: p.status as PassengerStatus,
+    arrivedAt: p.arrivedAt ? p.arrivedAt.toISOString() : null,
+  };
+}
 
 export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient): void {
   /**
@@ -190,28 +251,33 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     return reply.code(200).send({ zoneId });
   });
 
-  /** The driver's currently active ride (MATCHED, ARRIVED, or IN_PROGRESS), if any. */
+  /**
+   * The driver's currently active ride (MATCHED, ARRIVED, or IN_PROGRESS), if
+   * any, with every passenger (name, phone, zones, status, arrival time) —
+   * everything the trip screen needs. Three queries: the ride, its
+   * passengers, their riders; zones come from the in-memory zone cache.
+   */
   app.get("/driver/rides/active", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const userId = request.user!.userId;
 
-    const ride = await prisma.ride.findFirst({
-      where: {
-        driverId: userId,
-        status: { in: [...ACTIVE_DRIVER_STATUSES] },
-      },
-      include: {
-        pickupZone: true,
-        dropoffZone: true,
-        // Zone names nested per-passenger (Phase 6b-3) — the driving view of a
-        // SHARED ride (IN_PROGRESS) needs each passenger's own pickup/dropoff
-        // for the per-passenger pickup/dropoff list, same shape as
-        // fill-suggestions' PassengerInCar.
-        passengers: { include: { pickupZone: true, dropoffZone: true }, orderBy: { createdAt: "asc" } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const [ride, zones] = await Promise.all([
+      prisma.ride.findFirst({
+        where: {
+          driverId: userId,
+          status: { in: [...ACTIVE_DRIVER_STATUSES] },
+        },
+        include: {
+          passengers: {
+            orderBy: { createdAt: "asc" },
+            include: { rider: { select: { id: true, name: true, phone: true } } },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      getZoneMap(prisma),
+    ]);
 
     if (!ride) return reply.code(200).send({ ride: null });
 
@@ -222,30 +288,19 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // active ride and dropped the moment it completes (this route only ever
     // returns a live ride), which keeps rider contact details tied to the
     // trip that justifies them.
-    const riderIds = Array.from(new Set([ride.riderId, ...passengers.map((p) => p.riderId)]));
-    const riders = await prisma.user.findMany({
-      where: { id: { in: riderIds } },
-      select: { id: true, name: true, phone: true },
-    });
-    const riderById = new Map(riders.map((r) => [r.id, r]));
-    const owner = riderById.get(ride.riderId) ?? null;
+    const owner =
+      passengers.find((p) => p.riderId === ride.riderId)?.rider ??
+      (await prisma.user.findUnique({ where: { id: ride.riderId }, select: { id: true, name: true, phone: true } }));
 
     return reply.code(200).send({
       ride: {
         ...rideFields,
+        pickupZone: zones.get(ride.pickupZoneId) ?? null,
+        dropoffZone: zones.get(ride.dropoffZoneId) ?? null,
         // The ride owner, for a LONE ride that has no RidePassenger row.
         riderName: owner?.name ?? null,
         riderPhone: owner?.phone ?? null,
-        passengers: passengers.map((p) => ({
-          id: p.id,
-          riderId: p.riderId,
-          riderName: riderById.get(p.riderId)?.name ?? null,
-          riderPhone: riderById.get(p.riderId)?.phone ?? null,
-          pickupZoneName: p.pickupZone.name,
-          dropoffZoneName: p.dropoffZone.name,
-          lockedFare: p.lockedFare,
-          status: p.status,
-        })),
+        passengers: passengers.map((p) => passengerForApp(p, zones, p.rider)),
       },
     });
   });
@@ -420,7 +475,14 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
   /**
    * Atomically claim a REQUESTED ride (first-to-claim-wins).
-   * On success emits ride:status (MATCHED) + ride:driver_assigned to the ride room.
+   *
+   * Two queries: one reads the driver's standing and any trip they already
+   * hold, one claims the ride and returns it. The rider is told
+   * (ride:driver_assigned) AFTER the reply, so building that payload never
+   * delays the driver.
+   *
+   * Safe to retry: claiming a ride this driver already holds answers 200 —
+   * the app retries after a timeout, and the first attempt often landed.
    */
   app.post("/rides/:id/claim", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
@@ -428,37 +490,51 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
 
-    const driver = await prisma.driver.findUnique({ where: { userId } });
-    if (!driver?.isApproved || !driver.isOnline) {
-      return reply.code(403).send({ error: "Driver must be online and approved to claim rides" });
+    const [standing] = await prisma.$queryRaw<
+      Array<{ isApproved: boolean; isOnline: boolean; activeRideId: string | null }>
+    >`
+      SELECT d."isApproved", d."isOnline",
+        (SELECT r.id FROM "Ride" r
+          WHERE r."driverId" = ${userId} AND r.status IN ('MATCHED', 'ARRIVED', 'IN_PROGRESS')
+          ORDER BY r."createdAt" DESC LIMIT 1) AS "activeRideId"
+      FROM "Driver" d WHERE d."userId" = ${userId}`;
+
+    if (standing?.activeRideId === rideId) {
+      const ride = await prisma.ride.findUniqueOrThrow({ where: { id: rideId } });
+      return reply.code(200).send({ ride });
+    }
+    if (!standing?.isApproved || !standing.isOnline) {
+      return refuse(reply, 403, "NOT_ONLINE", "Go online to accept requests.");
+    }
+    if (standing.activeRideId) {
+      return reply.code(409).send({
+        error: "You already have a trip. Finish it before accepting another request.",
+        code: "DRIVER_HAS_ACTIVE_RIDE",
+        existingRide: { id: standing.activeRideId },
+      });
     }
 
-    try {
-      const ride = await claimRide(prisma, rideId, userId);
+    const ride = await claimIfOpen(prisma, rideId, userId);
+    if (!ride) {
+      return refuse(
+        reply,
+        409,
+        "RIDE_NOT_AVAILABLE",
+        "Another driver accepted this request first, or the rider cancelled it.",
+      );
+    }
 
-      const driverInfo = await getDriverInfo(prisma, userId);
+    reply.code(200).send({ ride });
 
+    void (async () => {
       emitRideEvent(rideId, "ride:status", { rideId, status: ride.status });
-      if (driverInfo) {
-        emitRideEvent(rideId, "ride:driver_assigned", { rideId, ...driverInfo });
-      }
-
+      const driverInfo = await getDriverInfo(prisma, userId);
+      if (driverInfo) emitRideEvent(rideId, "ride:driver_assigned", { rideId, ...driverInfo });
       if (ride.source === "USSD") {
         void notifyUssdRider(prisma, ride.riderId, "Driver matched! They're on the way.");
       }
-
-      return reply.code(200).send({ ride });
-    } catch (err) {
-      if (err instanceof RideAlreadyClaimedError) {
-        return reply.code(409).send({ error: "Ride already claimed by another driver" });
-      }
-      if (err instanceof DriverHasActiveRideError) {
-        return reply
-          .code(409)
-          .send({ error: err.message, existingRide: err.existingRide });
-      }
-      throw err;
-    }
+    })().catch((err) => request.log.warn({ err, rideId }, "claim: rider notification failed"));
+    return reply;
   });
 
   /**
@@ -577,8 +653,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply.code(200).send({ rides: [] });
     }
 
-    // Full adjacency graph — small table (~30 edges for 15 zones), fetched once.
-    const allAdjacencies = await prisma.zoneAdjacency.findMany();
+    // Adjacency and zones never change at runtime: served from memory.
+    const [allAdjacencies, zoneMap] = await Promise.all([getZoneAdjacency(prisma), getZoneMap(prisma)]);
 
     // Zones where this driver is eligible to pick up.
     const driverEligibleZones = computeEligibleZoneSet(driver.currentZoneId, allAdjacencies);
@@ -599,7 +675,6 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         // is the whole point of an explicit reject over letting it time out.
         rejections: { none: { driverUserId: userId } },
       },
-      include: { pickupZone: true, dropoffZone: true },
       orderBy: { createdAt: "desc" },
     });
 
@@ -647,9 +722,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
       return {
         rideId: ride.id,
-        pickupZoneName: ride.pickupZone.name,
+        pickupZoneName: zoneMap.get(ride.pickupZoneId)?.name ?? "",
         pickupZoneId: ride.pickupZoneId,
-        dropoffZoneName: ride.dropoffZone.name,
+        dropoffZoneName: zoneMap.get(ride.dropoffZoneId)?.name ?? "",
         dropoffZoneId: ride.dropoffZoneId,
         type: ride.type as "LONE" | "SHARED",
         /** Riders on this request (a fresh request is its requester alone). */
@@ -683,15 +758,18 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
 
-    // Load anchor with passengers (including zone names) for response + suggestFillsForRide
-    const anchor = await prisma.ride.findUnique({
-      where: { id: rideId },
-      include: {
-        passengers: { include: { pickupZone: true, dropoffZone: true }, orderBy: { createdAt: "asc" } },
-        pickupZone: true,
-        dropoffZone: true,
-      },
-    });
+    const [anchor, allCandidates, adjacency, zones] = await Promise.all([
+      prisma.ride.findUnique({
+        where: { id: rideId },
+        include: { passengers: { orderBy: { createdAt: "asc" } } },
+      }),
+      prisma.ride.findMany({
+        where: { status: "REQUESTED", driverId: null, type: "SHARED" },
+        orderBy: { createdAt: "desc" },
+      }),
+      getZoneAdjacency(prisma),
+      getZoneMap(prisma),
+    ]);
     if (!anchor) return reply.code(404).send({ error: "Ride not found" });
     if (anchor.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
     if (anchor.type !== "SHARED") return reply.code(400).send({ error: "Ride is not SHARED" });
@@ -699,69 +777,41 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply.code(400).send({ error: "Ride is not in an assembly state" });
     }
 
-    const [adjacency, allCandidates] = await Promise.all([
-      prisma.zoneAdjacency.findMany(),
-      prisma.ride.findMany({
-        where: { status: "REQUESTED", driverId: null, type: "SHARED" },
-        include: { pickupZone: true, dropoffZone: true },
-        orderBy: { createdAt: "desc" },
-      }),
-    ]);
-
-    // suggestFillsForRide needs RideWithPassengers (plain passengers include, no zone nesting).
-    // anchor satisfies this structurally — cast is safe. Its own internal
-    // areCombinable filter is exactly what makes this the "compatible,
-    // ranked" subset — left untouched, its contract/tests stay as-is.
-    const compatibleRanked = suggestFillsForRide(
-      anchor as unknown as RideWithPassengers,
-      allCandidates,
-      adjacency,
-      new Date(),
-    );
+    // suggestFillsForRide's internal areCombinable filter is exactly what
+    // makes this the "compatible, ranked" subset — left untouched.
+    const compatibleRanked = suggestFillsForRide(anchor, allCandidates, adjacency, new Date());
     const compatibleIds = new Set(compatibleRanked.map((r) => r.id));
-    const zoneMap = new Map(allCandidates.map((r) => [r.id, r]));
+    const byId = new Map(allCandidates.map((r) => [r.id, r]));
     const existingRiderIds = new Set(anchor.passengers.map((p) => p.riderId));
     const isFull = anchor.occupancy >= PRICING.MAX_SHARED_OCCUPANCY;
 
     const toSuggestion = (r: (typeof allCandidates)[number], compatible: boolean) => ({
       requestRideId: r.id,
-      pickupZoneName: r.pickupZone.name,
+      pickupZoneName: zones.get(r.pickupZoneId)?.name ?? "",
       pickupZoneId: r.pickupZoneId,
-      dropoffZoneName: r.dropoffZone.name,
+      dropoffZoneName: zones.get(r.dropoffZoneId)?.name ?? "",
       dropoffZoneId: r.dropoffZoneId,
       createdAt: r.createdAt.toISOString(),
       compatible,
     });
 
-    const compatibleSuggestions = isFull
+    const suggestions = isFull
       ? []
-      : compatibleRanked
-          .map((r) => zoneMap.get(r.id))
-          .filter((r): r is NonNullable<typeof r> => r !== undefined)
-          .map((r) => toSuggestion(r, true));
+      : [
+          ...compatibleRanked
+            .map((r) => byId.get(r.id))
+            .filter((r): r is NonNullable<typeof r> => r !== undefined)
+            .map((r) => toSuggestion(r, true)),
+          ...allCandidates
+            .filter((r) => !compatibleIds.has(r.id) && !existingRiderIds.has(r.riderId))
+            .map((r) => toSuggestion(r, false)),
+        ];
 
-    const restSuggestions = isFull
-      ? []
-      : allCandidates
-          .filter((r) => !compatibleIds.has(r.id) && !existingRiderIds.has(r.riderId))
-          .map((r) => toSuggestion(r, false));
-
-    const suggestions = [...compatibleSuggestions, ...restSuggestions];
-
-    // isActivePassengerStatus (WAITING/ARRIVED/PICKED_UP) — NOT a hardcoded
-    // WAITING||PICKED_UP list, which would silently drop a passenger the
-    // moment the driver marks them ARRIVED ("I'm here"), making their row
-    // vanish from this list on the very next poll.
+    // isActivePassengerStatus (WAITING/ARRIVED/PICKED_UP) — a passenger the
+    // driver has marked ARRIVED still occupies a seat.
     const currentPassengers = anchor.passengers
       .filter((p) => isActivePassengerStatus(p.status))
-      .map((p) => ({
-        id: p.id,
-        riderId: p.riderId,
-        pickupZoneName: p.pickupZone.name,
-        dropoffZoneName: p.dropoffZone.name,
-        lockedFare: p.lockedFare,
-        status: p.status,
-      }));
+      .map((p) => passengerForApp(p, zones));
 
     return reply.code(200).send({
       occupancy: anchor.occupancy,
@@ -771,62 +821,55 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   });
 
   /**
-   * Driver adds a compatible SHARED request to their claimed car.
-   * Wraps the existing atomic `addRiderToCar` — no new business logic.
-   * On success returns the updated passenger list with current locked fares.
+   * Driver adds a pending SHARED request to their claimed car. Wraps the
+   * atomic, car-locking `addRiderToCar`. Safe to retry: adding a rider who is
+   * already in this car answers 200.
    */
   app.post("/rides/:id/add-passenger", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
-    const body = request.body as { requestRideId?: unknown };
+    const body = (request.body ?? {}) as { requestRideId?: unknown };
 
     if (typeof body.requestRideId !== "string" || body.requestRideId.length === 0) {
       return reply.code(400).send({ error: "requestRideId (string) is required" });
     }
+    const requestRideId = body.requestRideId;
 
     try {
-      const updatedAnchor = await addRiderToCar(prisma, userId, rideId, body.requestRideId);
+      const [car, zones] = await Promise.all([addRiderToCar(prisma, userId, rideId, requestRideId), getZoneMap(prisma)]);
 
-      // #7 merged-rider reach: addRiderToCar set the absorbed request to
-      // CANCELLED/MERGED_INTO_ANOTHER_RIDE but broadcasts nothing to its room.
-      // That rider's app is still tracking the absorbed ride, so emit
-      // ride:status to its room — the client sees CANCELLED + mergedIntoRideId
-      // and follows to this anchor in ~1-2s instead of waiting on the 12s poll.
-      emitRideEvent(body.requestRideId, "ride:status", {
-        rideId: body.requestRideId,
-        status: "CANCELLED",
+      if (car.changed) {
+        // #7 merged-rider reach: the absorbed request is now CANCELLED /
+        // MERGED_INTO_ANOTHER_RIDE. That rider's app is still tracking it, so
+        // tell its room — the client follows mergedIntoRideId to this car.
+        emitRideEvent(requestRideId, "ride:status", { rideId: requestRideId, status: "CANCELLED" });
+      }
+
+      return reply.code(200).send({
+        occupancy: car.occupancy,
+        passengers: car.passengers
+          .filter((p) => isActivePassengerStatus(p.status))
+          .map((p) => passengerForApp(p, zones)),
       });
-
-      // Reload with zone names for the response.
-      const withZones = await prisma.ride.findUniqueOrThrow({
-        where: { id: rideId },
-        include: { passengers: { include: { pickupZone: true, dropoffZone: true }, orderBy: { createdAt: "asc" } } },
-      });
-
-      const passengers = withZones.passengers
-        .filter((p) => isActivePassengerStatus(p.status))
-        .map((p) => ({
-          id: p.id,
-          riderId: p.riderId,
-          pickupZoneName: p.pickupZone.name,
-          dropoffZoneName: p.dropoffZone.name,
-          lockedFare: p.lockedFare,
-          status: p.status,
-        }));
-
-      return reply.code(200).send({ occupancy: updatedAnchor.occupancy, passengers });
     } catch (err) {
       if (err instanceof NotRideOwnerError) {
-        return reply.code(403).send({ error: "Forbidden" });
+        return refuse(reply, 403, "NOT_YOUR_RIDE", "This trip belongs to another driver.");
       }
-      if (
-        err instanceof RideNotFillableError ||
-        err instanceof NoSeatsAvailableError ||
-        err instanceof RequestRideUnavailableError
-      ) {
-        return reply.code(409).send({ error: (err as Error).message });
+      if (err instanceof RideNotFillableError) {
+        return refuse(reply, 409, "CAR_CLOSED", "You can only add riders before your first pickup.");
+      }
+      if (err instanceof NoSeatsAvailableError) {
+        return refuse(reply, 409, "CAR_FULL", "Your car is full.");
+      }
+      if (err instanceof RequestRideUnavailableError) {
+        return refuse(
+          reply,
+          409,
+          "REQUEST_UNAVAILABLE",
+          "This rider's request is no longer open — another driver took it or the rider cancelled.",
+        );
       }
       throw err;
     }
@@ -881,223 +924,102 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   });
 
   /**
-   * Per-passenger lifecycle (Phase 6b-3): driver has arrived at THIS
-   * passenger's pickup point. WAITING -> ARRIVED only — no ride-level effect,
-   * no effect on any other passenger on the same car.
+   * Per-passenger lifecycle: the four actions on one rider's seat, plus
+   * "rider didn't show". Used for Ride alone and Shared trips alike (the
+   * stop-based trip screen drives both through these).
+   *
+   * - arrived  WAITING -> ARRIVED     (first one also moves a MATCHED ride to ARRIVED)
+   * - pickup   ARRIVED -> PICKED_UP   (first one walks the ride to IN_PROGRESS)
+   * - dropoff  PICKED_UP -> DROPPED_OFF (last one completes the ride)
+   * - cancel   WAITING -> CANCELLED   (not once "I'm here" is tapped)
+   * - no-show  ARRIVED -> CANCELLED   (3 minutes after arriving)
+   *
+   * Every one is safe to repeat: asking for the status the rider already has
+   * answers 200 and changes nothing. Refusals come back as { error, code }
+   * with the reason in plain words. Rider notifications go out after the
+   * commit and never hold up the reply.
    */
-  app.post(
-    "/rides/:id/passengers/:passengerId/arrived",
-    { preHandler: requireAuth },
-    async (request, reply) => {
+  const PASSENGER_ACTIONS: Record<
+    string,
+    { to: PassengerStatus; onlyFrom?: PassengerStatus[]; noShow?: boolean }
+  > = {
+    arrived: { to: "ARRIVED" },
+    pickup: { to: "PICKED_UP" },
+    dropoff: { to: "DROPPED_OFF" },
+    cancel: { to: "CANCELLED", onlyFrom: ["WAITING"] },
+    "no-show": { to: "CANCELLED", onlyFrom: ["ARRIVED"], noShow: true },
+  };
+
+  for (const [action, spec] of Object.entries(PASSENGER_ACTIONS)) {
+    app.post(`/rides/:id/passengers/:passengerId/${action}`, { preHandler: requireAuth }, async (request, reply) => {
       if (!(await requireDriver(request, reply))) return;
 
       const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
       const userId = request.user!.userId;
 
-      const ride = await prisma.ride.findUnique({ where: { id: rideId } });
-      if (!ride) return reply.code(404).send({ error: "Ride not found" });
-      if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      const passenger = await prisma.ridePassenger.findUnique({ where: { id: passengerId } });
-      if (!passenger || passenger.rideId !== rideId) {
-        return reply.code(404).send({ error: "Passenger not found on this ride" });
-      }
-
+      let result;
       try {
-        const result = await applyPassengerTransition(prisma, passengerId, "ARRIVED");
-
-        emitToRider(passenger.riderId, "ride:passenger_status", {
-          rideId,
-          ridePassengerId: passengerId,
-          riderId: passenger.riderId,
-          status: result.passenger.status as PassengerStatus,
+        result = await applyPassengerTransition(prisma, passengerId, spec.to, new Date(), {
+          expectedRideId: rideId,
+          expectedDriverId: userId,
+          onlyFrom: spec.onlyFrom,
+          noShow: spec.noShow,
         });
-
-        if (ride.source === "USSD") {
-          void notifyUssdRider(prisma, passenger.riderId, "Your driver has arrived.");
-        }
-
-        return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
       } catch (err) {
-        if (err instanceof InvalidTransitionError) {
-          return reply.code(409).send({ error: "Invalid transition from current passenger status" });
+        if (err instanceof PassengerNotFoundError) {
+          return refuse(reply, 404, "PASSENGER_NOT_FOUND", "This rider is no longer on your trip.");
         }
-        throw err;
-      }
-    },
-  );
-
-  /**
-   * Per-passenger lifecycle (Phase 6b-3): driver has picked up THIS
-   * passenger. ARRIVED -> PICKED_UP. If this is the ride's first pickup, the
-   * ride itself is walked forward to IN_PROGRESS as a side effect inside the
-   * same transaction (see applyPassengerTransition) — no separate
-   * ride-level "depart" call is needed or allowed for SHARED rides anymore.
-   */
-  app.post(
-    "/rides/:id/passengers/:passengerId/pickup",
-    { preHandler: requireAuth },
-    async (request, reply) => {
-      if (!(await requireDriver(request, reply))) return;
-
-      const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
-      const userId = request.user!.userId;
-
-      const ride = await prisma.ride.findUnique({ where: { id: rideId } });
-      if (!ride) return reply.code(404).send({ error: "Ride not found" });
-      if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      const passenger = await prisma.ridePassenger.findUnique({ where: { id: passengerId } });
-      if (!passenger || passenger.rideId !== rideId) {
-        return reply.code(404).send({ error: "Passenger not found on this ride" });
-      }
-
-      try {
-        const result = await applyPassengerTransition(prisma, passengerId, "PICKED_UP");
-
-        emitToRider(passenger.riderId, "ride:passenger_status", {
-          rideId,
-          ridePassengerId: passengerId,
-          riderId: passenger.riderId,
-          status: result.passenger.status as PassengerStatus,
-        });
-
-        // First pickup may have just walked the ride to IN_PROGRESS — tell
-        // everyone in the ride room once (map/location consumers, other
-        // passengers' "car is moving" state), ride-wide and exactly once.
-        if (result.ride.status === "IN_PROGRESS" && ride.status !== "IN_PROGRESS") {
-          emitRideEvent(rideId, "ride:status", { rideId, status: result.ride.status });
+        if (err instanceof NotRideOwnerError) {
+          return refuse(reply, 403, "NOT_YOUR_RIDE", "This trip belongs to another driver.");
         }
-
-        return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
-      } catch (err) {
-        if (err instanceof InvalidTransitionError) {
-          return reply.code(409).send({ error: "Invalid transition from current passenger status" });
-        }
-        throw err;
-      }
-    },
-  );
-
-  /**
-   * Per-passenger lifecycle (Phase 6b-3): driver has dropped off THIS
-   * passenger. PICKED_UP -> DROPPED_OFF, stamping fareCharged from their
-   * frozen lockedFare. If no passenger remains WAITING/ARRIVED/PICKED_UP, the
-   * ride itself completes as a side effect (same transaction) and
-   * finalizeRideCompletion runs the same CommissionLedger + per-rider fare
-   * summary logic the ride-level /complete route uses for LONE rides.
-   */
-  app.post(
-    "/rides/:id/passengers/:passengerId/dropoff",
-    { preHandler: requireAuth },
-    async (request, reply) => {
-      if (!(await requireDriver(request, reply))) return;
-
-      const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
-      const userId = request.user!.userId;
-
-      const ride = await prisma.ride.findUnique({ where: { id: rideId } });
-      if (!ride) return reply.code(404).send({ error: "Ride not found" });
-      if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      const passenger = await prisma.ridePassenger.findUnique({ where: { id: passengerId } });
-      if (!passenger || passenger.rideId !== rideId) {
-        return reply.code(404).send({ error: "Passenger not found on this ride" });
-      }
-
-      try {
-        const result = await applyPassengerTransition(prisma, passengerId, "DROPPED_OFF");
-
-        emitToRider(passenger.riderId, "ride:passenger_status", {
-          rideId,
-          ridePassengerId: passengerId,
-          riderId: passenger.riderId,
-          status: result.passenger.status as PassengerStatus,
-        });
-
-        const justCompleted = result.ride.status === "COMPLETED" && ride.status !== "COMPLETED";
-        if (justCompleted) {
-          emitRideEvent(rideId, "ride:status", { rideId, status: result.ride.status });
-          await finalizeRideCompletion(
-            prisma,
-            {
-              id: result.ride.id,
-              type: ride.type,
-              occupancy: result.ride.occupancy,
-              paymentMethod: result.ride.paymentMethod,
-              source: ride.source,
-            },
-            userId,
+        if (err instanceof NoShowTooEarlyError) {
+          const wait = err.availableAt ? Math.max(1, Math.ceil((err.availableAt.getTime() - Date.now()) / 60_000)) : null;
+          return refuse(
+            reply,
+            409,
+            "NO_SHOW_TOO_EARLY",
+            wait
+              ? `Give the rider a little longer — you can mark a no-show in ${wait} min.`
+              : "Mark that you're at the pickup first.",
           );
         }
-
-        return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
-      } catch (err) {
         if (err instanceof InvalidTransitionError) {
-          return reply.code(409).send({ error: "Invalid transition from current passenger status" });
+          if (err.entity === "Ride") {
+            return refuse(reply, 409, "TRIP_ENDED", "This trip has already ended.");
+          }
+          return refuse(reply, 409, "INVALID_PASSENGER_STATE", passengerRefusal(err.from, err.to));
         }
         throw err;
       }
-    },
-  );
 
-  /**
-   * Driver cancels THIS passenger before pickup — WAITING -> CANCELLED only.
-   * Enforced WAITING-only at the route (the state machine also permits ARRIVED,
-   * but the product rule is "no cancel once 'I'm here' is tapped").
-   *
-   * Cancel is a real state transition, not a UI-only removal: the cancelled
-   * rider is dropped from the car and MUST be told via socket so they don't sit
-   * stranded on "driver on the way". Emits ride:passenger_status CANCELLED to
-   * the rider's personal room; if this empties the car, applyPassengerTransition
-   * cancels the ride (ALL_PASSENGERS_LEFT) and we broadcast ride:status too.
-   */
-  app.post(
-    "/rides/:id/passengers/:passengerId/cancel",
-    { preHandler: requireAuth },
-    async (request, reply) => {
-      if (!(await requireDriver(request, reply))) return;
+      const { passenger, ride, changed, rideStatusBefore } = result;
+      reply.code(200).send({ passenger, ride });
+      if (!changed) return reply;
 
-      const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
-      const userId = request.user!.userId;
-
-      const ride = await prisma.ride.findUnique({ where: { id: rideId } });
-      if (!ride) return reply.code(404).send({ error: "Ride not found" });
-      if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
-
-      const passenger = await prisma.ridePassenger.findUnique({ where: { id: passengerId } });
-      if (!passenger || passenger.rideId !== rideId) {
-        return reply.code(404).send({ error: "Passenger not found on this ride" });
-      }
-      if (passenger.status !== "WAITING") {
-        return reply
-          .code(409)
-          .send({ error: "A passenger can only be cancelled before pickup" });
-      }
-
-      try {
-        const result = await applyPassengerTransition(prisma, passengerId, "CANCELLED");
-
+      // After the reply: tell the rider(s). Never blocks or fails the action.
+      void (async () => {
         emitToRider(passenger.riderId, "ride:passenger_status", {
           rideId,
           ridePassengerId: passengerId,
           riderId: passenger.riderId,
-          status: result.passenger.status as PassengerStatus,
+          status: passenger.status as PassengerStatus,
         });
-
-        const justCancelledRide =
-          result.ride.status === "CANCELLED" && ride.status !== "CANCELLED";
-        if (justCancelledRide) {
-          emitRideEvent(rideId, "ride:status", { rideId, status: result.ride.status });
+        if (ride.status !== rideStatusBefore) {
+          emitRideEvent(rideId, "ride:status", { rideId, status: ride.status as RideStatus });
         }
-
-        return reply.code(200).send({ passenger: result.passenger, ride: result.ride });
-      } catch (err) {
-        if (err instanceof InvalidTransitionError) {
-          return reply.code(409).send({ error: "Invalid transition from current passenger status" });
+        if (spec.to === "ARRIVED" && ride.source === "USSD") {
+          void notifyUssdRider(prisma, passenger.riderId, "Your driver has arrived.");
         }
-        throw err;
-      }
-    },
-  );
+        if (ride.status === "COMPLETED" && rideStatusBefore !== "COMPLETED") {
+          await finalizeRideCompletion(
+            prisma,
+            { id: ride.id, type: ride.type, occupancy: ride.occupancy, paymentMethod: ride.paymentMethod, source: ride.source },
+            userId,
+            ride.passengers,
+          );
+        }
+      })().catch((err) => request.log.error({ err, rideId, passengerId }, `passenger ${action}: follow-up failed`));
+      return reply;
+    });
+  }
 }

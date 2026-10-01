@@ -176,6 +176,30 @@ model Zone {
   passengerDropoffs RidePassenger[] @relation("PassengerDropoff")
   adjacencies       ZoneAdjacency[] @relation("ZoneAdjacencies")
   adjacentTo        ZoneAdjacency[] @relation("AdjacentZones")
+  routesFrom        ZoneRoute[]     @relation("RouteFrom")
+  routesTo          ZoneRoute[]     @relation("RouteTo")
+}
+
+/// A road route between two campus zones, precomputed once by
+/// src/scripts/precomputeZoneRoutes.ts so the apps can draw real roads
+/// instead of straight lines without calling a routing service per trip.
+model ZoneRoute {
+  id              String   @id @default(cuid())
+  fromZoneId      String
+  toZoneId        String
+  /// Google encoded polyline, precision 5 (what OSRM and openrouteservice return).
+  polyline        String
+  distanceMeters  Int
+  durationSeconds Int
+  /// Which routing service produced it ("osrm" | "ors").
+  provider        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  fromZone Zone @relation("RouteFrom", fields: [fromZoneId], references: [id], onDelete: Cascade)
+  toZone   Zone @relation("RouteTo", fields: [toZoneId], references: [id], onDelete: Cascade)
+
+  @@unique([fromZoneId, toZoneId])
 }
 
 model ZoneAdjacency {
@@ -268,6 +292,11 @@ model RidePassenger {
   /// only as occupancy increases; frozen permanently once the ride departs
   lockedFare    Int?
   status        PassengerStatus @default(WAITING)
+  /// When the driver reached this rider's pickup (WAITING -> ARRIVED). Starts
+  /// the rider's wait timer; "rider didn't show" unlocks 3 minutes after it.
+  arrivedAt     DateTime?
+  /// Set when the driver cancelled this seat because the rider didn't show.
+  noShowAt      DateTime?
   /// Set at join time; the stable ascending sort key for the driver's
   /// per-passenger list so first-added stays on top and order never shifts
   /// on a status change.

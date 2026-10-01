@@ -37,8 +37,7 @@ describe("driverTripStatusLine", () => {
 });
 
 describe("driverTripHref", () => {
-  it("sends LONE trips to their screen and SHARED cars to Home", () => {
-    expect(driverTripHref({ id: "r1", type: "LONE" })).toBe("/ride/r1");
-    expect(driverTripHref({ id: "r1", type: "SHARED" })).toBe("/");
+  it("sends every trip, Ride alone or Shared, to the one trip screen", () => {
+    expect(driverTripHref({ id: "r1" })).toBe("/ride/r1");
   });
 });

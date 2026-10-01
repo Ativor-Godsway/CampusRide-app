@@ -9,6 +9,7 @@ import {
   useDeepLinkGuard,
 } from "@rida/mobile-shared";
 import { DriverPresenceProvider } from "../lib/presence";
+import { DriverLocationProvider } from "../lib/location";
 
 const queryClient = new QueryClient();
 
@@ -40,11 +41,13 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <DriverPresenceProvider>
-          <DeepLinkGuard />
-          <SessionCacheReset />
-          <Stack screenOptions={{ headerShown: false }} />
-        </DriverPresenceProvider>
+        <DriverLocationProvider>
+          <DriverPresenceProvider>
+            <DeepLinkGuard />
+            <SessionCacheReset />
+            <Stack screenOptions={{ headerShown: false }} />
+          </DriverPresenceProvider>
+        </DriverLocationProvider>
       </AuthProvider>
     </QueryClientProvider>
   );

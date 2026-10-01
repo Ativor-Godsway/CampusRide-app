@@ -1,5 +1,6 @@
-import type { PrismaClient, Prisma } from "@prisma/client";
+import type { PrismaClient, Prisma, Ride, RidePassenger } from "@prisma/client";
 import {
+  NO_SHOW_AFTER_MS,
   getSharedFarePerRider,
   validateSharedOccupancy,
 } from "@rida/shared";
@@ -11,6 +12,7 @@ import {
   type RideTransitionContext,
 } from "./stateMachine";
 import { recomputeLockedFares, type LockedFarePassenger } from "./lockedFare";
+import { InvalidTransitionError, NoShowTooEarlyError, NotRideOwnerError, PassengerNotFoundError } from "./errors";
 
 export type Tx = Prisma.TransactionClient | PrismaClient;
 
@@ -18,8 +20,12 @@ export type Tx = Prisma.TransactionClient | PrismaClient;
  * Neon's pooled connection has noticeable per-query latency, and these
  * transactions issue several sequential queries — raise the interactive
  * transaction timeout above Prisma's 5s default to avoid spurious P2028s.
+ * maxWait (how long to wait for a pooled connection before the transaction
+ * may start) is raised from Prisma's 2 s for the same reason: under a busy
+ * pool, "Unable to start a transaction in the given time" was a 500 for a
+ * perfectly valid status change.
  */
-const TX_OPTIONS = { timeout: 20000 } as const;
+const TX_OPTIONS = { timeout: 20000, maxWait: 10_000 } as const;
 
 /**
  * Validates and applies a Ride status transition inside a transaction.
@@ -104,133 +110,183 @@ async function transitionRideTx(
 }
 
 export interface PassengerTransitionResult {
-  passenger: Awaited<ReturnType<Tx["ridePassenger"]["update"]>>;
-  /** Always re-fetched with passengers included, regardless of which side
-   * effect branch fired, so callers get a consistent shape every time. */
-  ride: Prisma.RideGetPayload<{ include: { passengers: true } }>;
+  passenger: RidePassenger;
+  /** The ride after the transition, with ALL its passengers — built from the
+   * rows this call already read and wrote, never re-fetched. */
+  ride: Ride & { passengers: RidePassenger[] };
+  /**
+   * False when the passenger was already in the requested status: nothing was
+   * written and the caller should skip its side effects (socket events, SMS,
+   * payment finalisation). Makes every driver action safe to retry — the app
+   * retries after a timeout, and the first attempt may well have landed.
+   */
+  changed: boolean;
+  /** The ride's status before this call, so callers can tell what moved. */
+  rideStatusBefore: RideStatus;
+}
+
+export interface PassengerTransitionOptions {
+  /**
+   * The statuses this action may start from (e.g. a driver may cancel a
+   * seat only while WAITING). Anything else is an InvalidTransitionError,
+   * even where the state machine itself would allow it.
+   */
+  onlyFrom?: readonly PassengerStatus[];
+  /** The ride id from the URL; a passenger on another ride is "not found". */
+  expectedRideId?: string;
+  /** The acting driver; any other driver gets NotRideOwnerError. */
+  expectedDriverId?: string;
+  /** Cancel as "rider didn't show": only from ARRIVED, and only NO_SHOW_AFTER_MS after arrival. */
+  noShow?: boolean;
 }
 
 /**
  * Validates and applies a RidePassenger status transition inside a transaction.
- * Side effects, all computed from a fresh read of sibling passengers taken
- * AFTER locking the parent Ride row (see below) — never from a snapshot taken
- * before the lock, which could be stale under concurrent calls:
  *
- * - WAITING/ARRIVED -> CANCELLED: recomputes the ride's occupancy from the
- *   remaining active passengers; if none remain, cancels the ride with reason
- *   ALL_PASSENGERS_LEFT (via transitionRide — throws InvalidTransitionError,
- *   rolling back the whole transaction, if the ride is already terminal).
- *   lockedFares of remaining passengers are left unchanged (downward-only ratchet).
- * - ARRIVED -> PICKED_UP (Phase 6b-3, "Option B" auto-walk): if no sibling is
- *   already PICKED_UP/DROPPED_OFF (i.e. this is the ride's first pickup), the
- *   RIDE is walked forward to IN_PROGRESS in this same transaction — through
- *   ARRIVED first if it's still MATCHED, since `RIDE_TRANSITIONS` requires
- *   that hop and this auto-walk intentionally does NOT add a direct
- *   MATCHED -> IN_PROGRESS edge to the general map (that would let any caller
- *   skip ARRIVED, not just this one). If the ride is already IN_PROGRESS
- *   (a later passenger's first pickup), nothing ride-level happens. There is
- *   no fare-lock or payment-initiation side effect here — Phase 7a decoupled
- *   payment from departure, and `addRiderToCar` already refuses new adds once
- *   the ride leaves MATCHED/ARRIVED, so fares are already frozen by then.
- * - PICKED_UP -> DROPPED_OFF: stamps `fareCharged` from the frozen
- *   `lockedFare`. If no sibling remains WAITING/ARRIVED/PICKED_UP (this was
- *   the last active passenger), the RIDE is walked forward to COMPLETED in
- *   this same transaction. Per-rider fare-summary emission and the CASH
- *   CommissionLedger upsert are NOT done here (no socket/payment imports in
- *   this module) — the caller (driver.ts route) does that after this
- *   transaction commits, using the returned `ride.status` to decide whether
- *   completion just happened.
+ * Round trips matter here (every query is a trip to the database, one after
+ * another), so the whole thing is: lock the ride (one query that also finds
+ * it from the passenger), read its passengers, write the passenger, and write
+ * the ride if it moves. The result is assembled from those rows. See
+ * routes/driverRoundTrips.test.ts for the budget this is held to.
+ *
+ * Side effects, all decided from the passenger list read AFTER the lock (so
+ * two concurrent taps on the same car serialize and never both think they
+ * were "last"):
+ *
+ * - WAITING -> ARRIVED: stamps arrivedAt (the rider's wait timer). If the ride
+ *   is still MATCHED it moves to ARRIVED too, so a Ride-alone rider's app,
+ *   which reads the ride status, says "your driver has arrived".
+ * - ARRIVED -> PICKED_UP: the ride's first pickup walks it to IN_PROGRESS
+ *   (through ARRIVED if needed — RIDE_TRANSITIONS is checked for each hop).
+ * - PICKED_UP -> DROPPED_OFF: stamps fareCharged from lockedFare; the last
+ *   active passenger's drop-off completes the ride.
+ * - -> CANCELLED: recomputes occupancy. If nobody is left in the car, the
+ *   ride ends: COMPLETED if it is under way (someone was carried — a ride
+ *   past the point of no return can only complete), otherwise CANCELLED
+ *   (ALL_PASSENGERS_LEFT). It used to always try CANCELLED, which the state
+ *   machine refuses for an IN_PROGRESS ride — cancelling the last waiting
+ *   rider after the others were dropped off failed and left the ride stuck.
+ *
+ * Idempotent: asking for the status the passenger already has returns the
+ * current state with `changed: false` and writes nothing.
+ *
+ * Per-rider fare summaries and the CASH commission ledger are NOT done here —
+ * the caller does that after commit when `ride.status` became COMPLETED.
  */
 export async function applyPassengerTransition(
   prisma: PrismaClient,
   passengerId: string,
   toStatus: PassengerStatus,
   now: Date = new Date(),
+  options: PassengerTransitionOptions = {},
 ): Promise<PassengerTransitionResult> {
   return prisma.$transaction(async (tx) => {
-    const passenger = await tx.ridePassenger.findUniqueOrThrow({ where: { id: passengerId } });
-    const result = transitionPassenger(passenger, toStatus);
+    // Lock the ride row, found through the passenger, in one round trip.
+    // Locking before reading siblings is what serializes concurrent actions
+    // on the same car.
+    const locked = await tx.$queryRaw<Ride[]>`
+      SELECT r.* FROM "Ride" r
+      WHERE r.id = (SELECT "rideId" FROM "RidePassenger" WHERE id = ${passengerId})
+      FOR UPDATE`;
+    const ride = locked[0];
+    if (!ride || (options.expectedRideId && ride.id !== options.expectedRideId)) {
+      throw new PassengerNotFoundError(passengerId);
+    }
+    if (options.expectedDriverId && ride.driverId !== options.expectedDriverId) {
+      throw new NotRideOwnerError(ride.id, options.expectedDriverId);
+    }
 
-    /**
-     * Lock the parent Ride row before reading any sibling passenger so that
-     * concurrent per-passenger actions on the SAME ride (two near-
-     * simultaneous "last dropoff" taps, a cancel racing a pickup, etc.)
-     * serialize against each other. Mirrors `addRiderToCar`'s atomic-claim
-     * pattern but via row lock rather than a conditional `updateMany` — the
-     * decision here ("is this the first pickup / last dropoff?") depends on
-     * the aggregate state of every sibling row, which a conditional update on
-     * a single row can't express. Without this, two transactions reading
-     * siblings before either commits could each conclude they are NOT last
-     * and the ride would never auto-complete.
-     */
-    await tx.$queryRaw`SELECT id FROM "Ride" WHERE id = ${passenger.rideId} FOR UPDATE`;
+    const passengers = await tx.ridePassenger.findMany({
+      where: { rideId: ride.id },
+      orderBy: { createdAt: "asc" },
+    });
+    const passenger = passengers.find((p) => p.id === passengerId)!;
+
+    const rideStatusBefore = ride.status as RideStatus;
+    if (passenger.status === toStatus) {
+      return { passenger, ride: { ...ride, passengers }, changed: false, rideStatusBefore };
+    }
+    if (options.onlyFrom && !options.onlyFrom.includes(passenger.status as PassengerStatus)) {
+      throw new InvalidTransitionError("RidePassenger", passenger.status, toStatus);
+    }
+    transitionPassenger(passenger, toStatus);
+
+    if (options.noShow) {
+      const availableAt = passenger.arrivedAt
+        ? new Date(passenger.arrivedAt.getTime() + NO_SHOW_AFTER_MS)
+        : null;
+      if (passenger.status !== "ARRIVED" || !availableAt || availableAt > now) {
+        throw new NoShowTooEarlyError(availableAt);
+      }
+    }
 
     const updatedPassenger = await tx.ridePassenger.update({
       where: { id: passengerId },
       data: {
-        status: result.status,
+        status: toStatus,
+        ...(toStatus === "ARRIVED" ? { arrivedAt: now } : {}),
         ...(toStatus === "DROPPED_OFF" ? { fareCharged: passenger.lockedFare } : {}),
+        ...(options.noShow ? { noShowAt: now } : {}),
       },
     });
+    const allPassengers = passengers.map((p) => (p.id === passengerId ? updatedPassenger : p));
+    const others = passengers.filter((p) => p.id !== passengerId);
 
-    let ride = await tx.ride.findUniqueOrThrow({ where: { id: passenger.rideId } });
-    const siblings = await tx.ridePassenger.findMany({
-      where: { rideId: passenger.rideId, id: { not: passengerId } },
-    });
+    // Work out where the ride goes, checking every hop against the ride
+    // state machine, then write it once.
+    const rideData: Prisma.RideUpdateInput = {};
+    let status = ride.status as RideStatus;
+    const hop = (to: RideStatus, ctx: RideTransitionContext = {}) => {
+      const result = transitionRide({ status }, to, ctx);
+      status = result.status;
+      rideData.status = result.status;
+      rideData.cancelReason = result.cancelReason;
+      if (to === "IN_PROGRESS") rideData.departedAt = now;
+      if (to === "COMPLETED") rideData.completedAt = now;
+    };
+
+    if (toStatus === "ARRIVED" && status === "MATCHED") hop("ARRIVED");
+
+    if (toStatus === "PICKED_UP" && status !== "IN_PROGRESS") {
+      const someoneAlreadyMoving = others.some((p) => p.status === "PICKED_UP" || p.status === "DROPPED_OFF");
+      if (!someoneAlreadyMoving) {
+        if (status === "MATCHED") hop("ARRIVED");
+        hop("IN_PROGRESS");
+      }
+    }
+
+    if (toStatus === "DROPPED_OFF" && !others.some((p) => isActivePassengerStatus(p.status))) {
+      hop("COMPLETED");
+    }
 
     if (toStatus === "CANCELLED") {
-      const remainingActive = siblings.filter((p) => isActivePassengerStatus(p.status));
-
-      if (remainingActive.length === 0) {
-        const rideResult = transitionRide(ride, "CANCELLED", {
-          cancelReason: "ALL_PASSENGERS_LEFT",
-        });
-        ride = await tx.ride.update({
-          where: { id: ride.id },
-          data: {
-            status: rideResult.status,
-            cancelReason: rideResult.cancelReason,
-            occupancy: 0,
-          },
-        });
-      } else {
-        ride = await tx.ride.update({
-          where: { id: ride.id },
-          data: { occupancy: remainingActive.length },
-        });
+      const remaining = others.filter((p) => isActivePassengerStatus(p.status)).length;
+      rideData.occupancy = remaining;
+      if (remaining === 0) {
+        if (status === "IN_PROGRESS") hop("COMPLETED");
+        else hop("CANCELLED", { cancelReason: "ALL_PASSENGERS_LEFT" });
       }
     }
 
-    if (toStatus === "PICKED_UP" && ride.status !== "IN_PROGRESS") {
-      const someoneAlreadyMoving = siblings.some(
-        (p) => p.status === "PICKED_UP" || p.status === "DROPPED_OFF",
-      );
-      if (!someoneAlreadyMoving) {
-        if (ride.status === "MATCHED") {
-          ride = await transitionRideTx(tx, ride.id, "ARRIVED", {}, now);
-        }
-        ride = await transitionRideTx(tx, ride.id, "IN_PROGRESS", {}, now);
-      }
-    }
+    const finalRide =
+      Object.keys(rideData).length > 0 ? await tx.ride.update({ where: { id: ride.id }, data: rideData }) : ride;
 
-    if (toStatus === "DROPPED_OFF") {
-      const anyoneStillActive = siblings.some((p) => isActivePassengerStatus(p.status));
-      if (!anyoneStillActive) {
-        ride = await transitionRideTx(tx, ride.id, "COMPLETED", {}, now);
-      }
-    }
-
-    // Re-fetch once at the end with passengers included so every branch
-    // (and every caller) gets the same consistent shape, regardless of which
-    // side effect (if any) fired above.
-    const finalRide = await tx.ride.findUniqueOrThrow({
-      where: { id: ride.id },
-      include: { passengers: true },
-    });
-
-    return { passenger: updatedPassenger, ride: finalRide };
-  }, TX_OPTIONS);
+    return {
+      passenger: updatedPassenger,
+      ride: { ...finalRide, passengers: allPassengers },
+      changed: true,
+      rideStatusBefore,
+    };
+  }, PASSENGER_TX_OPTIONS);
 }
+
+/**
+ * A driver action waits up to maxWait for a pooled connection before its
+ * transaction may start. Prisma's 2 s default turned a busy pool into
+ * "Unable to start a transaction in the given time" — a 500 the app showed
+ * as "reverted" although nothing was wrong with the action itself.
+ */
+const PASSENGER_TX_OPTIONS = { timeout: 20_000, maxWait: 10_000 } as const;
 
 export interface JoinSharedRideInput {
   riderId: string;
@@ -260,12 +316,27 @@ export async function joinSharedRideTx(tx: Tx, rideId: string, input: JoinShared
     where: { id: rideId },
     include: { passengers: true },
   });
+  const { passengers, ...rideFields } = ride;
+  return joinLoadedSharedRideTx(tx, rideFields, passengers, input);
+}
 
+/**
+ * The body of joinSharedRideTx for a caller that has already read (and
+ * ideally locked) the ride and its passengers — addRiderToCar — so the join
+ * doesn't read them a second time.
+ */
+export async function joinLoadedSharedRideTx(
+  tx: Tx,
+  ride: Ride,
+  passengers: readonly RidePassenger[],
+  input: JoinSharedRideInput,
+) {
+  const rideId = ride.id;
   if (ride.type !== "SHARED") {
     throw new Error("joinSharedRide: ride is not a SHARED ride");
   }
 
-  const activePassengers = ride.passengers.filter((p) =>
+  const activePassengers = passengers.filter((p) =>
     isActivePassengerStatus(p.status),
   );
   const newOccupancy = activePassengers.length + 1;
@@ -286,6 +357,7 @@ export async function joinSharedRideTx(tx: Tx, rideId: string, input: JoinShared
     type: "JOIN",
   });
 
+  const refared = new Map<string, number>();
   for (const p of recomputed) {
     if (p.id === "__new__") continue;
     const original = activePassengers.find((a) => a.id === p.id);
@@ -294,6 +366,7 @@ export async function joinSharedRideTx(tx: Tx, rideId: string, input: JoinShared
         where: { id: p.id },
         data: { lockedFare: p.lockedFare },
       });
+      refared.set(p.id, p.lockedFare);
     }
   }
 
@@ -316,5 +389,13 @@ export async function joinSharedRideTx(tx: Tx, rideId: string, input: JoinShared
     data: { occupancy: newOccupancy },
   });
 
-  return { passenger: newPassenger, ride: updatedRide };
+  return {
+    passenger: newPassenger,
+    ride: updatedRide,
+    /** Every passenger on the ride afterwards, the new one last. */
+    passengers: [
+      ...passengers.map((p) => (refared.has(p.id) ? { ...p, lockedFare: refared.get(p.id)! } : p)),
+      newPassenger,
+    ],
+  };
 }

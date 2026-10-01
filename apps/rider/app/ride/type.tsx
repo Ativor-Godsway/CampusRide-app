@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { usePreventRemove } from "expo-router/react-navigation";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
@@ -16,6 +16,8 @@ import {
   mapFitPadding,
   priceLoneRide,
   rideLeaveBehaviour,
+  decodePolyline,
+  routeAttribution,
 } from "@rida/shared";
 import {
   ActiveRideExistsError,
@@ -51,6 +53,7 @@ import {
   useDriverLocation,
   useRideTracking,
   type RideDriverInfo,
+  getZoneRoutes,
 } from "@rida/mobile-shared";
 import { CancelRideSheet, type SwitchOffer } from "../../components/ride/CancelRideSheet";
 import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
@@ -217,6 +220,24 @@ export default function RideTypeScreen() {
     () => ({ latitude: Number(params.dropoffLat), longitude: Number(params.dropoffLng) }),
     [params.dropoffLat, params.dropoffLng],
   );
+
+  // The real road between the two zones when it has been precomputed
+  // (GET /zones/routes); a dashed straight line otherwise.
+  const { data: zoneRoutes = [] } = useQuery({
+    queryKey: ["zoneRoutes"],
+    queryFn: getZoneRoutes,
+    staleTime: Infinity,
+    retry: false,
+  });
+  const { routeLine, routeIsRoad, routeCredit } = useMemo(() => {
+    const stored = zoneRoutes.find(
+      (r) => r.fromZoneId === params.pickupZoneId && r.toZoneId === params.dropoffZoneId,
+    );
+    const road = stored ? decodePolyline(stored.polyline) : [];
+    return road.length >= 2
+      ? { routeLine: road, routeIsRoad: true, routeCredit: routeAttribution(stored?.provider) }
+      : { routeLine: [pickupCoord, dropoffCoord], routeIsRoad: false, routeCredit: undefined };
+  }, [zoneRoutes, params.pickupZoneId, params.dropoffZoneId, pickupCoord, dropoffCoord]);
 
   /**
    * Phase 4 ETA. Straight-line distance from the driver's last reported
@@ -489,7 +510,9 @@ export default function RideTypeScreen() {
       <CampusMapView
         initialRegion={region}
         zones={mapZones}
-        routeLine={[pickupCoord, dropoffCoord]}
+        routeLine={routeLine}
+        routeIsRoad={routeIsRoad}
+        routeAttribution={routeCredit}
         height={windowHeight}
         light
         showRecenter
