@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Easing, Image, Pressable, StyleSheet, View } from "react-native";
+import { Animated, Easing, Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import MapView, { Circle, Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
 import type { EdgePadding } from "@rida/shared";
@@ -24,8 +24,15 @@ export interface CampusMapViewProps {
   onZonePress?: (id: string) => void;
   userLocation?: LatLng | null;
   height: number;
-  /** Draws a straight line between these points (e.g. pickup -> dropoff). No routing API — just connects the coordinates directly. */
+  /** Draws a line through these points (e.g. pickup -> dropoff). */
   routeLine?: LatLng[];
+  /**
+   * True when routeLine follows real roads (a precomputed zone route): drawn
+   * solid. Otherwise it is a straight-line stand-in and drawn dashed.
+   */
+  routeIsRoad?: boolean;
+  /** Credit line for the road route's data, shown small in a corner (required by the routing provider). */
+  routeAttribution?: string;
   /** Forces a light map appearance regardless of device theme (iOS Apple Maps). */
   light?: boolean;
   /** Shows a floating "recenter on route" button that re-frames the map to `initialRegion`. */
@@ -62,6 +69,8 @@ export function CampusMapView({
   userLocation,
   height,
   routeLine,
+  routeIsRoad = false,
+  routeAttribution,
   light,
   showRecenter,
   rounded = true,
@@ -124,9 +133,20 @@ export function CampusMapView({
         )}
 
         {routeLine && routeLine.length >= 2 ? (
-          <Polyline coordinates={routeLine} strokeColor={colors.primary[500]} strokeWidth={3} lineDashPattern={[8, 6]} />
+          <Polyline
+            coordinates={routeLine}
+            strokeColor={colors.primary[500]}
+            strokeWidth={routeIsRoad ? 4 : 3}
+            lineDashPattern={routeIsRoad ? undefined : [8, 6]}
+          />
         ) : null}
       </MapView>
+
+      {routeIsRoad && routeAttribution ? (
+        <View pointerEvents="none" style={[styles.attribution, { bottom: 4 + controlsBottomInset }]}>
+          <Text style={styles.attributionText}>{routeAttribution}</Text>
+        </View>
+      ) : null}
 
       {showRecenter ? (
         <Pressable
@@ -256,6 +276,15 @@ function ZonePulse({ center }: { center: LatLng }) {
 }
 
 const styles = StyleSheet.create({
+  attribution: {
+    position: "absolute",
+    left: 6,
+    backgroundColor: "rgba(255,255,255,0.8)",
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+  },
+  attributionText: { fontSize: 9, color: colors.ink[600] },
   container: {
     overflow: "hidden",
     borderRadius: radii.lg,

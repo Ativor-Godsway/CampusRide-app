@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState, type ReactElement } from "react";
 import { useRouter } from "expo-router";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
+import { useQuery } from "@tanstack/react-query";
+import { FlatList, Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   filterRequestsByType,
@@ -21,8 +21,6 @@ import {
   Screen,
   Text,
   colors,
-  driverClaimRide,
-  errorMessage,
   formatCedis,
   getZones,
   radii,
@@ -31,8 +29,10 @@ import {
   typography,
   type EligibleRideItem,
 } from "@rida/mobile-shared";
-import { driverActiveRideQueryKey, markTripOpened, useDriverActiveTrip } from "../lib/activeTrip";
-import { useDriverPresence, zonesQueryKey } from "../lib/presence";
+import { markTripOpened, useDriverActiveTrip } from "../lib/activeTrip";
+import { runClaim } from "../lib/tripActions";
+import { useDriverPresence } from "../lib/presence";
+import { zonesQueryKey } from "../lib/zones";
 import { useRequestsNearYou } from "../lib/requests";
 
 type NearbyRequest = WithDistance<EligibleRideItem>;
@@ -107,11 +107,9 @@ function RequestRow({
  */
 export default function RequestsNearYouScreen() {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const { isOnline, position, toggle } = useDriverPresence();
   const { data: activeTrip } = useDriverActiveTrip();
   const [filter, setFilter] = useState<RequestTypeFilter>("ALL");
-  const [claimingRideId, setClaimingRideId] = useState<string | null>(null);
 
   const { data: zones = [] } = useQuery({ queryKey: zonesQueryKey, queryFn: getZones, staleTime: Infinity });
   const {
@@ -131,37 +129,16 @@ export default function RequestsNearYouScreen() {
     else router.replace("/");
   }, [router]);
 
+  // Accept is instant: the trip opens now and the claim follows in the
+  // background (lib/tripActions — retried quietly if CampusRide is slow).
+  // If another driver got there first, the trip screen says so.
   const accept = useCallback(
-    async (item: NearbyRequest) => {
-      if (claimingRideId !== null) return;
-      setClaimingRideId(item.rideId);
-      try {
-        await driverClaimRide(item.rideId);
-        void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
-        if (item.type === "LONE") {
-          // Straight to the trip; Home mustn't open it a second time.
-          markTripOpened(item.rideId);
-          router.replace(`/ride/${item.rideId}`);
-        } else {
-          // A shared car is filled and driven from Home.
-          goBack();
-        }
-      } catch (err) {
-        const response = (err as { response?: { status?: number; data?: { existingRide?: unknown } } })
-          .response;
-        // A 409 carrying existingRide means THIS driver already has a trip;
-        // a bare 409 means someone else won the claim.
-        if (response?.status === 409 && !response.data?.existingRide) {
-          Alert.alert("Taken by another driver", "Someone else accepted this one first.");
-        } else {
-          Alert.alert("Couldn't accept", errorMessage(err));
-        }
-        void refetch();
-      } finally {
-        setClaimingRideId(null);
-      }
+    (item: NearbyRequest) => {
+      runClaim(item);
+      markTripOpened(item.rideId);
+      router.replace(`/ride/${item.rideId}`);
     },
-    [claimingRideId, queryClient, router, goBack, refetch],
+    [router],
   );
 
   const header = (
@@ -256,8 +233,8 @@ export default function RequestsNearYouScreen() {
         renderItem={({ item }) => (
           <RequestRow
             item={item}
-            claiming={claimingRideId === item.rideId}
-            disabled={claimingRideId !== null && claimingRideId !== item.rideId}
+            claiming={false}
+            disabled={false}
             onAccept={() => void accept(item)}
           />
         )}

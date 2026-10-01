@@ -25,10 +25,9 @@ export function driverTripStatusLine(trip: DriverTripStatusInput): string {
 }
 
 /**
- * Where "back to my trip" leads for a driver: a LONE trip is driven on its
- * own screen; a SHARED car is run from Home (fill the car, then per-rider
- * pickups and drop-offs).
+ * Where "back to my trip" leads for a driver: every trip, Ride alone or
+ * Shared, is driven on the one stop-based trip screen.
  */
-export function driverTripHref(trip: { id: string; type: RideType }): "/" | `/ride/${string}` {
-  return trip.type === "LONE" ? `/ride/${trip.id}` : "/";
+export function driverTripHref(trip: { id: string }): `/ride/${string}` {
+  return `/ride/${trip.id}`;
 }

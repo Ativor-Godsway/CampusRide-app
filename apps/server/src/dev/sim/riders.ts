@@ -23,6 +23,7 @@ import {
 import { signAccessToken } from "../../services/auth/tokens";
 import { assertDevOnlyDatabase, assertLocalApiUrl } from "../../db/devDbGuard";
 import { ensureSimRiders, SIM_PHONE_PREFIX, type SimRider } from "./simAccounts";
+import { assertRiderSideRequest } from "./riderOnly";
 import { parseSimOptions, SimOptionError, SIM_USAGE, type SimOptions } from "./options";
 import {
   PAIR_CHANCE,
@@ -145,6 +146,8 @@ class Simulator {
   private lastDriverNote = "";
   private warnedMockDriver = false;
   private polling = false;
+  /** A request tick is running; with a slow server, ticks would otherwise overlap and pick the same rider. */
+  private requesting = false;
   private stopped = false;
 
   constructor(
@@ -264,8 +267,12 @@ class Simulator {
       },
       include: { pickupZone: true, dropoffZone: true },
     });
+    let adopted = 0;
     for (const ride of rides) {
       const rider = this.riders.find((r) => r.id === ride.riderId)!;
+      const current = this.tracks.get(rider.id);
+      if (current && current.rideId !== "") continue; // already following it
+      adopted += 1;
       this.tracks.set(rider.id, {
         rider,
         rideId: ride.id,
@@ -280,7 +287,7 @@ class Simulator {
         everAccepted: ride.driverId !== null,
       });
     }
-    if (rides.length > 0) log("↺", c.dim(`Following ${rides.length} ride(s) left over from an earlier run`));
+    if (adopted > 0) log("↺", c.dim(`Following ${adopted} ride(s) left over from an earlier run`));
   }
 
   // ── Requests ────────────────────────────────────────────────────────────
@@ -321,7 +328,8 @@ class Simulator {
   }
 
   private async requestTick(count = 1): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.requesting) return;
+    this.requesting = true;
     try {
       let pickupBase: PlannerZone | null;
       if (this.opts.zone) {
@@ -373,6 +381,8 @@ class Simulator {
         return;
       }
       log("!", c.red(`Request failed: ${(err as Error).message}`));
+    } finally {
+      this.requesting = false;
     }
   }
 
@@ -589,6 +599,14 @@ class Simulator {
     if (t.giveUpAt !== null && Date.now() >= t.giveUpAt) {
       t.giveUpAt = null;
       if (ride.status === "REQUESTED" && ride.id === t.requestRideId && !t.everAccepted) {
+        // Look again right now: the status above can be two seconds old, and
+        // a real rider can cancel an accepted ride — so without this the
+        // simulator could cancel a request you had just accepted.
+        const fresh = await this.prisma.ride.findUnique({
+          where: { id: ride.id },
+          select: { status: true, driverId: true },
+        });
+        if (fresh?.status !== "REQUESTED" || fresh.driverId !== null) return;
         const reason = pickSearchingCancelReason(rng);
         const res = await this.api("POST", `/rides/${ride.id}/cancel`, t.rider, { reason });
         if (res.status === 200) {
@@ -664,6 +682,7 @@ class Simulator {
     rider: SimRider,
     body?: unknown,
   ): Promise<{ status: number; body: any }> { // eslint-disable-line @typescript-eslint/no-explicit-any
+    assertRiderSideRequest(method, path);
     const token = signAccessToken({ userId: rider.id, role: "RIDER" });
     let res: Response;
     try {

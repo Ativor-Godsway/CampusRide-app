@@ -25,6 +25,15 @@ Run every command from the **repo root** (`CampusRideApp/`) unless a step says
 otherwise. You'll use **three Terminal windows**: server, simulator, and the
 Expo app.
 
+> **On a phone hotspot? Use local Postgres.** The dev database is in the US.
+> From a Mac on a phone hotspot, one database round trip measured about
+> **1.4 seconds** (2026-10-01), and every driver action needs several. Actions
+> still work (they're instant on the phone and retried in the background), but
+> they take seconds to confirm and the simulator crawls. A database on your
+> Mac answers in about a millisecond. See
+> [Faster: use local Postgres](#faster-use-local-postgres) — it replaces Step 1
+> and changes how you start the server and simulator.
+
 ---
 
 ## Step 0 — One-time setup
@@ -194,13 +203,24 @@ simulator aims requests at wherever you are.
 
 ### What you should see on the phone
 
-- **Offers** popping up as requests arrive, and the **Requests near you** list
-  filling up.
-- Accept one and you're on a trip, like with a real rider. Mark arrived, pick
-  up, drop off. The simulator's log confirms each step from the rider's side.
+- The **Requests near you** list filling up.
+- **Accept** one: the trip screen opens at once (the server confirms in the
+  background). It's the same screen for Ride alone and Shared:
+  - a map with you, every stop numbered in order (green = pickup, black =
+    drop-off) and the route;
+  - the **NEXT STOP** card with **Navigate** and **Call**;
+  - one slide at a time: **"Ama picked up"** at a pickup, **"Cash collected"**
+    (amount shown large) at a drop-off;
+  - **I'm here** if arriving wasn't detected automatically, and **Rider didn't
+    show** three minutes after you arrived;
+  - **N more stops** opens the ordered list; seat dots show who's on board.
+- Every action changes the screen the moment you do it. If CampusRide is slow,
+  a small **Sending…** chip appears at the top while it retries; you can carry
+  on. If the server says no (say the rider cancelled), the screen goes back
+  and a red line tells you why.
 - **Filling a shared car:** about a third of Shared requests bring a second
-  fake rider going the same way a few seconds later. Accept the first, then add
-  the second from the car's suggestions.
+  fake rider going the same way a few seconds later. Accept the first, then
+  tap **Add rider** next to the seat dots (only before your first pickup).
 - **Cancellations:** about 15% of fake riders give up if nobody accepts within
   20–60 seconds, with a reason. They never cancel after you've accepted, and
   never after pickup.
@@ -323,34 +343,98 @@ Good to know:
 - **Shipping your Mac's address.** See Step 4. Release builds don't read the
   switch file and refuse local addresses.
 
+## Testing from off-campus: fake location
+
+Far from campus, distances say things like "122.2 km", ETAs are meaningless and
+automatic arrival never fires. Development builds can pretend to be on campus:
+
+1. Driver app → **Account** → **Developer · Fake location** → tap a zone, for
+   example **Balme Library**. The app now behaves as if you're standing there:
+   your zone on the server follows it (so the simulator sends requests near
+   it), and distances and ETAs are measured from it.
+2. Go online, accept a request. A yellow **Fake location** chip shows on the
+   trip screen, with **▶ Drive (fake)**.
+3. Tap **▶ Drive (fake)**: the app drives along the route to the next stop at
+   about 30 km/h. When it gets within ~60 m of a pickup, **arrival is detected
+   automatically** — the rider is told you're here and the wait timer starts.
+4. Tap **Off (real GPS)** in Account to go back to your real position.
+
+This is **impossible in a release build**: the code is behind React Native's
+`__DEV__`, which is `false` in a release bundle, so it's stripped out and the
+Account card doesn't exist.
+
+## One-phone test checklist
+
+With the server running (Step 2), the app pointed at your Mac (Step 4), and
+signed in as your approved driver (Step 5):
+
+1. **Account → Fake location → Balme Library.** Go online.
+2. Start riders, Shared only, near you:
+   `npm run sim:riders -- --shared-ratio 1 --zone Balme --interval 15`
+3. **Accept** a request from **Requests near you**. The trip screen opens at
+   once. ✔ map, numbered stop, route; "1 of 2".
+4. Tap **Add rider** → **Add** a waiting rider. ✔ they appear at once; seat
+   dots show 2; "1 of 4".
+5. Tap **▶ Drive (fake)**. ✔ the dot moves along the route; near the pickup the
+   card switches to "Ama knows you're here · Waiting 0:05" without you tapping
+   **I'm here**. The simulator logs "Driver is at … for Test Ama".
+6. **Slide "Ama picked up".** ✔ the next stop moves up at once.
+7. For the second rider, tap **I'm here** yourself, then wait 3 minutes. ✔
+   **Rider didn't show** unlocks; use it. ✔ that stop leaves the list; the
+   simulator logs the cancellation.
+8. **▶ Drive (fake)** to the drop-off. **Slide "Cash collected"** (GH₵5 shown
+   large). ✔ "Trip complete" with what you collected and your share.
+9. Now Ride alone: `npm run sim:riders -- --shared-ratio 0 --zone Balme`.
+   Accept one and run it start to finish the same way.
+10. **Burst:** `npm run sim:riders -- --burst 5`. ✔ the list fills; accepting
+    is instant every time.
+11. **Leave and come back:** mid-trip, tap ← (Home says "You're on a trip");
+    switch tabs (the green banner shows); kill the app and reopen it. ✔ every
+    time you get back to the same trip.
+12. Ctrl+C the simulator, then `npm run sim:cleanup`.
+
 ## Troubleshooting
 
-| You see                                                         | Do this                                                                                                                      |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `Can't reach your local server at http://localhost:3000`        | Start it: `npm run dev:server` (Step 2).                                                                                     |
-| App shows network errors / can't sign in                        | Phone and Mac on the same Wi-Fi? Does `http://<mac-ip>:3000/health` open in the phone's browser? Did the IP change (Step 3)? |
-| Expo terminal still shows `onrender.com`                        | Check the file is exactly `apps/driver/.env.development.local`, then `npm run dev:driver -- --clear`.                        |
-| `Waiting for a driver to go online…`                            | Go online in the driver app. Approved? `npm run sim:approve-driver`.                                                         |
-| `Driver account is not approved yet` in the app                 | `npm run sim:approve-driver -- <your number>`                                                                                |
-| `The server rejected the simulator's sign-in (401)`             | The server was started some other way. Stop it and use `npm run dev:server`.                                                 |
-| `…running against a different database`                         | Same fix: restart the server with `npm run dev:server`.                                                                      |
-| Requests accepted by "Kwame" instead of you                     | `ENABLE_MOCK_DRIVER=false` in `apps/server/.env.development`, restart the server.                                            |
-| The app errors about a missing column                           | The dev database is behind: `npm run db:deploy:dev` (Step 1).                                                                |
-| `REFUSING TO RUN against …`                                     | The database named isn't local or the dev branch. Check `apps/server/.env.development`. Never point it at production.        |
-| `sim:cleanup` says a simulator ride "also carries a real rider" | A real account shares a car with a fake one, so the script deleted nothing. Finish or cancel that ride, then run it again.   |
+| You see                                                         | Do this                                                                                                                                        |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Can't reach your local server at http://localhost:3000`        | Start it: `npm run dev:server` (Step 2).                                                                                                       |
+| App shows network errors / can't sign in                        | Phone and Mac on the same Wi-Fi? Does `http://<mac-ip>:3000/health` open in the phone's browser? Did the IP change (Step 3)?                   |
+| Expo terminal still shows `onrender.com`                        | Check the file is exactly `apps/driver/.env.development.local`, then `npm run dev:driver -- --clear`.                                          |
+| `Waiting for a driver to go online…`                            | Go online in the driver app. Approved? `npm run sim:approve-driver`.                                                                           |
+| `Driver account is not approved yet` in the app                 | `npm run sim:approve-driver -- <your number>`                                                                                                  |
+| `The server rejected the simulator's sign-in (401)`             | The server was started some other way. Stop it and use `npm run dev:server`.                                                                   |
+| `…running against a different database`                         | Same fix: restart the server with `npm run dev:server`.                                                                                        |
+| Requests accepted by "Kwame" instead of you                     | `ENABLE_MOCK_DRIVER=false` in `apps/server/.env.development`, restart the server.                                                              |
+| The app errors about a missing column                           | The dev database is behind: `npm run db:deploy:dev` (Step 1).                                                                                  |
+| `REFUSING TO RUN against …`                                     | The database named isn't local or the dev branch. Check `apps/server/.env.development`. Never point it at production.                          |
+| `sim:cleanup` says a simulator ride "also carries a real rider" | A real account shares a car with a fake one, so the script deleted nothing. Finish or cancel that ride, then run it again.                     |
+| **Sending…** stays on the trip screen for a long time           | CampusRide is slow to answer (often the dev database over a hotspot). Your actions are kept and retried; switch to local Postgres for testing. |
+| Distances like "122.2 km", no automatic arrival                 | You're off campus: use **Account → Fake location** (development builds only).                                                                  |
 
-## Using local Postgres instead of the dev database
+## Faster: use local Postgres
 
-If you'd rather not use Neon, point the tools at a local database by setting
-`DATABASE_URL` and `DIRECT_URL` in front of each command. For example, with a
-local database called `rida_dev`:
+A database on your Mac makes every action confirm in milliseconds instead of
+seconds. You already have Postgres running (the test suite uses it). One-time
+setup:
 
 ```bash
-export DATABASE_URL="postgresql://<you>@localhost:5432/rida_dev"
+createdb -h localhost rida_dev
+export DATABASE_URL="postgresql://$(whoami)@localhost:5432/rida_dev"
 export DIRECT_URL="$DATABASE_URL"
-npm run db:deploy:dev && npm run db:seed:dev --workspace apps/server
-npm run dev:server        # in this same terminal
+npm run db:deploy:dev                              # create the tables
+npm run db:seed:dev --workspace apps/server        # the 15 campus zones
 ```
 
-Export the same two variables in the simulator's terminal before
-`npm run sim:riders`. Both must point at the same database.
+Then, **every time**, export the same two lines in **both** the server's and the
+simulator's terminal before starting them:
+
+```bash
+export DATABASE_URL="postgresql://$(whoami)@localhost:5432/rida_dev"
+export DIRECT_URL="$DATABASE_URL"
+npm run dev:server          # Terminal 1
+npm run sim:riders          # Terminal 2 (after the same two exports)
+```
+
+A local database starts empty: sign up your driver again (Step 5) and approve
+it with `npm run sim:approve-driver` in a terminal with the same exports. To
+draw real roads instead of straight lines, see [docs/routing.md](../routing.md).

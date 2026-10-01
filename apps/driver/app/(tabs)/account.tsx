@@ -20,6 +20,7 @@ import {
   useAuth,
 } from "@rida/mobile-shared";
 import { useDriverActiveTrip } from "../../lib/activeTrip";
+import { FakeLocationCard } from "../../components/dev/FakeLocationCard";
 import { cloudinaryAvatar } from "@rida/shared";
 import { useDriverPhotoUpload, type DriverPhotoResult, type PhotoSource } from "../../lib/useDriverPhotoUpload";
 
@@ -264,6 +265,8 @@ export default function AccountTab() {
           <Button label="Edit profile" variant="secondary" onPress={startEdit} />
         </View>
       )}
+
+      {!editing && <FakeLocationCard />}
 
       {!editing && (
         <Card style={styles.logoutCard}>

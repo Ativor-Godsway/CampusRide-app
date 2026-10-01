@@ -6,3 +6,14 @@ export function errorMessage(err: unknown): string {
   }
   return "Something went wrong. Try again.";
 }
+
+/** The HTTP status of a failed request, or undefined when nothing came back (timeout, offline). */
+export function errorStatus(err: unknown): number | undefined {
+  return (err as { response?: { status?: number } } | null)?.response?.status;
+}
+
+/** The server's own reason (`{ error }`) for a refused request, if it gave one. */
+export function serverReason(err: unknown): string | null {
+  const data = (err as { response?: { data?: { error?: unknown } } } | null)?.response?.data;
+  return typeof data?.error === "string" ? data.error : null;
+}

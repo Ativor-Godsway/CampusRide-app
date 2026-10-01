@@ -9,18 +9,18 @@ import { getDriverActiveRide, useAuth, type RideWithZones } from "@rida/mobile-s
  */
 export const driverActiveRideQueryKey = ["driverActiveRide"] as const;
 
-export function useDriverActiveTrip() {
+export function useDriverActiveTrip(refetchIntervalMs = 15_000) {
   const { isAuthenticated, user } = useAuth();
   return useQuery<RideWithZones | null>({
     queryKey: driverActiveRideQueryKey,
     queryFn: getDriverActiveRide,
     enabled: isAuthenticated && user?.role === "DRIVER" && Boolean(user?.driver?.isApproved),
-    refetchInterval: 15_000,
+    refetchInterval: refetchIntervalMs,
   });
 }
 
-/** Where "back to my trip" leads (see driverTripHref in @rida/shared). */
-export function tripHref(ride: RideWithZones): "/" | `/ride/${string}` {
+/** Where "back to my trip" leads: the trip screen, for every kind of trip. */
+export function tripHref(ride: RideWithZones): `/ride/${string}` {
   return driverTripHref(ride);
 }
 
@@ -36,8 +36,8 @@ export function tripStatusLine(ride: RideWithZones): string {
 }
 
 /**
- * LONE trips whose screen has already been opened this session. Home opens
- * a newly matched LONE trip once; a driver who then steps back isn't bounced
+ * Trips whose screen has already been opened this session. Home opens a
+ * newly matched trip once; a driver who then steps back isn't bounced
  * straight back (the active-trip banner is how they return). Shared with
  * "Requests near you", which opens the trip itself after a claim.
  */

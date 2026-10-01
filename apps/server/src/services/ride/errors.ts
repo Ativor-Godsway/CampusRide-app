@@ -157,3 +157,25 @@ export class RideNotReadyToDepartError extends Error {
     this.status = status;
   }
 }
+
+/** The passenger id doesn't exist, or doesn't belong to the ride in the URL. */
+export class PassengerNotFoundError extends Error {
+  constructor(passengerId: string) {
+    super(`Passenger ${passengerId} not found on this ride`);
+    this.name = "PassengerNotFoundError";
+  }
+}
+
+/** "Rider didn't show" tapped before the rider has had their 3 minutes. */
+export class NoShowTooEarlyError extends Error {
+  readonly availableAt: Date | null;
+  constructor(availableAt: Date | null) {
+    super(
+      availableAt
+        ? `You can mark a no-show from ${availableAt.toISOString()}`
+        : "You can only mark a no-show after arriving at the pickup",
+    );
+    this.name = "NoShowTooEarlyError";
+    this.availableAt = availableAt;
+  }
+}
