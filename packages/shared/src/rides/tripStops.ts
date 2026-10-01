@@ -42,7 +42,7 @@ export interface TripStop {
   key: string;
   kind: TripStopKind;
   passengerId: string;
-  /** "Ama" — first name, or "Your rider" when unknown. */
+  /** "Ama" — first name, or "" when not known (see riderName). */
   riderFirstName: string;
   riderPhone: string | null;
   zone: TripZone;
@@ -61,9 +61,60 @@ export interface TripPlan {
   totalCount: number;
 }
 
+/** "Ama" from "Ama Serwaa"; "" when there's no name (never a placeholder like "Your rider"). */
 export function firstName(name: string | null | undefined): string {
-  const first = name?.trim().split(/\s+/)[0];
-  return first ? first : "Your rider";
+  return name?.trim().split(/\s+/)[0] ?? "";
+}
+
+/** The name to show for a stop's rider: their first name, or "Rider" (shown with the place). */
+export function riderName(stop: Pick<TripStop, "riderFirstName">): string {
+  return stop.riderFirstName || "Rider";
+}
+
+/**
+ * What to do at the next stop, in plain words:
+ * "Pick up Ama at Balme Library" / "Drop off Kofi at Main Gate · collect GH₵5".
+ * Without a name: "Pick up the rider at …".
+ */
+export function nextStopInstruction(
+  stop: Pick<TripStop, "kind" | "riderFirstName" | "zone" | "farePesewas">,
+  options: { cash: boolean; formatFare: (pesewas: number) => string },
+): string {
+  const who = stop.riderFirstName || "the rider";
+  if (stop.kind === "PICKUP") return `Pick up ${who} at ${stop.zone.name}`;
+  const collect = options.cash && stop.farePesewas !== null ? ` · collect ${options.formatFare(stop.farePesewas)}` : "";
+  return `Drop off ${who} at ${stop.zone.name}${collect}`;
+}
+
+/** Each rider's status in one word, for the stop list. */
+export function riderStatusWord(status: PassengerStatus): string {
+  switch (status) {
+    case "WAITING":
+      return "Waiting";
+    case "ARRIVED":
+      return "Arrived";
+    case "PICKED_UP":
+      return "In car";
+    case "DROPPED_OFF":
+      return "Dropped off";
+    case "CANCELLED":
+      return "Cancelled";
+  }
+}
+
+/**
+ * The short note after a step: "Ama is in the car · next: pick up Kofi",
+ * "Kofi dropped off · next: drop off Ama", "Kofi dropped off · that's everyone".
+ */
+export function stepToast(
+  done: { kind: TripStopKind; riderFirstName: string },
+  next: Pick<TripStop, "kind" | "riderFirstName" | "zone"> | undefined,
+): string {
+  const who = done.riderFirstName || "Rider";
+  const first = done.kind === "PICKUP" ? `${who} is in the car` : `${who} dropped off`;
+  if (!next) return `${first} · that's everyone`;
+  const nextWho = next.riderFirstName || `the rider at ${next.zone.name}`;
+  return `${first} · next: ${next.kind === "PICKUP" ? "pick up" : "drop off"} ${nextWho}`;
 }
 
 function isGone(status: PassengerStatus): boolean {

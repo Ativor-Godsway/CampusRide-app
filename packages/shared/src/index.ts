@@ -29,3 +29,4 @@ export * from "./geo/tripRoute";
 export * from "./rides/addRiderPreview";
 export * from "./driver/autoArrival";
 export * from "./driver/serviceArea";
+export * from "./driver/slideToConfirm";

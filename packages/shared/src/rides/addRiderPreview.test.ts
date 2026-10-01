@@ -35,7 +35,7 @@ describe("where a new rider slots into the trip", () => {
     const p = previewAddRider({ passengers: [rider("ama", A, D)], candidate: candidate(B, C), zones, routes: noRoutes, from: at(A) });
     expect(order(p)).toEqual(["ama:PICKUP@A", "new:PICKUP@B", "new:DROPOFF@C", "ama:DROPOFF@D"]);
     expect(p).toMatchObject({ pickupIndex: 1, dropoffIndex: 2 });
-    expect(p!.stops.filter((s) => s.isNew).every((s) => s.riderFirstName === "New rider" && s.passengerId === previewPassengerId("req1"))).toBe(true);
+    expect(p!.stops.filter((s) => s.isNew).every((s) => s.passengerId === previewPassengerId("req1"))).toBe(true);
   });
 
   it("a rider going the other way is fitted in after the current riders", () => {

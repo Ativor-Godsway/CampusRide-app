@@ -32,14 +32,16 @@ import {
  * arrived 11→6, pickup 15→6, cancel 12→6, drop-off 11→5, last drop-off 21→6.
  * A passenger action is BEGIN, lock ride, read seats, write seat, write ride,
  * COMMIT. "active" is 3 on a real ride; this fixture's owner has no seat, so
- * it reads the owner separately. add-preview (added later) runs its 4 reads
- * in parallel: the car, its seats, their names, the request.
+ * it reads the owner separately. add-preview (added later) runs its reads
+ * in parallel: the car, its seats, their names, the request, its rider.
+ * eligible / fill-suggestions / add-preview each gained one read (2026-10-03)
+ * for the requesting rider's first name, so the trip never says "Your rider".
  */
 const BUDGET = {
   "GET /driver/rides/active": 4,
-  "GET /driver/rides/eligible": 3,
-  "GET /rides/:id/fill-suggestions": 3,
-  "GET /rides/:id/add-preview": 4,
+  "GET /driver/rides/eligible": 4,
+  "GET /rides/:id/fill-suggestions": 4,
+  "GET /rides/:id/add-preview": 5,
   "POST /rides/:id/claim": 2,
   "POST /rides/:id/add-passenger": 7,
   "POST passenger arrived": 6,

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as SecureStore from "expo-secure-store";
 import {
   CAR_SEATS,
   NO_SHOW_AFTER_MS,
@@ -17,7 +18,11 @@ import {
   formatWait,
   indexRoutes,
   isAtStop,
+  nextStopInstruction,
   noShowAvailableAt,
+  riderName,
+  stepToast,
+  isOutsideServiceArea,
   planTripStops,
   routeAttribution,
   seatStates,
@@ -48,6 +53,7 @@ import {
   typography,
   useAuth,
   useCountUp,
+  useToast,
   type FillSuggestion,
   type PassengerInCar,
   type RideWithZones,
@@ -56,11 +62,11 @@ import { driverActiveRideQueryKey, useDriverActiveTrip } from "../../lib/activeT
 import { useDriverLocation, useLocationDemand } from "../../lib/location";
 import { useZoneRoutes, useZones } from "../../lib/zones";
 import {
+  claimPassengerId,
   clearClaim,
   overlayPassengers,
   runAddRider,
   runPassengerAction,
-  setTripActionsRefresh,
   settleWith,
   useTripActions,
 } from "../../lib/tripActions";
@@ -70,6 +76,8 @@ import { StopListSheet } from "../../components/trip/StopListSheet";
 import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
 import { SeatDots } from "../../components/trip/SeatDots";
 import { RateRidersPanel } from "../../components/trip/RateRidersPanel";
+
+const SEAT_LEGEND_KEY = "campusride.driver.seatLegendSeen";
 
 /** The trip screen checks its trip more often than the rest of the app (a rider may cancel). */
 const TRIP_POLL_MS = 5_000;
@@ -111,34 +119,70 @@ function useNow(on: boolean): number {
  * refusal puts it back, with the server's reason.
  */
 export default function TripScreen() {
-  const { id: rideId } = useLocalSearchParams<{ id: string }>();
+  const { id: rideId, preview: previewParam } = useLocalSearchParams<{ id: string; preview?: string }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { isAuthenticated, user } = useAuth();
 
-  const { data: activeRide, isLoading } = useDriverActiveTrip(TRIP_POLL_MS);
+  const { data: activeRide, isLoading } = useDriverActiveTrip(TRIP_POLL_MS, { includeFinished: true });
   const actions = useTripActions();
   const { data: zoneList = [] } = useZones();
   const { data: storedRoutes = [] } = useZoneRoutes();
   const location = useDriverLocation();
   useLocationDemand("trip", true);
 
-  const ride: RideWithZones | null = activeRide && activeRide.id === rideId ? activeRide : null;
+  const serverRide: RideWithZones | null = activeRide && activeRide.id === rideId ? activeRide : null;
   const claim = actions.claim?.rideId === rideId ? actions.claim : null;
+  const zones = useMemo(() => new Map<string, TripZone>(zoneList.map((z) => [z.id, z])), [zoneList]);
 
-  const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
-    void queryClient.invalidateQueries({ queryKey: ["fillSuggestions"] });
-  }, [queryClient]);
-  useEffect(() => setTripActionsRefresh(refresh), [refresh]);
+  // Just accepted and the server hasn't confirmed yet: the trip is built from
+  // the request itself, so the screen is the full trip at once (no
+  // "Confirming…"). Its rider's seat is provisional; steps taken on it wait
+  // in the action queue until the real seat id arrives.
+  const provisional = useMemo<RideWithZones | null>(() => {
+    if (serverRide || !claim || claim.state === "refused") return null;
+    const req = claim.request;
+    const pickupZone = zones.get(req.pickupZoneId);
+    const dropoffZone = zones.get(req.dropoffZoneId);
+    if (!pickupZone || !dropoffZone) return null;
+    return {
+      id: req.rideId,
+      type: req.type,
+      status: "MATCHED",
+      // Cash-only launch: every ride is cash until MoMo is switched on.
+      paymentMethod: "CASH",
+      riderId: "",
+      occupancy: req.seats ?? 1,
+      pickupZoneId: req.pickupZoneId,
+      dropoffZoneId: req.dropoffZoneId,
+      pickupZone,
+      dropoffZone,
+      passengers: [
+        {
+          id: claimPassengerId(req.rideId),
+          riderId: "",
+          riderName: req.riderFirstName ?? null,
+          riderPhone: null,
+          pickupZoneId: req.pickupZoneId,
+          dropoffZoneId: req.dropoffZoneId,
+          pickupZoneName: req.pickupZoneName,
+          dropoffZoneName: req.dropoffZoneName,
+          lockedFare: req.farePesewas,
+          status: "WAITING",
+          arrivedAt: null,
+        },
+      ],
+    } as unknown as RideWithZones;
+  }, [serverRide, claim, zones]);
+  const ride: RideWithZones | null = serverRide ?? provisional;
 
   // Drop optimistic overlays once the server has caught up.
   useEffect(() => {
-    if (ride) settleWith(ride.id, ride.passengers);
-  }, [ride]);
+    if (serverRide) settleWith(serverRide.id, serverRide.passengers);
+  }, [serverRide]);
 
-  const zones = useMemo(() => new Map<string, TripZone>(zoneList.map((z) => [z.id, z])), [zoneList]);
   const routes = useMemo(() => indexRoutes(storedRoutes), [storedRoutes]);
   const passengers: PassengerInCar[] = useMemo(
     () => (ride ? overlayPassengers(ride.id, ride.passengers) : []),
@@ -146,7 +190,11 @@ export default function TripScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [ride, actions.seats, actions.adds],
   );
-  const position = location.position;
+  // Far outside the service area (testing off campus), the driver's real
+  // position is left out of the trip: the map frames only the stops, the
+  // route starts at the first stop, and no ETA is invented from 120 km away.
+  const farFromCampus = isOutsideServiceArea(location.position, zoneList);
+  const position = farFromCampus ? null : location.position;
   const plan = useMemo(
     () =>
       planTripStops({
@@ -209,7 +257,9 @@ export default function TripScreen() {
   // Riders can join a shared car before departure and, within the 5-minute
   // detour limit the server enforces, while it's moving (sketch 6).
   const canAddRiders = Boolean(
-    ride && ride.type === "SHARED" && (ride.status === "MATCHED" || ride.status === "ARRIVED" || ride.status === "IN_PROGRESS"),
+    serverRide &&
+      serverRide.type === "SHARED" &&
+      (serverRide.status === "MATCHED" || serverRide.status === "ARRIVED" || serverRide.status === "IN_PROGRESS"),
   );
   const activeSeats = passengers.filter((p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP").length;
   const freeSeats = Math.max(0, CAR_SEATS - activeSeats);
@@ -245,6 +295,17 @@ export default function TripScreen() {
     const offer = suggestions.find((s) => s.compatible && !skippedRef.current.has(s.requestRideId));
     if (offer) setPreviewing({ suggestion: offer, manual: false });
   }, [canAddRiders, previewing, freeSeats, suggestions]);
+
+  // "See route" on a Home request opens this screen with ?preview=<request>.
+  const openedFromParamRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!previewParam || openedFromParamRef.current === previewParam || !canAddRiders) return;
+    const match = (fill?.suggestions ?? []).find((s) => s.requestRideId === previewParam);
+    if (!match) return;
+    openedFromParamRef.current = previewParam;
+    setCommitting(false);
+    setPreviewing({ suggestion: match, manual: true });
+  }, [previewParam, canAddRiders, fill]);
 
   const closePreview = useCallback((message?: string) => {
     setPreviewing((current) => {
@@ -336,11 +397,57 @@ export default function TripScreen() {
 
   const now = useNow(next?.kind === "PICKUP" && next.passengerStatus === "ARRIVED");
 
+  // After each step, a short note: "Ama is in the car · next: pick up Kofi".
+  const { showToast, toast } = useToast();
+  const onStep = useCallback(
+    (stop: TripStop, step: "arrived" | "pickup" | "dropoff") => {
+      if (step === "arrived") {
+        showToast(`${riderName(stop)} has been told you're here`);
+        return;
+      }
+      const after = plan.upcoming.filter((s) => s.key !== stop.key && !(step === "pickup" && s.key === `${stop.passengerId}:PICKUP`));
+      showToast(stepToast(stop, after[0]));
+    },
+    [plan.upcoming, showToast],
+  );
+
+  // The seat dots explain themselves the first time a driver sees them.
+  const [seatLegend, setSeatLegend] = useState(false);
+  useEffect(() => {
+    if (ride?.type !== "SHARED") return;
+    let cancelled = false;
+    void SecureStore.getItemAsync(SEAT_LEGEND_KEY)
+      .then((seen) => {
+        if (cancelled || seen) return;
+        setSeatLegend(true);
+        void SecureStore.setItemAsync(SEAT_LEGEND_KEY, "1").catch(() => {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [ride?.type]);
+  useEffect(() => {
+    if (!seatLegend) return;
+    const t = setTimeout(() => setSeatLegend(false), 10_000);
+    return () => clearTimeout(t);
+  }, [seatLegend]);
+
   const goHome = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
     if (router.canDismiss()) router.dismissAll();
     else router.replace("/");
   }, [router, queryClient]);
+
+  // iOS swipe-back is off while a trip is running: the slide-to-confirm knob
+  // starts near the left edge, and the system gesture used to grab the drag
+  // and slide the whole screen away. Back stays on the ← button (which
+  // minimises the trip, as before). On the summary and "trip ended"
+  // screens it works normally again.
+  const tripRunning = Boolean((ride || (claim && claim.state !== "refused")) && !(done && done.rideId === rideId));
+  useEffect(() => {
+    navigation.setOptions({ gestureEnabled: !tripRunning, fullScreenGestureEnabled: false });
+  }, [navigation, tripRunning]);
 
   if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
 
@@ -371,67 +478,28 @@ export default function TripScreen() {
     );
   }
 
-  // ─── Accepting (the claim is still on its way) or refused ──────────────
-  if (!ride && claim) {
-    const req = claim.request;
-    const pickupZone = zones.get(req.pickupZoneId);
-    if (claim.state === "refused") {
-      return (
-        <Screen>
-          <View style={styles.center}>
-            <Illustration name="searchEmpty" size={140} />
-            <Text variant="h2" style={styles.centerText}>
-              Not accepted
-            </Text>
-            <Text variant="bodySmall" color="muted" style={styles.centerText}>
-              {claim.message}
-            </Text>
-            <Button
-              label="Back to requests"
-              size="lg"
-              onPress={() => {
-                clearClaim();
-                if (router.canGoBack()) router.back();
-                else router.replace("/requests");
-              }}
-            />
-          </View>
-        </Screen>
-      );
-    }
+  // ─── Accept refused (another driver was first, the rider cancelled) ─────
+  if (!serverRide && claim?.state === "refused") {
     return (
-      <View style={styles.root}>
-        <TripMap
-          driver={position}
-          stops={
-            pickupZone
-              ? [
-                  { key: "claim", kind: "PICKUP", riderFirstName: "your rider", zone: pickupZone },
-                ]
-              : []
-          }
-          path={pickupZone && position ? [position, pickupZone] : []}
-          insets={{ top: topHeight, bottom: cardHeight }}
-        />
-        <TopBar onBack={goHome} onLayout={(e) => setTopHeight(e.nativeEvent.layout.height)} syncing={actions.retrying}>
-          <Chip label="Accepted" />
-        </TopBar>
-        <View style={[styles.card, { paddingBottom: insets.bottom + spacing.lg }]} onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}>
-          <Text variant="label" color="muted">NEXT STOP · PICKUP</Text>
-          <Text variant="h2">Pick up at {req.pickupZoneName}</Text>
-          <Text variant="bodySmall" color="muted">
-            Then {req.dropoffZoneName} · {formatCedis(req.farePesewas)}
+      <Screen>
+        <View style={styles.center}>
+          <Illustration name="searchEmpty" size={140} />
+          <Text variant="h2" style={styles.centerText}>
+            Not accepted
           </Text>
-          {pickupZone ? (
-            <Button
-              label="Navigate"
-              variant="secondary"
-              onPress={() => void openDirections({ ...pickupZone, label: pickupZone.name })}
-            />
-          ) : null}
-          <Text variant="caption" color="muted">Confirming with the rider…</Text>
+          <Text variant="bodySmall" color="muted" style={styles.centerText}>
+            {claim.message}
+          </Text>
+          <Button
+            label="Back to Home"
+            size="lg"
+            onPress={() => {
+              clearClaim();
+              goHome();
+            }}
+          />
         </View>
-      </View>
+      </Screen>
     );
   }
 
@@ -484,6 +552,19 @@ export default function TripScreen() {
         </View>
       ) : null}
 
+      {seatLegend ? (
+        <Pressable
+          onPress={() => setSeatLegend(false)}
+          style={[styles.legend, { top: topHeight + spacing.xs }]}
+          accessibilityRole="button"
+          accessibilityLabel="Seat dots: filled means in the car, light means to pick up, empty means a free seat. Dismiss."
+        >
+          <Text variant="caption" style={styles.legendText}>
+            ● in the car · ◐ to pick up · ○ free seat
+          </Text>
+        </Pressable>
+      ) : null}
+
       <TopBar onBack={goHome} onLayout={(e) => setTopHeight(e.nativeEvent.layout.height)} syncing={actions.retrying}>
         {ride.type === "SHARED" ? (
           <View style={styles.seatChip} accessible accessibilityLabel={`${activeSeats} of ${CAR_SEATS} seats taken`}>
@@ -496,6 +577,7 @@ export default function TripScreen() {
           <Chip label="Ride alone" />
         )}
         {tripFare > 0 ? <Chip label={formatCedis(tripFare)} /> : null}
+        {farFromCampus ? <Chip label="Far from campus" warn /> : null}
         {location.isFake && location.fake && next ? (
           <Pressable
             onPress={() =>
@@ -556,6 +638,7 @@ export default function TripScreen() {
             etaMinutes={etaMinutes}
             atStop={atNextStop}
             now={now}
+            onStep={onStep}
           />
         ) : (
           <Text variant="bodySmall" color="muted">Finishing up…</Text>
@@ -597,7 +680,14 @@ export default function TripScreen() {
         </View>
       </View>
 
-      <StopListSheet visible={stopsOpen} onClose={() => setStopsOpen(false)} stops={plan.upcoming} nextEtaMinutes={etaMinutes} />
+      <StopListSheet
+        visible={stopsOpen}
+        onClose={() => setStopsOpen(false)}
+        stops={plan.upcoming}
+        passengers={passengers}
+        nextEtaMinutes={etaMinutes}
+      />
+      {toast}
       <AddRiderSheet
         visible={addOpen}
         onClose={() => setAddOpen(false)}
@@ -621,15 +711,16 @@ function NextStopCard({
   etaMinutes,
   atStop,
   now,
+  onStep,
 }: {
   ride: RideWithZones;
   stop: TripStop;
   etaMinutes: number | null;
   atStop: boolean;
   now: number;
+  onStep: (stop: TripStop, step: "arrived" | "pickup" | "dropoff") => void;
 }) {
-  const name = stop.riderFirstName;
-  const pending = stop.passengerId.startsWith("pending:");
+  const name = riderName(stop);
   const where =
     atStop || (stop.kind === "PICKUP" && stop.passengerStatus === "ARRIVED")
       ? "you're here"
@@ -651,13 +742,15 @@ function NextStopCard({
           NEXT STOP · {stop.kind === "PICKUP" ? "PICKUP" : "DROP-OFF"}
         </Text>
       </View>
-      <Text variant="h2" numberOfLines={1}>
-        {stop.kind === "PICKUP" ? "Pick up" : "Drop off"} {name}
+      {/* What to do now, in plain words. */}
+      <Text variant="h3" numberOfLines={2} accessibilityRole="header">
+        {nextStopInstruction(stop, { cash, formatFare: formatCedis })}
       </Text>
-      <Text variant="bodySmall" color="muted" numberOfLines={1}>
-        {stop.zone.name}
-        {where ? ` · ${where}` : ""}
-      </Text>
+      {where ? (
+        <Text variant="bodySmall" color="muted" numberOfLines={1}>
+          {where === "you're here" ? "You're here" : where}
+        </Text>
+      ) : null}
 
       {arrived && arrivedAt !== null ? (
         <View style={styles.waitRow}>
@@ -698,18 +791,30 @@ function NextStopCard({
         ) : null}
       </View>
 
-      {pending ? (
-        <Text variant="caption" color="muted">Adding {stop.zone.name} rider to your car…</Text>
-      ) : stop.kind === "PICKUP" ? (
+      {stop.kind === "PICKUP" ? (
         <>
-          <SlideToConfirm label={`${name} picked up`} onConfirm={() => {
-            if (stop.passengerStatus === "WAITING") act("arrived");
-            act("pickup");
-          }} />
+          {/* Keyed by stop: every stop gets a fresh slider, so it can never
+              stay stuck at the end when two stops share a label. */}
+          <SlideToConfirm
+            key={stop.key}
+            label={`${name} picked up`}
+            onConfirm={() => {
+              if (stop.passengerStatus === "WAITING") act("arrived");
+              act("pickup");
+              onStep(stop, "pickup");
+            }}
+          />
           <View style={styles.smallLinks}>
             {stop.passengerStatus === "WAITING" ? (
               <>
-                <SmallLink label="I'm here" onPress={() => act("arrived")} hint="Tell the rider you've arrived" />
+                <SmallLink
+                  label="I'm here"
+                  onPress={() => {
+                    act("arrived");
+                    onStep(stop, "arrived");
+                  }}
+                  hint="Tell the rider you've arrived"
+                />
                 <SmallLink
                   label="Cancel pickup"
                   danger
@@ -737,7 +842,15 @@ function NextStopCard({
           </View>
         </>
       ) : (
-        <SlideToConfirm label={cash ? "Cash collected" : `${name} dropped off`} tone="dark" onConfirm={() => act("dropoff")} />
+        <SlideToConfirm
+          key={stop.key}
+          label={cash ? `Cash collected from ${name}` : `${name} dropped off`}
+          tone="dark"
+          onConfirm={() => {
+            act("dropoff");
+            onStep(stop, "dropoff");
+          }}
+        />
       )}
     </View>
   );
@@ -898,6 +1011,17 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     ...shadows.lg,
   },
+  legend: {
+    position: "absolute",
+    alignSelf: "center",
+    backgroundColor: colors.white,
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    zIndex: 4,
+    ...shadows.md,
+  },
+  legendText: { color: colors.ink[700], fontWeight: typography.weight.semibold },
   previewPill: {
     position: "absolute",
     alignSelf: "center",

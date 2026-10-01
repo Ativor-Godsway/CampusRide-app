@@ -1,5 +1,6 @@
 import type { Server as SocketIOServer, Socket } from "socket.io";
 import type { PrismaClient } from "@prisma/client";
+import { ACTIVE_DRIVER_STATUSES } from "../services/ride/stateMachine";
 import {
   RIDE_CLIENT_EVENTS,
   DRIVER_CLIENT_EVENTS,
@@ -88,9 +89,19 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
     });
 
     // Driver streams GPS during an active ride; server re-emits to the ride room.
+    // The check is cached briefly per socket: positions arrive every few
+    // seconds and the answer rarely changes.
+    const driverRideChecks = new Map<string, { allowed: boolean; at: number }>();
+    const checkDriverRide = async (rideId: string) => {
+      const cached = driverRideChecks.get(rideId);
+      if (cached && Date.now() - cached.at < DRIVER_RIDE_CHECK_TTL_MS) return cached.allowed;
+      const allowed = await authorizeDriverRide(prisma, rideId, userId);
+      driverRideChecks.set(rideId, { allowed, at: Date.now() });
+      return allowed;
+    };
     socket.on(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, (data: unknown) => {
       if (!isDriverLocationUpdate(data)) return;
-      void authorizeDriverRide(prisma, data.rideId, userId).then((allowed) => {
+      void checkDriverRide(data.rideId).then((allowed) => {
         if (!allowed) return;
         ioRef?.to(roomForRide(data.rideId)).emit(RIDE_EVENTS.DRIVER_LOCATION, {
           rideId: data.rideId,
@@ -113,7 +124,12 @@ function isDriverLocationUpdate(v: unknown): v is DriverLocationUpdatePayload {
   );
 }
 
-async function authorizeRideAccess(
+/**
+ * Who may listen to a ride's room: its rider, a passenger on it, and — so a
+ * rider cancelling or the trip changing reaches the driver's trip screen in a
+ * second or two instead of at the next poll — its driver.
+ */
+export async function authorizeRideAccess(
   prisma: PrismaClient,
   rideId: string,
   userId: string,
@@ -123,11 +139,18 @@ async function authorizeRideAccess(
     include: { passengers: { where: { riderId: userId } } },
   });
   if (!ride) return false;
-  return ride.riderId === userId || ride.passengers.length > 0;
+  return ride.riderId === userId || ride.driverId === userId || ride.passengers.length > 0;
 }
 
-/** Allows a location update only if the user is the active driver of the ride. */
-async function authorizeDriverRide(
+const DRIVER_RIDE_CHECK_TTL_MS = 30_000;
+
+/**
+ * Allows a location update only from the ride's driver while the trip is
+ * active — MATCHED and ARRIVED as well as IN_PROGRESS. It used to be
+ * IN_PROGRESS only, so riders never saw their driver on the way to the
+ * pickup: positions sent before the first pickup were silently dropped.
+ */
+export async function authorizeDriverRide(
   prisma: PrismaClient,
   rideId: string,
   userId: string,
@@ -137,7 +160,7 @@ async function authorizeDriverRide(
     select: { driverId: true, status: true },
   });
   if (!ride) return false;
-  return ride.driverId === userId && ride.status === "IN_PROGRESS";
+  return ride.driverId === userId && (ACTIVE_DRIVER_STATUSES as readonly string[]).includes(ride.status);
 }
 
 /** Emits a contract event to everyone subscribed to a ride's room. No-op if the socket server isn't initialized (e.g. tests). */

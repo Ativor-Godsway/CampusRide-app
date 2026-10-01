@@ -21,6 +21,8 @@ export function prepareDevToolEnv(context: string): void {
   assertDevelopmentEnv(process.env.NODE_ENV, context);
   process.env.NODE_ENV = "development";
 
+  // An optional .env.development.local (e.g. a local Postgres URL) wins.
+  dotenv.config({ path: path.join(serverRoot, ".env.development.local") });
   dotenv.config({ path: path.join(serverRoot, ".env.development") });
 
   // Never let the production escape hatch in db/prisma.ts apply to a process

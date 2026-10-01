@@ -1,61 +1,132 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { StyleSheet, Switch, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { FlatList, Pressable, RefreshControl, StyleSheet, Switch, View } from "react-native";
 import {
-  Button,
+  CAR_SEATS,
+  DRIVER_EVENTS,
+  filterRequestsByType,
+  getSharedFarePerRider,
+  sortRequestsNearestFirst,
+  type RequestTypeFilter,
+} from "@rida/shared";
+import {
   Illustration,
   LoadingState,
-  PressableScale,
   Screen,
   Text,
   colors,
+  getFillSuggestions,
+  getRideSocket,
   radii,
-  getDriverActiveRide,
-  shadows,
   spacing,
   typography,
   useAuth,
 } from "@rida/mobile-shared";
-import { driverActiveRideQueryKey, markTripOpened, tripStatusLine, wasTripOpened } from "../../lib/activeTrip";
+import { markTripOpened, useDriverActiveTrip, wasTripOpened } from "../../lib/activeTrip";
 import { useDriverPresence } from "../../lib/presence";
 import { useRequestsNearYou } from "../../lib/requests";
+import { overlayPassengers, runAddRider, runClaim, useTripActions } from "../../lib/tripActions";
+import { useZones } from "../../lib/zones";
+import { RequestCard, type HomeRequest } from "../../components/home/RequestCard";
 
-// ─── Main screen ──────────────────────────────────────────────────────────────
+const FILTERS: { value: RequestTypeFilter; label: string }[] = [
+  { value: "ALL", label: "All" },
+  { value: "SHARED", label: "Shared" },
+  { value: "LONE", label: "Private" },
+];
 
+/**
+ * Home — where requests live.
+ *
+ * - Header: greeting and the Online switch.
+ * - On a trip, the green trip banner sits above everything (from the tabs
+ *   layout, identical on every tab).
+ * - Free: every request near you, nearest first, filtered by type, with
+ *   Accept. Accepting opens the trip at once (lib/tripActions).
+ * - On a Shared trip: only riders who fit the route, each with See route
+ *   (the dotted preview on the trip screen) and Add.
+ * - On a Ride-alone trip: no requests, and a line saying why.
+ * - No requests: the pulsing pin. Offline: "Ready when you are".
+ *
+ * The list updates live (new requests arrive over the socket; it also polls),
+ * and a request you accept or add leaves the list the moment you tap.
+ */
 export default function DriverHomeScreen() {
   const router = useRouter();
-  const { isLoading: authLoading, isAuthenticated, user } = useAuth();
+  const { isLoading: authLoading, user } = useAuth();
+  const { isOnline, waking, outsideServiceArea, position, toggle } = useDriverPresence();
+  const { data: trip, isLoading: tripLoading } = useDriverActiveTrip();
+  const actions = useTripActions();
+  const { data: zones = [] } = useZones();
+  const [filter, setFilter] = useState<RequestTypeFilter>("ALL");
 
-  const { isOnline, waking, outsideServiceArea, toggle } = useDriverPresence();
-
-  const { data: activeRide, isLoading: rideLoading } = useQuery({
-    queryKey: driverActiveRideQueryKey,
-    queryFn: getDriverActiveRide,
-    enabled: isAuthenticated,
-    refetchInterval: 15_000,
-  });
-
-  // "Requests near you (N)" — not while on ANY trip: a driver with an active
-  // ride can't claim another (the server refuses).
-  const { data: requests = [] } = useRequestsNearYou(isOnline && !activeRide);
-
-  // Open the trip screen once per trip — Ride alone and Shared alike. PUSH,
-  // not replace, so the tabs stay underneath; once per trip, so a driver who
-  // steps back to Home isn't bounced straight back (the "Return to trip" card
-  // and the banner on every tab are how they return).
+  // Open a trip's screen once per trip (one started elsewhere, or the app
+  // reopened mid-trip). After that, the banner leads back.
   useEffect(() => {
-    if (!activeRide || wasTripOpened(activeRide.id)) return;
-    markTripOpened(activeRide.id);
-    router.push(`/ride/${activeRide.id}`);
-  }, [activeRide, router]);
+    if (!trip || wasTripOpened(trip.id)) return;
+    markTripOpened(trip.id);
+    router.push(`/ride/${trip.id}`);
+  }, [trip, router]);
 
-  // ─── Loading guard ────────────────────────────────────────────────────────
-  // Auth/role/onboarding are already gated by the parent (tabs) layout — by
-  // the time this screen renders, the user is a confirmed onboarded driver.
+  // ─── Requests when free ─────────────────────────────────────────────────
+  const free = isOnline && !trip;
+  const eligible = useRequestsNearYou(free);
 
-  if (authLoading || rideLoading || !user) {
+  // ─── Riders who fit a shared trip ───────────────────────────────────────
+  const sharedTrip =
+    trip?.type === "SHARED" && (trip.status === "MATCHED" || trip.status === "ARRIVED" || trip.status === "IN_PROGRESS")
+      ? trip
+      : null;
+  const seated = sharedTrip
+    ? overlayPassengers(sharedTrip.id, sharedTrip.passengers).filter(
+        (p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP",
+      ).length
+    : 0;
+  const freeSeats = Math.max(0, CAR_SEATS - seated);
+  const fill = useQuery({
+    queryKey: ["fillSuggestions", sharedTrip?.id],
+    queryFn: () => getFillSuggestions(sharedTrip!.id),
+    enabled: Boolean(sharedTrip) && freeSeats > 0,
+    refetchInterval: 10_000,
+  });
+  const { refetch: refetchFill } = fill;
+  useEffect(() => {
+    if (!sharedTrip) return;
+    const socket = getRideSocket();
+    const onBroadcast = () => void refetchFill();
+    socket.on(DRIVER_EVENTS.RIDE_BROADCAST, onBroadcast);
+    return () => {
+      socket.off(DRIVER_EVENTS.RIDE_BROADCAST, onBroadcast);
+    };
+  }, [sharedTrip, refetchFill]);
+
+  const sharedFare = getSharedFarePerRider(1);
+  const items: HomeRequest[] = useMemo(() => {
+    if (free) {
+      const open = (eligible.data ?? []).filter((r) => r.rideId !== actions.claim?.rideId);
+      return filterRequestsByType(sortRequestsNearestFirst(open, position, zones), filter);
+    }
+    if (sharedTrip && freeSeats > 0) {
+      const fits = (fill.data?.suggestions ?? [])
+        .filter((s) => s.compatible && !actions.adds[s.requestRideId])
+        .map((s) => ({
+          rideId: s.requestRideId,
+          type: "SHARED" as const,
+          seats: 1,
+          farePesewas: sharedFare,
+          pickupZoneId: s.pickupZoneId,
+          pickupZoneName: s.pickupZoneName,
+          dropoffZoneName: s.dropoffZoneName,
+          createdAt: s.createdAt,
+          riderFirstName: s.riderFirstName,
+        }));
+      return sortRequestsNearestFirst(fits, position, zones);
+    }
+    return [];
+  }, [free, eligible.data, actions.claim, actions.adds, position, zones, filter, sharedTrip, freeSeats, fill.data, sharedFare]);
+
+  if (authLoading || tripLoading || !user) {
     return (
       <Screen>
         <LoadingState />
@@ -64,34 +135,32 @@ export default function DriverHomeScreen() {
   }
 
   const firstName = user.name?.split(" ")[0] ?? "Driver";
+  const refreshing = free ? eligible.isRefetching : fill.isRefetching;
+  const refresh = () => void (free ? eligible.refetch() : fill.refetch());
 
-  // ─── On a trip, stepped back to Home ─────────────────────────────────────
-  // Every trip is driven on its own screen; Home says so and leads back.
-  if (activeRide) {
-    return (
-      <Screen>
-        <View style={styles.onTrip}>
-          <Illustration name="carIdle" size={140} float />
-          <Text variant="h2" style={styles.onTripText}>
-            You&apos;re on a trip
-          </Text>
-          <Text variant="bodySmall" color="muted" style={styles.onTripText}>
-            {tripStatusLine(activeRide)}
-          </Text>
-          <Button label="Return to trip" size="lg" onPress={() => router.push(`/ride/${activeRide.id}`)} />
-        </View>
-      </Screen>
-    );
-  }
+  const accept = (item: HomeRequest) => {
+    const request = eligible.data?.find((r) => r.rideId === item.rideId);
+    if (!request) return;
+    runClaim(request);
+    markTripOpened(item.rideId);
+    router.push(`/ride/${item.rideId}`);
+  };
+  const add = (item: HomeRequest) => {
+    const suggestion = fill.data?.suggestions.find((s) => s.requestRideId === item.rideId);
+    if (!sharedTrip || !suggestion) return;
+    runAddRider(sharedTrip.id, suggestion, sharedFare, position);
+  };
 
-  // ─── Normal home: waiting for requests ───────────────────────────────────────
-
-  return (
-    <Screen>
+  const header = (
+    <View style={styles.headerBlock}>
       <View style={styles.header}>
-        <View>
-          <Text variant="bodySmall" color="muted">Welcome back</Text>
-          <Text variant="h1">{firstName}</Text>
+        <View style={styles.greeting}>
+          <Text variant="bodySmall" color="muted">
+            Welcome back
+          </Text>
+          <Text variant="h1" numberOfLines={1}>
+            {firstName}
+          </Text>
         </View>
         <View style={styles.onlineToggle}>
           <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
@@ -110,121 +179,166 @@ export default function DriverHomeScreen() {
         </View>
       </View>
 
-      {waking && (
-        <Text variant="caption" color="muted" style={styles.waking} accessibilityLiveRegion="polite">
+      {waking ? (
+        <Text variant="caption" color="muted" accessibilityLiveRegion="polite">
           Connecting to CampusRide… this can take a few seconds.
         </Text>
-      )}
+      ) : null}
 
-      {!isOnline ? (
-        <View style={styles.emptyState}>
-          <Illustration name="carIdle" size={180} float accessibilityLabel="Parked car" />
-          <Text variant="h3" style={styles.emptyTitle}>Ready when you are</Text>
-          <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
-            Toggle online above to start accepting trips around campus.
-          </Text>
+      {free && !outsideServiceArea ? (
+        <View style={styles.chips}>
+          {FILTERS.map(({ value, label }) => {
+            const active = value === filter;
+            return (
+              <Pressable
+                key={value}
+                onPress={() => setFilter(value)}
+                style={[styles.chip, active && styles.chipActive]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`Show ${label.toLowerCase()} requests`}
+              >
+                <Text variant="bodySmall" style={active ? styles.chipTextActive : styles.chipText}>
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
-      ) : outsideServiceArea ? (
-        <View style={styles.emptyState} accessibilityLiveRegion="polite">
-          <Illustration name="searchEmpty" size={160} accessibilityLabel="Map" />
-          <Text variant="h3" style={styles.emptyTitle}>You&apos;re outside the CampusRide area</Text>
-          <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
-            Requests reach drivers within 2 km of campus. Head back towards campus and they&apos;ll start coming in.
-          </Text>
-        </View>
-      ) : (
-        <>
-          <View style={styles.hero}>
-            <Illustration name="pinRadar" size={150} pulse accessibilityLabel="Map pin" />
-            <Text variant="h3" style={styles.emptyTitle}>Waiting for requests</Text>
-            <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
-              Keep the app open. Requests near you show up below.
-            </Text>
-          </View>
+      ) : null}
 
-          <PressableScale
-            onPress={() => router.push("/requests")}
-            style={styles.nearYouCard}
-            accessibilityRole="button"
-            accessibilityLabel={`Requests near you, ${requests.length} ${requests.length === 1 ? "request" : "requests"}`}
-            accessibilityHint="Browse and pick one yourself"
-          >
-            <View style={styles.nearYouCount}>
-              <Text variant="bodyMedium" style={styles.nearYouCountText}>{requests.length}</Text>
-            </View>
-            <View style={styles.nearYouText}>
-              <Text variant="bodyMedium" style={styles.nearYouTitle}>Requests near you</Text>
-              <Text variant="caption" color="muted">Browse and pick one yourself</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.ink[300]} />
-          </PressableScale>
-        </>
-      )}
+      {sharedTrip && freeSeats > 0 && items.length > 0 ? (
+        <Text variant="label" color="muted">
+          RIDERS ON YOUR ROUTE · {freeSeats} FREE SEAT{freeSeats === 1 ? "" : "S"}
+        </Text>
+      ) : null}
+    </View>
+  );
+
+  let empty: ReactElement;
+  if (!isOnline) {
+    empty = (
+      <EmptyState
+        illustration={<Illustration name="carIdle" size={170} float accessibilityLabel="Parked car" />}
+        title="Ready when you are"
+        body="Go online above to start getting trips around campus."
+      />
+    );
+  } else if (outsideServiceArea) {
+    empty = (
+      <EmptyState
+        illustration={<Illustration name="searchEmpty" size={150} accessibilityLabel="Map" />}
+        title="You're outside the CampusRide area"
+        body="Requests reach drivers within 2 km of campus. Head back towards campus and they'll start coming in."
+      />
+    );
+  } else if (trip && trip.type === "LONE") {
+    empty = (
+      <EmptyState
+        illustration={<Illustration name="carIdle" size={130} accessibilityLabel="Car" />}
+        title="You're on a Ride alone trip"
+        body="A private trip takes one rider, so new requests show here once it ends."
+      />
+    );
+  } else if (sharedTrip && freeSeats === 0) {
+    empty = (
+      <EmptyState
+        illustration={<Illustration name="carFull" size={130} accessibilityLabel="Full car" />}
+        title="Your car is full"
+        body="Riders on your route will show here again when a seat frees up."
+      />
+    );
+  } else if (trip && !sharedTrip) {
+    empty = <View />;
+  } else {
+    empty = (
+      <EmptyState
+        illustration={<Illustration name="pinRadar" size={150} pulse accessibilityLabel="Map pin" />}
+        title={sharedTrip ? "No riders on your route right now" : "Waiting for requests"}
+        body={
+          sharedTrip
+            ? "Riders whose trip fits yours show up here as they request."
+            : "Keep the app open. New requests show up here as they come in."
+        }
+      />
+    );
+  }
+
+  return (
+    // On a trip the banner above already covers the top safe area.
+    <Screen noPadding edges={trip ? [] : ["top"]}>
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.rideId}
+        ListHeaderComponent={header}
+        ListEmptyComponent={empty}
+        renderItem={({ item }) =>
+          free ? (
+            <RequestCard item={item} onAccept={() => accept(item)} />
+          ) : (
+            <RequestCard
+              item={item}
+              onSeeRoute={() => sharedTrip && router.push(`/ride/${sharedTrip.id}?preview=${item.rideId}`)}
+              onAdd={() => add(item)}
+            />
+          )
+        }
+        contentContainerStyle={styles.content}
+        ItemSeparatorComponent={Separator}
+        refreshControl={
+          free || sharedTrip ? (
+            <RefreshControl refreshing={Boolean(refreshing)} onRefresh={refresh} tintColor={colors.primary[500]} />
+          ) : undefined
+        }
+      />
     </Screen>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+function Separator() {
+  return <View style={styles.separator} />;
+}
+
+function EmptyState({ illustration, title, body }: { illustration: ReactElement; title: string; body: string }) {
+  return (
+    <View style={styles.empty}>
+      {illustration}
+      <Text variant="h3" style={styles.emptyTitle}>
+        {title}
+      </Text>
+      <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
+        {body}
+      </Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
-  onTrip: { flex: 1, justifyContent: "center", alignItems: "stretch", gap: spacing.md },
-  onTripText: { textAlign: "center" },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.xl,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: radii.full,
-    backgroundColor: colors.primary[500],
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  // One side padding (16) and one gap between sections, everywhere on Home.
+  content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl },
+  headerBlock: { gap: spacing.md, marginBottom: spacing.lg },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  greeting: { flexShrink: 1 },
   onlineToggle: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   onlineLabel: { fontWeight: typography.weight.semibold },
   statusDot: { width: 10, height: 10, borderRadius: radii.full },
   dotOnline: { backgroundColor: colors.primary[500] },
   dotOffline: { backgroundColor: colors.ink[300] },
-  emptyState: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    paddingTop: spacing["4xl"],
-    paddingBottom: spacing["4xl"],
-  },
-  emptyTitle: { marginTop: spacing.sm },
-  emptyBody: { textAlign: "center", maxWidth: 260 },
-  waking: { marginTop: -spacing.md, marginBottom: spacing.md, textAlign: "right" },
-  hero: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-    paddingBottom: spacing["3xl"],
-  },
-  nearYouCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    backgroundColor: colors.white,
-    borderRadius: radii.lg,
+  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  chip: {
     paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    marginBottom: spacing.lg,
-    ...shadows.sm,
-  },
-  nearYouCount: {
-    width: 32,
-    height: 32,
+    paddingVertical: spacing.sm,
     borderRadius: radii.full,
-    backgroundColor: colors.primary[50],
-    alignItems: "center",
+    backgroundColor: colors.surfaceMuted,
+    minHeight: 36,
     justifyContent: "center",
   },
-  nearYouCountText: { color: colors.primary[500], fontWeight: typography.weight.extrabold },
-  nearYouText: { flex: 1, gap: 1 },
-  nearYouTitle: { fontWeight: typography.weight.bold },
+  chipActive: { backgroundColor: colors.primary[500] },
+  chipText: { color: colors.ink[600], fontWeight: typography.weight.semibold },
+  chipTextActive: { color: colors.white, fontWeight: typography.weight.semibold },
+  separator: { height: spacing.md },
+  // Fills the space under the header so the illustration sits centred in it.
+  empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md, paddingVertical: spacing["2xl"] },
+  emptyTitle: { textAlign: "center" },
+  emptyBody: { textAlign: "center", maxWidth: 300 },
 });

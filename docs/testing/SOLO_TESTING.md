@@ -203,7 +203,7 @@ simulator aims requests at wherever you are.
 
 ### What you should see on the phone
 
-- The **Requests near you** list filling up.
+- The request list on **Home** filling up (nearest first, live).
 - **Accept** one: the trip screen opens at once (the server confirms in the
   background). It's the same screen for Ride alone and Shared:
   - a map with you, every stop numbered in order (green = pickup, black =
@@ -363,53 +363,78 @@ This is **impossible in a release build**: the code is behind React Native's
 `__DEV__`, which is `false` in a release bundle, so it's stripped out and the
 Account card doesn't exist.
 
-## One-phone test checklist
+## One-phone test script
 
-With the server running (Step 2), the app pointed at your Mac (Step 4), and
-signed in as your approved driver (Step 5):
+With the server running (Step 2 — on local Postgres if you're on a hotspot, see
+[Faster: use local Postgres](#faster-use-local-postgres)), the app pointed at
+your Mac (Step 4) and signed in as your approved driver (Step 5).
 
-1. **Account → Fake location → Balme Library.** Go online.
-2. Start riders, Shared only, near you:
+**What "instant" means here:** every slide, tap and Add changes the screen the
+moment you do it. The request goes to the server in the background. If the
+server is slow, a small **Sending…** chip shows at the top — you carry on. If
+the server says no, the screen goes back and a red line says why.
+
+### A 3-rider shared trip, from Home
+
+1. **Account → Fake location → Balme Library.** Back on **Home**, go online.
+2. Start Shared riders near you:
    `npm run sim:riders -- --shared-ratio 1 --zone Balme --interval 15`
-3. **Accept** a request from **Requests near you**. The trip screen opens at
-   once. ✔ map, numbered stops, route; seat dots "1 of 4".
-4. **Add a rider with a route preview.** A rider going your way is offered on
-   the trip screen by itself (or tap **Add rider** → **See route**). ✔ the map
-   shows your current route solid and the new one dotted and lighter, the new
-   pins marked **New**, all stops in view, and a label like "+1 rider · adds
-   ~2 min · +GH₵5". Tap **Skip** once — ✔ the preview disappears. On the next
-   one tap **Add** — ✔ the dotted route turns solid, the stop list and seat
-   dots update ("1 of 4"). Leave one alone for 90 seconds — ✔ it disappears
-   when the request expires.
-5. Tap **▶ Drive (fake)**. ✔ the dot moves along the route; near the pickup the
-   car stops at the pickup and, about 10 seconds later, the card switches to
-   "Ama knows you're here · Waiting 0:05" without you tapping **I'm here**.
-   (Driving straight past a pickup never counts as arriving.) This works on
-   any screen — go to the Rides tab while it drives and come back. The simulator logs "Driver is at … for Test Ama".
-6. **Slide "Ama picked up".** ✔ the next stop moves up at once. While you
-   drive, ✔ the route line only shows what's ahead of you.
-   **Add a rider mid-trip:** with Ama in the car, a rider on the way is
-   offered (or use **Add rider** → **See route**). ✔ the preview shows the
-   extra minutes; **Add** works if it keeps Ama within 5 minutes of her
-   drop-off, otherwise it says the detour is too long. (Riders already in
-   the car get "Picking up 1 more rider on the way · ~N min" in the rider
-   app.)
-7. For the second rider, tap **I'm here** yourself, then wait 3 minutes. ✔
-   **Rider didn't show** unlocks; use it. ✔ that stop leaves the list; the
-   simulator logs the cancellation.
-8. **▶ Drive (fake)** to the drop-off. **Slide "Cash collected"** (GH₵5 shown
-   large). ✔ "Trip complete" with what you collected and your share.
-9. Now Ride alone: `npm run sim:riders -- --shared-ratio 0 --zone Balme`.
-   Accept one and run it start to finish the same way.
-10. **Burst:** `npm run sim:riders -- --burst 5`. ✔ the list fills; accepting
-    is instant every time.
-11. **Leave and come back:** mid-trip, tap ← (Home says "You're on a trip");
-    switch tabs (the green banner shows); kill the app and reopen it. ✔ every
-    time you get back to the same trip.
-12. **Off campus:** turn **Fake location** off and, far from campus, try to go
-    online. ✔ "You're outside the CampusRide area". Turn it back on — ✔ you
-    can go online again.
-13. Ctrl+C the simulator, then `npm run sim:cleanup`.
+3. ✔ The request list fills on **Home**: type and seats, distance, pickup →
+   drop-off, price, the rider's name and how long ago, nearest first. Try the
+   **All / Shared / Private** chips and pull to refresh.
+4. **Accept** the top one (say Ama). ✔ The trip screen opens at once with the
+   full trip — map, numbered stops, "Pick up Ama at Balme Library" — no
+   "Confirming…" step. Seat dots show "1 of 4"; the first time, a one-line
+   legend explains them.
+5. Tap **←**. ✔ Home shows the green banner at the top ("Filling your car ·
+   1 rider · Tap to return to your trip") and, below it, only riders who fit
+   your route, each with **See route** and **Add**.
+6. **Add a rider from Home:** tap **Add** on one (say Kofi). ✔ Kofi leaves the
+   list at once and the banner says 2 riders.
+7. Tap the banner. ✔ The trip shows Kofi straight away in **N more stops**
+   (named, not "Your rider").
+8. **Add a rider from the trip screen:** tap **Add rider** → **See route** on a
+   third rider (say Yaw). ✔ dotted route, **New** pins, "+1 rider · adds ~N
+   min · +GH₵5". Tap **Add**. ✔ the dotted line turns solid, seat dots "3 of
+   4", the stop list shows Yaw.
+9. **▶ Drive (fake)** to the first pickup. ✔ About 10 seconds after stopping
+   there, the card shows "Ama knows you're here · Waiting 0:05" on its own.
+10. **Slide "Ama picked up".** ✔ The knob turns into a check mark with a buzz
+    and the next stop moves up **in the same moment**; a toast says "Ama is
+    in the car · next: pick up Kofi"; the seat dots fill one in.
+11. Pick up Kofi and Yaw the same way (Drive, then slide). Each slide advances
+    at once. Open **N more stops** — ✔ each rider has one word: Waiting /
+    Arrived / In car.
+12. Drive to each drop-off. The card says "Drop off Ama at … · collect GH₵5"
+    with the amount large. **Slide "Cash collected from Ama"**. ✔ instant;
+    toast "Ama dropped off · next: drop off Kofi"; the stop list has a
+    **Done** section with Ama.
+13. **The last drop-off:** slide it. ✔ Straight to **Trip complete** (cash
+    collected, your share). **Back to Home** — ✔ no banner, the request list
+    is back; no waiting for the server.
+
+### A Ride-alone trip
+
+14. Stop the simulator (Ctrl+C) and start private riders:
+    `npm run sim:riders -- --shared-ratio 0 --zone Balme`
+15. Accept one from Home. ✔ The trip opens at once.
+16. Tap **←**. ✔ Home shows the banner and "You're on a Ride alone trip",
+    no request list.
+17. Drive, let it arrive, **slide "… picked up"**, drive, **slide "Cash
+    collected …"**. ✔ each instant; the last one goes straight to Trip
+    complete, then Home is free again.
+
+### Also check
+
+18. **A rider cancels:** with a trip running, cancel from the simulator side
+    (`npm run sim:riders -- --cancel-ratio 1` makes riders give up before
+    you accept) — or let a request you were about to add expire. ✔ Home and
+    the trip screen update within a second or two without leaving the screen.
+19. **Leave and come back:** kill the app mid-trip and reopen it. ✔ you're
+    back on the same trip.
+20. **Off campus:** turn **Fake location** off far from campus and try to go
+    online. ✔ "You're outside the CampusRide area".
+21. Ctrl+C the simulator, then `npm run sim:cleanup`.
 
 ## Troubleshooting
 
@@ -431,28 +456,31 @@ signed in as your approved driver (Step 5):
 
 ## Faster: use local Postgres
 
-A database on your Mac makes every action confirm in milliseconds instead of
-seconds. You already have Postgres running (the test suite uses it). One-time
-setup:
+The dev database is in the US; over a phone hotspot every request takes
+seconds. The app no longer waits on that (every step shows at once), but the
+simulator and confirmations are much quicker on a database on your Mac.
+
+**What's on this Mac:** Homebrew **PostgreSQL 16**, already running as a
+service (the test suite uses it). If it's ever stopped:
+`brew services start postgresql@16`.
+
+**One-time setup** (from the repo root):
 
 ```bash
 createdb -h localhost rida_dev
-export DATABASE_URL="postgresql://$(whoami)@localhost:5432/rida_dev"
-export DIRECT_URL="$DATABASE_URL"
+printf 'DATABASE_URL="postgresql://%s@localhost:5432/rida_dev"\nDIRECT_URL="postgresql://%s@localhost:5432/rida_dev"\n' "$(whoami)" "$(whoami)" > apps/server/.env.development.local
 npm run db:deploy:dev                              # create the tables
 npm run db:seed:dev --workspace apps/server        # the 15 campus zones
+npm run routes:precompute --workspace apps/server -- --provider osrm   # optional: real roads
 ```
 
-Then, **every time**, export the same two lines in **both** the server's and the
-simulator's terminal before starting them:
-
-```bash
-export DATABASE_URL="postgresql://$(whoami)@localhost:5432/rida_dev"
-export DIRECT_URL="$DATABASE_URL"
-npm run dev:server          # Terminal 1
-npm run sim:riders          # Terminal 2 (after the same two exports)
-```
+That file, `apps/server/.env.development.local`, is the switch. While it
+exists, **everything** uses your local database: `npm run dev:server`, the
+simulator, `sim:cleanup`, `sim:approve-driver` and the `db:*:dev` commands — no
+exports, nothing else to remember. It's git-ignored.
 
 A local database starts empty: sign up your driver again (Step 5) and approve
-it with `npm run sim:approve-driver` in a terminal with the same exports. To
-draw real roads instead of straight lines, see [docs/routing.md](../routing.md).
+it with `npm run sim:approve-driver -- <your number>`.
+
+**Back to the US dev database:** `rm apps/server/.env.development.local`, then
+restart the server and simulator.
