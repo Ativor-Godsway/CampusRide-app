@@ -189,7 +189,9 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
     const totalLocked = finalPassengers.reduce((sum, p) => sum + (p.lockedFare ?? 0), 0);
     expect(totalLocked).toBe(getSharedTotalFare(3)); // 1500 (500 flat x 3 — total still scales with headcount)
 
-    // 9. Attempt addRiderToCar after departure -> rejected.
+    // 9. addRiderToCar after departure — allowed since 2026-10-02 (sketch 6).
+    // The car stays IN_PROGRESS with its departure time, existing fares are
+    // frozen (untouched), and the newcomer waits at the flat shared fare.
     const { ride: rideE, rider: riderE } = await createTestRide({
       type: "SHARED",
       status: "REQUESTED",
@@ -200,9 +202,16 @@ describe("Phase 2d — end-to-end shared-car assembly", () => {
     otherRideIds.push(rideE.id);
     riderIds.push(riderE.id);
 
-    await expect(addRiderToCar(prisma, driver.user.id, rideA.id, rideE.id)).rejects.toThrow(
-      RideNotFillableError,
-    );
+    const faresBefore = new Map(finalPassengers.map((p) => [p.id, p.lockedFare]));
+    const midTrip = await addRiderToCar(prisma, driver.user.id, rideA.id, rideE.id);
+    expect(midTrip.changed).toBe(true);
+    expect(midTrip.status).toBe("IN_PROGRESS");
+    expect(midTrip.departedAt).toEqual(departed.departedAt);
+    const newcomer = midTrip.passengers.find((p) => p.riderId === riderE.id)!;
+    expect(newcomer).toMatchObject({ status: "WAITING", lockedFare: getSharedFarePerRider(1) });
+    for (const p of midTrip.passengers.filter((x) => faresBefore.has(x.id))) {
+      expect(p.lockedFare).toBe(faresBefore.get(p.id));
+    }
 
     // 10. Driver completes -> COMPLETED.
     const completed = await applyRideTransition(prisma, rideA.id, "COMPLETED");
@@ -256,18 +265,21 @@ describe("addRiderToCar — guard rails", () => {
     );
   });
 
-  it("throws NoSeatsAvailableError when the anchor ride is already at occupancy 4", async () => {
+  it("throws NoSeatsAvailableError when four riders are already in the car", async () => {
     const { pickup, dropoff } = await getTestZones();
 
     const driver = await createTestDriver({ isOnline: true, isApproved: true });
     createdDriverUserIds.push(driver.user.id);
 
+    // Seats are the riders actually in the car (waiting, arrived, on board).
+    const seated = [];
+    for (let i = 0; i < 4; i++) seated.push(await createTestUser("RIDER"));
     const { ride: anchor } = await createTestRide({
       type: "SHARED",
       status: "MATCHED",
       driverId: driver.user.id,
       occupancy: 4,
-      passengers: [],
+      passengers: seated.map((r) => ({ riderId: r.id, lockedFare: 500 })),
       pickupZoneId: pickup.id,
       dropoffZoneId: dropoff.id,
     });

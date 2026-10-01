@@ -9,8 +9,15 @@
  * the stored zone-to-zone road routes where they exist.
  */
 import type { PathPoint } from "../geo/polyline";
-import { planSeconds, tripPath, type RouteLookup } from "../geo/tripRoute";
+import { planSeconds, planTimeline, tripPath, type RouteLookup } from "../geo/tripRoute";
 import { planTripStops, type TripPassenger, type TripStop, type TripZone } from "./tripStops";
+
+/**
+ * The most a new rider may delay any rider already IN the car (picked up),
+ * measured at that rider's drop-off. Owner's rule, 2026-10-02: "only if the
+ * detour adds at most ~5 minutes for riders already in the car".
+ */
+export const MAX_ONBOARD_DELAY_SECONDS = 5 * 60;
 
 export interface AddRiderCandidate {
   /** The waiting request being considered. */
@@ -41,6 +48,15 @@ export interface AddRiderPreview {
   addedSeconds: number;
   /** For "adds ~X min": at least 1, since a new rider always means two more stops. */
   addedMinutes: number;
+  /**
+   * How much later each rider already in the car (PICKED_UP) reaches their
+   * drop-off, by passenger id, in seconds (never below zero).
+   */
+  onboardDelaySeconds: Record<string, number>;
+  /** The largest of those, or 0 with nobody on board. */
+  maxOnboardDelaySeconds: number;
+  /** False when that exceeds MAX_ONBOARD_DELAY_SECONDS: the rider must not be added. */
+  withinDetourLimit: boolean;
 }
 
 /** Seat id given to the rider being previewed (never a real RidePassenger id). */
@@ -93,6 +109,22 @@ export function previewAddRider(input: {
   const proposedSeconds = planSeconds(input.from, proposedZones, input.zones, input.routes);
   const addedSeconds = Math.max(0, proposedSeconds - currentSeconds);
 
+  // Each on-board rider's drop-off time, before and after.
+  const currentTimes = planTimeline(input.from, currentZones, input.zones, input.routes);
+  const proposedTimes = planTimeline(input.from, proposedZones, input.zones, input.routes);
+  const dropoffTime = (plan: readonly TripStop[], times: number[], passengerId: string) => {
+    const i = plan.findIndex((s) => s.passengerId === passengerId && s.kind === "DROPOFF");
+    return i === -1 ? null : times[i]!;
+  };
+  const onboardDelaySeconds: Record<string, number> = {};
+  for (const p of input.passengers) {
+    if (p.status !== "PICKED_UP") continue;
+    const before = dropoffTime(current.upcoming, currentTimes, p.id);
+    const after = dropoffTime(stops, proposedTimes, p.id);
+    if (before !== null && after !== null) onboardDelaySeconds[p.id] = Math.max(0, after - before);
+  }
+  const maxOnboardDelaySeconds = Math.max(0, ...Object.values(onboardDelaySeconds));
+
   return {
     stops,
     pickupIndex,
@@ -103,7 +135,15 @@ export function previewAddRider(input: {
     proposedSeconds,
     addedSeconds,
     addedMinutes: Math.max(1, Math.round(addedSeconds / 60)),
+    onboardDelaySeconds,
+    maxOnboardDelaySeconds,
+    withinDetourLimit: maxOnboardDelaySeconds <= MAX_ONBOARD_DELAY_SECONDS,
   };
+}
+
+/** "Picking up 1 more rider on the way · ~3 min" — what an on-board rider is told. */
+export function onboardAddNotice(delaySeconds: number): string {
+  return `Picking up 1 more rider on the way · ~${Math.max(1, Math.round(delaySeconds / 60))} min`;
 }
 
 /** "+1 rider · adds ~3 min · +GH₵5" */

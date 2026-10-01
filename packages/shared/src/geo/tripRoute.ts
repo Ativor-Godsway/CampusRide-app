@@ -171,6 +171,27 @@ export function driverLegSeconds(
 }
 
 /**
+ * When the car reaches each stop, in seconds from now: driving time to it
+ * plus STOP_DWELL_SECONDS for every stop before it. `from` is the driver
+ * (or null: start at the first stop).
+ */
+export function planTimeline(
+  from: PathPoint | null,
+  stops: readonly RouteZone[],
+  zones: readonly RouteZone[],
+  routes: RouteLookup,
+): number[] {
+  const arriveAt: number[] = [];
+  let t = 0;
+  for (let i = 0; i < stops.length; i++) {
+    if (i === 0) t += from ? driverLegSeconds(from, stops[0]!, zones, routes) : 0;
+    else t += STOP_DWELL_SECONDS + legSeconds(stops[i - 1]!, stops[i]!, routes);
+    arriveAt.push(t);
+  }
+  return arriveAt;
+}
+
+/**
  * Seconds to drive a whole plan: from `from` (the driver, or the first stop
  * when unknown) through every stop in order, plus STOP_DWELL_SECONDS per stop.
  */
@@ -181,9 +202,8 @@ export function planSeconds(
   routes: RouteLookup,
 ): number {
   if (stops.length === 0) return 0;
-  let total = from ? driverLegSeconds(from, stops[0]!, zones, routes) : 0;
-  for (let i = 1; i < stops.length; i++) total += legSeconds(stops[i - 1]!, stops[i]!, routes);
-  return total + stops.length * STOP_DWELL_SECONDS;
+  const timeline = planTimeline(from, stops, zones, routes);
+  return timeline[timeline.length - 1]! + STOP_DWELL_SECONDS;
 }
 
 /**

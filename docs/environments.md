@@ -2,11 +2,11 @@
 
 CampusRide uses **three isolated databases**, all Neon branches of one project:
 
-| Env | NODE_ENV | Neon branch | Local env file | Who uses it |
-|---|---|---|---|---|
-| Production | `production` | `main` (compute host `ep-ancient-butterfly…`) | **none** — values live only in Render | The deployed server |
-| Development | `development` | `dev` (`ep-flat-rain…`) | `apps/server/.env.development` | `npm run dev`, local scripts |
-| Test | `test` | **local Postgres** (`localhost:5432/rida_test`) | `apps/server/.env.test` | `vitest` (creates/deletes rows) |
+| Env         | NODE_ENV      | Neon branch                                     | Local env file                        | Who uses it                     |
+| ----------- | ------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------- |
+| Production  | `production`  | `main` (compute host `ep-ancient-butterfly…`)   | **none** — values live only in Render | The deployed server             |
+| Development | `development` | `dev` (`ep-flat-rain…`)                         | `apps/server/.env.development`        | `npm run dev`, local scripts    |
+| Test        | `test`        | **local Postgres** (`localhost:5432/rida_test`) | `apps/server/.env.test`               | `vitest` (creates/deletes rows) |
 
 > The test suite runs against a **local Postgres**, not a remote Neon branch. It
 > issues hundreds of sequential queries — locally that's ~12s and deterministic;
@@ -29,7 +29,7 @@ fallback. `dotenv` never overrides an already-set variable, so:
 - Locally, `.env.development` (or `.env.test` under vitest) wins over any stray
   base `.env`.
 
-Prisma **CLI** commands (`migrate`, `seed`) do *not* read `config.ts`; they read
+Prisma **CLI** commands (`migrate`, `seed`) do _not_ read `config.ts`; they read
 `.env` / real env vars. So the env-scoped scripts below use `dotenv-cli` to load
 the correct file explicitly.
 
@@ -76,6 +76,37 @@ All `db:*:dev` scripts (`migrate`, `deploy`, `status`, `seed`, `reset`) run
 `db:guard:dev` first ([src/db/devDbGuard.ts](../apps/server/src/db/devDbGuard.ts)),
 which allows only local Postgres or the dev branch and refuses production with
 no override. See [testing/SOLO_TESTING.md](testing/SOLO_TESTING.md).
+
+## Database time limits
+
+Since migration `20261002120000_database_timeouts`, every database we migrate
+(dev, production, local test) carries these settings:
+
+| Setting                               | Value | Why                                                                                                                                                                |
+| ------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lock_timeout`                        | 10 s  | Waiting for a row another transaction holds gives up after 10 s. The request fails with a 500; the driver app retries quietly (every driver action is idempotent). |
+| `statement_timeout`                   | 30 s  | No single statement runs longer than 30 s.                                                                                                                         |
+| `idle_in_transaction_session_timeout` | 60 s  | A session left inside a transaction with nothing happening is ended, which releases its locks.                                                                     |
+
+**Why (the 29-minute stall, 2026-10-01).** Under a deliberately slow link
+(1.4 s per round trip), one request waited 29 minutes. Reproduced on its own:
+when Prisma gives up on an interactive transaction (error P2028), the
+database session is still _inside_ that transaction, holding its row locks,
+until Prisma's ROLLBACK arrives. With `lock_timeout` and
+`statement_timeout` at 0 (no limit) — the default on plain Postgres and on
+our Neon branches — anything that needs those rows waits for as long as that
+takes; Neon only ends an idle transaction after 5 minutes, plain Postgres
+never. In the isolated runs the ROLLBACK arrived within ~2 s; the exact
+condition that delayed it for 29 minutes wasn't reproduced. With the limits
+above, no wait can exceed ~10 s for a lock or 60 s for an abandoned session.
+
+They are database settings, not schema: no table or row changes. They apply
+to **new** connections, so restart the server after deploying. The migration
+needs the migrating role to own the database (it does on our Neon branches);
+otherwise it only warns, and the owner must run the three `ALTER DATABASE …
+SET` lines from the migration by hand. Check what a database has with
+`SHOW lock_timeout; SHOW statement_timeout; SHOW idle_in_transaction_session_timeout;`
+from a new connection.
 
 ## Seeding
 

@@ -11,6 +11,7 @@ import {
   getSharedFarePerRider,
   getSharedTotalFare,
   indexRoutes,
+  onboardAddNotice,
   previewAddRider,
   splitFare,
 } from "@rida/shared";
@@ -19,12 +20,13 @@ import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
 import { getDriverInfo } from "../services/user/driverInfo";
 import { claimIfOpen } from "../services/ride/dispatch";
-import { departRide, addRiderToCar } from "../services/ride/assembly";
+import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
 import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
 import {
+  DetourTooLongError,
   InvalidTransitionError,
   NoShowTooEarlyError,
   PassengerNotFoundError,
@@ -137,6 +139,9 @@ async function finalizeRideCompletion(
   }
 }
 
+const DETOUR_TOO_LONG_MESSAGE =
+  "Adding this rider would make the riders in your car more than 5 minutes late.";
+
 /** A refusal the driver app shows as-is: plain words plus a stable code. */
 function refuse(reply: FastifyReply, status: number, code: string, error: string) {
   return reply.code(status).send({ error, code });
@@ -239,14 +244,17 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     if (!(await requireDriver(request, reply))) return;
 
     const body = (request.body ?? {}) as { zoneId?: unknown };
-    if (typeof body.zoneId !== "string" || body.zoneId.length === 0) {
-      return reply.code(400).send({ error: "zoneId (string) is required" });
+    // null = "I'm outside the service area": no zone, so no requests.
+    if (body.zoneId !== null && (typeof body.zoneId !== "string" || body.zoneId.length === 0)) {
+      return reply.code(400).send({ error: "zoneId (string, or null to clear it) is required" });
     }
     const zoneId = body.zoneId;
 
     const userId = request.user!.userId;
-    const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
-    if (!zone) return reply.code(404).send({ error: "Zone not found" });
+    if (zoneId !== null) {
+      const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
+      if (!zone) return reply.code(404).send({ error: "Zone not found" });
+    }
 
     // Conditional update: only an online driver's zone moves, decided in the
     // same statement as the write so a concurrent "go offline" always wins.
@@ -785,8 +793,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     if (!anchor) return reply.code(404).send({ error: "Ride not found" });
     if (anchor.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
     if (anchor.type !== "SHARED") return reply.code(400).send({ error: "Ride is not SHARED" });
-    if (anchor.status !== "MATCHED" && anchor.status !== "ARRIVED") {
-      return reply.code(400).send({ error: "Ride is not in an assembly state" });
+    if (!(FILLABLE_STATUSES as readonly string[]).includes(anchor.status)) {
+      return reply.code(400).send({ error: "Riders can't be added to this trip now" });
     }
 
     // suggestFillsForRide's internal areCombinable filter is exactly what
@@ -880,8 +888,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     if (!car) return reply.code(404).send({ error: "Ride not found" });
     if (car.driverId !== userId) return refuse(reply, 403, "NOT_YOUR_RIDE", "This trip belongs to another driver.");
-    if (car.type !== "SHARED" || (car.status !== "MATCHED" && car.status !== "ARRIVED")) {
-      return refuse(reply, 409, "CAR_CLOSED", "You can only add riders before your first pickup.");
+    if (car.type !== "SHARED" || !(FILLABLE_STATUSES as readonly string[]).includes(car.status)) {
+      return refuse(reply, 409, "CAR_CLOSED", "Riders can't be added to this trip now.");
     }
     const seated = car.passengers.filter((p) => isActivePassengerStatus(p.status)).length;
     if (seated >= PRICING.MAX_SHARED_OCCUPANCY) return refuse(reply, 409, "CAR_FULL", "Your car is full.");
@@ -921,6 +929,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       from,
     });
     if (!preview) return reply.code(404).send({ error: "Zone not found" });
+    if (!preview.withinDetourLimit) {
+      return refuse(reply, 409, "DETOUR_TOO_LONG", DETOUR_TOO_LONG_MESSAGE);
+    }
 
     const startedAt = (requestRide.broadcastStartedAt ?? requestRide.createdAt).getTime();
     return reply.code(200).send({
@@ -931,6 +942,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       driverSharePesewas: splitFare(farePesewas).driverShare,
       addedSeconds: Math.round(preview.addedSeconds),
       addedMinutes: preview.addedMinutes,
+      /** How much later the most-delayed rider already in the car is dropped off. */
+      maxOnboardDelayMinutes: Math.ceil(preview.maxOnboardDelaySeconds / 60),
       expiresAt: new Date(startedAt + DISPATCH_WINDOW_MS).toISOString(),
       pickupIndex: preview.pickupIndex,
       dropoffIndex: preview.dropoffIndex,
@@ -959,21 +972,56 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
-    const body = (request.body ?? {}) as { requestRideId?: unknown };
+    const body = (request.body ?? {}) as { requestRideId?: unknown; lat?: unknown; lng?: unknown };
 
     if (typeof body.requestRideId !== "string" || body.requestRideId.length === 0) {
       return reply.code(400).send({ error: "requestRideId (string) is required" });
     }
     const requestRideId = body.requestRideId;
+    const lat = Number(body.lat);
+    const lng = Number(body.lng);
+    const from = Number.isFinite(lat) && Number.isFinite(lng) && body.lat !== undefined ? { latitude: lat, longitude: lng } : null;
 
     try {
-      const [car, zones] = await Promise.all([addRiderToCar(prisma, userId, rideId, requestRideId), getZoneMap(prisma)]);
+      const [zones, storedRoutes] = await Promise.all([getZoneMap(prisma), getStoredZoneRoutes(prisma)]);
+      // Worked out inside the transaction, with the car locked, so it is
+      // exactly the car the rider joins.
+      let onboardDelaySeconds: Record<string, number> = {};
+      const car = await addRiderToCar(prisma, userId, rideId, requestRideId, {
+        checkCar: ({ passengers, candidate }) => {
+          const preview = previewAddRider({
+            passengers: passengers.map((p) => ({
+              id: p.id,
+              pickupZoneId: p.pickupZoneId,
+              dropoffZoneId: p.dropoffZoneId,
+              lockedFare: p.lockedFare,
+              status: p.status as PassengerStatus,
+            })),
+            candidate: { requestRideId, ...candidate, farePesewas: getSharedFarePerRider(1) },
+            zones: [...zones.values()],
+            routes: indexRoutes(storedRoutes),
+            from,
+          });
+          if (preview && !preview.withinDetourLimit) throw new DetourTooLongError(preview.maxOnboardDelaySeconds);
+          onboardDelaySeconds = preview?.onboardDelaySeconds ?? {};
+        },
+      });
 
       if (car.changed) {
         // #7 merged-rider reach: the absorbed request is now CANCELLED /
         // MERGED_INTO_ANOTHER_RIDE. That rider's app is still tracking it, so
         // tell its room — the client follows mergedIntoRideId to this car.
         emitRideEvent(requestRideId, "ride:status", { rideId: requestRideId, status: "CANCELLED" });
+        // Riders already in the car hear about the detour.
+        for (const p of car.passengers) {
+          const delay = onboardDelaySeconds[p.id];
+          if (p.status !== "PICKED_UP" || delay === undefined) continue;
+          emitToRider(p.riderId, "ride:car_notice", {
+            rideId,
+            message: onboardAddNotice(delay),
+            delayMinutes: Math.max(1, Math.round(delay / 60)),
+          });
+        }
       }
 
       return reply.code(200).send({
@@ -987,7 +1035,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         return refuse(reply, 403, "NOT_YOUR_RIDE", "This trip belongs to another driver.");
       }
       if (err instanceof RideNotFillableError) {
-        return refuse(reply, 409, "CAR_CLOSED", "You can only add riders before your first pickup.");
+        return refuse(reply, 409, "CAR_CLOSED", "Riders can't be added to this trip now.");
+      }
+      if (err instanceof DetourTooLongError) {
+        return refuse(reply, 409, "DETOUR_TOO_LONG", DETOUR_TOO_LONG_MESSAGE);
       }
       if (err instanceof NoSeatsAvailableError) {
         return refuse(reply, 409, "CAR_FULL", "Your car is full.");
@@ -1076,15 +1127,21 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     pickup: { to: "PICKED_UP" },
     dropoff: { to: "DROPPED_OFF" },
     cancel: { to: "CANCELLED", onlyFrom: ["WAITING"] },
+    // Older app builds; the app now sends cancel with { reason: "NO_SHOW" }.
     "no-show": { to: "CANCELLED", onlyFrom: ["ARRIVED"], noShow: true },
   };
+  const NO_SHOW_CANCEL = PASSENGER_ACTIONS["no-show"]!;
 
-  for (const [action, spec] of Object.entries(PASSENGER_ACTIONS)) {
+  for (const [action, baseSpec] of Object.entries(PASSENGER_ACTIONS)) {
     app.post(`/rides/:id/passengers/:passengerId/${action}`, { preHandler: requireAuth }, async (request, reply) => {
       if (!(await requireDriver(request, reply))) return;
 
       const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
       const userId = request.user!.userId;
+      // "Rider didn't show" is the passenger cancel with a no-show reason
+      // (allowed from ARRIVED, 3 minutes after arriving).
+      const reason = (request.body as { reason?: unknown } | undefined)?.reason;
+      const spec = action === "cancel" && reason === "NO_SHOW" ? NO_SHOW_CANCEL : baseSpec;
 
       let result;
       try {

@@ -12,9 +12,11 @@ import { Alert } from "react-native";
 import * as Location from "expo-location";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  SERVICE_AREA_RADIUS_METERS,
+  isOutsideServiceArea,
   isTransientRequestFailure,
-  nearestZone,
   planZoneUpdate,
+  zoneInServiceArea,
   type LatLng,
   type ZoneUpdateState,
 } from "@rida/shared";
@@ -48,6 +50,11 @@ interface DriverPresence {
   isOnline: boolean;
   /** A retry is under way because the server didn't answer in time. */
   waking: boolean;
+  /**
+   * Online but more than 2 km from every campus zone: no zone is set on the
+   * server, so no requests arrive. Home says so.
+   */
+  outsideServiceArea: boolean;
   /** The latest position while online (for distances), or null. Real GPS, or the dev-only fake. */
   position: LatLng | null;
   toggle: () => void;
@@ -67,6 +74,8 @@ export { zonesQueryKey } from "./zones";
 const AVAILABILITY_TIMEOUT_MS = 20_000;
 /** Pauses before each retry of a transient failure. Four attempts in all. */
 const RETRY_DELAYS_MS = [1_500, 3_000, 5_000];
+/** Zone-update stand-in for "outside the service area" (sent to the server as null). */
+const OUTSIDE_SERVICE_AREA = "__outside__";
 
 function httpStatus(err: unknown): number | undefined {
   return (err as { response?: { status?: number } } | null)?.response?.status;
@@ -192,7 +201,17 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
           queryClient.fetchQuery({ queryKey: zonesQueryKey, queryFn: getZones, staleTime: Infinity }),
           location.currentOrLastKnown(),
         ]);
-        if (coords) zoneId = nearestZone(coords.latitude, coords.longitude, allZones)?.id;
+        if (coords && isOutsideServiceArea(coords, allZones)) {
+          if (seq !== seqRef.current) return;
+          applyOnline(false);
+          setConfirmed(true);
+          Alert.alert(
+            "You're outside the CampusRide area",
+            `CampusRide works within ${SERVICE_AREA_RADIUS_METERS / 1000} km of campus. Go online when you're closer.`,
+          );
+          return;
+        }
+        if (coords) zoneId = zoneInServiceArea(coords, allZones)?.id;
       } catch {
         // No zone yet: the first fresh fix sets it.
       }
@@ -215,7 +234,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
       const previous = zoneStateRef.current;
       zoneStateRef.current = { lastSentZoneId: zoneId, lastSentAt: Date.now() };
       try {
-        await updateDriverZone(zoneId);
+        await updateDriverZone(zoneId === OUTSIDE_SERVICE_AREA ? null : zoneId);
         void queryClient.invalidateQueries({ queryKey: eligibleRidesQueryKey });
       } catch (err) {
         if (!trackZoneRef.current) return;
@@ -249,7 +268,9 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   const lng = location.position?.longitude;
   useEffect(() => {
     if (!trackZone || !zones || lat === undefined || lng === undefined) return;
-    latestZoneIdRef.current = nearestZone(lat, lng, zones)?.id ?? null;
+    // Out of the service area, the zone is cleared (no requests) rather than
+    // set to whichever zone happens to be nearest, however far away.
+    latestZoneIdRef.current = zoneInServiceArea({ latitude: lat, longitude: lng }, zones)?.id ?? OUTSIDE_SERVICE_AREA;
     scheduleZone();
   }, [trackZone, zones, lat, lng, scheduleZone]);
 
@@ -260,10 +281,11 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   }, [trackZone]);
 
   const position = isDriver && isOnline ? location.position : null;
+  const outsideServiceArea = Boolean(isDriver && isOnline && zones && isOutsideServiceArea(location.position, zones));
 
   const value = useMemo(
-    () => ({ isOnline: isDriver && isOnline, waking, position, toggle }),
-    [isDriver, isOnline, waking, position, toggle],
+    () => ({ isOnline: isDriver && isOnline, waking, outsideServiceArea, position, toggle }),
+    [isDriver, isOnline, waking, outsideServiceArea, position, toggle],
   );
 
   return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>;

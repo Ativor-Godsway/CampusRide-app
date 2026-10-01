@@ -330,6 +330,13 @@ export async function joinLoadedSharedRideTx(
   ride: Ride,
   passengers: readonly RidePassenger[],
   input: JoinSharedRideInput,
+  options: {
+    /**
+     * After departure fares are frozen: leave every existing rider's locked
+     * fare exactly as it is (no ratchet) and give the newcomer the flat rate.
+     */
+    freezeExistingFares?: boolean;
+  } = {},
 ) {
   const rideId = ride.id;
   if (ride.type !== "SHARED") {
@@ -353,9 +360,9 @@ export async function joinLoadedSharedRideTx(
     { id: "__new__", status: "WAITING" as const, lockedFare: newRate },
   ];
 
-  const recomputed = recomputeLockedFares(passengersForRecompute, {
-    type: "JOIN",
-  });
+  const recomputed = options.freezeExistingFares
+    ? passengersForRecompute
+    : recomputeLockedFares(passengersForRecompute, { type: "JOIN" });
 
   const refared = new Map<string, number>();
   for (const p of recomputed) {
