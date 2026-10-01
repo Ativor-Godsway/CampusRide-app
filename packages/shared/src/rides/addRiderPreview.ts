@@ -26,6 +26,8 @@ export interface AddRiderCandidate {
   dropoffZoneId: string;
   /** What the new rider would pay. */
   farePesewas: number;
+  /** The new rider's name, when known. */
+  riderName?: string | null;
 }
 
 export interface PreviewStop extends TripStop {
@@ -82,7 +84,7 @@ export function previewAddRider(input: {
       ...input.passengers,
       {
         id: newId,
-        riderName: null,
+        riderName: input.candidate.riderName ?? null,
         riderPhone: null,
         pickupZoneId: input.candidate.pickupZoneId,
         dropoffZoneId: input.candidate.dropoffZoneId,
@@ -95,11 +97,7 @@ export function previewAddRider(input: {
     from: input.from,
   });
 
-  const stops: PreviewStop[] = proposed.upcoming.map((s) => ({
-    ...s,
-    isNew: s.passengerId === newId,
-    riderFirstName: s.passengerId === newId ? "New rider" : s.riderFirstName,
-  }));
+  const stops: PreviewStop[] = proposed.upcoming.map((s) => ({ ...s, isNew: s.passengerId === newId }));
   const pickupIndex = stops.findIndex((s) => s.isNew && s.kind === "PICKUP");
   const dropoffIndex = stops.findIndex((s) => s.isNew && s.kind === "DROPOFF");
 

@@ -7,10 +7,12 @@ import {
   type ArrivalSample,
   type ArrivalState,
 } from "@rida/shared";
-import { getRideSocket } from "@rida/mobile-shared";
-import { useDriverActiveTrip } from "./activeTrip";
+import { useQueryClient } from "@tanstack/react-query";
+import { RIDE_EVENTS, type RideStatusPayload } from "@rida/shared";
+import { getRideSocket, subscribeToRide, unsubscribeFromRide, type RideWithZones } from "@rida/mobile-shared";
+import { driverActiveRideQueryKey, useDriverActiveTrip } from "./activeTrip";
 import { useDriverLocation, useLocationDemand } from "./location";
-import { overlayPassengers, runPassengerAction, useTripActions } from "./tripActions";
+import { configureTripActions, overlayPassengers, runPassengerAction, useTripActions } from "./tripActions";
 import { useZones } from "./zones";
 
 /** Riders see the driver move: one position every few seconds. */
@@ -40,7 +42,20 @@ const KEEP_AWAKE_TAG = "campusride-trip";
  * Mounted once in the root layout; renders nothing.
  */
 export function TripRuntime() {
+  const queryClient = useQueryClient();
   const { data: trip } = useDriverActiveTrip();
+
+  // The action store syncs in the background through the shared cache: a
+  // refetch after each answered action, and trip data it fetched itself.
+  useEffect(() => {
+    configureTripActions({
+      refresh: () => {
+        void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
+        void queryClient.invalidateQueries({ queryKey: ["fillSuggestions"] });
+      },
+      onRide: (ride: RideWithZones | null) => queryClient.setQueryData(driverActiveRideQueryKey, ride),
+    });
+  }, [queryClient]);
   const actions = useTripActions();
   const { data: zones = [] } = useZones();
   const location = useDriverLocation();
@@ -55,6 +70,30 @@ export function TripRuntime() {
       void deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
     };
   }, [rideId]);
+
+  // Server-pushed trip changes (the rider cancels, the trip ends) reach
+  // every screen in a second or two: listen on the trip's room, and apply an
+  // ending straight to the cache instead of waiting for a refetch.
+  useEffect(() => {
+    if (!rideId) return;
+    const socket = getRideSocket();
+    const join = () => subscribeToRide(rideId);
+    const onStatus = (payload: RideStatusPayload) => {
+      if (payload.rideId !== rideId) return;
+      if (payload.status === "CANCELLED" || payload.status === "COMPLETED") {
+        queryClient.setQueryData(driverActiveRideQueryKey, null);
+      }
+      void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
+    };
+    join();
+    socket.on("connect", join); // rooms are forgotten on reconnect
+    socket.on(RIDE_EVENTS.STATUS, onStatus);
+    return () => {
+      socket.off("connect", join);
+      socket.off(RIDE_EVENTS.STATUS, onStatus);
+      unsubscribeFromRide(rideId);
+    };
+  }, [rideId, queryClient]);
 
   // Live location to the ride room.
   const sampleRef = useRef<ArrivalSample | null>(location.sample);

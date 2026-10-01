@@ -176,6 +176,8 @@ export async function driverComplete(
 /** A single ride request the driver is eligible to claim. */
 export interface EligibleRideItem {
   rideId: string;
+  /** The requesting rider's first name (newer servers). */
+  riderFirstName?: string;
   pickupZoneName: string;
   pickupZoneId: string;
   dropoffZoneName: string;
@@ -283,6 +285,8 @@ export interface PassengerInCar {
  */
 export interface FillSuggestion {
   requestRideId: string;
+  /** The requesting rider's first name (newer servers). */
+  riderFirstName?: string;
   pickupZoneName: string;
   pickupZoneId: string;
   dropoffZoneName: string;
@@ -465,6 +469,7 @@ export interface AddRiderPreviewStop {
 
 export interface AddRiderPreviewResult {
   requestRideId: string;
+  riderFirstName?: string;
   pickupZoneName: string;
   dropoffZoneName: string;
   farePesewas: number;

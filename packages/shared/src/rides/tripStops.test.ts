@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   NO_SHOW_AFTER_MS,
   firstName,
+  nextStopInstruction,
+  riderName,
+  riderStatusWord,
+  stepToast,
   formatWait,
   isAtStop,
   noShowAvailableAt,
@@ -105,6 +109,40 @@ describe("stop helpers", () => {
     expect(formatWait(84_000)).toBe("1:24");
     expect(formatWait(-5)).toBe("0:00");
     expect(firstName("  Ama  Serwaa ")).toBe("Ama");
-    expect(firstName(null)).toBe("Your rider");
+    expect(firstName(null)).toBe("");
+  });
+});
+
+describe("plain words for the driver", () => {
+  const cedis = (p: number) => `GH₵${p / 100}`;
+  const ama = { kind: "PICKUP" as const, riderFirstName: "Ama", zone: { id: "B", name: "Balme Library", latitude: 0, longitude: 0 }, farePesewas: 500 };
+  const kofi = { kind: "DROPOFF" as const, riderFirstName: "Kofi", zone: { id: "M", name: "Main Gate", latitude: 0, longitude: 0 }, farePesewas: 500 };
+
+  it("says what to do at the next stop", () => {
+    expect(nextStopInstruction(ama, { cash: true, formatFare: cedis })).toBe("Pick up Ama at Balme Library");
+    expect(nextStopInstruction(kofi, { cash: true, formatFare: cedis })).toBe("Drop off Kofi at Main Gate · collect GH₵5");
+    expect(nextStopInstruction(kofi, { cash: false, formatFare: cedis })).toBe("Drop off Kofi at Main Gate");
+    expect(nextStopInstruction({ ...ama, riderFirstName: "" }, { cash: true, formatFare: cedis })).toBe("Pick up the rider at Balme Library");
+  });
+
+  it("never uses a placeholder name", () => {
+    expect(riderName({ riderFirstName: "" })).toBe("Rider");
+    expect(riderName({ riderFirstName: "Ama" })).toBe("Ama");
+  });
+
+  it("gives each rider's status in one word", () => {
+    expect(["WAITING", "ARRIVED", "PICKED_UP", "DROPPED_OFF"].map((s) => riderStatusWord(s as never))).toEqual([
+      "Waiting",
+      "Arrived",
+      "In car",
+      "Dropped off",
+    ]);
+  });
+
+  it("tells the driver what just happened and what's next", () => {
+    expect(stepToast(ama, { ...kofi, kind: "PICKUP" })).toBe("Ama is in the car · next: pick up Kofi");
+    expect(stepToast(kofi, { ...ama, kind: "DROPOFF" })).toBe("Kofi dropped off · next: drop off Ama");
+    expect(stepToast(kofi, undefined)).toBe("Kofi dropped off · that's everyone");
+    expect(stepToast(ama, { ...kofi, riderFirstName: "" })).toBe("Ama is in the car · next: drop off the rider at Main Gate");
   });
 });

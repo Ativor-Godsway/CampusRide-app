@@ -64,6 +64,8 @@ export function SlideToConfirm({
 }) {
   const screenReader = useScreenReader();
   const [width, setWidth] = useState(0);
+  /** Confirmed: the knob shows a check mark. */
+  const [checked, setChecked] = useState(false);
   const x = useRef(new Animated.Value(0)).current;
   const hold = useRef(new Animated.Value(0)).current;
   const travelRef = useRef(0);
@@ -77,18 +79,36 @@ export function SlideToConfirm({
   useEffect(() => {
     doneRef.current = false;
     progressRef.current = 0;
+    setChecked(false);
     x.setValue(0);
     hold.setValue(0);
   }, [label, x, hold]);
 
+  // The trip normally moves on at once (the parent shows the next stop with a
+  // fresh slider). If it's still here a moment later — the step was refused
+  // and the same stop came back — reset rather than stay stuck at the end.
+  useEffect(() => {
+    if (!checked) return;
+    const t = setTimeout(() => {
+      doneRef.current = false;
+      progressRef.current = 0;
+      setChecked(false);
+      hold.setValue(0);
+      Animated.spring(x, { toValue: 0, useNativeDriver: true }).start();
+    }, 1_500);
+    return () => clearTimeout(t);
+  }, [checked, x, hold]);
+
   const gesture = useMemo(() => {
+    // Confirm: check mark + success haptic, and the trip updates in the same
+    // moment — the step is never held back waiting for an animation.
     const confirm = () => {
       if (doneRef.current) return;
       doneRef.current = true;
+      setChecked(true);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      Animated.timing(x, { toValue: travelRef.current, duration: 90, useNativeDriver: true }).start(() =>
-        confirmRef.current(),
-      );
+      Animated.timing(x, { toValue: travelRef.current, duration: 90, useNativeDriver: true }).start();
+      confirmRef.current();
     };
     const snapBack = () => {
       progressRef.current = 0;
@@ -183,9 +203,12 @@ export function SlideToConfirm({
             accessibilityLabel={label}
             accessibilityHint="Slide right, or hold for one second"
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            style={[styles.knob, { backgroundColor: fill, transform: [{ translateX: x }] }]}
+            style={[
+              styles.knob,
+              { backgroundColor: checked ? colors.primary[500] : fill, transform: [{ translateX: x }] },
+            ]}
           >
-            <Ionicons name="chevron-forward" size={26} color={colors.white} />
+            <Ionicons name={checked ? "checkmark" : "chevron-forward"} size={26} color={colors.white} />
           </Animated.View>
         </GestureDetector>
       </View>

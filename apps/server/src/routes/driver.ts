@@ -6,6 +6,7 @@ import {
   PRICING,
   designateBestFit,
   encodePolyline,
+  firstName,
   getDriverGrossForRide,
   getLoneFare,
   getSharedFarePerRider,
@@ -695,6 +696,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         // is the whole point of an explicit reject over letting it time out.
         rejections: { none: { driverUserId: userId } },
       },
+      // First name only, so the trip can say "Pick up Ama" from the moment
+      // the driver accepts.
+      include: { rider: { select: { name: true } } },
       orderBy: { createdAt: "desc" },
     });
 
@@ -742,6 +746,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
       return {
         rideId: ride.id,
+        riderFirstName: firstName(ride.rider.name),
         pickupZoneName: zoneMap.get(ride.pickupZoneId)?.name ?? "",
         pickupZoneId: ride.pickupZoneId,
         dropoffZoneName: zoneMap.get(ride.dropoffZoneId)?.name ?? "",
@@ -785,6 +790,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       }),
       prisma.ride.findMany({
         where: { status: "REQUESTED", driverId: null, type: "SHARED" },
+        include: { rider: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
       }),
       getZoneAdjacency(prisma),
@@ -807,6 +813,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     const toSuggestion = (r: (typeof allCandidates)[number], compatible: boolean) => ({
       requestRideId: r.id,
+      riderFirstName: firstName(r.rider.name),
       pickupZoneName: zones.get(r.pickupZoneId)?.name ?? "",
       pickupZoneId: r.pickupZoneId,
       dropoffZoneName: zones.get(r.dropoffZoneId)?.name ?? "",
@@ -881,7 +888,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           },
         },
       }),
-      prisma.ride.findUnique({ where: { id: query.requestRideId } }),
+      prisma.ride.findUnique({ where: { id: query.requestRideId }, include: { rider: { select: { name: true } } } }),
       getZoneMap(prisma),
       getStoredZoneRoutes(prisma),
     ]);
@@ -923,6 +930,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         pickupZoneId: requestRide.pickupZoneId,
         dropoffZoneId: requestRide.dropoffZoneId,
         farePesewas,
+        riderName: requestRide.rider.name,
       },
       zones: [...zones.values()],
       routes: indexRoutes(storedRoutes),
@@ -936,6 +944,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const startedAt = (requestRide.broadcastStartedAt ?? requestRide.createdAt).getTime();
     return reply.code(200).send({
       requestRideId: requestRide.id,
+      riderFirstName: firstName(requestRide.rider.name),
       pickupZoneName: zones.get(requestRide.pickupZoneId)?.name ?? "",
       dropoffZoneName: zones.get(requestRide.dropoffZoneId)?.name ?? "",
       farePesewas,

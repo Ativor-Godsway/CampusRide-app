@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { driverTripHref, driverTripStatusLine } from "@rida/shared";
 import { getDriverActiveRide, useAuth, type RideWithZones } from "@rida/mobile-shared";
+import { finishedLocally, overlayPassengers, useTripActions } from "./tripActions";
 
 /**
  * The driver's current trip (MATCHED / ARRIVED / IN_PROGRESS), or null.
@@ -9,14 +10,26 @@ import { getDriverActiveRide, useAuth, type RideWithZones } from "@rida/mobile-s
  */
 export const driverActiveRideQueryKey = ["driverActiveRide"] as const;
 
-export function useDriverActiveTrip(refetchIntervalMs = 15_000) {
+/**
+ * The driver's current trip. A trip this device has just finished (everyone
+ * dropped off, not yet confirmed by the server) already counts as over, so
+ * Home and the banner clear the moment the last drop-off is done — pass
+ * `includeFinished` for the trip screen, which shows the summary for it.
+ */
+export function useDriverActiveTrip(refetchIntervalMs = 15_000, options: { includeFinished?: boolean } = {}) {
   const { isAuthenticated, user } = useAuth();
-  return useQuery<RideWithZones | null>({
+  // Re-render when this device's actions change what "finished" means.
+  const actions = useTripActions();
+  const query = useQuery<RideWithZones | null>({
     queryKey: driverActiveRideQueryKey,
     queryFn: getDriverActiveRide,
     enabled: isAuthenticated && user?.role === "DRIVER" && Boolean(user?.driver?.isApproved),
     refetchInterval: refetchIntervalMs,
   });
+  const ride = query.data;
+  const hidden = Boolean(ride && !options.includeFinished && finishedLocally(ride));
+  void actions;
+  return hidden ? { ...query, data: null } : query;
 }
 
 /** Where "back to my trip" leads: the trip screen, for every kind of trip. */
@@ -31,7 +44,8 @@ export function tripStatusLine(ride: RideWithZones): string {
     status: ride.status,
     pickupZoneName: ride.pickupZone.name,
     dropoffZoneName: ride.dropoffZone.name,
-    passengerStatuses: ride.passengers.map((p) => p.status),
+    // With this device's not-yet-confirmed steps, so it changes on the slide.
+    passengerStatuses: overlayPassengers(ride.id, ride.passengers).map((p) => p.status),
   });
 }
 

@@ -11,6 +11,11 @@ import { resolveCloudinaryConfig } from "./services/uploads/cloudinaryConfig";
 // what keeps local dev/tests OFF the production database.
 const NODE_ENV = process.env.NODE_ENV ?? "development";
 const serverRoot = path.resolve(__dirname, "..");
+// `.env.development.local` (gitignored, optional) wins over
+// `.env.development`: put a local Postgres URL there to run against this
+// Mac's database instead of the dev branch (docs/testing/SOLO_TESTING.md).
+// Never read under the test suite, which has its own database.
+if (NODE_ENV !== "test") dotenv.config({ path: path.join(serverRoot, `.env.${NODE_ENV}.local`) });
 dotenv.config({ path: path.join(serverRoot, `.env.${NODE_ENV}`) });
 dotenv.config({ path: path.join(serverRoot, ".env") });
 
