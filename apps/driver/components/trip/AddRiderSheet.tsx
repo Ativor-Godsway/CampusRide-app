@@ -4,8 +4,9 @@ import { Badge, Button, Sheet, Text, colors, spacing, typography, type FillSugge
 
 /**
  * "Add a rider": the waiting Shared requests the driver can add to the car
- * before the first pickup. Compact rows (route + age + Add) in a sheet —
- * replaces the long list that used to sit under the car. Best matches first.
+ * before the first pickup. Compact rows (route + age + "See route") in a
+ * sheet. Picking one shows the route preview on the trip map, where the
+ * driver adds or skips. Best matches first.
  */
 export function AddRiderSheet({
   visible,
@@ -51,10 +52,11 @@ export function AddRiderSheet({
                   </View>
                 </View>
                 <Button
-                  label="Add"
+                  label="See route"
+                  variant="secondary"
                   fullWidth={false}
                   onPress={() => onAdd(s)}
-                  accessibilityLabel={`Add rider from ${s.pickupZoneName} to ${s.dropoffZoneName}`}
+                  accessibilityLabel={`See the route with the rider from ${s.pickupZoneName} to ${s.dropoffZoneName}`}
                 />
               </View>
             ))

@@ -454,3 +454,55 @@ export async function passengerCancel(
   );
   return res.data;
 }
+
+// ─── Add-rider route preview ──────────────────────────────────────────────────
+
+export interface AddRiderPreviewStop {
+  key: string;
+  kind: "PICKUP" | "DROPOFF";
+  /** True for the new rider's pickup and drop-off. */
+  isNew: boolean;
+  riderFirstName: string;
+  zoneId: string;
+  zoneName: string;
+  latitude: number;
+  longitude: number;
+}
+
+export interface AddRiderPreviewResult {
+  requestRideId: string;
+  pickupZoneName: string;
+  dropoffZoneName: string;
+  farePesewas: number;
+  driverSharePesewas: number;
+  addedSeconds: number;
+  addedMinutes: number;
+  /** When the request stops being offered (ISO). */
+  expiresAt: string;
+  pickupIndex: number;
+  dropoffIndex: number;
+  /** Every remaining stop with the new rider slotted in, in order. */
+  stops: AddRiderPreviewStop[];
+  /** Encoded polylines (decodePolyline from @rida/shared). */
+  currentPolyline: string;
+  proposedPolyline: string;
+}
+
+/**
+ * Where a waiting rider would slot into this car, the new route, the time it
+ * adds and the extra fare. Read-only. Answers 409 (code REQUEST_UNAVAILABLE,
+ * CAR_FULL or CAR_CLOSED) when the rider couldn't be added right now.
+ */
+export async function getAddRiderPreview(
+  rideId: string,
+  requestRideId: string,
+  position: { latitude: number; longitude: number } | null,
+): Promise<AddRiderPreviewResult> {
+  const res = await api.get<AddRiderPreviewResult>(`/rides/${rideId}/add-preview`, {
+    params: {
+      requestRideId,
+      ...(position ? { lat: position.latitude.toFixed(6), lng: position.longitude.toFixed(6) } : {}),
+    },
+  });
+  return { ...res.data, stops: readList<AddRiderPreviewStop>(res.data, "stops") };
+}

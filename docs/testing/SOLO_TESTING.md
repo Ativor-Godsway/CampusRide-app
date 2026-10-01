@@ -373,12 +373,19 @@ signed in as your approved driver (Step 5):
    `npm run sim:riders -- --shared-ratio 1 --zone Balme --interval 15`
 3. **Accept** a request from **Requests near you**. The trip screen opens at
    once. ✔ map, numbered stop, route; "1 of 2".
-4. Tap **Add rider** → **Add** a waiting rider. ✔ they appear at once; seat
-   dots show 2; "1 of 4".
+4. **Add a rider with a route preview.** A rider going your way is offered on
+   the trip screen by itself (or tap **Add rider** → **See route**). ✔ the map
+   shows your current route solid and the new one dotted and lighter, the new
+   pins marked **New**, all stops in view, and a label like "+1 rider · adds
+   ~2 min · +GH₵5". Tap **Skip** once — ✔ the preview disappears. On the next
+   one tap **Add** — ✔ the dotted route turns solid, the stop list and seat
+   dots update ("1 of 4"). Leave one alone for 90 seconds — ✔ it disappears
+   when the request expires.
 5. Tap **▶ Drive (fake)**. ✔ the dot moves along the route; near the pickup the
    card switches to "Ama knows you're here · Waiting 0:05" without you tapping
    **I'm here**. The simulator logs "Driver is at … for Test Ama".
-6. **Slide "Ama picked up".** ✔ the next stop moves up at once.
+6. **Slide "Ama picked up".** ✔ the next stop moves up at once. While you
+   drive, ✔ the route line only shows what's ahead of you.
 7. For the second rider, tap **I'm here** yourself, then wait 3 minutes. ✔
    **Rider didn't show** unlocks; use it. ✔ that stop leaves the list; the
    simulator logs the cancellation.

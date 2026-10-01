@@ -106,6 +106,8 @@ interface SeatOverlay {
 
 interface PendingAdd {
   suggestion: FillSuggestion;
+  /** The fare the preview quoted, shown on the provisional seat. */
+  farePesewas?: number;
   /** The seat the server created, once it has answered. */
   passengerId?: string;
 }
@@ -203,9 +205,9 @@ export function runPassengerAction(rideId: string, passengerId: string, action: 
 }
 
 /** Add a waiting rider to the car: they appear at once, the request follows. */
-export function runAddRider(rideId: string, suggestion: FillSuggestion) {
+export function runAddRider(rideId: string, suggestion: FillSuggestion, farePesewas?: number) {
   forRide(rideId);
-  set({ adds: { ...state.adds, [suggestion.requestRideId]: { suggestion } } });
+  set({ adds: { ...state.adds, [suggestion.requestRideId]: { suggestion, farePesewas } } });
   let retrying = false;
   enqueue(async () => {
     try {
@@ -274,7 +276,7 @@ export function overlayPassengers(rideId: string, passengers: readonly Passenger
     return { ...p, status: o.status, arrivedAt: o.arrivedAt ?? p.arrivedAt ?? null };
   });
   const present = new Set(passengers.map((p) => p.id));
-  for (const { suggestion, passengerId } of Object.values(state.adds)) {
+  for (const { suggestion, passengerId, farePesewas } of Object.values(state.adds)) {
     // Once the server lists the new seat, the provisional row goes.
     if (passengerId && present.has(passengerId)) continue;
     merged.push({
@@ -286,7 +288,7 @@ export function overlayPassengers(rideId: string, passengers: readonly Passenger
       dropoffZoneId: suggestion.dropoffZoneId,
       pickupZoneName: suggestion.pickupZoneName,
       dropoffZoneName: suggestion.dropoffZoneName,
-      lockedFare: null,
+      lockedFare: farePesewas ?? null,
       status: "WAITING",
       arrivedAt: null,
     });

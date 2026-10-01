@@ -32,12 +32,14 @@ import {
  * arrived 11→6, pickup 15→6, cancel 12→6, drop-off 11→5, last drop-off 21→6.
  * A passenger action is BEGIN, lock ride, read seats, write seat, write ride,
  * COMMIT. "active" is 3 on a real ride; this fixture's owner has no seat, so
- * it reads the owner separately.
+ * it reads the owner separately. add-preview (added later) runs its 4 reads
+ * in parallel: the car, its seats, their names, the request.
  */
 const BUDGET = {
   "GET /driver/rides/active": 4,
   "GET /driver/rides/eligible": 3,
   "GET /rides/:id/fill-suggestions": 3,
+  "GET /rides/:id/add-preview": 4,
   "POST /rides/:id/claim": 2,
   "POST /rides/:id/add-passenger": 7,
   "POST passenger arrived": 6,
@@ -133,6 +135,10 @@ describe("driver endpoint round trips", () => {
     expect((await measure("GET /driver/rides/active", "GET", "/driver/rides/active", token)).statusCode).toBe(200);
     expect(
       (await measure("GET /rides/:id/fill-suggestions", "GET", `/rides/${anchor.id}/fill-suggestions`, token)).statusCode,
+    ).toBe(200);
+
+    expect(
+      (await measure("GET /rides/:id/add-preview", "GET", `/rides/${anchor.id}/add-preview?requestRideId=${second.id}`, token)).statusCode,
     ).toBe(200);
 
     for (const req of [second, third]) {
