@@ -51,6 +51,7 @@ import {
   typography,
   useAuth,
   useDriverLocation,
+  useCarNotice,
   useRideTracking,
   type RideDriverInfo,
   getZoneRoutes,
@@ -118,6 +119,16 @@ export default function RideTypeScreen() {
   const [conflictOpen, setConflictOpen] = useState(false);
   const { user } = useAuth();
   const { data: trackingData } = useRideTracking(activeRideId ?? undefined);
+
+  // "Picking up 1 more rider on the way · ~3 min" when the driver adds a
+  // rider while this rider is in the car. Shown for a few seconds.
+  const [carNotice, setCarNotice] = useState<string | null>(null);
+  useCarNotice(activeRideId ?? undefined, setCarNotice);
+  useEffect(() => {
+    if (!carNotice) return;
+    const t = setTimeout(() => setCarNotice(null), 8_000);
+    return () => clearTimeout(t);
+  }, [carNotice]);
 
   useDriverLocation(activeRideId ?? undefined, (payload) => {
     setDriverLocation({ latitude: payload.lat, longitude: payload.lng });
@@ -522,6 +533,19 @@ export default function RideTypeScreen() {
         fitPadding={fitPadding}
         controlsBottomInset={sheetHeight}
       />
+
+      {carNotice ? (
+        <View
+          style={[styles.carNotice, { top: insets.top + PILL_TOP_GAP + 64 }]}
+          accessibilityLiveRegion="polite"
+          accessibilityRole="alert"
+        >
+          <Ionicons name="people" size={16} color={colors.white} />
+          <Text variant="bodySmall" style={styles.carNoticeText}>
+            {carNotice}
+          </Text>
+        </View>
+      ) : null}
 
       <RoutePill
         top={insets.top + PILL_TOP_GAP}
@@ -1231,6 +1255,21 @@ function CancelledContent({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  carNotice: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    zIndex: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.surfaceDark,
+    borderRadius: radii.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    ...shadows.md,
+  },
+  carNoticeText: { color: colors.white, flex: 1, fontWeight: "600" },
   // Phase 4: in-ride safety + contact row.
   safetyRow: { flexDirection: "row", gap: spacing.sm },
   callButton: {

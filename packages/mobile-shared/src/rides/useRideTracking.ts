@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   RIDE_EVENTS,
@@ -7,6 +7,7 @@ import {
   type PassengerStatusPayload,
   type RideCompletedPayload,
   type RideStatusPayload,
+  type CarNoticePayload,
 } from "@rida/shared";
 import { getRide, type GetRideResult } from "./api";
 import { getRideSocket, subscribeToRide, unsubscribeFromRide } from "../realtime/socket";
@@ -145,5 +146,26 @@ export function useDriverLocation(
       socket.off(RIDE_EVENTS.DRIVER_LOCATION, handler);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rideId]);
+}
+
+/**
+ * A rider already in a shared car is told when the driver picks up someone
+ * else on the way ("Picking up 1 more rider on the way · ~3 min"). Sent to
+ * the rider's own room only. Calls `onNotice` with the message.
+ */
+export function useCarNotice(rideId: string | undefined, onNotice: (message: string) => void): void {
+  const handlerRef = useRef(onNotice);
+  handlerRef.current = onNotice;
+  useEffect(() => {
+    if (!rideId) return;
+    const socket = getRideSocket();
+    const handler = (payload: CarNoticePayload) => {
+      if (payload.rideId === rideId) handlerRef.current(payload.message);
+    };
+    socket.on(RIDE_EVENTS.CAR_NOTICE, handler);
+    return () => {
+      socket.off(RIDE_EVENTS.CAR_NOTICE, handler);
+    };
   }, [rideId]);
 }

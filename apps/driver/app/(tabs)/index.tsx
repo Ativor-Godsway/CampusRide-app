@@ -28,7 +28,7 @@ export default function DriverHomeScreen() {
   const router = useRouter();
   const { isLoading: authLoading, isAuthenticated, user } = useAuth();
 
-  const { isOnline, waking, toggle } = useDriverPresence();
+  const { isOnline, waking, outsideServiceArea, toggle } = useDriverPresence();
 
   const { data: activeRide, isLoading: rideLoading } = useQuery({
     queryKey: driverActiveRideQueryKey,
@@ -122,6 +122,14 @@ export default function DriverHomeScreen() {
           <Text variant="h3" style={styles.emptyTitle}>Ready when you are</Text>
           <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
             Toggle online above to start accepting trips around campus.
+          </Text>
+        </View>
+      ) : outsideServiceArea ? (
+        <View style={styles.emptyState} accessibilityLiveRegion="polite">
+          <Illustration name="searchEmpty" size={160} accessibilityLabel="Map" />
+          <Text variant="h3" style={styles.emptyTitle}>You&apos;re outside the CampusRide area</Text>
+          <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
+            Requests reach drivers within 2 km of campus. Head back towards campus and they&apos;ll start coming in.
           </Text>
         </View>
       ) : (

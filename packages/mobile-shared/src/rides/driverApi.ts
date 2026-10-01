@@ -96,10 +96,10 @@ export async function setDriverAvailability(
 
 /**
  * Move an ONLINE driver's current zone as they drive (PATCH /driver/zone).
- * Never changes online status: the server answers 409 if the driver is
- * offline.
+ * null clears it (outside the service area: no requests). Never changes
+ * online status: the server answers 409 if the driver is offline.
  */
-export async function updateDriverZone(zoneId: string): Promise<void> {
+export async function updateDriverZone(zoneId: string | null): Promise<void> {
   await api.patch("/driver/zone", { zoneId });
 }
 
@@ -323,11 +323,18 @@ export async function getFillSuggestions(rideId: string): Promise<FillSuggestion
 export async function addPassenger(
   rideId: string,
   requestRideId: string,
-  options?: { timeoutMs?: number },
+  options?: {
+    timeoutMs?: number;
+    /** The driver's position, for the server's detour check on a moving car. */
+    position?: { latitude: number; longitude: number } | null;
+  },
 ): Promise<AddPassengerResult> {
   const res = await api.post<AddPassengerResult>(
     `/rides/${rideId}/add-passenger`,
-    { requestRideId },
+    {
+      requestRideId,
+      ...(options?.position ? { lat: options.position.latitude, lng: options.position.longitude } : {}),
+    },
     options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return { ...res.data, passengers: readList<PassengerInCar>(res.data, "passengers") };
@@ -403,23 +410,6 @@ export async function passengerDropoff(
   return res.data;
 }
 
-/**
- * "Rider didn't show": cancel a passenger who hasn't come out three minutes
- * after the driver arrived (ARRIVED -> CANCELLED). The server checks the time.
- */
-export async function passengerNoShow(
-  rideId: string,
-  passengerId: string,
-  options?: { timeoutMs?: number },
-): Promise<PassengerLifecycleResult> {
-  const res = await api.post<PassengerLifecycleResult>(
-    `/rides/${rideId}/passengers/${passengerId}/no-show`,
-    undefined,
-    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
-  );
-  return res.data;
-}
-
 /** A precomputed road route between two zones (GET /zones/routes). */
 export interface ZoneRoute {
   fromZoneId: string;
@@ -445,11 +435,15 @@ export async function getZoneRoutes(): Promise<ZoneRoute[]> {
 export async function passengerCancel(
   rideId: string,
   passengerId: string,
-  options?: { timeoutMs?: number },
+  options?: {
+    timeoutMs?: number;
+    /** "NO_SHOW": the rider didn't come out (allowed 3 minutes after arriving). */
+    reason?: "NO_SHOW";
+  },
 ): Promise<PassengerLifecycleResult> {
   const res = await api.post<PassengerLifecycleResult>(
     `/rides/${rideId}/passengers/${passengerId}/cancel`,
-    undefined,
+    options?.reason ? { reason: options.reason } : undefined,
     options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return res.data;

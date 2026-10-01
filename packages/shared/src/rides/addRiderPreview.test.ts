@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { encodePolyline } from "../geo/polyline";
 import { STOP_DWELL_SECONDS, indexRoutes, straightLineSeconds } from "../geo/tripRoute";
-import { addRiderPreviewLabel, previewAddRider, previewPassengerId } from "./addRiderPreview";
+import {
+  MAX_ONBOARD_DELAY_SECONDS,
+  addRiderPreviewLabel,
+  onboardAddNotice,
+  previewAddRider,
+  previewPassengerId,
+} from "./addRiderPreview";
 import type { TripPassenger, TripZone } from "./tripStops";
 
 // Five zones on a north–south line, ~110 m apart: A B C D E.
@@ -97,5 +103,38 @@ describe("the time a new rider adds", () => {
 
   it("is never below a minute on the label", () => {
     expect(addRiderPreviewLabel(1, "GH₵5")).toBe("+1 rider · adds ~1 min · +GH₵5");
+  });
+});
+
+describe("the detour limit for riders already in the car", () => {
+  it("measures how much later each on-board rider is dropped off", () => {
+    // Ama is in the car going A→C; the new rider is on the way (A→B).
+    const p = previewAddRider({ passengers: [rider("ama", A, C, "PICKED_UP")], candidate: candidate(A, B), zones, routes: noRoutes, from: at(A) })!;
+    // The new pickup (same spot) and drop-off (on the way) cost Ama two stops' dwell.
+    expect(p.onboardDelaySeconds.ama).toBeCloseTo(2 * STOP_DWELL_SECONDS, 3);
+    expect(p.withinDetourLimit).toBe(true);
+    expect(onboardAddNotice(p.onboardDelaySeconds.ama!)).toBe("Picking up 1 more rider on the way · ~2 min");
+  });
+
+  it("refuses a rider whose detour would make an on-board rider more than 5 minutes late", () => {
+    // Ama (in the car, A→B) would be taken on a 6-minute detour first.
+    const detour = indexRoutes([
+      { fromZoneId: "A", toZoneId: "C", polyline: encodePolyline([at(A), at(C)]), durationSeconds: 360 },
+    ]);
+    const p = previewAddRider({
+      passengers: [rider("ama", A, E, "PICKED_UP")],
+      candidate: candidate(C, D),
+      zones,
+      routes: detour,
+      from: at(A),
+    })!;
+    expect(p.maxOnboardDelaySeconds).toBeGreaterThan(MAX_ONBOARD_DELAY_SECONDS);
+    expect(p.withinDetourLimit).toBe(false);
+  });
+
+  it("has no limit to apply when nobody is in the car yet", () => {
+    const p = previewAddRider({ passengers: [rider("ama", A, D)], candidate: candidate(E, A), zones, routes: noRoutes, from: at(A) })!;
+    expect(p.onboardDelaySeconds).toEqual({});
+    expect(p).toMatchObject({ maxOnboardDelaySeconds: 0, withinDetourLimit: true });
   });
 });

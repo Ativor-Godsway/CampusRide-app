@@ -3,11 +3,9 @@ import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useKeepAwake } from "expo-keep-awake";
 import { Ionicons } from "@expo/vector-icons";
 import {
   CAR_SEATS,
-  DRIVER_CLIENT_EVENTS,
   NO_SHOW_AFTER_MS,
   addRiderPreviewLabel,
   classifyActionFailure,
@@ -73,8 +71,6 @@ import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
 import { SeatDots } from "../../components/trip/SeatDots";
 import { RateRidersPanel } from "../../components/trip/RateRidersPanel";
 
-/** Riders see the driver move: one position every few seconds for the whole trip. */
-const LOCATION_SEND_MS = 4_000;
 /** The trip screen checks its trip more often than the rest of the app (a rider may cancel). */
 const TRIP_POLL_MS = 5_000;
 
@@ -120,7 +116,6 @@ export default function TripScreen() {
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { isAuthenticated, user } = useAuth();
-  useKeepAwake();
 
   const { data: activeRide, isLoading } = useDriverActiveTrip(TRIP_POLL_MS);
   const actions = useTripActions();
@@ -195,31 +190,10 @@ export default function TripScreen() {
     });
   }, [ride, plan.upcoming.length, passengers, done]);
 
-  // ─── Automatic arrival at a pickup ("I'm here" is the fallback) ─────────
-  const autoArrivedRef = useRef(new Set<string>());
-  useEffect(() => {
-    if (!ride || !next || next.kind !== "PICKUP" || next.passengerStatus !== "WAITING") return;
-    if (!atNextStop || next.passengerId.startsWith("pending:")) return;
-    if (autoArrivedRef.current.has(next.passengerId)) return;
-    autoArrivedRef.current.add(next.passengerId);
-    runPassengerAction(ride.id, next.passengerId, "arrived");
-  }, [ride, next, atNextStop]);
-
-  // ─── Live location to the riders, for the whole trip ─────────────────────
+  // Live location to the riders and automatic arrival run on every screen
+  // during a trip (lib/tripRuntime), not just here.
   const positionRef = useRef<LatLng | null>(position);
   positionRef.current = position;
-  const liveRideId = ride?.id ?? null;
-  useEffect(() => {
-    if (!liveRideId) return;
-    const socket = getRideSocket();
-    const send = () => {
-      const p = positionRef.current;
-      if (p) socket.emit(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, { rideId: liveRideId, lat: p.latitude, lng: p.longitude });
-    };
-    send();
-    const t = setInterval(send, LOCATION_SEND_MS);
-    return () => clearInterval(t);
-  }, [liveRideId]);
 
   // Refusals: the server's reason, in a banner the driver dismisses.
   const [refusal, setRefusal] = useState<string | null>(null);
@@ -232,24 +206,28 @@ export default function TripScreen() {
   }, [actions.refusal]);
 
   // ─── Adding riders (Shared, before the first pickup) ─────────────────────
-  const assembling = Boolean(ride && ride.type === "SHARED" && (ride.status === "MATCHED" || ride.status === "ARRIVED"));
+  // Riders can join a shared car before departure and, within the 5-minute
+  // detour limit the server enforces, while it's moving (sketch 6).
+  const canAddRiders = Boolean(
+    ride && ride.type === "SHARED" && (ride.status === "MATCHED" || ride.status === "ARRIVED" || ride.status === "IN_PROGRESS"),
+  );
   const activeSeats = passengers.filter((p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP").length;
   const freeSeats = Math.max(0, CAR_SEATS - activeSeats);
   const { data: fill, refetch: refetchFill } = useQuery({
     queryKey: ["fillSuggestions", ride?.id],
     queryFn: () => getFillSuggestions(ride!.id),
-    enabled: assembling,
+    enabled: canAddRiders,
     refetchInterval: 10_000,
   });
   useEffect(() => {
-    if (!assembling) return;
+    if (!canAddRiders) return;
     const socket = getRideSocket();
     const onBroadcast = () => void refetchFill();
     socket.on(DRIVER_EVENTS.RIDE_BROADCAST, onBroadcast);
     return () => {
       socket.off(DRIVER_EVENTS.RIDE_BROADCAST, onBroadcast);
     };
-  }, [assembling, refetchFill]);
+  }, [canAddRiders, refetchFill]);
   const suggestions = (fill?.suggestions ?? []).filter((s) => !actions.adds[s.requestRideId]);
 
   // ─── Route preview before adding a rider ─────────────────────────────────
@@ -263,10 +241,10 @@ export default function TripScreen() {
   const previewId = previewing?.suggestion.requestRideId ?? null;
 
   useEffect(() => {
-    if (!assembling || previewing || freeSeats === 0) return;
+    if (!canAddRiders || previewing || freeSeats === 0) return;
     const offer = suggestions.find((s) => s.compatible && !skippedRef.current.has(s.requestRideId));
     if (offer) setPreviewing({ suggestion: offer, manual: false });
-  }, [assembling, previewing, freeSeats, suggestions]);
+  }, [canAddRiders, previewing, freeSeats, suggestions]);
 
   const closePreview = useCallback((message?: string) => {
     setPreviewing((current) => {
@@ -280,7 +258,7 @@ export default function TripScreen() {
   const previewQuery = useQuery({
     queryKey: ["addPreview", ride?.id, previewId],
     queryFn: () => getAddRiderPreview(ride!.id, previewId!, positionRef.current),
-    enabled: Boolean(ride && previewId && assembling && !committing),
+    enabled: Boolean(ride && previewId && canAddRiders && !committing),
     refetchInterval: 15_000,
     // Keep showing the last answer while a refresh is on its way (no flicker).
     placeholderData: (previous) => previous,
@@ -305,8 +283,8 @@ export default function TripScreen() {
 
   // Once the car leaves (first pickup) or fills up, a preview no longer applies.
   useEffect(() => {
-    if (previewing && !committing && (!assembling || freeSeats === 0)) closePreview();
-  }, [previewing, committing, assembling, freeSeats, closePreview]);
+    if (previewing && !committing && (!canAddRiders || freeSeats === 0)) closePreview();
+  }, [previewing, committing, canAddRiders, freeSeats, closePreview]);
 
   const proposedFull = useMemo(
     () => (previewData ? decodePolyline(previewData.proposedPolyline) : []),
@@ -342,7 +320,7 @@ export default function TripScreen() {
     const { suggestion } = previewing;
     const fare = previewData.farePesewas;
     commitTimer.current = setTimeout(() => {
-      runAddRider(ride.id, suggestion, fare);
+      runAddRider(ride.id, suggestion, fare, positionRef.current);
       skippedRef.current.add(suggestion.requestRideId);
       setPreviewing(null);
       setCommitting(false);
@@ -507,7 +485,16 @@ export default function TripScreen() {
       ) : null}
 
       <TopBar onBack={goHome} onLayout={(e) => setTopHeight(e.nativeEvent.layout.height)} syncing={actions.retrying}>
-        <Chip label={`${Math.min(plan.doneCount + 1, plan.totalCount)} of ${plan.totalCount}`} />
+        {ride.type === "SHARED" ? (
+          <View style={styles.seatChip} accessible accessibilityLabel={`${activeSeats} of ${CAR_SEATS} seats taken`}>
+            <SeatDots seats={seats} />
+            <Text variant="caption" style={styles.chipText}>
+              {activeSeats} of {CAR_SEATS}
+            </Text>
+          </View>
+        ) : (
+          <Chip label="Ride alone" />
+        )}
         {tripFare > 0 ? <Chip label={formatCedis(tripFare)} /> : null}
         {location.isFake && location.fake && next ? (
           <Pressable
@@ -592,8 +579,7 @@ export default function TripScreen() {
           )}
           {ride.type === "SHARED" ? (
             <View style={styles.seatsAndAdd}>
-              <SeatDots seats={seats} />
-              {assembling && freeSeats > 0 ? (
+              {canAddRiders && freeSeats > 0 ? (
                 <Pressable
                   onPress={() => setAddOpen(true)}
                   style={styles.addChip}
@@ -877,6 +863,16 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   chipText: { fontWeight: typography.weight.bold, color: colors.ink[900] },
+  seatChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+    backgroundColor: colors.white,
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    ...shadows.sm,
+  },
   chipWarn: { backgroundColor: colors.warningSurface },
   chipWarnText: { color: colors.warning },
   syncing: {

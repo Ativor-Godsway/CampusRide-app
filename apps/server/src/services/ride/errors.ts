@@ -179,3 +179,16 @@ export class NoShowTooEarlyError extends Error {
     this.availableAt = availableAt;
   }
 }
+
+/**
+ * Adding this rider to a moving car would make a rider already in it more
+ * than MAX_ONBOARD_DELAY_SECONDS late. Nothing is written.
+ */
+export class DetourTooLongError extends Error {
+  readonly delaySeconds: number;
+  constructor(delaySeconds: number) {
+    super(`The detour would delay riders in the car by ${Math.round(delaySeconds)} s`);
+    this.name = "DetourTooLongError";
+    this.delaySeconds = delaySeconds;
+  }
+}

@@ -12,7 +12,6 @@ import {
   passengerArrived,
   passengerCancel,
   passengerDropoff,
-  passengerNoShow,
   passengerPickup,
   serverReason,
   type EligibleRideItem,
@@ -53,7 +52,8 @@ const CALL: Record<PassengerAction, (rideId: string, passengerId: string, o: { t
   pickup: passengerPickup,
   dropoff: passengerDropoff,
   cancel: passengerCancel,
-  "no-show": passengerNoShow,
+  // "Rider didn't show" is the passenger cancel with a no-show reason.
+  "no-show": (rideId, passengerId, o) => passengerCancel(rideId, passengerId, { ...o, reason: "NO_SHOW" }),
 };
 
 const FALLBACK: Record<PassengerAction, string> = {
@@ -205,14 +205,20 @@ export function runPassengerAction(rideId: string, passengerId: string, action: 
 }
 
 /** Add a waiting rider to the car: they appear at once, the request follows. */
-export function runAddRider(rideId: string, suggestion: FillSuggestion, farePesewas?: number) {
+export function runAddRider(
+  rideId: string,
+  suggestion: FillSuggestion,
+  farePesewas?: number,
+  /** Where the driver is, for the server's detour check on a moving car. */
+  position?: { latitude: number; longitude: number } | null,
+) {
   forRide(rideId);
   set({ adds: { ...state.adds, [suggestion.requestRideId]: { suggestion, farePesewas } } });
   let retrying = false;
   enqueue(async () => {
     try {
       const result = await sendUntilAnswered(
-        (timeoutMs) => addPassenger(rideId, suggestion.requestRideId, { timeoutMs }),
+        (timeoutMs) => addPassenger(rideId, suggestion.requestRideId, { timeoutMs, position }),
         "Couldn't add this rider.",
         (on) => {
           if (on !== retrying) setRetrying(on);

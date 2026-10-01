@@ -7,8 +7,9 @@ import {
   RideNotFillableError,
   RideNotReadyToDepartError,
 } from "./errors";
-import type { Ride } from "@prisma/client";
+import type { Ride, RidePassenger } from "@prisma/client";
 import { applyRideTransition, joinLoadedSharedRideTx } from "./rideService";
+import { isActivePassengerStatus } from "./stateMachine";
 
 /**
  * `maxWait` (time allowed to acquire a pooled connection before the
@@ -21,48 +22,69 @@ const TX_OPTIONS = { timeout: 20000, maxWait: 10000 } as const;
 
 export type RideWithPassengers = Prisma.RideGetPayload<{ include: { passengers: true } }>;
 
+/** Car statuses a rider may be added in. IN_PROGRESS since 2026-10-02 (sketch 6). */
+export const FILLABLE_STATUSES = ["MATCHED", "ARRIVED", "IN_PROGRESS"] as const;
+
+/** A request about to be added, as the detour check sees it. */
+export interface AddCandidate {
+  riderId: string;
+  pickupZoneId: string;
+  dropoffZoneId: string;
+}
+
+export interface AddRiderOptions {
+  /**
+   * Called inside the transaction, with the car locked, before anything is
+   * kept. Throw (e.g. DetourTooLongError) to refuse: the whole transaction
+   * rolls back, including the absorbed request.
+   */
+  checkCar?: (car: { anchor: Ride; passengers: readonly RidePassenger[]; candidate: AddCandidate }) => void;
+}
+
 /**
- * "Fill the car" (Phase 2d): a driver pulls a still-pending SHARED request
- * into their already-claimed car.
+ * "Fill the car": a driver pulls a still-pending SHARED request into their
+ * claimed car — before departure (MATCHED/ARRIVED) and, since 2026-10-02,
+ * also while driving (IN_PROGRESS).
  *
- * Merge representation: the absorbed `requestRide` is closed
- * (CANCELLED, cancelReason MERGED_INTO_ANOTHER_RIDE, mergedIntoRideId =
- * anchorRideId) — it is never an orphaned/independent REQUESTED ride again,
- * and never double-counted in fares. Its rider is added to the anchor ride
- * as a RidePassenger via `joinSharedRideTx`, which applies the same
- * downward-only locked-fare ratchet (recomputeLockedFares) used by the
- * normal join path. This keeps a single source of truth for "who is in this
- * car and what they pay" — the anchor ride's passenger list — while leaving
- * an audit trail (mergedIntoRideId) on the absorbed request.
+ * Merge representation: the absorbed `requestRide` is closed (CANCELLED,
+ * cancelReason MERGED_INTO_ANOTHER_RIDE, mergedIntoRideId = anchorRideId);
+ * its rider joins the anchor ride as a WAITING RidePassenger. The anchor's
+ * passenger list stays the single source of truth for "who is in this car
+ * and what they pay"; mergedIntoRideId is the audit trail.
  *
- * Steps (all inside one transaction — no torn state on failure):
- * 1. Load the anchor ride; verify `driverId` owns it and it's MATCHED or
- *    ARRIVED (claimed, not yet departed) with a free seat (occupancy < 4).
- * 2. Load the request ride; verify it's still REQUESTED, unclaimed, SHARED.
- * 3. Atomically absorb the request ride — a conditional UPDATE
- *    (`WHERE status = 'REQUESTED' AND driverId IS NULL`) that only one
- *    concurrent caller can win, mirroring claimRide's atomic-claim pattern.
- *    If it affects 0 rows, another driver already absorbed it.
- * 4. Move the request's rider onto the anchor via `joinSharedRideTx`.
+ * One transaction, no torn state:
+ * 1. Lock the anchor ride (FOR UPDATE) and read its passengers.
+ * 2. Absorb the request with one conditional UPDATE that only one caller
+ *    can win (status REQUESTED, unclaimed, SHARED) — the atomic-claim pattern.
+ * 3. Check the car can take them: owned by this driver, in a fillable
+ *    status, a free seat counted from riders actually in the car, and the
+ *    caller's checkCar (the detour limit for a moving car). Any refusal
+ *    throws and rolls the absorb back.
+ * 4. Add the rider. Before departure the usual downward-only fare ratchet
+ *    runs; once IN_PROGRESS, fares are frozen (departure is still exactly
+ *    where that happens), so existing riders' locked fares are not touched
+ *    at all and the new rider gets the flat shared fare.
  *
- * No route/zone compatibility check: a driver may combine ANY pending SHARED
- * request into their car (product decision — compatibility is surfaced to the
- * driver as a sort hint in `/rides/:id/fill-suggestions`, not enforced as a
- * guardrail here). This previously threw `RidesNotCombinableError` via
- * `areCombinable`; that check is intentionally removed.
+ * The ride's own status never changes here: a car that is IN_PROGRESS stays
+ * IN_PROGRESS (departedAt untouched) and the new rider goes WAITING →
+ * ARRIVED → PICKED_UP → DROPPED_OFF through the per-passenger actions.
  *
- * Throws (no DB writes on any of these):
- * - NotRideOwnerError: anchor.driverId !== driverId
- * - RideNotFillableError: anchor.status not in {MATCHED, ARRIVED}
- * - NoSeatsAvailableError: anchor.occupancy >= 4
- * - RequestRideUnavailableError: request not REQUESTED/unclaimed/SHARED
- *   (checked up front, and again via the atomic absorb for races)
+ * Throws (nothing kept):
+ * - NotRideOwnerError: someone else's car
+ * - RideNotFillableError: car not MATCHED/ARRIVED/IN_PROGRESS
+ * - NoSeatsAvailableError: 4 riders already in the car
+ * - RequestRideUnavailableError: request no longer open
+ * - whatever checkCar throws
+ *
+ * Idempotent: adding a rider already merged into this car returns it with
+ * `changed: false`.
  */
 export async function addRiderToCar(
   prisma: PrismaClient,
   driverId: string,
   anchorRideId: string,
   requestRideId: string,
+  options: AddRiderOptions = {},
 ): Promise<RideWithPassengers & { changed: boolean }> {
   return prisma.$transaction(async (tx) => {
     // Lock the car first: two quick "Add" taps (or two drivers' worth of
@@ -76,16 +98,16 @@ export async function addRiderToCar(
       where: { rideId: anchorRideId },
       orderBy: { createdAt: "asc" },
     });
+    const fillable = (FILLABLE_STATUSES as readonly string[]).includes(anchor.status);
+    const seated = passengers.filter((p) => isActivePassengerStatus(p.status)).length;
 
-    // Absorb the request in one conditional statement that only one caller
-    // can win (mirrors claimRide).
-    const [request] = await tx.$queryRaw<Ride[]>`
-      UPDATE "Ride"
-      SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId}
-      WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
-        AND ${anchor.status}::text IN ('MATCHED', 'ARRIVED')
-        AND ${anchor.occupancy} < ${PRICING.MAX_SHARED_OCCUPANCY}
-      RETURNING *`;
+    const [request] = fillable && seated < PRICING.MAX_SHARED_OCCUPANCY
+      ? await tx.$queryRaw<Ride[]>`
+          UPDATE "Ride"
+          SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId}
+          WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
+          RETURNING *`
+      : [];
 
     if (!request) {
       // A retry of an add that already landed is a success, not an error.
@@ -96,19 +118,20 @@ export async function addRiderToCar(
       if (existing?.mergedIntoRideId === anchorRideId) {
         return { ...anchor, passengers, changed: false };
       }
-      if (anchor.status !== "MATCHED" && anchor.status !== "ARRIVED") {
-        throw new RideNotFillableError(anchorRideId, anchor.status);
-      }
-      if (anchor.occupancy >= PRICING.MAX_SHARED_OCCUPANCY) {
-        throw new NoSeatsAvailableError(anchorRideId);
-      }
+      if (!fillable) throw new RideNotFillableError(anchorRideId, anchor.status);
+      if (seated >= PRICING.MAX_SHARED_OCCUPANCY) throw new NoSeatsAvailableError(anchorRideId);
       throw new RequestRideUnavailableError(requestRideId);
     }
 
-    const joined = await joinLoadedSharedRideTx(tx, anchor, passengers, {
+    const candidate = {
       riderId: request.riderId,
       pickupZoneId: request.pickupZoneId,
       dropoffZoneId: request.dropoffZoneId,
+    };
+    options.checkCar?.({ anchor, passengers, candidate });
+
+    const joined = await joinLoadedSharedRideTx(tx, anchor, passengers, candidate, {
+      freezeExistingFares: anchor.status === "IN_PROGRESS",
     });
 
     return { ...joined.ride, passengers: joined.passengers, changed: true };

@@ -13,6 +13,7 @@ export const RIDE_EVENTS = {
   STATUS: "ride:status",
   COMPLETED: "ride:completed",
   PASSENGER_STATUS: "ride:passenger_status",
+  CAR_NOTICE: "ride:car_notice",
 } as const;
 
 export type RideServerEvent = (typeof RIDE_EVENTS)[keyof typeof RIDE_EVENTS];
@@ -77,12 +78,25 @@ export interface PassengerStatusPayload {
   status: PassengerStatus;
 }
 
+/**
+ * A short note to a rider already in the car about a change to the trip,
+ * e.g. "Picking up 1 more rider on the way · ~3 min". Sent to that rider's
+ * personal room only (`emitToRider`).
+ */
+export interface CarNoticePayload {
+  rideId: string;
+  message: string;
+  /** How much later they'll reach their drop-off, in whole minutes. */
+  delayMinutes: number;
+}
+
 export interface RideServerEventPayloads {
   "ride:driver_assigned": DriverAssignedPayload;
   "ride:driver_location": DriverLocationPayload;
   "ride:status": RideStatusPayload;
   "ride:completed": RideCompletedPayload;
   "ride:passenger_status": PassengerStatusPayload;
+  "ride:car_notice": CarNoticePayload;
 }
 
 /** Client -> server events: subscribe/unsubscribe to a ride's room. */

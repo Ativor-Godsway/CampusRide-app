@@ -10,7 +10,7 @@ import {
 } from "react";
 import * as Location from "expo-location";
 import { useQuery } from "@tanstack/react-query";
-import { pathLengthMeters, pointAlongPath, type LatLng } from "@rida/shared";
+import { pathLengthMeters, pointAlongPath, type ArrivalSample, type LatLng } from "@rida/shared";
 import { getZones, useAuth } from "@rida/mobile-shared";
 import { zonesQueryKey } from "./zones";
 
@@ -47,6 +47,8 @@ export interface FakeLocationControls {
 interface DriverLocation {
   /** The latest position (real GPS, or the fake one), or null if unknown. */
   position: LatLng | null;
+  /** The same fix with its speed and time, for automatic arrival. */
+  sample: ArrivalSample | null;
   /** The best position available right now, waiting briefly for the OS's last known fix. */
   currentOrLastKnown: () => Promise<LatLng | null>;
   /** True while the position shown is the dev-only fake. */
@@ -82,7 +84,7 @@ const LAST_KNOWN_MAX_AGE_MS = 10 * 60_000;
 export function DriverLocationProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const isDriver = user?.role === "DRIVER";
-  const [realPosition, setRealPosition] = useState<LatLng | null>(null);
+  const [realSample, setRealSample] = useState<ArrivalSample | null>(null);
   const [demanders, setDemanders] = useState<ReadonlySet<string>>(new Set());
 
   // ─── Real GPS ─────────────────────────────────────────────────────────
@@ -96,7 +98,13 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
       if (cancelled || perm.status !== "granted") return;
       const subscription = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, timeInterval: 5_000, distanceInterval: 10 },
-        (pos) => setRealPosition({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+        (pos) =>
+          setRealSample({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            speed: pos.coords.speed,
+            at: pos.timestamp || Date.now(),
+          }),
       );
       if (cancelled) subscription.remove();
       else sub = subscription;
@@ -119,7 +127,7 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
 
   // ─── Dev-only fake ────────────────────────────────────────────────────
   const [fakeZoneId, setFakeZoneId] = useState<string | null>(null);
-  const [fakePosition, setFakePosition] = useState<LatLng | null>(null);
+  const [fakeSample, setFakeSample] = useState<ArrivalSample | null>(null);
   const [driving, setDriving] = useState(false);
   const driveTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const { data: zones } = useQuery({
@@ -141,7 +149,7 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
       stopDriving();
       setFakeZoneId(zoneId);
       const zone = zoneId ? zones?.find((z) => z.id === zoneId) : undefined;
-      setFakePosition(zone ? { latitude: zone.latitude, longitude: zone.longitude } : null);
+      setFakeSample(zone ? { latitude: zone.latitude, longitude: zone.longitude, speed: 0, at: Date.now() } : null);
     },
     [zones, stopDriving],
   );
@@ -157,8 +165,9 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
       driveTimer.current = setInterval(() => {
         travelled = Math.min(total, travelled + FAKE_SPEED_METERS_PER_SECOND * (FAKE_TICK_MS / 1000));
         const point = pointAlongPath(path, travelled);
-        if (point) setFakePosition(point);
-        if (travelled >= total) stopDriving();
+        const arrived = travelled >= total;
+        if (point) setFakeSample({ ...point, speed: arrived ? 0 : FAKE_SPEED_METERS_PER_SECOND, at: Date.now() });
+        if (arrived) stopDriving();
       }, FAKE_TICK_MS);
     },
     [stopDriving],
@@ -166,8 +175,24 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => stopDriving, [stopDriving]);
 
-  const isFake = FAKE_LOCATION_AVAILABLE && fakeZoneId !== null && fakePosition !== null;
-  const position = isFake ? fakePosition : realPosition;
+  // A parked fake car keeps "reporting" every few seconds, like a real phone,
+  // so time-based checks (automatic arrival) see it staying put.
+  useEffect(() => {
+    if (!FAKE_LOCATION_AVAILABLE || fakeZoneId === null || driving) return;
+    const t = setInterval(() => setFakeSample((s) => (s ? { ...s, speed: 0, at: Date.now() } : s)), 3_000);
+    return () => clearInterval(t);
+  }, [fakeZoneId, driving]);
+
+  const isFake = FAKE_LOCATION_AVAILABLE && fakeZoneId !== null && fakeSample !== null;
+  const sample = isFake ? fakeSample : realSample;
+  const lat = sample?.latitude;
+  const lng = sample?.longitude;
+  // Only a moved fix is a new position (a re-reported one isn't), so
+  // position-driven work doesn't rerun every few seconds for nothing.
+  const position = useMemo<LatLng | null>(
+    () => (lat === undefined || lng === undefined ? null : { latitude: lat, longitude: lng }),
+    [lat, lng],
+  );
 
   const positionRef = useRef(position);
   positionRef.current = position;
@@ -187,8 +212,8 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ position, currentOrLastKnown, isFake, fake, demand }),
-    [position, currentOrLastKnown, isFake, fake, demand],
+    () => ({ position, sample, currentOrLastKnown, isFake, fake, demand }),
+    [position, sample, currentOrLastKnown, isFake, fake, demand],
   );
 
   return <LocationContext.Provider value={value}>{children}</LocationContext.Provider>;

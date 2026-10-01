@@ -372,7 +372,7 @@ signed in as your approved driver (Step 5):
 2. Start riders, Shared only, near you:
    `npm run sim:riders -- --shared-ratio 1 --zone Balme --interval 15`
 3. **Accept** a request from **Requests near you**. The trip screen opens at
-   once. ✔ map, numbered stop, route; "1 of 2".
+   once. ✔ map, numbered stops, route; seat dots "1 of 4".
 4. **Add a rider with a route preview.** A rider going your way is offered on
    the trip screen by itself (or tap **Add rider** → **See route**). ✔ the map
    shows your current route solid and the new one dotted and lighter, the new
@@ -382,10 +382,18 @@ signed in as your approved driver (Step 5):
    dots update ("1 of 4"). Leave one alone for 90 seconds — ✔ it disappears
    when the request expires.
 5. Tap **▶ Drive (fake)**. ✔ the dot moves along the route; near the pickup the
-   card switches to "Ama knows you're here · Waiting 0:05" without you tapping
-   **I'm here**. The simulator logs "Driver is at … for Test Ama".
+   car stops at the pickup and, about 10 seconds later, the card switches to
+   "Ama knows you're here · Waiting 0:05" without you tapping **I'm here**.
+   (Driving straight past a pickup never counts as arriving.) This works on
+   any screen — go to the Rides tab while it drives and come back. The simulator logs "Driver is at … for Test Ama".
 6. **Slide "Ama picked up".** ✔ the next stop moves up at once. While you
    drive, ✔ the route line only shows what's ahead of you.
+   **Add a rider mid-trip:** with Ama in the car, a rider on the way is
+   offered (or use **Add rider** → **See route**). ✔ the preview shows the
+   extra minutes; **Add** works if it keeps Ama within 5 minutes of her
+   drop-off, otherwise it says the detour is too long. (Riders already in
+   the car get "Picking up 1 more rider on the way · ~N min" in the rider
+   app.)
 7. For the second rider, tap **I'm here** yourself, then wait 3 minutes. ✔
    **Rider didn't show** unlocks; use it. ✔ that stop leaves the list; the
    simulator logs the cancellation.
@@ -398,7 +406,10 @@ signed in as your approved driver (Step 5):
 11. **Leave and come back:** mid-trip, tap ← (Home says "You're on a trip");
     switch tabs (the green banner shows); kill the app and reopen it. ✔ every
     time you get back to the same trip.
-12. Ctrl+C the simulator, then `npm run sim:cleanup`.
+12. **Off campus:** turn **Fake location** off and, far from campus, try to go
+    online. ✔ "You're outside the CampusRide area". Turn it back on — ✔ you
+    can go online again.
+13. Ctrl+C the simulator, then `npm run sim:cleanup`.
 
 ## Troubleshooting
 

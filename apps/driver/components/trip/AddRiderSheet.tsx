@@ -3,9 +3,10 @@ import { requestedAgo } from "@rida/shared";
 import { Badge, Button, Sheet, Text, colors, spacing, typography, type FillSuggestion } from "@rida/mobile-shared";
 
 /**
- * "Add a rider": the waiting Shared requests the driver can add to the car
- * before the first pickup. Compact rows (route + age + "See route") in a
- * sheet. Picking one shows the route preview on the trip map, where the
+ * "Add a rider": the waiting Shared requests the driver can add to the car —
+ * before departure, or while driving if the detour keeps riders already in
+ * the car within 5 minutes (the preview says so). Compact rows (route + age
+ * + "See route") in a sheet. Picking one shows the route preview on the trip map, where the
  * driver adds or skips. Best matches first.
  */
 export function AddRiderSheet({
