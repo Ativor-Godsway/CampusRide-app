@@ -9,6 +9,10 @@ import {
   CAR_SEATS,
   DRIVER_CLIENT_EVENTS,
   NO_SHOW_AFTER_MS,
+  addRiderPreviewLabel,
+  classifyActionFailure,
+  decodePolyline,
+  trimPathToPosition,
   DRIVER_EVENTS,
   etaToStopMinutes,
   formatCedis,
@@ -34,7 +38,10 @@ import {
   Text,
   callPhone,
   colors,
+  errorStatus,
+  getAddRiderPreview,
   getFillSuggestions,
+  serverReason,
   getRideSocket,
   openDirections,
   radii,
@@ -43,6 +50,7 @@ import {
   typography,
   useAuth,
   useCountUp,
+  type FillSuggestion,
   type PassengerInCar,
   type RideWithZones,
 } from "@rida/mobile-shared";
@@ -58,7 +66,7 @@ import {
   settleWith,
   useTripActions,
 } from "../../lib/tripActions";
-import { TripMap } from "../../components/trip/TripMap";
+import { TripMap, type TripPreviewOverlay } from "../../components/trip/TripMap";
 import { SlideToConfirm } from "../../components/trip/SlideToConfirm";
 import { StopListSheet } from "../../components/trip/StopListSheet";
 import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
@@ -213,6 +221,16 @@ export default function TripScreen() {
     return () => clearInterval(t);
   }, [liveRideId]);
 
+  // Refusals: the server's reason, in a banner the driver dismisses.
+  const [refusal, setRefusal] = useState<string | null>(null);
+  const lastRefusalId = useRef(actions.refusal?.id ?? 0);
+  useEffect(() => {
+    if (actions.refusal && actions.refusal.id !== lastRefusalId.current) {
+      lastRefusalId.current = actions.refusal.id;
+      setRefusal(actions.refusal.message);
+    }
+  }, [actions.refusal]);
+
   // ─── Adding riders (Shared, before the first pickup) ─────────────────────
   const assembling = Boolean(ride && ride.type === "SHARED" && (ride.status === "MATCHED" || ride.status === "ARRIVED"));
   const activeSeats = passengers.filter((p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP").length;
@@ -234,21 +252,109 @@ export default function TripScreen() {
   }, [assembling, refetchFill]);
   const suggestions = (fill?.suggestions ?? []).filter((s) => !actions.adds[s.requestRideId]);
 
+  // ─── Route preview before adding a rider ─────────────────────────────────
+  // A rider who fits the route is offered automatically (once); any waiting
+  // rider can be previewed from the "Add rider" sheet. The server works out
+  // where they'd slot in (same ordering as this screen), the new route, the
+  // time it adds and the fare.
+  const [previewing, setPreviewing] = useState<{ suggestion: FillSuggestion; manual: boolean } | null>(null);
+  const [committing, setCommitting] = useState(false);
+  const skippedRef = useRef(new Set<string>());
+  const previewId = previewing?.suggestion.requestRideId ?? null;
+
+  useEffect(() => {
+    if (!assembling || previewing || freeSeats === 0) return;
+    const offer = suggestions.find((s) => s.compatible && !skippedRef.current.has(s.requestRideId));
+    if (offer) setPreviewing({ suggestion: offer, manual: false });
+  }, [assembling, previewing, freeSeats, suggestions]);
+
+  const closePreview = useCallback((message?: string) => {
+    setPreviewing((current) => {
+      if (current) skippedRef.current.add(current.suggestion.requestRideId);
+      return null;
+    });
+    setCommitting(false);
+    if (message) setRefusal(message);
+  }, []);
+
+  const previewQuery = useQuery({
+    queryKey: ["addPreview", ride?.id, previewId],
+    queryFn: () => getAddRiderPreview(ride!.id, previewId!, positionRef.current),
+    enabled: Boolean(ride && previewId && assembling && !committing),
+    refetchInterval: 15_000,
+    // Keep showing the last answer while a refresh is on its way (no flicker).
+    placeholderData: (previous) => previous,
+    retry: (count, err) => classifyActionFailure(errorStatus(err)) === "retry" && count < 3,
+  });
+  const previewData = previewQuery.data?.requestRideId === previewId ? previewQuery.data : undefined;
+
+  // A refusal (the request was taken, the car filled up) ends the preview;
+  // say why only if the driver opened it themselves.
+  useEffect(() => {
+    if (!previewQuery.error || classifyActionFailure(errorStatus(previewQuery.error)) !== "refused") return;
+    closePreview(previewing?.manual ? (serverReason(previewQuery.error) ?? "That rider can't be added now.") : undefined);
+  }, [previewQuery.error, previewing?.manual, closePreview]);
+
+  // The offer runs out when the request does.
+  const expiresAt = previewData ? Date.parse(previewData.expiresAt) : null;
+  useEffect(() => {
+    if (expiresAt === null || committing) return;
+    const t = setTimeout(() => closePreview(), Math.max(0, expiresAt - Date.now()));
+    return () => clearTimeout(t);
+  }, [expiresAt, committing, closePreview]);
+
+  // Once the car leaves (first pickup) or fills up, a preview no longer applies.
+  useEffect(() => {
+    if (previewing && !committing && (!assembling || freeSeats === 0)) closePreview();
+  }, [previewing, committing, assembling, freeSeats, closePreview]);
+
+  const proposedFull = useMemo(
+    () => (previewData ? decodePolyline(previewData.proposedPolyline) : []),
+    // Decode only when the route itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [previewData?.proposedPolyline],
+  );
+  const previewOverlay = useMemo<TripPreviewOverlay | null>(() => {
+    if (!previewData) return null;
+    return {
+      stops: previewData.stops.map((st) => ({
+        key: st.key,
+        kind: st.kind,
+        isNew: st.isNew,
+        riderFirstName: st.riderFirstName,
+        zone: { name: st.zoneName, latitude: st.latitude, longitude: st.longitude },
+      })),
+      // What's ahead only: cut off what the driver has already driven.
+      path: position && proposedFull.length >= 2 ? trimPathToPosition(proposedFull, position) : proposedFull,
+      committing,
+    };
+  }, [previewData, proposedFull, position, committing]);
+
+  // "Add": the dotted route turns solid, then the rider joins the car and the
+  // trip's own route (which is the same line) takes over.
+  const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (commitTimer.current) clearTimeout(commitTimer.current);
+  }, []);
+  const acceptPreview = useCallback(() => {
+    if (!ride || !previewing || !previewData || committing) return;
+    setCommitting(true);
+    const { suggestion } = previewing;
+    const fare = previewData.farePesewas;
+    commitTimer.current = setTimeout(() => {
+      runAddRider(ride.id, suggestion, fare);
+      skippedRef.current.add(suggestion.requestRideId);
+      setPreviewing(null);
+      setCommitting(false);
+    }, 450);
+  }, [ride, previewing, previewData, committing]);
+
   // ─── Layout ──────────────────────────────────────────────────────────────
   const [cardHeight, setCardHeight] = useState(300);
   const [topHeight, setTopHeight] = useState(insets.top + 64);
   const [stopsOpen, setStopsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
 
-  // Refusals: the server's reason, in a banner the driver dismisses.
-  const [refusal, setRefusal] = useState<string | null>(null);
-  const lastRefusalId = useRef(actions.refusal?.id ?? 0);
-  useEffect(() => {
-    if (actions.refusal && actions.refusal.id !== lastRefusalId.current) {
-      lastRefusalId.current = actions.refusal.id;
-      setRefusal(actions.refusal.message);
-    }
-  }, [actions.refusal]);
 
   const now = useNow(next?.kind === "PICKUP" && next.passengerStatus === "ARRIVED");
 
@@ -322,17 +428,7 @@ export default function TripScreen() {
           stops={
             pickupZone
               ? [
-                  {
-                    key: "claim",
-                    kind: "PICKUP",
-                    passengerId: "claim",
-                    riderFirstName: "your rider",
-                    riderPhone: null,
-                    zone: pickupZone,
-                    farePesewas: req.farePesewas,
-                    passengerStatus: "WAITING",
-                    arrivedAt: null,
-                  },
+                  { key: "claim", kind: "PICKUP", riderFirstName: "your rider", zone: pickupZone },
                 ]
               : []
           }
@@ -399,7 +495,16 @@ export default function TripScreen() {
         path={path}
         insets={{ top: topHeight, bottom: cardHeight }}
         attribution={storedRoutes.length > 0 ? routeAttribution(storedRoutes[0]!.provider) : null}
+        preview={previewOverlay}
       />
+
+      {previewData ? (
+        <View pointerEvents="none" style={[styles.previewPill, { top: topHeight + spacing.xs }]}>
+          <Text variant="bodySmall" style={styles.previewPillText}>
+            {addRiderPreviewLabel(previewData.addedMinutes, formatCedis(previewData.farePesewas))}
+          </Text>
+        </View>
+      ) : null}
 
       <TopBar onBack={goHome} onLayout={(e) => setTopHeight(e.nativeEvent.layout.height)} syncing={actions.retrying}>
         <Chip label={`${Math.min(plan.doneCount + 1, plan.totalCount)} of ${plan.totalCount}`} />
@@ -432,6 +537,28 @@ export default function TripScreen() {
             <Pressable onPress={() => setRefusal(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Dismiss">
               <Text variant="bodySmall" style={styles.refusalOk}>OK</Text>
             </Pressable>
+          </View>
+        ) : null}
+
+        {previewing ? (
+          <View style={styles.previewCard} accessibilityLiveRegion="polite">
+            <View style={styles.previewText}>
+              <Text variant="label" style={styles.previewKicker}>
+                {previewing.suggestion.compatible ? "NEW RIDER ON YOUR ROUTE" : "ADD THIS RIDER?"}
+              </Text>
+              <Text variant="bodyMedium" style={styles.previewRoute} numberOfLines={1}>
+                {previewing.suggestion.pickupZoneName} → {previewing.suggestion.dropoffZoneName}
+              </Text>
+              <Text variant="caption" color="muted">
+                {previewData
+                  ? `Adds ~${previewData.addedMinutes} min · +${formatCedis(previewData.farePesewas)}`
+                  : "Working out the route…"}
+              </Text>
+            </View>
+            <View style={styles.previewButtons}>
+              <Button label="Skip" variant="secondary" fullWidth={false} onPress={() => closePreview()} disabled={committing} />
+              <Button label="Add" fullWidth={false} onPress={acceptPreview} disabled={!previewData || committing} />
+            </View>
           </View>
         ) : null}
 
@@ -491,7 +618,8 @@ export default function TripScreen() {
         suggestions={suggestions}
         freeSeats={freeSeats}
         onAdd={(s) => {
-          runAddRider(ride.id, s);
+          setCommitting(false);
+          setPreviewing({ suggestion: s, manual: true });
           setAddOpen(false);
         }}
       />
@@ -774,6 +902,28 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     ...shadows.lg,
   },
+  previewPill: {
+    position: "absolute",
+    alignSelf: "center",
+    backgroundColor: colors.surfaceDark,
+    borderRadius: radii.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    ...shadows.md,
+  },
+  previewPillText: { color: colors.white, fontWeight: typography.weight.semibold },
+  previewCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    backgroundColor: colors.primary[50],
+    borderRadius: radii.lg,
+    padding: spacing.md,
+  },
+  previewText: { flex: 1, gap: 2, minWidth: 0 },
+  previewKicker: { color: colors.primary[600] },
+  previewRoute: { fontWeight: typography.weight.bold },
+  previewButtons: { flexDirection: "row", gap: spacing.xs },
   refusal: {
     flexDirection: "row",
     alignItems: "center",

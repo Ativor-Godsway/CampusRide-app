@@ -229,3 +229,60 @@ describe("claim and add-passenger", () => {
     expect((await prisma.ride.findUniqueOrThrow({ where: { id: anchor.id } })).occupancy).toBe(4);
   });
 });
+
+describe("add-rider route preview", () => {
+  async function openShared(pickupZoneId?: string, dropoffZoneId?: string) {
+    const rider = await createTestUser("RIDER");
+    const { ride } = await createTestRide({
+      type: "SHARED",
+      status: "REQUESTED",
+      broadcastStartedAt: new Date(),
+      passengers: [{ riderId: rider.id, lockedFare: 500 }],
+      ...(pickupZoneId ? { pickupZoneId } : {}),
+      ...(dropoffZoneId ? { dropoffZoneId } : {}),
+    });
+    rideIds.push(ride.id);
+    return ride;
+  }
+  const preview = (rideId: string, token: string, requestRideId: string, extra = "") =>
+    app.inject({
+      method: "GET",
+      url: `/rides/${rideId}/add-preview?requestRideId=${requestRideId}${extra}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+  it("shows where the new rider slots in, both routes, the added time and the extra fare", async () => {
+    const { ride: car, token } = await driverWithCar(["WAITING"]);
+    const zones = await prisma.zone.findMany({ take: 3, orderBy: { name: "asc" } });
+    const request = await openShared(zones[1]!.id, zones[2]!.id);
+
+    const res = await preview(car.id, token, request.id, `&lat=${zones[0]!.latitude}&lng=${zones[0]!.longitude}`);
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body).toMatchObject({ requestRideId: request.id, farePesewas: 500, driverSharePesewas: 425 });
+    expect(body.addedMinutes).toBeGreaterThanOrEqual(1);
+    expect(body.stops).toHaveLength(4);
+    const newStops = body.stops.filter((s: { isNew: boolean }) => s.isNew);
+    expect(newStops.map((s: { kind: string; zoneId: string }) => `${s.kind}@${s.zoneId}`)).toEqual([
+      `PICKUP@${zones[1]!.id}`,
+      `DROPOFF@${zones[2]!.id}`,
+    ]);
+    expect(body.dropoffIndex).toBeGreaterThan(body.pickupIndex);
+    expect(typeof body.proposedPolyline).toBe("string");
+    expect(body.proposedPolyline.length).toBeGreaterThan(body.currentPolyline.length);
+    expect(Date.parse(body.expiresAt) - request.broadcastStartedAt!.getTime()).toBe(90_000);
+    // Read-only: nothing changed.
+    expect((await prisma.ride.findUniqueOrThrow({ where: { id: request.id } })).status).toBe("REQUESTED");
+  });
+
+  it("refuses when the request is gone or the car has left, so the app never previews an add that would fail", async () => {
+    const { ride: car, token } = await driverWithCar(["WAITING"]);
+    const request = await openShared();
+    await prisma.ride.update({ where: { id: request.id }, data: { status: "CANCELLED", cancelReason: "RIDER_CANCELLED" } });
+    expect((await preview(car.id, token, request.id)).json()).toMatchObject({ code: "REQUEST_UNAVAILABLE" });
+
+    const moving = await driverWithCar(["PICKED_UP"], "IN_PROGRESS");
+    const another = await openShared();
+    expect((await preview(moving.ride.id, moving.token, another.id)).json()).toMatchObject({ code: "CAR_CLOSED" });
+  });
+});

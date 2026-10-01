@@ -1,4 +1,4 @@
-import type { PrismaClient, Zone, ZoneAdjacency } from "@prisma/client";
+import type { PrismaClient, Zone, ZoneAdjacency, ZoneRoute } from "@prisma/client";
 
 /**
  * Zones (15 campus spots) and their adjacency (≤ 210 edges) are seeded and
@@ -16,6 +16,7 @@ interface Snapshot {
   at: number;
   zones: Map<string, Zone>;
   adjacency: ZoneAdjacency[];
+  routes: ZoneRoute[];
 }
 
 const snapshots = new WeakMap<PrismaClient, Snapshot>();
@@ -38,11 +39,12 @@ export function forceZoneCacheForTests(prisma: PrismaClient): void {
 const inFlight = new WeakMap<PrismaClient, Promise<Snapshot>>();
 
 async function load(prisma: PrismaClient): Promise<Snapshot> {
-  const [zones, adjacency] = await Promise.all([
+  const [zones, adjacency, routes] = await Promise.all([
     prisma.zone.findMany(),
     prisma.zoneAdjacency.findMany(),
+    prisma.zoneRoute.findMany(),
   ]);
-  return { at: Date.now(), zones: new Map(zones.map((z) => [z.id, z])), adjacency };
+  return { at: Date.now(), zones: new Map(zones.map((z) => [z.id, z])), adjacency, routes };
 }
 
 async function snapshot(prisma: PrismaClient): Promise<Snapshot> {
@@ -72,4 +74,9 @@ export async function getZoneAdjacency(prisma: PrismaClient): Promise<ZoneAdjace
 /** Drops the cache — for tests that create or delete zones/edges. */
 export function clearZoneCache(prisma: PrismaClient): void {
   snapshots.delete(prisma);
+}
+
+/** Every stored zone-to-zone road route (precomputeZoneRoutes.ts); empty until precomputed. */
+export async function getStoredZoneRoutes(prisma: PrismaClient): Promise<ZoneRoute[]> {
+  return (await snapshot(prisma)).routes;
 }

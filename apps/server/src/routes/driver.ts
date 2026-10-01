@@ -1,14 +1,26 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, PassengerStatus, RideSource, RideStatus } from "@rida/shared";
-import { getLoneFare, getSharedFarePerRider, getSharedTotalFare, getDriverGrossForRide, splitFare, designateBestFit, PRICING } from "@rida/shared";
+import {
+  DISPATCH_WINDOW_MS,
+  PRICING,
+  designateBestFit,
+  encodePolyline,
+  getDriverGrossForRide,
+  getLoneFare,
+  getSharedFarePerRider,
+  getSharedTotalFare,
+  indexRoutes,
+  previewAddRider,
+  splitFare,
+} from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
 import { getDriverInfo } from "../services/user/driverInfo";
 import { claimIfOpen } from "../services/ride/dispatch";
 import { departRide, addRiderToCar } from "../services/ride/assembly";
-import { getZoneAdjacency, getZoneMap } from "../services/zones/zoneCache";
+import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
 import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
@@ -817,6 +829,123 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       occupancy: anchor.occupancy,
       passengers: currentPassengers,
       suggestions,
+    });
+  });
+
+  /**
+   * Route preview before adding a rider: where the new pickup and drop-off
+   * would slot into this car's stop order, the route as it is and as it
+   * would be (built from the stored zone-to-zone routes), the time it adds
+   * and the extra fare. Read-only.
+   *
+   * Query: requestRideId (required), lat/lng (the driver's position; without
+   * it the plan starts at the first stop).
+   *
+   * Uses previewAddRider from @rida/shared — the same stop ordering the trip
+   * screen uses — so the preview is exactly what the car looks like after
+   * "Add". Refuses (409, same codes as add-passenger) when the rider could
+   * not be added right now, so the app only ever previews an add that would
+   * succeed.
+   */
+  app.get("/rides/:id/add-preview", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+
+    const { id: rideId } = request.params as { id: string };
+    const userId = request.user!.userId;
+    const query = (request.query ?? {}) as { requestRideId?: unknown; lat?: unknown; lng?: unknown };
+    if (typeof query.requestRideId !== "string" || query.requestRideId.length === 0) {
+      return reply.code(400).send({ error: "requestRideId is required" });
+    }
+    const lat = Number(query.lat);
+    const lng = Number(query.lng);
+    const from =
+      query.lat !== undefined && query.lng !== undefined && Number.isFinite(lat) && Number.isFinite(lng)
+        ? { latitude: lat, longitude: lng }
+        : null;
+
+    const [car, requestRide, zones, storedRoutes] = await Promise.all([
+      prisma.ride.findUnique({
+        where: { id: rideId },
+        include: {
+          passengers: {
+            orderBy: { createdAt: "asc" },
+            include: { rider: { select: { name: true } } },
+          },
+        },
+      }),
+      prisma.ride.findUnique({ where: { id: query.requestRideId } }),
+      getZoneMap(prisma),
+      getStoredZoneRoutes(prisma),
+    ]);
+
+    if (!car) return reply.code(404).send({ error: "Ride not found" });
+    if (car.driverId !== userId) return refuse(reply, 403, "NOT_YOUR_RIDE", "This trip belongs to another driver.");
+    if (car.type !== "SHARED" || (car.status !== "MATCHED" && car.status !== "ARRIVED")) {
+      return refuse(reply, 409, "CAR_CLOSED", "You can only add riders before your first pickup.");
+    }
+    const seated = car.passengers.filter((p) => isActivePassengerStatus(p.status)).length;
+    if (seated >= PRICING.MAX_SHARED_OCCUPANCY) return refuse(reply, 409, "CAR_FULL", "Your car is full.");
+    if (
+      !requestRide ||
+      requestRide.status !== "REQUESTED" ||
+      requestRide.driverId !== null ||
+      requestRide.type !== "SHARED"
+    ) {
+      return refuse(
+        reply,
+        409,
+        "REQUEST_UNAVAILABLE",
+        "This rider's request is no longer open — another driver took it or the rider cancelled.",
+      );
+    }
+
+    const farePesewas = getSharedFarePerRider(1);
+    const preview = previewAddRider({
+      passengers: car.passengers.map((p) => ({
+        id: p.id,
+        riderName: p.rider.name,
+        pickupZoneId: p.pickupZoneId,
+        dropoffZoneId: p.dropoffZoneId,
+        lockedFare: p.lockedFare,
+        status: p.status as PassengerStatus,
+        arrivedAt: p.arrivedAt?.toISOString() ?? null,
+      })),
+      candidate: {
+        requestRideId: requestRide.id,
+        pickupZoneId: requestRide.pickupZoneId,
+        dropoffZoneId: requestRide.dropoffZoneId,
+        farePesewas,
+      },
+      zones: [...zones.values()],
+      routes: indexRoutes(storedRoutes),
+      from,
+    });
+    if (!preview) return reply.code(404).send({ error: "Zone not found" });
+
+    const startedAt = (requestRide.broadcastStartedAt ?? requestRide.createdAt).getTime();
+    return reply.code(200).send({
+      requestRideId: requestRide.id,
+      pickupZoneName: zones.get(requestRide.pickupZoneId)?.name ?? "",
+      dropoffZoneName: zones.get(requestRide.dropoffZoneId)?.name ?? "",
+      farePesewas,
+      driverSharePesewas: splitFare(farePesewas).driverShare,
+      addedSeconds: Math.round(preview.addedSeconds),
+      addedMinutes: preview.addedMinutes,
+      expiresAt: new Date(startedAt + DISPATCH_WINDOW_MS).toISOString(),
+      pickupIndex: preview.pickupIndex,
+      dropoffIndex: preview.dropoffIndex,
+      stops: preview.stops.map((st) => ({
+        key: st.key,
+        kind: st.kind,
+        isNew: st.isNew,
+        riderFirstName: st.riderFirstName,
+        zoneId: st.zone.id,
+        zoneName: st.zone.name,
+        latitude: st.zone.latitude,
+        longitude: st.zone.longitude,
+      })),
+      currentPolyline: encodePolyline(preview.currentPath),
+      proposedPolyline: encodePolyline(preview.proposedPath),
     });
   });
 

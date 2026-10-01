@@ -26,3 +26,4 @@ export * from "./geo/polyline";
 export * from "./rides/tripStops";
 export * from "./driver/actionFailure";
 export * from "./geo/tripRoute";
+export * from "./rides/addRiderPreview";
