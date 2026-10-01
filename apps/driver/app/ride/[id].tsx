@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -18,6 +18,7 @@ import {
   indexRoutes,
   isAtStop,
   noShowAvailableAt,
+  isOutsideServiceArea,
   planTripStops,
   routeAttribution,
   seatStates,
@@ -113,6 +114,7 @@ function useNow(on: boolean): number {
 export default function TripScreen() {
   const { id: rideId } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const navigation = useNavigation();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
   const { isAuthenticated, user } = useAuth();
@@ -146,7 +148,11 @@ export default function TripScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [ride, actions.seats, actions.adds],
   );
-  const position = location.position;
+  // Far outside the service area (testing off campus), the driver's real
+  // position is left out of the trip: the map frames only the stops, the
+  // route starts at the first stop, and no ETA is invented from 120 km away.
+  const farFromCampus = isOutsideServiceArea(location.position, zoneList);
+  const position = farFromCampus ? null : location.position;
   const plan = useMemo(
     () =>
       planTripStops({
@@ -342,6 +348,16 @@ export default function TripScreen() {
     else router.replace("/");
   }, [router, queryClient]);
 
+  // iOS swipe-back is off while a trip is running: the slide-to-confirm knob
+  // starts near the left edge, and the system gesture used to grab the drag
+  // and slide the whole screen away. Back stays on the ← button (which
+  // minimises the trip, as before). On the summary and "trip ended"
+  // screens it works normally again.
+  const tripRunning = Boolean((ride || (claim && claim.state !== "refused")) && !(done && done.rideId === rideId));
+  useEffect(() => {
+    navigation.setOptions({ gestureEnabled: !tripRunning, fullScreenGestureEnabled: false });
+  }, [navigation, tripRunning]);
+
   if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
 
   // ─── Done ────────────────────────────────────────────────────────────────
@@ -496,6 +512,7 @@ export default function TripScreen() {
           <Chip label="Ride alone" />
         )}
         {tripFare > 0 ? <Chip label={formatCedis(tripFare)} /> : null}
+        {farFromCampus ? <Chip label="Far from campus" warn /> : null}
         {location.isFake && location.fake && next ? (
           <Pressable
             onPress={() =>

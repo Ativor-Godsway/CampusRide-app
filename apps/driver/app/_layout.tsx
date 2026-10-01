@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { DRIVER_DEEP_LINK_POLICY } from "@rida/shared";
 import {
   AuthProvider,
@@ -40,18 +41,22 @@ function DeepLinkGuard() {
 
 export default function RootLayout() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <DriverLocationProvider>
-          <DriverPresenceProvider>
-            <DeepLinkGuard />
-            <SessionCacheReset />
-            {/* Live location + automatic arrival on every screen during a trip. */}
-            <TripRuntime />
-            <Stack screenOptions={{ headerShown: false }} />
-          </DriverPresenceProvider>
-        </DriverLocationProvider>
-      </AuthProvider>
-    </QueryClientProvider>
+    // Required for react-native-gesture-handler gestures (the trip screen's
+    // slide-to-confirm) to work at all.
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <DriverLocationProvider>
+            <DriverPresenceProvider>
+              <DeepLinkGuard />
+              <SessionCacheReset />
+              {/* Live location + automatic arrival on every screen during a trip. */}
+              <TripRuntime />
+              <Stack screenOptions={{ headerShown: false }} />
+            </DriverPresenceProvider>
+          </DriverLocationProvider>
+        </AuthProvider>
+      </QueryClientProvider>
+    </GestureHandlerRootView>
   );
 }
