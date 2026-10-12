@@ -168,6 +168,13 @@ model Zone {
   quadrant  String
   latitude  Float
   longitude Float
+  /// Set when a zone is taken out of service (e.g. "Accra Mall Junction",
+  /// off campus, 2026-10). The row stays — old rides reference it and show
+  /// its name — but nothing new uses it: no pin is derived to it, it isn't
+  /// served by GET /zones, a driver can't be in it, eligibility never flows
+  /// through it, and the realign and route precompute scripts skip it.
+  /// Set by src/scripts/realignZones.ts (RETIRED_ZONES).
+  retiredAt DateTime?
 
   drivers           Driver[]
   pickupRides       Ride[]          @relation("PickupZone")

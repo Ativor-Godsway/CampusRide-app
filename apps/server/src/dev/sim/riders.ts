@@ -229,8 +229,11 @@ class Simulator {
 
   private async loadZones(): Promise<void> {
     const [zones, edges] = await Promise.all([
-      this.prisma.zone.findMany({ select: { id: true, name: true, latitude: true, longitude: true } }),
-      this.prisma.zoneAdjacency.findMany({ select: { zoneId: true, adjacentZoneId: true } }),
+      this.prisma.zone.findMany({ where: { retiredAt: null }, select: { id: true, name: true, latitude: true, longitude: true } }),
+      this.prisma.zoneAdjacency.findMany({
+        where: { zone: { retiredAt: null }, adjacentZone: { retiredAt: null } },
+        select: { zoneId: true, adjacentZoneId: true },
+      }),
     ]);
     if (zones.length < 2) {
       throw new Fatal("This database has no zones. Seed them first: npm run db:seed:dev --workspace apps/server");

@@ -75,7 +75,8 @@ afterAll(async () => {
 const BALME = { latitude: 5.65201, longitude: -0.18705 };
 const NIGHT_MARKET = { latitude: 5.64208, longitude: -0.1856 };
 const VOLTA = { latitude: 5.6515, longitude: -0.18969 };
-const ACCRA_MALL = { latitude: 5.62218, longitude: -0.17326 };
+const UGMC = { latitude: 5.631864, longitude: -0.185925 }; // campus's far south
+const ACCRA_MALL = { latitude: 5.62218, longitude: -0.17326 }; // off campus: outside the area
 const KUMASI = { latitude: 6.6885, longitude: -1.6244 };
 
 async function addPlace(name: string, at: { latitude: number; longitude: number }, aliases: string[] = []): Promise<Place> {
@@ -215,8 +216,9 @@ describe("booking with exact pins", () => {
     const dropoffOut = await book(token, { type: "LONE", pickup: BALME, dropoff: KUMASI });
     expect(dropoffOut.json()).toMatchObject({ code: "OUTSIDE_SERVICE_AREA", end: "dropoff" });
 
-    // Accra Mall is inside (the N4 corridor).
-    expect((await book(token, { type: "LONE", pickup: BALME, dropoff: ACCRA_MALL })).statusCode).toBe(201);
+    // Off campus is a future feature: Accra Mall is refused, the campus's far south is fine.
+    expect((await book(token, { type: "LONE", pickup: BALME, dropoff: ACCRA_MALL })).statusCode).toBe(422);
+    expect((await book(token, { type: "LONE", pickup: BALME, dropoff: UGMC })).statusCode).toBe(201);
   });
 
   it("refuses an unknown or deactivated place, and malformed input", async () => {
@@ -291,7 +293,7 @@ describe("who sees the pins", () => {
 
   it("a rider sharing a car sees their own pins, not the others'", async () => {
     const owner = await rider();
-    const anchor = (await book(owner.token, { type: "SHARED", pickup: BALME, dropoff: ACCRA_MALL })).json().ride;
+    const anchor = (await book(owner.token, { type: "SHARED", pickup: BALME, dropoff: UGMC })).json().ride;
     const driver = await onlineDriver(anchor.pickupZoneId);
     await app.inject({ method: "POST", url: `/rides/${anchor.id}/claim`, headers: { authorization: `Bearer ${driver.token}` } });
 
@@ -314,7 +316,7 @@ describe("who sees the pins", () => {
     const ownerSeat = seenByJoiner.passengers.find((p: { riderId: string }) => p.riderId === owner.user.id);
     expect(ownSeat).toMatchObject({ pickupLat: VOLTA.latitude, pickupNote: "By the gate" });
     expect(ownerSeat).toMatchObject({ pickupLat: null, pickupLabel: null, dropoffLat: null, pickupNote: null });
-    expect(mentions(JSON.stringify(seenByJoiner), BALME.latitude, ACCRA_MALL.latitude)).toBe(false);
+    expect(mentions(JSON.stringify(seenByJoiner), BALME.latitude, UGMC.latitude)).toBe(false);
 
     const active = (await get("/rides/active", joiner.token)).json().ride;
     expect(active).toMatchObject({ pickupLat: VOLTA.latitude, dropoffLat: NIGHT_MARKET.latitude });
@@ -328,7 +330,7 @@ describe("who sees the pins", () => {
   it("the add-rider preview shows the new rider at the named place, not their pin", async () => {
     await addPlace("Night Market", NIGHT_MARKET);
     const owner = await rider();
-    const anchor = (await book(owner.token, { type: "SHARED", pickup: BALME, dropoff: ACCRA_MALL })).json().ride;
+    const anchor = (await book(owner.token, { type: "SHARED", pickup: BALME, dropoff: UGMC })).json().ride;
     const driver = await onlineDriver(anchor.pickupZoneId);
     await app.inject({ method: "POST", url: `/rides/${anchor.id}/claim`, headers: { authorization: `Bearer ${driver.token}` } });
 
@@ -412,8 +414,8 @@ describe("admin Places", () => {
       app.inject({ method: "PATCH", url: `/admin/places/${place.id}`, headers: auth, payload });
 
     expect((await patch({ name: `${MARK} Balme Kiosk` })).json().place.name).toBe(`${MARK} Balme Kiosk`);
-    const moved = (await patch({ latitude: ACCRA_MALL.latitude, longitude: ACCRA_MALL.longitude })).json().place;
-    expect(moved.zoneId).toBe(nearestZone(ACCRA_MALL.latitude, ACCRA_MALL.longitude, zones)!.id);
+    const moved = (await patch({ latitude: UGMC.latitude, longitude: UGMC.longitude })).json().place;
+    expect(moved.zoneId).toBe(nearestZone(UGMC.latitude, UGMC.longitude, zones)!.id);
     expect((await patch({ isActive: false })).json().place.isActive).toBe(false);
     expect((await patch({ latitude: KUMASI.latitude, longitude: KUMASI.longitude })).statusCode).toBe(400);
     expect((await patch({ category: "PALACE" })).statusCode).toBe(400);
@@ -475,7 +477,7 @@ describe("routes between pins", () => {
     setRouteFetcherForTests(async () => {
       throw new Error("timeout");
     });
-    const points = [NIGHT_MARKET, ACCRA_MALL];
+    const points = [NIGHT_MARKET, UGMC];
     const res = await post(token, points);
     expect(res.statusCode).toBe(200);
     const body = res.json();
@@ -483,7 +485,7 @@ describe("routes between pins", () => {
     expect(body.legs).toHaveLength(1);
     const line = decodePolyline(body.polyline);
     expect(line[0]!.latitude).toBeCloseTo(NIGHT_MARKET.latitude, 5);
-    expect(line.at(-1)!.longitude).toBeCloseTo(ACCRA_MALL.longitude, 5);
+    expect(line.at(-1)!.longitude).toBeCloseTo(UGMC.longitude, 4); // polylines keep 5 decimals
 
     let called = false;
     setRouteFetcherForTests(async () => {

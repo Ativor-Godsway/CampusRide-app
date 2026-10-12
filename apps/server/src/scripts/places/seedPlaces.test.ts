@@ -22,11 +22,11 @@ afterEach(async () => {
 describe("seedPlaces", () => {
   it("creates places with their nearest zone, and leaves them alone on a re-run", async () => {
     const zones = await prisma.zone.findMany();
-    const rows = [row("A", 5.65201, -0.18705), row("B", 5.62218, -0.17326)];
+    const rows = [row("A", 5.65201, -0.18705), row("B", 5.631864, -0.185925)];
     const first = await seedPlaces(prisma, rows);
     expect(first.created).toEqual(["A", "B"]);
     const b = await prisma.place.findFirstOrThrow({ where: { source: rows[1]!.source } });
-    expect(b.zoneId).toBe(nearestZone(5.62218, -0.17326, zones)!.id);
+    expect(b.zoneId).toBe(nearestZone(5.631864, -0.185925, zones)!.id);
 
     // An admin renamed A; a re-run must not undo that.
     await prisma.place.updateMany({ where: { source: rows[0]!.source }, data: { name: "A (renamed)" } });
@@ -50,5 +50,7 @@ describe("seedPlaces", () => {
 
     await seedPlaces(prisma, [row("Keep", 5.65201, -0.18705)], { deactivateMissing: true });
     expect((await prisma.place.findFirstOrThrow({ where: { name: "Drop", source: { contains: MARK } } })).isActive).toBe(false);
+    // Once hidden, a re-run has nothing left to say about it.
+    expect((await seedPlaces(prisma, [row("Keep", 5.65201, -0.18705)])).missing).toEqual([]);
   });
 });

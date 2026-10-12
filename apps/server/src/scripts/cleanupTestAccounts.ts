@@ -32,6 +32,7 @@
  */
 import { prisma } from "../db/prisma";
 import { dbHostFromUrl } from "../db/dbHostGuard";
+import { SCRIPT_TX_OPTIONS } from "./scriptTx";
 
 /** Phone patterns that cannot belong to a real subscriber. */
 const FIXTURE_PHONE_PATTERNS = [
@@ -216,7 +217,7 @@ async function main() {
 
     await tx.driver.deleteMany({ where: { userId: { in: ids } } });
     await tx.user.deleteMany({ where: { id: { in: ids } } });
-  });
+  }, SCRIPT_TX_OPTIONS);
 
   const remaining = await prisma.user.count({ where });
   heading("Done");

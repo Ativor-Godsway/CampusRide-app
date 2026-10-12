@@ -9,13 +9,14 @@ const zones = [
 describe("driver service area", () => {
   it("gives the nearest zone anywhere inside the area", () => {
     expect(zoneInServiceArea({ latitude: 5.6534, longitude: -0.1873 }, zones)?.id).toBe("balme");
-    // Real Accra Mall: ~3.4 km from these zones, but inside the area.
-    expect(zoneInServiceArea({ latitude: 5.62218, longitude: -0.17326 }, zones)?.id).toBe("gate");
+    // UG Medical Centre, the campus's far south: ~2 km from these zones, but inside the area.
+    expect(zoneInServiceArea({ latitude: 5.631864, longitude: -0.185925 }, zones)?.id).toBe("gate");
   });
 
   it("gives no zone 122 km away (the off-campus tester) or just past the edge", () => {
     expect(zoneInServiceArea({ latitude: 6.6885, longitude: -1.6244 }, zones)).toBeNull(); // Kumasi
     expect(zoneInServiceArea({ latitude: 5.67633, longitude: -0.1779 }, zones)).toBeNull(); // Madina Zongo
+    expect(zoneInServiceArea({ latitude: 5.62218, longitude: -0.17326 }, zones)).toBeNull(); // Accra Mall (off campus)
     expect(isOutsideServiceArea({ latitude: 6.6885, longitude: -1.6244 }, zones)).toBe(true);
   });
 

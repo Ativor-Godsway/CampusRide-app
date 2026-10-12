@@ -11,7 +11,7 @@ import { SERVICE_AREA_POLYGON, zoneForPoint, type PolygonPoint } from "../geo/se
 
 /** What the driver is told when they try to go online outside the area. */
 export const DRIVER_OUTSIDE_AREA_MESSAGE =
-  "CampusRide works on the University of Ghana campus and nearby, down to Accra Mall. Go online when you're inside the area.";
+  "CampusRide works on the University of Ghana (Legon) campus. Go online when you're on campus.";
 
 /** The nearest zone if the position is inside the service area, else null. */
 export function zoneInServiceArea<T extends { latitude: number; longitude: number }>(

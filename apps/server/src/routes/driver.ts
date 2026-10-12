@@ -23,7 +23,7 @@ import { config } from "../config";
 import { getDriverInfo } from "../services/user/driverInfo";
 import { claimIfOpen } from "../services/ride/dispatch";
 import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
-import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap } from "../services/zones/zoneCache";
+import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
 import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
@@ -222,13 +222,16 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply.code(403).send({ error: "Driver account is not approved yet" });
     }
 
-    const zoneId = typeof body.zoneId === "string" && body.zoneId.length > 0
+    const requestedZoneId = typeof body.zoneId === "string" && body.zoneId.length > 0
       ? body.zoneId
       : undefined;
 
-    if (zoneId) {
-      const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
-      if (!zone) return reply.code(404).send({ error: "Zone not found" });
+    // A retired zone (sent by an app with an old zone list) counts as the
+    // in-service zone nearest it: a driver is never in a retired zone.
+    let zoneId: string | undefined;
+    if (requestedZoneId) {
+      zoneId = (await servedZoneId(prisma, requestedZoneId)) ?? undefined;
+      if (!zoneId) return reply.code(404).send({ error: "Zone not found" });
     }
 
     const updated = await prisma.driver.update({
@@ -258,13 +261,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     if (body.zoneId !== null && (typeof body.zoneId !== "string" || body.zoneId.length === 0)) {
       return reply.code(400).send({ error: "zoneId (string, or null to clear it) is required" });
     }
-    const zoneId = body.zoneId;
-
     const userId = request.user!.userId;
-    if (zoneId !== null) {
-      const zone = await prisma.zone.findUnique({ where: { id: zoneId } });
-      if (!zone) return reply.code(404).send({ error: "Zone not found" });
-    }
+    // A retired zone counts as the in-service zone nearest it (see /driver/availability).
+    const zoneId = body.zoneId === null ? null : await servedZoneId(prisma, body.zoneId);
+    if (body.zoneId !== null && !zoneId) return reply.code(404).send({ error: "Zone not found" });
 
     // Conditional update: only an online driver's zone moves, decided in the
     // same statement as the write so a concurrent "go offline" always wins.

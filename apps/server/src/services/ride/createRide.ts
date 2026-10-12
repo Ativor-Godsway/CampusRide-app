@@ -34,6 +34,20 @@ export class ZoneNotFoundError extends Error {
   }
 }
 
+/**
+ * Thrown by createRide when an app sends the id of a zone that has been
+ * taken out of service (an old build with an old zone list). A subclass of
+ * ZoneNotFoundError so callers that only know that one still refuse it.
+ */
+export class ZoneRetiredError extends ZoneNotFoundError {
+  readonly code = "ZONE_NOT_SERVED";
+  constructor() {
+    super();
+    this.message = "That place isn't served any more. Please choose another pickup or drop-off.";
+    this.name = "ZoneRetiredError";
+  }
+}
+
 /** Thrown by createRide when the rider already has an active ride. */
 export class ActiveRideExistsError extends Error {
   readonly existingRide: { id: string; status: RideStatus };
@@ -118,6 +132,9 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
 
   if (!pickupZone || !dropoffZone) {
     throw new ZoneNotFoundError();
+  }
+  if (pickupZone.retiredAt || dropoffZone.retiredAt) {
+    throw new ZoneRetiredError();
   }
   if (existingActiveRide) {
     throw new ActiveRideExistsError(existingActiveRide);

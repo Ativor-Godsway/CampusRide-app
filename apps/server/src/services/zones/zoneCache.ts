@@ -1,4 +1,5 @@
 import type { PrismaClient, Zone, ZoneAdjacency, ZoneRoute } from "@prisma/client";
+import { nearestZone } from "@rida/shared";
 
 /**
  * Zones (15 campus spots) and their adjacency (≤ 210 edges) are seeded and
@@ -62,14 +63,42 @@ async function snapshot(prisma: PrismaClient): Promise<Snapshot> {
   return fresh;
 }
 
-/** Every zone, by id. */
+/**
+ * Every zone, by id — RETIRED ones too, because old rides reference them
+ * and must still show their names. For anything new (deriving a zone from a
+ * pin, a driver's zone, a place's zone) use getActiveZones.
+ */
 export async function getZoneMap(prisma: PrismaClient): Promise<Map<string, Zone>> {
   return (await snapshot(prisma)).zones;
 }
 
-/** Every adjacency edge (read in both directions by callers). */
+/** The zones in service (retiredAt null): the only ones anything new may use. */
+export async function getActiveZones(prisma: PrismaClient): Promise<Zone[]> {
+  return [...(await snapshot(prisma)).zones.values()].filter((z) => z.retiredAt === null);
+}
+
+/**
+ * The zone a driver who reports `zoneId` is counted in: that zone if it is
+ * in service, else the in-service zone nearest its centre (an app holding a
+ * zone list from before a zone was retired keeps sending it). Null for an
+ * unknown id.
+ */
+export async function servedZoneId(prisma: PrismaClient, zoneId: string): Promise<string | null> {
+  const zone = (await getZoneMap(prisma)).get(zoneId);
+  if (!zone) return null;
+  if (zone.retiredAt === null) return zone.id;
+  return nearestZone(zone.latitude, zone.longitude, await getActiveZones(prisma))?.id ?? null;
+}
+
+/**
+ * Every adjacency edge between two zones in service (read in both
+ * directions by callers). Edges touching a retired zone are left out, so
+ * driver eligibility never flows through one.
+ */
 export async function getZoneAdjacency(prisma: PrismaClient): Promise<ZoneAdjacency[]> {
-  return (await snapshot(prisma)).adjacency;
+  const { zones, adjacency } = await snapshot(prisma);
+  const active = (id: string) => zones.get(id)?.retiredAt === null;
+  return adjacency.filter((e) => active(e.zoneId) && active(e.adjacentZoneId));
 }
 
 /** Drops the cache — for tests that create or delete zones/edges. */

@@ -67,8 +67,11 @@ out tags center;`,
     const [type, id] = key.split("/");
     return `${type}(${id});`;
   });
-  if (!rawDir) await new Promise((r) => setTimeout(r, 5_000));
-  const offCampus = await cached(rawDir, "off-campus.json", `[out:json][timeout:60];(${ids.join("")});out tags center;`);
+  let offCampus: OsmElement[] = [];
+  if (ids.length > 0) {
+    if (!rawDir) await new Promise((r) => setTimeout(r, 5_000));
+    offCampus = await cached(rawDir, "off-campus.json", `[out:json][timeout:60];(${ids.join("")});out tags center;`);
+  }
   console.log(`  ${offCampus.length} of ${ids.length} found`);
 
   const rows = buildPlaceRows(campus, offCampus);

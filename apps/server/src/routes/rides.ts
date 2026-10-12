@@ -16,6 +16,7 @@ import {
   SameZoneError,
   TripTooShortError,
   ZoneNotFoundError,
+  ZoneRetiredError,
 } from "../services/ride/createRide";
 import {
   OutsideServiceAreaError,
@@ -188,6 +189,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       }
       if (err instanceof PlaceNotFoundError) {
         return reply.code(404).send({ error: err.message, code: err.code, end: err.end });
+      }
+      if (err instanceof ZoneRetiredError) {
+        return reply.code(400).send({ error: err.message, code: err.code });
       }
       if (err instanceof ZoneNotFoundError) {
         return reply.code(404).send({ error: err.message });

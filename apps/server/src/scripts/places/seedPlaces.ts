@@ -31,7 +31,7 @@ export interface SeedReport {
   updated: string[];
   unchanged: number;
   deactivated: string[];
-  /** Seeded places (osm:/manual: source) that are no longer in the CSV. */
+  /** Seeded places (osm:/manual: source), still active, that are no longer in the CSV. */
   missing: string[];
 }
 
@@ -40,7 +40,8 @@ export async function seedPlaces(
   rows: readonly PlaceRow[],
   opts: { dryRun?: boolean; update?: boolean; deactivateMissing?: boolean } = {},
 ): Promise<SeedReport> {
-  const zones = await prisma.zone.findMany();
+  // Zones in service only: a place is never put in a retired zone.
+  const zones = await prisma.zone.findMany({ where: { retiredAt: null } });
   if (zones.length === 0) throw new Error("No zones in this database: seed the zones first (npm run db:seed)");
   const existing = new Map((await prisma.place.findMany()).map((p) => [p.source ?? `id:${p.id}`, p]));
   const report: SeedReport = { created: [], updated: [], unchanged: 0, deactivated: [], missing: [] };
@@ -69,9 +70,10 @@ export async function seedPlaces(
 
   const inCsv = new Set(rows.map((r) => r.source));
   for (const [source, place] of existing) {
-    if (!/^(osm|manual):/.test(source) || inCsv.has(source)) continue;
+    // Already hidden: nothing to report or do, so a re-run is quiet.
+    if (!/^(osm|manual):/.test(source) || inCsv.has(source) || !place.isActive) continue;
     report.missing.push(place.name);
-    if (opts.deactivateMissing && place.isActive) {
+    if (opts.deactivateMissing) {
       if (!opts.dryRun) await prisma.place.update({ where: { id: place.id }, data: { isActive: false } });
       report.deactivated.push(place.name);
     }
@@ -98,7 +100,11 @@ async function main() {
     console.log(`${verb[0]} ${report.created.length}, ${verb[1]} ${report.updated.length}, left alone ${report.unchanged}.`);
     if (report.missing.length > 0) {
       console.log(
-        `${report.missing.length} seeded place(s) are no longer in the CSV${report.deactivated.length ? ` (${report.deactivated.length} deactivated)` : " — pass --deactivate-missing to hide them"}:`,
+        `${report.missing.length} seeded place(s) are no longer in the CSV${
+          report.deactivated.length
+            ? ` (${report.deactivated.length} ${dryRun ? "would be deactivated" : "deactivated"})`
+            : " — pass --deactivate-missing to hide them"
+        }:`,
       );
       for (const name of report.missing) console.log(`  - ${name}`);
     }

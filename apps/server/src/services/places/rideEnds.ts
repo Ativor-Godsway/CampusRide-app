@@ -17,7 +17,7 @@ import {
   nearestZone,
   outsideServiceAreaMessage,
 } from "@rida/shared";
-import { getZoneMap } from "../zones/zoneCache";
+import { getActiveZones } from "../zones/zoneCache";
 import { getActivePlaces } from "./placeCache";
 
 export type RideEnd = "pickup" | "dropoff";
@@ -91,7 +91,7 @@ export async function resolveRideEnd(
   end: RideEnd,
   input: RideEndInput,
 ): Promise<ResolvedRideEnd> {
-  const [places, zoneMap] = await Promise.all([getActivePlaces(prisma), getZoneMap(prisma)]);
+  const [places, zones] = await Promise.all([getActivePlaces(prisma), getActiveZones(prisma)]);
 
   const place = input.placeId ? places.find((p) => p.id === input.placeId) : undefined;
   if (input.placeId && !place) throw new PlaceNotFoundError(end);
@@ -103,7 +103,8 @@ export async function resolveRideEnd(
 
   if (!isInServiceArea(point)) throw new OutsideServiceAreaError(end);
 
-  const zone = nearestZone(point.latitude, point.longitude, [...zoneMap.values()]);
+  // Only zones in service: a pin is never derived to a retired zone.
+  const zone = nearestZone(point.latitude, point.longitude, zones);
   // No zones at all is a broken install, not a rider error.
   if (!zone) throw new Error("No zones: seed the zones before booking rides");
 
