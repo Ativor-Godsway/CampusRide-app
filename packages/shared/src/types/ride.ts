@@ -1,4 +1,5 @@
 import type { RiderCancelReason } from "../rides/riderCancel";
+import type { RidePinFields } from "../rides/ridePins";
 export type RideType = "LONE" | "SHARED";
 
 /** USSD vs app-originated ride — drives SMS vs push notification on transitions. */
@@ -33,7 +34,11 @@ export type RideCancelReason =
   | "ALL_PASSENGERS_LEFT"
   | "MERGED_INTO_ANOTHER_RIDE";
 
-export interface Ride {
+/**
+ * Exact pins are optional on these types: absent from servers before
+ * October 2026, null on rides booked without them (see rides/ridePins.ts).
+ */
+export interface Ride extends Partial<RidePinFields> {
   id: string;
   riderId: string;
   driverId: string | null;
@@ -61,7 +66,7 @@ export interface Ride {
   decisionStartedAt: Date | null;
 }
 
-export interface RidePassenger {
+export interface RidePassenger extends Partial<RidePinFields> {
   id: string;
   rideId: string;
   riderId: string;

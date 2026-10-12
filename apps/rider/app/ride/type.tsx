@@ -2,22 +2,30 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { usePreventRemove } from "expo-router/react-navigation";
-import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Alert, Pressable, StyleSheet, TextInput, View, useWindowDimensions } from "react-native";
 import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import type { PaymentMethod, RideCompletedFareSummary, RiderCancelReason, RideType } from "@rida/shared";
+import type { PaymentMethod, RideCompletedFareSummary, RiderCancelReason, RideType, TripEnd } from "@rida/shared";
 import {
+  MAX_PIN_ADJUST_METERS,
+  PICKUP_NOTE_MAX_LENGTH,
+  clampToRadius,
   cloudinaryAvatar,
   estimateEtaMinutes,
   formatEta,
   getSharedFarePerRider,
+  isInServiceArea,
   mapFitPadding,
+  movedEnd,
+  pointsKey,
   priceLoneRide,
   rideLeaveBehaviour,
   decodePolyline,
-  routeAttribution,
+  tripEndBody,
+  tripEndFromParams,
+  tripEndParams,
 } from "@rida/shared";
 import {
   ActiveRideExistsError,
@@ -54,7 +62,9 @@ import {
   useCarNotice,
   useRideTracking,
   type RideDriverInfo,
-  getZoneRoutes,
+  RideRequestRefusedError,
+  getRoadRoute,
+  useLiveRoute,
 } from "@rida/mobile-shared";
 import { CancelRideSheet, type SwitchOffer } from "../../components/ride/CancelRideSheet";
 import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
@@ -63,6 +73,7 @@ import { SearchingPanel } from "../../components/ride/SearchingPanel";
 import { RideInProgressSheet } from "../../components/ride/RideInProgressSheet";
 import { activeRideParams, useActiveRide } from "../../lib/activeRide";
 import { haptics } from "../../lib/haptics";
+import { usePlaces } from "../../lib/chooseRide";
 
 const STARS = [1, 2, 3, 4, 5];
 
@@ -82,22 +93,34 @@ export default function RideTypeScreen() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
 
-  const params = useLocalSearchParams<{
-    pickupZoneId: string;
-    dropoffZoneId: string;
-    pickupZoneName: string;
-    dropoffZoneName: string;
-    pickupLat: string;
-    pickupLng: string;
-    dropoffLat: string;
-    dropoffLng: string;
-    /** Present when resuming an active ride from the "Your rides" tab. */
-    rideId?: string;
-    /** "plan" when opened from Plan your ride, so Edit can simply go back. */
-    from?: string;
-    /** "1": open this ride's cancel sheet as soon as it loads ("Cancel it"). */
-    openCancel?: string;
-  }>();
+  /**
+   * Both ends as exact points (tripEndParams, "pickup" / "dropoff" prefixes),
+   * plus: `rideId` when resuming an active ride; `from` ("plan" when opened
+   * from Plan your ride, so Edit can simply go back); `openCancel` ("1": open
+   * this ride's cancel sheet as soon as it loads).
+   */
+  const params = useLocalSearchParams<Record<string, string>>();
+  const initialPickup = useMemo<TripEnd>(
+    () => tripEndFromParams("pickup", params) ?? { kind: "pin", latitude: 0, longitude: 0, label: "Pickup", placeId: null },
+    // Read once: the pickup can then be moved on this screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const dropoffEnd = useMemo<TripEnd>(
+    () => tripEndFromParams("dropoff", params) ?? { kind: "pin", latitude: 0, longitude: 0, label: "Drop-off", placeId: null },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const { data: places = [] } = usePlaces();
+
+  // ── "Move pin to the exact spot" and "Note for driver" (before requesting) ──
+  const [pickupEnd, setPickupEnd] = useState<TripEnd>(initialPickup);
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustHint, setAdjustHint] = useState<string | null>(null);
+  /** Re-places the pickup marker after each drag (it may have been clamped or refused). */
+  const [pinVersion, setPinVersion] = useState(0);
+  const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
 
   // ── Options phase ───────────────────────────────────────────────────────────
   const [selectedType, setSelectedType] = useState<RideType>("SHARED");
@@ -224,31 +247,50 @@ export default function RideTypeScreen() {
 
   // ── Map coords & region ─────────────────────────────────────────────────────
   const pickupCoord = useMemo(
-    () => ({ latitude: Number(params.pickupLat), longitude: Number(params.pickupLng) }),
-    [params.pickupLat, params.pickupLng],
+    () => ({ latitude: pickupEnd.latitude, longitude: pickupEnd.longitude }),
+    [pickupEnd.latitude, pickupEnd.longitude],
   );
   const dropoffCoord = useMemo(
-    () => ({ latitude: Number(params.dropoffLat), longitude: Number(params.dropoffLng) }),
-    [params.dropoffLat, params.dropoffLng],
+    () => ({ latitude: dropoffEnd.latitude, longitude: dropoffEnd.longitude }),
+    [dropoffEnd.latitude, dropoffEnd.longitude],
   );
 
-  // The real road between the two zones when it has been precomputed
-  // (GET /zones/routes); a dashed straight line otherwise.
-  const { data: zoneRoutes = [] } = useQuery({
-    queryKey: ["zoneRoutes"],
-    queryFn: getZoneRoutes,
+  // The road from the pickup pin to the drop-off pin (POST /routes/legs:
+  // OSRM, cached by the server). Until it answers, or if it can't, a dashed
+  // straight line.
+  const { data: tripRoute } = useQuery({
+    queryKey: ["roadRoute", pointsKey([pickupCoord, dropoffCoord])],
+    queryFn: () => getRoadRoute([pickupCoord, dropoffCoord]),
     staleTime: Infinity,
-    retry: false,
+    retry: 1,
   });
+
+  // While the driver comes for the rider: the road from the driver to the
+  // exact pickup pin; once picked up, from the driver to the drop-off pin.
+  // Asked for once, then re-asked only if the driver leaves it (useLiveRoute).
+  const legStage: "toPickup" | "toDropoff" | null =
+    ride && (ride.status === "MATCHED" || ride.status === "ARRIVED" || ride.status === "IN_PROGRESS")
+      ? myLegStatus === "PICKED_UP"
+        ? "toDropoff"
+        : myLegStatus === "DROPPED_OFF"
+          ? null
+          : "toPickup"
+      : null;
+  const liveStops = useMemo(
+    () => (legStage === "toPickup" ? [pickupCoord] : legStage === "toDropoff" ? [dropoffCoord] : []),
+    [legStage, pickupCoord, dropoffCoord],
+  );
+  const live = useLiveRoute({ from: driverLocation, stops: liveStops, enabled: legStage !== null && driverLocation !== null });
+
   const { routeLine, routeIsRoad, routeCredit } = useMemo(() => {
-    const stored = zoneRoutes.find(
-      (r) => r.fromZoneId === params.pickupZoneId && r.toZoneId === params.dropoffZoneId,
-    );
-    const road = stored ? decodePolyline(stored.polyline) : [];
+    if (live.path && live.path.length >= 2) {
+      return { routeLine: live.path, routeIsRoad: live.source === "osrm", routeCredit: live.attribution ?? undefined };
+    }
+    const road = tripRoute ? decodePolyline(tripRoute.polyline) : [];
     return road.length >= 2
-      ? { routeLine: road, routeIsRoad: true, routeCredit: routeAttribution(stored?.provider) }
+      ? { routeLine: road, routeIsRoad: tripRoute?.source === "osrm", routeCredit: tripRoute?.attribution }
       : { routeLine: [pickupCoord, dropoffCoord], routeIsRoad: false, routeCredit: undefined };
-  }, [zoneRoutes, params.pickupZoneId, params.dropoffZoneId, pickupCoord, dropoffCoord]);
+  }, [live.path, live.source, live.attribution, tripRoute, pickupCoord, dropoffCoord]);
 
   /**
    * Phase 4 ETA. Straight-line distance from the driver's last reported
@@ -260,13 +302,14 @@ export default function RideTypeScreen() {
    * caller falls back to "Your driver is getting ready" rather than showing
    * a number invented from nothing.
    */
+  const roadEtaMinutes = live.secondsToFirstStop !== null ? Math.max(1, Math.round(live.secondsToFirstStop / 60)) : null;
   const etaToPickup = useMemo(
-    () => estimateEtaMinutes(driverLocation, pickupCoord),
-    [driverLocation, pickupCoord],
+    () => (legStage === "toPickup" && roadEtaMinutes !== null ? roadEtaMinutes : estimateEtaMinutes(driverLocation, pickupCoord)),
+    [legStage, roadEtaMinutes, driverLocation, pickupCoord],
   );
   const etaToDropoff = useMemo(
-    () => estimateEtaMinutes(driverLocation, dropoffCoord),
-    [driverLocation, dropoffCoord],
+    () => (legStage === "toDropoff" && roadEtaMinutes !== null ? roadEtaMinutes : estimateEtaMinutes(driverLocation, dropoffCoord)),
+    [legStage, roadEtaMinutes, driverLocation, dropoffCoord],
   );
 
   const region = useMemo(() => {
@@ -277,14 +320,14 @@ export default function RideTypeScreen() {
 
   const mapZones = useMemo(() => {
     const zones: CampusMapZone[] = [
-      { id: "pickup", ...pickupCoord, label: params.pickupZoneName, role: "pickup" },
-      { id: "dropoff", ...dropoffCoord, label: params.dropoffZoneName, role: "dropoff" },
+      { id: "pickup", ...pickupCoord, label: pickupEnd.label, role: "pickup", version: pinVersion },
+      { id: "dropoff", ...dropoffCoord, label: dropoffEnd.label, role: "dropoff" },
     ];
     if (driverLocation) {
       zones.push({ id: "driver", ...driverLocation, label: "Driver", role: "driver" });
     }
     return zones;
-  }, [pickupCoord, dropoffCoord, driverLocation, params.pickupZoneName, params.dropoffZoneName]);
+  }, [pickupCoord, dropoffCoord, driverLocation, pickupEnd.label, dropoffEnd.label, pinVersion]);
 
   // ── Phase ───────────────────────────────────────────────────────────────────
   const isSearching = activeRideId !== null && (!ride || ride.status === "REQUESTED" || isMerged);
@@ -309,15 +352,16 @@ export default function RideTypeScreen() {
 
   // ── Actions ─────────────────────────────────────────────────────────────────
   async function handleSubmit() {
-    if (!params.pickupZoneId || !params.dropoffZoneId) return;
     setSubmitting(true);
     try {
       const created = await createRide({
-        pickupZoneId: params.pickupZoneId,
-        dropoffZoneId: params.dropoffZoneId,
+        pickup: tripEndBody(pickupEnd),
+        dropoff: tripEndBody(dropoffEnd),
+        ...(note.trim() ? { pickupNote: note.trim() } : {}),
         type: selectedType,
         paymentMethod: selectedPaymentMethod,
       });
+      setAdjusting(false);
       setActiveRideId(created.id);
       void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
     } catch (err) {
@@ -325,12 +369,37 @@ export default function RideTypeScreen() {
         // Not an error to show: offer the way to the ride that's in the way.
         await queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
         setConflictOpen(true);
+      } else if (err instanceof RideRequestRefusedError) {
+        // Outside the area, a place that's gone, the same spot twice: the server's own words.
+        Alert.alert("Couldn't request this ride", err.message);
       } else {
         Alert.alert("Couldn't request a ride", "Please check your connection and try again.");
       }
     } finally {
       setSubmitting(false);
     }
+  }
+
+  /**
+   * The rider dragged the pickup pin. It may move up to MAX_PIN_ADJUST_METERS
+   * from where it started (further lands it on that circle), and never out
+   * of the CampusRide area. The label follows: the chosen place's name while
+   * it's near it, else "Near <place>".
+   */
+  function onPickupDragged(point: { latitude: number; longitude: number }) {
+    setPinVersion((v) => v + 1);
+    const kept = clampToRadius(initialPickup, point);
+    if (!isInServiceArea(kept)) {
+      setAdjustHint("That's outside the CampusRide area. Keep the pin on campus.");
+      return;
+    }
+    setPickupEnd(movedEnd(initialPickup, kept, places));
+    setAdjustHint(
+      kept.clamped
+        ? `The pin can move up to ${MAX_PIN_ADJUST_METERS} m. To be picked up somewhere else, edit your pickup.`
+        : null,
+    );
+    haptics.selection();
   }
 
   async function refreshRide() {
@@ -478,11 +547,14 @@ export default function RideTypeScreen() {
     [windowHeight],
   );
   const hasDriverPin = driverLocation !== null;
+  // Framed on where the pickup STARTED while choosing, so dragging the pin
+  // doesn't swing the map; on the moved pin once the ride is requested.
+  const framePickup = inOptions ? initialPickup : pickupCoord;
   const fitTo = useMemo(
-    () => (hasDriverPin && driverLocation ? [pickupCoord, dropoffCoord, driverLocation] : [pickupCoord, dropoffCoord]),
+    () => (hasDriverPin && driverLocation ? [framePickup, dropoffCoord, driverLocation] : [framePickup, dropoffCoord]),
     // Re-fit when the driver first appears, not on every GPS ping.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [pickupCoord, dropoffCoord, hasDriverPin],
+    [framePickup, dropoffCoord, hasDriverPin],
   );
   const fitPadding = useMemo(
     () =>
@@ -508,7 +580,7 @@ export default function RideTypeScreen() {
     }
     router.replace({
       pathname: "/ride/location",
-      params: { pickupZoneId: params.pickupZoneId, dropoffZoneId: params.dropoffZoneId },
+      params: { ...tripEndParams("pickup", pickupEnd), ...tripEndParams("dropoff", dropoffEnd) },
     });
   }
 
@@ -532,6 +604,9 @@ export default function RideTypeScreen() {
         fitTo={fitTo}
         fitPadding={fitPadding}
         controlsBottomInset={sheetHeight}
+        draggableZoneId={inOptions && adjusting ? "pickup" : undefined}
+        onZoneDragEnd={(_id, point) => onPickupDragged(point)}
+        circle={inOptions && adjusting ? { center: initialPickup, radiusMeters: MAX_PIN_ADJUST_METERS } : null}
       />
 
       {carNotice ? (
@@ -549,8 +624,8 @@ export default function RideTypeScreen() {
 
       <RoutePill
         top={insets.top + PILL_TOP_GAP}
-        pickupZoneName={params.pickupZoneName}
-        dropoffZoneName={params.dropoffZoneName}
+        pickupZoneName={pickupEnd.label}
+        dropoffZoneName={dropoffEnd.label}
         onBack={goBack}
         // A requested ride's route can't change, so Edit only exists before.
         onEdit={inOptions ? editRoute : undefined}
@@ -585,6 +660,20 @@ export default function RideTypeScreen() {
                 />
               ))}
             </View>
+
+            <PickupDetails
+              pickup={pickupEnd}
+              adjusting={adjusting}
+              hint={adjustHint}
+              onToggleAdjust={() => {
+                setAdjusting((on) => !on);
+                setAdjustHint(null);
+              }}
+              note={note}
+              noteOpen={noteOpen}
+              onOpenNote={() => setNoteOpen(true)}
+              onNoteChange={setNote}
+            />
 
             <View style={styles.requestBar}>
               {/* Cash-only launch (Phase 1): MoMo is intentionally not
@@ -644,8 +733,8 @@ export default function RideTypeScreen() {
               {isSearching && (
                 <FadeIn key="searching">
                   <SearchingPanel
-                    pickupZoneName={params.pickupZoneName}
-                    dropoffZoneName={params.dropoffZoneName}
+                    pickupZoneName={pickupEnd.label}
+                    dropoffZoneName={dropoffEnd.label}
                     rideType={rideType}
                     priceLabel={priceLabel}
                     broadcastStartedAt={ride?.broadcastStartedAt}
@@ -678,13 +767,13 @@ export default function RideTypeScreen() {
                 driver &&
                 (myLegStatus === "DROPPED_OFF" ? (
                   <FadeIn key="leg-done">
-                    <MyLegDoneContent dropoffZoneName={params.dropoffZoneName} />
+                    <MyLegDoneContent dropoffZoneName={dropoffEnd.label} />
                   </FadeIn>
                 ) : myLegStatus === "PICKED_UP" ? (
                   <FadeIn key="in-progress">
                     <InProgressContent
                       driver={driver}
-                      dropoffZoneName={params.dropoffZoneName}
+                      dropoffZoneName={dropoffEnd.label}
                       etaMinutes={etaToDropoff}
                       rideId={ride.id}
                     />
@@ -745,6 +834,91 @@ export default function RideTypeScreen() {
           onConfirmCancel={(reason, note) => void handleConfirmCancel(reason, note)}
         />
       ) : null}
+    </View>
+  );
+}
+
+// ── Pickup pin + note ─────────────────────────────────────────────────────────
+
+/**
+ * Under the ride options: where exactly the driver will stop ("Move pin to
+ * the exact spot" lets the rider drag it, within 200 m) and an optional note
+ * for the driver ("At the main gate, blue shirt").
+ */
+function PickupDetails({
+  pickup,
+  adjusting,
+  hint,
+  onToggleAdjust,
+  note,
+  noteOpen,
+  onOpenNote,
+  onNoteChange,
+}: {
+  pickup: TripEnd;
+  adjusting: boolean;
+  hint: string | null;
+  onToggleAdjust: () => void;
+  note: string;
+  noteOpen: boolean;
+  onOpenNote: () => void;
+  onNoteChange: (note: string) => void;
+}) {
+  return (
+    <View style={styles.pickupDetails}>
+      <View style={styles.pickupRow}>
+        <View style={styles.pickupDotSmall} />
+        <View style={styles.pickupText}>
+          <Text variant="caption" color="muted">
+            Pickup
+          </Text>
+          <Text variant="bodyMedium" numberOfLines={1}>
+            {pickup.label}
+          </Text>
+        </View>
+      </View>
+      <Pressable
+        onPress={onToggleAdjust}
+        accessibilityRole="button"
+        hitSlop={6}
+        style={styles.noteLink}
+      >
+        <Ionicons name={adjusting ? "checkmark-circle-outline" : "move-outline"} size={16} color={colors.primary[500]} />
+        <Text variant="bodySmall" color="primary" style={styles.linkText}>
+          {adjusting ? "Done moving the pin" : "Move pin to the exact spot"}
+        </Text>
+      </Pressable>
+      {adjusting ? (
+        <Text variant="caption" color="muted" accessibilityLiveRegion="polite">
+          {hint ?? "Drag the green pin to the exact spot — up to 200 m from here."}
+        </Text>
+      ) : null}
+
+      {noteOpen ? (
+        <View>
+          <TextInput
+            value={note}
+            onChangeText={(t) => onNoteChange(t.slice(0, PICKUP_NOTE_MAX_LENGTH))}
+            placeholder="Note for driver, e.g. At the main gate, blue shirt"
+            placeholderTextColor={colors.ink[300]}
+            maxLength={PICKUP_NOTE_MAX_LENGTH}
+            style={styles.noteInput}
+            accessibilityLabel="Note for driver"
+            autoFocus
+            returnKeyType="done"
+          />
+          <Text variant="caption" color="muted" style={styles.noteCount}>
+            {note.length}/{PICKUP_NOTE_MAX_LENGTH}
+          </Text>
+        </View>
+      ) : (
+        <Pressable onPress={onOpenNote} accessibilityRole="button" style={styles.noteLink} hitSlop={6}>
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary[500]} />
+          <Text variant="bodySmall" color="primary" style={styles.linkText}>
+            Add a note for your driver
+          </Text>
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -1255,6 +1429,27 @@ function CancelledContent({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  pickupDetails: {
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
+  pickupRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  pickupDotSmall: { width: 10, height: 10, borderRadius: radii.full, backgroundColor: colors.primary[500] },
+  pickupText: { flex: 1, minWidth: 0 },
+  linkText: { fontWeight: typography.weight.semibold },
+  noteLink: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingVertical: spacing.xs },
+  noteInput: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radii.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    fontSize: typography.size.md,
+    color: colors.ink[900],
+  },
+  noteCount: { textAlign: "right", marginTop: 2 },
   carNotice: {
     position: "absolute",
     left: spacing.lg,

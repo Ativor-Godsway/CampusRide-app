@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef } from "react";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import {
+  AUTO_ARRIVAL_RADIUS_METERS,
   DRIVER_CLIENT_EVENTS,
   INITIAL_ARRIVAL_STATE,
+  PIN_ARRIVAL_RADIUS_METERS,
+  pickupPin,
   stepArrival,
   type ArrivalSample,
   type ArrivalState,
@@ -32,8 +35,9 @@ const KEEP_AWAKE_TAG = "campusride-trip";
  * the trip screen (Stage 3 rule 0):
  *
  * - the driver's live position goes to the riders every few seconds;
- * - automatic arrival: when the driver stays within 60 m of a waiting rider's
- *   pickup, moving slowly, for 10 s (see stepArrival in @rida/shared), that
+ * - automatic arrival: when the driver stays within 50 m of a waiting rider's
+ *   exact pickup pin (60 m of the zone centre for a ride booked without
+ *   one), moving slowly, for 10 s (see stepArrival in @rida/shared), that
  *   rider is marked ARRIVED through the same action as the "I'm here" button
  *   — so the rider is told exactly the same way;
  * - the screen stays awake (no background location yet: that needs the
@@ -118,8 +122,16 @@ export function TripRuntime() {
     const byId = new Map(zones.map((z) => [z.id, z]));
     return overlayPassengers(trip.id, trip.passengers)
       .filter((p) => p.status === "WAITING" && !p.id.startsWith("pending:") && p.pickupZoneId)
-      .map((p) => ({ id: p.id, zone: byId.get(p.pickupZoneId!) }))
-      .filter((p): p is { id: string; zone: NonNullable<typeof p.zone> } => p.zone !== undefined);
+      .map((p) => {
+        const pin = pickupPin(p);
+        const zone = byId.get(p.pickupZoneId!);
+        return pin
+          ? { id: p.id, at: pin, radius: PIN_ARRIVAL_RADIUS_METERS }
+          : zone
+            ? { id: p.id, at: { latitude: zone.latitude, longitude: zone.longitude }, radius: AUTO_ARRIVAL_RADIUS_METERS }
+            : null;
+      })
+      .filter((p): p is NonNullable<typeof p> => p !== null);
     // actions.seats changes when an overlay does.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trip, zones, actions.seats, actions.adds]);
@@ -138,7 +150,7 @@ export function TripRuntime() {
     const evaluate = (sample: ArrivalSample) => {
       for (const p of waitingRef.current) {
         if (firedRef.current.has(p.id)) continue;
-        const { state, arrived } = stepArrival(detectorsRef.current.get(p.id) ?? INITIAL_ARRIVAL_STATE, sample, p.zone);
+        const { state, arrived } = stepArrival(detectorsRef.current.get(p.id) ?? INITIAL_ARRIVAL_STATE, sample, p.at, p.radius);
         detectorsRef.current.set(p.id, state);
         if (arrived) {
           firedRef.current.add(p.id);

@@ -10,6 +10,8 @@ import type {
   RiderDecisionAction,
   RideStatus,
   RideType,
+  RidePinFields,
+  CampusPlace,
   Zone,
 } from "@rida/shared";
 import { asArray, readCursorPage, readList } from "@rida/shared";
@@ -36,11 +38,69 @@ export async function getZones(): Promise<Zone[]> {
   return readList<Zone>(res.data, "zones");
 }
 
-export interface CreateRideInput {
-  pickupZoneId: string;
-  dropoffZoneId: string;
+/** Every active campus place (GET /places): searched on the phone with searchPlaces. */
+export async function getPlaces(): Promise<CampusPlace[]> {
+  const res = await api.get<{ places: CampusPlace[] }>("/places");
+  return readList<CampusPlace>(res.data, "places");
+}
+
+/** One cache entry for the place list, shared by every screen that searches or labels. */
+export const placesQueryKey = ["places"] as const;
+
+/** The road through 2–10 points (POST /routes/legs): OSRM behind it, or the zone-road fallback. */
+export interface RoadRoute {
+  /** Encoded polyline (decodePolyline from @rida/shared). */
+  polyline: string;
+  distanceMeters: number;
+  durationSeconds: number;
+  /** Leg i is points[i] → points[i + 1]. */
+  legs: { distanceMeters: number; durationSeconds: number }[];
+  /** "osrm": real roads. "zones": the approximate fallback. */
+  source: "osrm" | "zones";
+  /** Credit to show under the line. */
+  attribution: string;
+}
+
+export async function getRoadRoute(points: readonly { latitude: number; longitude: number }[]): Promise<RoadRoute> {
+  const res = await api.post<RoadRoute>("/routes/legs", {
+    points: points.map((p) => ({ latitude: Number(p.latitude.toFixed(6)), longitude: Number(p.longitude.toFixed(6)) })),
+  });
+  return { ...res.data, legs: readList(res.data, "legs") };
+}
+
+/** One end of a trip as POST /rides takes it: an exact point, plus the place when one was chosen. */
+export interface RideEndBody {
+  latitude: number;
+  longitude: number;
+  placeId?: string;
+}
+
+/**
+ * Current apps send exact pins (`pickup` / `dropoff`); the server works out
+ * the zones. The zone ids are kept for callers that still book by zone.
+ */
+export type CreateRideInput = {
   type: RideType;
   paymentMethod?: PaymentMethod;
+  /** "At the main gate, blue shirt" — at most PICKUP_NOTE_MAX_LENGTH characters. */
+  pickupNote?: string;
+} & ({ pickup: RideEndBody; dropoff: RideEndBody } | { pickupZoneId: string; dropoffZoneId: string });
+
+/**
+ * The server refused the request for a reason the rider can act on — the
+ * pickup or drop-off is outside the area, a place has gone, the two ends are
+ * the same spot. `message` is the server's sentence, shown as-is.
+ */
+export class RideRequestRefusedError extends Error {
+  constructor(
+    message: string,
+    readonly code: string | null,
+    /** Which end the problem is with, when the server says. */
+    readonly end: "pickup" | "dropoff" | null,
+  ) {
+    super(message);
+    this.name = "RideRequestRefusedError";
+  }
 }
 
 export interface CreateRideConflictError extends Error {
@@ -70,6 +130,14 @@ export async function createRide(input: CreateRideInput): Promise<Ride> {
       const id = typeof data.activeRideId === "string" ? data.activeRideId : data.ride?.id;
       throw new ActiveRideExistsError(typeof id === "string" ? id : null);
     }
+    const data = (response?.data ?? {}) as { error?: unknown; code?: unknown; end?: unknown };
+    if (response && [400, 404, 422].includes(response.status ?? 0) && typeof data.code === "string" && typeof data.error === "string") {
+      throw new RideRequestRefusedError(
+        data.error,
+        data.code,
+        data.end === "pickup" || data.end === "dropoff" ? data.end : null,
+      );
+    }
     throw err;
   }
 }
@@ -82,8 +150,8 @@ export interface ActiveRideZone {
   longitude: number;
 }
 
-/** The rider's ride that is still going on (GET /rides/active). */
-export interface ActiveRideSummary {
+/** The rider's ride that is still going on (GET /rides/active). Pins are the rider's own (null without them). */
+export interface ActiveRideSummary extends Partial<RidePinFields> {
   id: string;
   status: RideStatus;
   type: RideType;

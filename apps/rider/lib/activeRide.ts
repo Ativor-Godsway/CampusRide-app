@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { rideEnd, tripEndParams } from "@rida/shared";
 import {
   activeRideQueryKey,
   getActiveRide,
@@ -49,18 +50,15 @@ export function useResetCacheOnAccountChange() {
   });
 }
 
-/** Route params that reopen the ride screen on this ride, from the rider's own leg. */
+/**
+ * Route params that reopen the ride screen on this ride, from the rider's
+ * own leg: their exact pins, or the zone centres for a ride booked without.
+ */
 export function activeRideParams(ride: ActiveRideSummary, extra: { openCancel?: boolean } = {}) {
   return {
     rideId: ride.id,
-    pickupZoneId: ride.pickupZone.id,
-    dropoffZoneId: ride.dropoffZone.id,
-    pickupZoneName: ride.pickupZone.name,
-    dropoffZoneName: ride.dropoffZone.name,
-    pickupLat: String(ride.pickupZone.latitude),
-    pickupLng: String(ride.pickupZone.longitude),
-    dropoffLat: String(ride.dropoffZone.latitude),
-    dropoffLng: String(ride.dropoffZone.longitude),
+    ...tripEndParams("pickup", rideEnd(ride, "pickup", ride.pickupZone)),
+    ...tripEndParams("dropoff", rideEnd(ride, "dropoff", ride.dropoffZone)),
     ...(extra.openCancel ? { openCancel: "1" } : {}),
   };
 }

@@ -68,4 +68,20 @@ describe("auto-arrival", () => {
   it("never fires outside the radius however long the driver waits", () => {
     expect(run(Array.from({ length: 60 }, (_, i) => ({ ...metersNorth(75), at: i * 1_000, speed: 0 })))).toBeNull();
   });
+
+  it("uses the radius it is given: 50 m around an exact pin, 60 m around a zone centre", () => {
+    const parked = (m: number) => Array.from({ length: 12 }, (_, i) => ({ ...metersNorth(m), at: i * 1_000, speed: 0 }));
+    const runWith = (samples: ArrivalSample[], radius?: number) => {
+      let state: ArrivalState = INITIAL_ARRIVAL_STATE;
+      for (const s of samples) {
+        const r = stepArrival(state, s, pickup, radius);
+        state = r.state;
+        if (r.arrived) return true;
+      }
+      return false;
+    };
+    expect(runWith(parked(55))).toBe(true); // zone centre: 60 m
+    expect(runWith(parked(55), 50)).toBe(false); // exact pin: 50 m
+    expect(runWith(parked(45), 50)).toBe(true);
+  });
 });

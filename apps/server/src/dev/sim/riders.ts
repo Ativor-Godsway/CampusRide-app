@@ -28,8 +28,13 @@ import { parseSimOptions, SimOptionError, SIM_USAGE, type SimOptions } from "./o
 import {
   PAIR_CHANCE,
   pickDecision,
+  pickDropoffPlace,
   pickDropoffZone,
+  pickPickupNote,
+  pickPickupPlace,
   pickPickupZone,
+  planEnd,
+  type PlannedEnd,
   pickRideType,
   pickSearchingCancelReason,
   planGiveUp,
@@ -140,6 +145,8 @@ async function main(): Promise<void> {
 class Simulator {
   private riders: SimRider[] = [];
   private zones: PlannerZone[] = [];
+  /** Active campus places: fake riders use them (exact pins) when there are any; zones otherwise. */
+  private places: PlannerZone[] = [];
   private adjacency = new Map<string, Set<string>>();
   private tracks = new Map<string, Track>(); // by rider id
   private timers: NodeJS.Timeout[] = [];
@@ -239,6 +246,13 @@ class Simulator {
       throw new Fatal("This database has no zones. Seed them first: npm run db:seed:dev --workspace apps/server");
     }
     this.zones = zones;
+    this.places = await this.prisma.place.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true, latitude: true, longitude: true },
+    });
+    if (this.places.length < 2) {
+      log("·", c.yellow("No campus places in this database — fake riders will book by zone. Seed them: npm run places:seed:dev --workspace apps/server"));
+    }
     for (const e of edges) {
       if (!this.adjacency.has(e.zoneId)) this.adjacency.set(e.zoneId, new Set());
       if (!this.adjacency.has(e.adjacentZoneId)) this.adjacency.set(e.adjacentZoneId, new Set());
@@ -354,10 +368,7 @@ class Simulator {
           if (count === 1) log("·", c.dim("Every fake rider is busy — waiting for one to finish"));
           return;
         }
-        const pickup = this.opts.zone
-          ? pickupBase
-          : pickPickupZone(pickupBase, this.adjacentZones(pickupBase), rng);
-        const dropoff = pickDropoffZone(this.zones, pickup, rng);
+        const { pickup, dropoff } = this.planTrip(pickupBase);
         const type = pickRideType(this.opts.sharedRatio, rng);
         const ok = await this.request(rider, pickup, dropoff, type);
 
@@ -389,6 +400,25 @@ class Simulator {
     }
   }
 
+  /**
+   * Where a fake rider goes: real campus places with exact pins near the
+   * driver (as the rider app sends them), or — on a database without places —
+   * zones, as older app builds do.
+   */
+  private planTrip(base: PlannerZone): { pickup: PlannedEnd; dropoff: PlannedEnd } {
+    if (this.places.length >= 2) {
+      const from = pickPickupPlace(base, this.places, rng);
+      const to = pickDropoffPlace(this.places, from, rng);
+      return { pickup: planEnd(from, rng), dropoff: planEnd(to, rng) };
+    }
+    const pickupZone = this.opts.zone ? base : pickPickupZone(base, this.adjacentZones(base), rng);
+    const dropoffZone = pickDropoffZone(this.zones, pickupZone, rng);
+    return {
+      pickup: { description: pickupZone.name, body: { zoneId: pickupZone.id } },
+      dropoff: { description: dropoffZone.name, body: { zoneId: dropoffZone.id } },
+    };
+  }
+
   private adjacentZones(zone: PlannerZone): PlannerZone[] {
     const ids = this.adjacency.get(zone.id) ?? new Set<string>();
     return this.zones.filter((z) => ids.has(z.id));
@@ -396,17 +426,18 @@ class Simulator {
 
   private async request(
     rider: SimRider,
-    pickup: PlannerZone,
-    dropoff: PlannerZone,
+    pickup: PlannedEnd,
+    dropoff: PlannedEnd,
     type: RideType,
     sameWayAs?: string,
   ): Promise<boolean> {
-    const res = await this.api("POST", "/rides", rider, {
-      pickupZoneId: pickup.id,
-      dropoffZoneId: dropoff.id,
-      type,
-      paymentMethod: "CASH",
-    });
+    const note = pickPickupNote(rng);
+    const zoneOnly = "zoneId" in pickup.body && "zoneId" in dropoff.body;
+    const ends =
+      "zoneId" in pickup.body && "zoneId" in dropoff.body
+        ? { pickupZoneId: pickup.body.zoneId, dropoffZoneId: dropoff.body.zoneId }
+        : { pickup: pickup.body, dropoff: dropoff.body, ...(note ? { pickupNote: note } : {}) };
+    const res = await this.api("POST", "/rides", rider, { ...ends, type, paymentMethod: "CASH" });
 
     if (res.status === 409 && res.body?.code === "ACTIVE_RIDE_EXISTS") {
       log("·", c.dim(`${rider.name} already has a ride going — skipping`));
@@ -441,8 +472,8 @@ class Simulator {
       rideId,
       requestRideId: rideId,
       type,
-      pickup: pickup.name,
-      dropoff: dropoff.name,
+      pickup: pickup.description,
+      dropoff: dropoff.description,
       rideStatus: "REQUESTED",
       legStatus: "WAITING",
       giveUpAt: giveUp === null ? null : Date.now() + giveUp,
@@ -454,7 +485,8 @@ class Simulator {
     log(
       "📍",
       `${c.bold(rider.name)} requested ${c.magenta(typeLabel(type))} (${formatCedis(fare)}), ` +
-        `${pickup.name} → ${dropoff.name}` +
+        `${pickup.description} → ${dropoff.description}` +
+        (note && !zoneOnly ? c.dim(`  “${note}”`) : "") +
         (sameWayAs ? c.dim(`  — going the same way as ${sameWayAs}`) : ""),
     );
     return true;

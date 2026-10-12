@@ -38,12 +38,17 @@ export function sampleSpeed(sample: ArrivalSample, last: ArrivalSample | null): 
   return haversineDistanceMeters(last, sample) / ((sample.at - last.at) / 1000);
 }
 
+/**
+ * `radiusMeters`: AUTO_ARRIVAL_RADIUS_METERS around a zone centre (a ride
+ * booked without pins), PIN_ARRIVAL_RADIUS_METERS (50 m) around an exact pin.
+ */
 export function stepArrival(
   state: ArrivalState,
   sample: ArrivalSample,
   pickup: { latitude: number; longitude: number },
+  radiusMeters = AUTO_ARRIVAL_RADIUS_METERS,
 ): { state: ArrivalState; arrived: boolean } {
-  const inside = haversineDistanceMeters(sample, pickup) <= AUTO_ARRIVAL_RADIUS_METERS;
+  const inside = haversineDistanceMeters(sample, pickup) <= radiusMeters;
   const speed = sampleSpeed(sample, state.last);
   // Unknown speed counts as slow: staying inside for the whole dwell is the real test.
   const slow = speed === null || speed <= AUTO_ARRIVAL_MAX_SPEED_MPS;

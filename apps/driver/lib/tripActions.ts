@@ -386,6 +386,9 @@ export function overlayPassengers(rideId: string, passengers: readonly Passenger
         dropoffZoneId: suggestion.dropoffZoneId,
         pickupZoneName: suggestion.pickupZoneName,
         dropoffZoneName: suggestion.dropoffZoneName,
+        // Names only until the server confirms the seat; then the exact pins.
+        pickupLabel: suggestion.pickupPlaceName ?? null,
+        dropoffLabel: suggestion.dropoffPlaceName ?? null,
         lockedFare: farePesewas ?? null,
         status: "WAITING",
         arrivedAt: null,

@@ -42,8 +42,9 @@ export function tripStatusLine(ride: RideWithZones): string {
   return driverTripStatusLine({
     type: ride.type,
     status: ride.status,
-    pickupZoneName: ride.pickupZone.name,
-    dropoffZoneName: ride.dropoffZone.name,
+    // The ride owner's place names ("Night Market"); zone names for a ride booked without pins.
+    pickupZoneName: ride.pickupLabel ?? ride.pickupZone.name,
+    dropoffZoneName: ride.dropoffLabel ?? ride.dropoffZone.name,
     // With this device's not-yet-confirmed steps, so it changes on the slide.
     passengerStatuses: overlayPassengers(ride.id, ride.passengers).map((p) => p.status),
   });

@@ -1,4 +1,4 @@
-import type { PassengerStatus, Ride, RideSource, RideType, Zone } from "@rida/shared";
+import type { PassengerStatus, Ride, RidePinFields, RideSource, RideType, Zone } from "@rida/shared";
 import { asArray, readList } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
@@ -182,6 +182,9 @@ export interface EligibleRideItem {
   pickupZoneId: string;
   dropoffZoneName: string;
   dropoffZoneId: string;
+  /** Where the rider asked to go, by name ("Night Market") — never coordinates before accepting. Absent from older servers. */
+  pickupPlaceName?: string;
+  dropoffPlaceName?: string;
   type: RideType;
   /** Riders on the request. Optional: servers before the driver redesign don't send it. */
   seats?: number;
@@ -207,6 +210,9 @@ export interface DriverRideHistoryItem {
   rideId: string;
   pickupZoneName: string;
   dropoffZoneName: string;
+  /** Where the trip actually went, by name. Absent from older servers. */
+  pickupPlaceName?: string;
+  dropoffPlaceName?: string;
   type: RideType;
   source: RideSource;
   /** ISO timestamp the ride was marked COMPLETED. */
@@ -258,8 +264,11 @@ export async function getDriverRideHistory(): Promise<DriverRideHistory> {
 
 // ─── Fill-your-car assembly (Phase 6b-2) ─────────────────────────────────────
 
-/** A passenger already in the driver's shared car. */
-export interface PassengerInCar {
+/**
+ * A passenger already in the driver's car — with their exact pins, labels
+ * and note (this driver's own riders only), null for a ride booked without them.
+ */
+export interface PassengerInCar extends Partial<RidePinFields> {
   id: string;
   riderId: string;
   /** Phase 4: so the driver can identify and call this passenger at pickup. */
@@ -291,6 +300,9 @@ export interface FillSuggestion {
   pickupZoneId: string;
   dropoffZoneName: string;
   dropoffZoneId: string;
+  /** By name only (not this driver's rider yet). Absent from older servers. */
+  pickupPlaceName?: string;
+  dropoffPlaceName?: string;
   createdAt: string;
   /** True for requests ranked compatible by the existing Phase-2c scoring — badge-eligible, sorted first. */
   compatible: boolean;
@@ -463,6 +475,9 @@ export interface AddRiderPreviewStop {
   riderFirstName: string;
   zoneId: string;
   zoneName: string;
+  /** The stop's name ("Night Market"); absent from older servers. */
+  label?: string;
+  /** The car's riders at their exact pins; the new rider at the named place their pin is at or near. */
   latitude: number;
   longitude: number;
 }
@@ -472,6 +487,8 @@ export interface AddRiderPreviewResult {
   riderFirstName?: string;
   pickupZoneName: string;
   dropoffZoneName: string;
+  pickupPlaceName?: string;
+  dropoffPlaceName?: string;
   farePesewas: number;
   driverSharePesewas: number;
   addedSeconds: number;

@@ -43,8 +43,8 @@ function HistoryRow({ item }: { item: DriverRideHistoryItem }) {
 
       <RouteStops
         connectorHeight={16}
-        origin={<Text variant="bodySmall">{item.pickupZoneName}</Text>}
-        destination={<Text variant="bodySmall">{item.dropoffZoneName}</Text>}
+        origin={<Text variant="bodySmall">{item.pickupPlaceName ?? item.pickupZoneName}</Text>}
+        destination={<Text variant="bodySmall">{item.dropoffPlaceName ?? item.dropoffZoneName}</Text>}
       />
 
       <Text variant="caption" color="muted">

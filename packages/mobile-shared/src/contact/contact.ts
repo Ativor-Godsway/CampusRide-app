@@ -45,36 +45,42 @@ export interface DirectionsTarget {
 }
 
 /**
- * Opens the platform's maps app with directions to `target`.
+ * Opens Google Maps with driving directions to the exact point in `target`
+ * (an exact pickup pin, or a zone centre for a ride booked without one).
  *
- * iOS gets Apple Maps and Android gets Google Maps via each platform's
- * documented URL scheme. The `geo:` fallback lets Android hand off to
- * whatever maps app the driver actually has installed rather than assuming
- * Google Maps is present.
+ * - Android: Google Maps turn-by-turn (`google.navigation:`), then any maps
+ *   app (`geo:`).
+ * - iOS: the Google Maps app (`comgooglemaps://`) when it's installed, else
+ *   Google Maps on the web (which opens the app if it is there), else Apple
+ *   Maps — so a driver is never left without directions.
+ *
+ * Coordinates are sent with 6 decimals (~10 cm): the point, not a search by name.
  */
 export async function openDirections(target: DirectionsTarget): Promise<void> {
   const { latitude, longitude, label } = target;
-  const coords = `${latitude},${longitude}`;
+  const coords = `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
   const encodedLabel = encodeURIComponent(label ?? "Destination");
 
-  const primary =
+  const attempts =
     Platform.OS === "ios"
-      ? // `dirflg=d` asks for driving directions.
-        `http://maps.apple.com/?daddr=${coords}&q=${encodedLabel}&dirflg=d`
-      : `google.navigation:q=${coords}`;
+      ? [
+          `comgooglemaps://?daddr=${coords}&directionsmode=driving`,
+          `https://www.google.com/maps/dir/?api=1&destination=${coords}&travelmode=driving`,
+          `http://maps.apple.com/?daddr=${coords}&q=${encodedLabel}&dirflg=d`,
+        ]
+      : [
+          `google.navigation:q=${coords}&mode=d`,
+          `https://www.google.com/maps/dir/?api=1&destination=${coords}&travelmode=driving`,
+          `geo:${coords}?q=${coords}(${encodedLabel})`,
+        ];
 
-  const fallback =
-    Platform.OS === "ios"
-      ? `https://maps.apple.com/?daddr=${coords}`
-      : `geo:${coords}?q=${coords}(${encodedLabel})`;
-
-  try {
-    await Linking.openURL(primary);
-  } catch {
+  for (const url of attempts) {
     try {
-      await Linking.openURL(fallback);
+      await Linking.openURL(url);
+      return;
     } catch {
-      Alert.alert("Couldn't open maps", "No maps app is available on this device.");
+      // Not installed / not handled: try the next one.
     }
   }
+  Alert.alert("Couldn't open maps", "No maps app is available on this device.");
 }
