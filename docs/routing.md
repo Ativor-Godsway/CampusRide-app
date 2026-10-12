@@ -9,6 +9,11 @@ per pair**, store the road as an encoded polyline in `ZoneRoute`, and the apps
 draw it from `GET /zones/routes`. A pair without a stored route is drawn as a
 straight line, so nothing breaks before the precompute has run.
 
+Since exact pins (October 2026) a trip's real road between its pins comes
+from OSRM per trip — see [Routes between exact pins](#routes-between-exact-pins-per-trip)
+below. The zone routes remain the instant fallback and the basis of the
+drive-time maths.
+
 ## Which provider
 
 | | OSRM public demo | openrouteservice (free "Standard") | Mapbox Directions |
@@ -59,3 +64,54 @@ ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" \
 
 It prints each route as it saves it and a summary. It only writes `ZoneRoute`
 rows. Re-run it only if zones change.
+
+## Routes between exact pins (per trip)
+
+Since exact pickup and drop-off pins (October 2026), a trip no longer goes
+zone centre to zone centre, so its road can't all be precomputed. The apps
+ask the server for the road through a trip's own points —
+`POST /routes/legs` with 2–10 `{ latitude, longitude }` — and the server
+([services/routing/pointRoutes.ts](../apps/server/src/services/routing/pointRoutes.ts)):
+
+1. answers from memory, or from the `PointRoute` table, when it has routed
+   those points before (each point rounded to ~11 m, so a place picked twice
+   is one request);
+2. otherwise makes **one** OSRM request through all the points (OSRM returns
+   each leg's time too), with a 2.5 s timeout, and keeps the answer;
+3. never calls OSRM more than once a second from one server. A request that
+   would come sooner, times out or fails gets the **fallback** at once: the
+   stored zone routes above with their ends moved to the pins. The fallback
+   is not kept, so the next request for those points tries OSRM again.
+
+Drive-time maths for dispatch and the 5-minute detour rule still uses the
+zone routes, unchanged.
+
+### How busy we are, and when we'd outgrow the free server
+
+Every OSRM call is logged as `osrm_call` with the day's running count, and
+every fallback as `osrm_fallback`; past `ROUTING_DAILY_WARN_AT` (3,000) in a
+UTC day each further call logs at **warn** level. Search the Render logs
+for `osrm_call` to see the number.
+
+A trip costs roughly **3–8 calls**: the rider's preview (pickup → drop-off,
+often cached), the driver's way to each pickup (it starts at the driver's
+live position, so it's rarely cached, and it's re-asked only when the driver
+leaves the drawn road), and the trip's stops. At 100 trips a day that is
+about 300–800 calls, which is light use by OSRM's policy.
+
+Move to our own OSRM when any of these happens:
+
+- the daily count is regularly over **~3,000** (the warnings start), or
+- `osrm_fallback` is more than ~10% of `osrm_call` at busy times (the
+  one-a-second limit is being hit, so riders see the approximate road), or
+- OSRM answers 429 or blocks us.
+
+Self-hosting is cheap: OSRM's Docker image with the Ghana extract from
+Geofabrik (about 100 MB) runs on a 2 GB VPS (~US$6–12 a month). Point
+`OSRM_BASE_URL` at it and set `ROUTING_MIN_INTERVAL_MS=0`; nothing else
+changes.
+
+Settings (all optional): `OSRM_BASE_URL`, `ROUTING_DISABLED=true` (serve
+the fallback only), `ROUTING_TIMEOUT_MS`, `ROUTING_MIN_INTERVAL_MS`,
+`ROUTING_DAILY_WARN_AT`, `RATE_LIMIT_ROUTE_LEGS` (per user per 15 minutes,
+default 120). Under the test suite OSRM is never contacted.

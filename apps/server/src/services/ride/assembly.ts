@@ -1,5 +1,5 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
-import { PRICING } from "@rida/shared";
+import { PRICING, type RidePinFields } from "@rida/shared";
 import {
   NoSeatsAvailableError,
   NotRideOwnerError,
@@ -25,8 +25,8 @@ export type RideWithPassengers = Prisma.RideGetPayload<{ include: { passengers: 
 /** Car statuses a rider may be added in. IN_PROGRESS since 2026-10-02 (sketch 6). */
 export const FILLABLE_STATUSES = ["MATCHED", "ARRIVED", "IN_PROGRESS"] as const;
 
-/** A request about to be added, as the detour check sees it. */
-export interface AddCandidate {
+/** A request about to be added, as the detour check sees it (pins null for a request without them). */
+export interface AddCandidate extends RidePinFields {
   riderId: string;
   pickupZoneId: string;
   dropoffZoneId: string;
@@ -123,10 +123,20 @@ export async function addRiderToCar(
       throw new RequestRideUnavailableError(requestRideId);
     }
 
-    const candidate = {
+    // The rider's own pins and note travel with them onto their new seat.
+    const candidate: AddCandidate = {
       riderId: request.riderId,
       pickupZoneId: request.pickupZoneId,
       dropoffZoneId: request.dropoffZoneId,
+      pickupLat: request.pickupLat,
+      pickupLng: request.pickupLng,
+      pickupLabel: request.pickupLabel,
+      pickupPlaceId: request.pickupPlaceId,
+      dropoffLat: request.dropoffLat,
+      dropoffLng: request.dropoffLng,
+      dropoffLabel: request.dropoffLabel,
+      dropoffPlaceId: request.dropoffPlaceId,
+      pickupNote: request.pickupNote,
     };
     options.checkCar?.({ anchor, passengers, candidate });
 

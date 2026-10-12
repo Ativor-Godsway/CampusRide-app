@@ -87,6 +87,8 @@ export const config = {
     signupMax: Number(process.env.RATE_LIMIT_SIGNUP ?? 10),
     /** POST /auth/refresh — per 15 min (higher: legitimate silent re-auth). */
     refreshMax: Number(process.env.RATE_LIMIT_REFRESH ?? 30),
+    /** POST /routes/legs — per user, per 15 min (each may call OSRM). */
+    routeLegsMax: Number(process.env.RATE_LIMIT_ROUTE_LEGS ?? 120),
     /** POST /rides (create) — per 15 min. */
     rideCreateMax: Number(process.env.RATE_LIMIT_RIDE_CREATE ?? 20),
     /** POST /rides/:id/initiate-payment — per 15 min (each hits Moolre). */
@@ -189,4 +191,20 @@ export const config = {
    * secret. Same pattern as `moolre.paymentsEnabled`.
    */
   enableUssd: process.env.ENABLE_USSD === "true",
+  /**
+   * Road routes between exact pins (services/routing/pointRoutes.ts). OSRM's
+   * public demo server by default; point OSRM_BASE_URL at a self-hosted OSRM
+   * when we outgrow it (docs/routing.md). ROUTING_DISABLED=true serves only
+   * the stored zone routes. Never contacted under NODE_ENV=test.
+   */
+  routing: {
+    osrmBaseUrl: process.env.OSRM_BASE_URL ?? "https://router.project-osrm.org",
+    disabled: process.env.ROUTING_DISABLED === "true" || process.env.NODE_ENV === "test",
+    /** Give up on OSRM after this long and draw the fallback instead. */
+    timeoutMs: Number(process.env.ROUTING_TIMEOUT_MS ?? 2_500),
+    /** Fewest ms between two calls from this server: OSRM's demo asks for at most 1 a second. */
+    minIntervalMs: Number(process.env.ROUTING_MIN_INTERVAL_MS ?? 1_100),
+    /** Above this many OSRM calls in a UTC day, each further call logs a warning (time to self-host). */
+    dailyWarnAt: Number(process.env.ROUTING_DAILY_WARN_AT ?? 3_000),
+  },
 } as const;

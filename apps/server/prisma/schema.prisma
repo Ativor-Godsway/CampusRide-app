@@ -178,6 +178,59 @@ model Zone {
   adjacentTo        ZoneAdjacency[] @relation("AdjacentZones")
   routesFrom        ZoneRoute[]     @relation("RouteFrom")
   routesTo          ZoneRoute[]     @relation("RouteTo")
+  places            Place[]
+}
+
+enum PlaceCategory {
+  HALL
+  HOSTEL
+  FACULTY
+  GATE
+  FOOD
+  LANDMARK
+  OTHER
+}
+
+/// A named campus spot riders can search for and pick ("Balme Library",
+/// "Night Market"). Seeded from OpenStreetMap (src/scripts/places/) and
+/// edited in the admin site. A ride stores the place's id, name and
+/// coordinates at booking time, so editing or deactivating a place never
+/// rewrites history.
+model Place {
+  id        String        @id @default(cuid())
+  name      String        @db.VarChar(120)
+  /// Short alternative names for search ("Balme", "UGBS", "Night market").
+  aliases   String[]      @default([])
+  latitude  Float
+  longitude Float
+  category  PlaceCategory @default(OTHER)
+  /// Nearest zone, recomputed by the server whenever the place moves.
+  zoneId    String
+  isActive  Boolean       @default(true)
+  /// "osm:way/278303018" for seeded rows, null for places added by hand.
+  source    String?       @unique
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  zone Zone @relation(fields: [zoneId], references: [id], onDelete: Restrict)
+
+  @@index([isActive])
+}
+
+/// Road routes through exact points (a trip's pins, or the driver and the
+/// stops ahead), cached so OSRM is asked once per set of points rather than
+/// per screen. Keyed by the points rounded to 4 decimals (about 11 m). See
+/// services/routing/pointRoutes.ts.
+model PointRoute {
+  key             String   @id
+  polyline        String
+  distanceMeters  Int
+  durationSeconds Int
+  /// Per leg (point i to point i+1), so each stop gets its own ETA.
+  legDistances    Int[]    @default([])
+  legDurations    Int[]    @default([])
+  provider        String
+  createdAt       DateTime @default(now())
 }
 
 /// A road route between two campus zones, precomputed once by
@@ -260,6 +313,25 @@ model Ride {
   /// (Phase 2d): the request ride is closed (CANCELLED,
   /// MERGED_INTO_ANOTHER_RIDE) and points at the anchor ride it joined.
   mergedIntoRideId   String?
+  /// Exact pickup/drop-off pins (2026-10 "exact pins"). All nullable: a ride
+  /// from an app build that predates them has none, and everything falls
+  /// back to the zone centre exactly as before. The zone ids above are still
+  /// ALWAYS set — derived by the server as the nearest zone to the pin — so
+  /// dispatch, eligibility, fares and shared matching never see a difference.
+  /// Coordinates are private: only the rider, their assigned driver and
+  /// admins ever receive them (see routes/ridePins.ts).
+  pickupLat     Float?
+  pickupLng     Float?
+  /// Server-derived display name ("Balme Library", "Near Volta Hall").
+  pickupLabel   String?  @db.VarChar(120)
+  /// The campus Place the rider chose, when they chose one (not a pin).
+  pickupPlaceId String?
+  dropoffLat    Float?
+  dropoffLng    Float?
+  dropoffLabel  String?  @db.VarChar(120)
+  dropoffPlaceId String?
+  /// Optional rider note for the driver ("At the main gate, blue shirt").
+  pickupNote    String?  @db.VarChar(140)
 
   rider       User            @relation("RiderRides", fields: [riderId], references: [id], onDelete: Restrict)
   driver      User?           @relation("DriverRides", fields: [driverId], references: [id], onDelete: Restrict)
@@ -301,6 +373,17 @@ model RidePassenger {
   /// per-passenger list so first-added stays on top and order never shifts
   /// on a status change.
   createdAt     DateTime        @default(now())
+  /// This rider's own exact pins (copied from their request ride when they
+  /// join a car). Same meaning and privacy as the Ride columns.
+  pickupLat      Float?
+  pickupLng      Float?
+  pickupLabel    String?  @db.VarChar(120)
+  pickupPlaceId  String?
+  dropoffLat     Float?
+  dropoffLng     Float?
+  dropoffLabel   String?  @db.VarChar(120)
+  dropoffPlaceId String?
+  pickupNote     String?  @db.VarChar(140)
 
   ride        Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
   rider       User @relation(fields: [riderId], references: [id], onDelete: Restrict)

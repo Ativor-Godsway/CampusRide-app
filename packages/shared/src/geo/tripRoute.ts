@@ -14,6 +14,18 @@ export interface RouteZone {
   longitude: number;
 }
 
+/**
+ * A stop for drawing: its zone (id + centre, for the stored zone routes and
+ * drive times) and, when the ride has one, the exact pin the car goes to.
+ */
+export interface RouteStop extends RouteZone {
+  point?: PathPoint | null;
+}
+
+function pointOf(stop: RouteStop): PathPoint {
+  return stop.point ?? { latitude: stop.latitude, longitude: stop.longitude };
+}
+
 export interface StoredRoute {
   fromZoneId: string;
   toZoneId: string;
@@ -40,6 +52,23 @@ export function pathBetweenZones(from: RouteZone, to: RouteZone, routes: RouteLo
     { latitude: from.latitude, longitude: from.longitude },
     { latitude: to.latitude, longitude: to.longitude },
   ];
+}
+
+/**
+ * Stop-to-stop path for drawing: between exact pins, the stored zone route
+ * with its ends swapped for the pins (a straight line within one zone, or
+ * when no route is stored). Without pins, exactly pathBetweenZones. The real
+ * road between pins comes from GET /routes/legs; this is the instant
+ * fallback.
+ */
+export function pathBetweenStops(from: RouteStop, to: RouteStop, routes: RouteLookup): PathPoint[] {
+  if (!from.point && !to.point) return pathBetweenZones(from, to, routes);
+  const a = pointOf(from);
+  const b = pointOf(to);
+  if (from.id === to.id) return [a, b];
+  const zonePath = pathBetweenZones(from, to, routes);
+  if (zonePath.length <= 2) return [a, b];
+  return [a, ...zonePath.slice(1, -1), b];
 }
 
 /** Closest point to `p` on segment a–b (flat-earth maths; fine across a campus). */
@@ -86,29 +115,33 @@ export function trimPathToPosition(path: readonly PathPoint[], position: PathPoi
  */
 export function pathFromDriver(
   driver: PathPoint,
-  stop: RouteZone,
+  stop: RouteStop,
   zones: readonly RouteZone[],
   routes: RouteLookup,
 ): PathPoint[] {
   const here = nearestZone(driver.latitude, driver.longitude, zones);
   if (!here || here.id === stop.id || !routes.has(routeKey(here.id, stop.id))) {
-    return [driver, { latitude: stop.latitude, longitude: stop.longitude }];
+    return [driver, pointOf(stop)];
   }
-  return trimPathToPosition(pathBetweenZones(here, stop, routes), driver);
+  const zonePath = pathBetweenZones(here, stop, routes);
+  return trimPathToPosition(stop.point ? [...zonePath.slice(0, -1), stop.point] : zonePath, driver);
 }
 
 /** The whole remaining trip as one line: driver → stop 1 → stop 2 → … */
 export function tripPath(
   driver: PathPoint | null,
-  stops: readonly RouteZone[],
+  stops: readonly RouteStop[],
   zones: readonly RouteZone[],
   routes: RouteLookup,
 ): PathPoint[] {
   if (stops.length === 0) return [];
-  const path: PathPoint[] = driver ? pathFromDriver(driver, stops[0]!, zones, routes) : [stops[0]!];
+  const path: PathPoint[] = driver ? pathFromDriver(driver, stops[0]!, zones, routes) : [pointOf(stops[0]!)];
   for (let i = 1; i < stops.length; i++) {
-    if (stops[i]!.id === stops[i - 1]!.id) continue;
-    path.push(...pathBetweenZones(stops[i - 1]!, stops[i]!, routes).slice(1));
+    const prev = stops[i - 1]!;
+    const stop = stops[i]!;
+    // Two stops at one zone centre are one spot; two pins in a zone are not.
+    if (stop.id === prev.id && !stop.point && !prev.point) continue;
+    path.push(...pathBetweenStops(prev, stop, routes).slice(1));
   }
   return path;
 }

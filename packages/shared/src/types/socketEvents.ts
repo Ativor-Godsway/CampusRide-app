@@ -121,6 +121,13 @@ export interface RideBroadcastPayload {
   rideId: string;
   pickupZoneName: string;
   dropoffZoneName: string;
+  /**
+   * Where the rider asked to go, by NAME ("Night Market"; the zone name for
+   * a ride booked without pins). Never coordinates: the driver hasn't
+   * accepted yet. Optional: absent from servers older than exact pins.
+   */
+  pickupPlaceName?: string;
+  dropoffPlaceName?: string;
   type: RideType;
   /** Total locked fare for the ride in integer pesewas. */
   farePesewas: number;

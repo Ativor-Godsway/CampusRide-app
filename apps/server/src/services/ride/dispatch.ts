@@ -3,6 +3,7 @@ import { getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
 import { emitDriverBroadcast } from "../../realtime/rideSocket";
 import { DriverHasActiveRideError, RideAlreadyClaimedError } from "./errors";
 import { ACTIVE_DRIVER_STATUSES } from "./stateMachine";
+import { requestPlaceNames } from "../../routes/ridePins";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -60,6 +61,8 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
         rideId: ride.id,
         pickupZoneName: ride.pickupZone.name,
         dropoffZoneName: ride.dropoffZone.name,
+        // Names only: no driver gets a rider's coordinates before accepting.
+        ...requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name),
         type: ride.type,
         farePesewas,
         driverSharePesewas: driverShare,

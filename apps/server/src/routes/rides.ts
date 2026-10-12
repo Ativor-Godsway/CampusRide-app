@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, RideStatus, RideType } from "@rida/shared";
-import { FLAGGED_RIDER_CANCEL_REASONS, parseRiderCancelInput } from "@rida/shared";
+import { FLAGGED_RIDER_CANCEL_REASONS, parsePickupNote, parseRiderCancelInput } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { applyRideTransition } from "../services/ride/rideService";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
@@ -14,8 +14,16 @@ import {
   createRide,
   ActiveRideExistsError,
   SameZoneError,
+  TripTooShortError,
   ZoneNotFoundError,
 } from "../services/ride/createRide";
+import {
+  OutsideServiceAreaError,
+  PlaceNotFoundError,
+  parseRideEndInput,
+  type RideEndInput,
+} from "../services/places/rideEnds";
+import { hideOtherRidersPins, pinFieldsOf } from "./ridePins";
 import { getRidePaymentSummary, initiateCollection } from "../services/payment/paymentFlow";
 import { NoAwaitingOtpPaymentError } from "../services/payment/errors";
 import type { MoolreChannel } from "../services/payment/constants";
@@ -101,6 +109,13 @@ const RIDER_CANCELLABLE_STATUSES: RideStatus[] = [
  * dispatch/matching engine (Phase 2) to pick up. Reuses the existing
  * RideStatus/broadcastStartedAt conventions from rideService — no matching
  * logic is reimplemented here.
+ *
+ * Body, current apps: `{ pickup, dropoff, type, pickupNote?, paymentMethod? }`
+ * where each end is `{ placeId }`, `{ latitude, longitude }` or both (a
+ * place whose pin the rider moved). Older builds send pickupZoneId /
+ * dropoffZoneId instead, and get exactly the ride they always did. Refusals:
+ * 422 OUTSIDE_SERVICE_AREA, 404 PLACE_NOT_FOUND, 400 TRIP_TOO_SHORT /
+ * NOTE_TOO_LONG — each with `error` in words the app can show as-is.
  */
 export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): void {
   app.post(
@@ -112,21 +127,33 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
-    const body = request.body as {
+    const body = (request.body ?? {}) as {
       pickupZoneId?: unknown;
       dropoffZoneId?: unknown;
+      pickup?: unknown;
+      dropoff?: unknown;
+      pickupNote?: unknown;
       type?: unknown;
       paymentMethod?: unknown;
     };
 
+    // Each end is a pin/place (current apps) or a zone id (older builds).
+    const pickup = parseRideEndInput(body.pickup, "pickup");
+    const dropoff = parseRideEndInput(body.dropoff, "dropoff");
+    for (const parsed of [pickup, dropoff]) {
+      if (parsed && "error" in parsed) return reply.code(400).send({ error: parsed.error });
+    }
+    const note = parsePickupNote(body.pickupNote);
+    if (!note.ok) return reply.code(400).send({ error: note.error, code: "NOTE_TOO_LONG" });
+
     if (
-      !isNonEmptyString(body.pickupZoneId) ||
-      !isNonEmptyString(body.dropoffZoneId) ||
+      (!pickup && !isNonEmptyString(body.pickupZoneId)) ||
+      (!dropoff && !isNonEmptyString(body.dropoffZoneId)) ||
       !isRideType(body.type)
     ) {
-      return reply
-        .code(400)
-        .send({ error: "pickupZoneId, dropoffZoneId, and type (LONE|SHARED) are required" });
+      return reply.code(400).send({
+        error: "pickup (or pickupZoneId), dropoff (or dropoffZoneId), and type (LONE|SHARED) are required",
+      });
     }
 
     // Cash-only launch (Phase 1): an omitted/invalid paymentMethod falls back
@@ -143,13 +170,24 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       ride = await createRide(prisma, {
         riderId,
         type: body.type,
-        pickupZoneId: body.pickupZoneId,
-        dropoffZoneId: body.dropoffZoneId,
+        // A zone id sent alongside a pin is ignored: the server derives it.
+        ...(pickup ? { pickup: pickup as RideEndInput } : { pickupZoneId: body.pickupZoneId as string }),
+        ...(dropoff ? { dropoff: dropoff as RideEndInput } : { dropoffZoneId: body.dropoffZoneId as string }),
+        pickupNote: note.note,
         paymentMethod,
       });
     } catch (err) {
       if (err instanceof SameZoneError) {
         return reply.code(400).send({ error: err.message });
+      }
+      if (err instanceof TripTooShortError) {
+        return reply.code(400).send({ error: err.message, code: err.code });
+      }
+      if (err instanceof OutsideServiceAreaError) {
+        return reply.code(422).send({ error: err.message, code: err.code, end: err.end });
+      }
+      if (err instanceof PlaceNotFoundError) {
+        return reply.code(404).send({ error: err.message, code: err.code, end: err.end });
       }
       if (err instanceof ZoneNotFoundError) {
         return reply.code(404).send({ error: err.message });
@@ -212,6 +250,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     });
 
+    // Only rides this rider booked, but a ride they joined as someone
+    // else's passenger never appears here; their own pins are theirs to see
+    // (Recent destinations are built from them).
     const hasMore = rows.length > limit;
     const rides = hasMore ? rows.slice(0, limit) : rows;
     const nextCursor = hasMore ? rides[rides.length - 1]!.id : null;
@@ -253,6 +294,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         legStatus: passenger?.status ?? null,
         pickupZone,
         dropoffZone,
+        // This rider's own pins (their seat's; the ride's for an old-style
+        // ride with no seat). All null for a ride booked without pins.
+        ...pinFieldsOf(passenger ?? (ride.riderId === request.user!.userId ? ride : null)),
         // First name only: all the banner needs ("Kofi is 3 min away").
         driver: driverUser ? { firstName: driverUser.name.trim().split(/\s+/)[0] ?? "" } : null,
       },
@@ -306,7 +350,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       };
     }
 
-    return reply.code(200).send({ ride, driver, ...(fareSummary ? { fareSummary } : {}) });
+    return reply
+      .code(200)
+      .send({ ride: hideOtherRidersPins(ride, userId), driver, ...(fareSummary ? { fareSummary } : {}) });
   });
 
   app.post("/rides/:id/decision", { preHandler: requireAuth }, async (request, reply) => {

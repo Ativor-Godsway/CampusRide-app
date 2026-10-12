@@ -1,7 +1,17 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient, Prisma } from "@prisma/client";
-import { FLAGGED_RIDER_CANCEL_REASONS, RIDER_CANCEL_REASON_LABELS } from "@rida/shared";
+import {
+  FLAGGED_RIDER_CANCEL_REASONS,
+  PLACE_CATEGORIES,
+  RIDER_CANCEL_REASON_LABELS,
+  isInServiceArea,
+  nearestZone,
+  searchPlaces,
+  type PlaceCategory,
+} from "@rida/shared";
 import { requireAuth, requireAdmin } from "../middleware/auth";
+import { getZoneMap } from "../services/zones/zoneCache";
+import { clearPlaceCache } from "../services/places/placeCache";
 
 /**
  * Phase 5 admin surface. Closes the gap where `Driver.isApproved` was enforced
@@ -44,6 +54,14 @@ const ADMIN_RIDE_SELECT = {
   driver: { select: { id: true, name: true, phone: true } },
   pickupZone: { select: { id: true, name: true } },
   dropoffZone: { select: { id: true, name: true } },
+  // Admins may see exact pins (support, disputes).
+  pickupLat: true,
+  pickupLng: true,
+  pickupLabel: true,
+  dropoffLat: true,
+  dropoffLng: true,
+  dropoffLabel: true,
+  pickupNote: true,
 } satisfies Prisma.RideSelect;
 
 const RIDE_STATUSES = [
@@ -73,6 +91,97 @@ function parseDate(raw: unknown, field: string): Date | null {
     throw new Error(`${field} must be an ISO date`);
   }
   return date;
+}
+
+const ADMIN_PLACE_SELECT = {
+  id: true,
+  name: true,
+  aliases: true,
+  latitude: true,
+  longitude: true,
+  category: true,
+  zoneId: true,
+  isActive: true,
+  source: true,
+  updatedAt: true,
+  zone: { select: { name: true } },
+} satisfies Prisma.PlaceSelect;
+
+const PLACE_NAME_MAX = 120;
+const ALIAS_MAX = 40;
+const ALIASES_MAX = 10;
+
+type PlaceInput = {
+  name?: string;
+  aliases?: string[];
+  latitude?: number;
+  longitude?: number;
+  category?: PlaceCategory;
+  isActive?: boolean;
+};
+
+/**
+ * Validates a place body. `partial` (PATCH) allows any subset; otherwise
+ * name, latitude and longitude are required. A position must be inside the
+ * service area — a place nobody may book to is no use.
+ */
+function parsePlaceInput(body: unknown, partial: boolean): PlaceInput | { error: string } {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const out: PlaceInput = {};
+  if (b.name !== undefined || !partial) {
+    if (typeof b.name !== "string" || !b.name.trim()) return { error: "name is required" };
+    if (b.name.trim().length > PLACE_NAME_MAX) return { error: `name must be at most ${PLACE_NAME_MAX} characters` };
+    out.name = b.name.trim().replace(/\s+/g, " ");
+  }
+  if (b.aliases !== undefined) {
+    if (!Array.isArray(b.aliases) || !b.aliases.every((a) => typeof a === "string")) {
+      return { error: "aliases must be a list of words" };
+    }
+    const aliases = [...new Set((b.aliases as string[]).map((a) => a.trim()).filter(Boolean))];
+    if (aliases.length > ALIASES_MAX || aliases.some((a) => a.length > ALIAS_MAX)) {
+      return { error: `at most ${ALIASES_MAX} aliases of up to ${ALIAS_MAX} characters` };
+    }
+    out.aliases = aliases;
+  }
+  const moving = b.latitude !== undefined || b.longitude !== undefined;
+  if (moving || !partial) {
+    const { latitude, longitude } = b;
+    if (typeof latitude !== "number" || typeof longitude !== "number" || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return { error: "latitude and longitude must both be numbers" };
+    }
+    if (!isInServiceArea({ latitude, longitude })) return { error: "That spot is outside the CampusRide service area" };
+    out.latitude = latitude;
+    out.longitude = longitude;
+  }
+  if (b.category !== undefined) {
+    if (!(PLACE_CATEGORIES as readonly unknown[]).includes(b.category)) {
+      return { error: `category must be one of ${PLACE_CATEGORIES.join(", ")}` };
+    }
+    out.category = b.category as PlaceCategory;
+  }
+  if (b.isActive !== undefined) {
+    if (typeof b.isActive !== "boolean") return { error: "isActive must be true or false" };
+    out.isActive = b.isActive;
+  }
+  return out;
+}
+
+/** "name: Balme → Balme Library; moved 42 m" — what the audit row says changed. */
+function describePlaceChange(
+  before: { name: string; aliases: string[]; latitude: number; longitude: number; category: string; isActive: boolean },
+  after: PlaceInput,
+): string {
+  const parts: string[] = [];
+  if (after.name !== undefined && after.name !== before.name) parts.push(`name: ${before.name} → ${after.name}`);
+  if (after.aliases !== undefined && after.aliases.join("|") !== before.aliases.join("|")) {
+    parts.push(`aliases: [${before.aliases.join(", ")}] → [${after.aliases.join(", ")}]`);
+  }
+  if (after.latitude !== undefined && (after.latitude !== before.latitude || after.longitude !== before.longitude)) {
+    parts.push(`moved: ${before.latitude},${before.longitude} → ${after.latitude},${after.longitude}`);
+  }
+  if (after.category !== undefined && after.category !== before.category) parts.push(`category: ${before.category} → ${after.category}`);
+  if (after.isActive !== undefined && after.isActive !== before.isActive) parts.push(after.isActive ? "reactivated" : "deactivated");
+  return parts.join("; ");
 }
 
 export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient): void {
@@ -200,5 +309,102 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
           FLAGGED_RIDER_CANCEL_REASONS.includes(ride.riderCancelReason),
       })),
     });
+  });
+
+  // ─── Campus places ───────────────────────────────────────────────────────
+  //
+  // Every change is audit-logged in the same transaction ("place.create",
+  // "place.update", "place.move", "place.deactivate", "place.reactivate"),
+  // with what changed in `reason`. Places are never deleted: a ride keeps
+  // its own copy of the name and pin, and deactivating hides a place from
+  // search without touching history. A move recomputes the place's zone.
+
+  /** Every place, inactive ones too. `?q=` searches names and aliases the way riders do (typos and all). */
+  app.get("/admin/places", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const { q } = (request.query ?? {}) as { q?: unknown };
+    const query = typeof q === "string" ? q.trim().slice(0, 80) : "";
+    const all = await prisma.place.findMany({
+      select: ADMIN_PLACE_SELECT,
+      orderBy: [{ isActive: "desc" }, { name: "asc" }],
+    });
+    return reply.send({ places: query ? searchPlaces(all, query, all.length) : all });
+  });
+
+  app.post("/admin/places", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const input = parsePlaceInput(request.body, false);
+    if ("error" in input) return reply.code(400).send({ error: input.error });
+
+    const zone = nearestZone(input.latitude!, input.longitude!, [...(await getZoneMap(prisma)).values()]);
+    if (!zone) return reply.code(409).send({ error: "No zones exist yet" });
+
+    const place = await prisma.$transaction(async (tx) => {
+      const created = await tx.place.create({
+        data: {
+          name: input.name!,
+          aliases: input.aliases ?? [],
+          latitude: input.latitude!,
+          longitude: input.longitude!,
+          category: input.category ?? "OTHER",
+          isActive: input.isActive ?? true,
+          zoneId: zone.id,
+        },
+        select: ADMIN_PLACE_SELECT,
+      });
+      await tx.adminAuditLog.create({
+        data: {
+          actor: request.user!.userId,
+          action: "place.create",
+          target: created.id,
+          reason: `${created.name} at ${created.latitude},${created.longitude}`,
+        },
+      });
+      return created;
+    });
+    clearPlaceCache(prisma);
+    return reply.code(201).send({ place });
+  });
+
+  app.patch("/admin/places/:id", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const { id } = request.params as { id: string };
+    const input = parsePlaceInput(request.body, true);
+    if ("error" in input) return reply.code(400).send({ error: input.error });
+
+    const before = await prisma.place.findUnique({ where: { id } });
+    if (!before) return reply.code(404).send({ error: "Place not found" });
+
+    const change = describePlaceChange(before, input);
+    if (!change) {
+      const place = await prisma.place.findUniqueOrThrow({ where: { id }, select: ADMIN_PLACE_SELECT });
+      return reply.send({ place });
+    }
+
+    const moved = input.latitude !== undefined && (input.latitude !== before.latitude || input.longitude !== before.longitude);
+    const zone = moved
+      ? nearestZone(input.latitude!, input.longitude!, [...(await getZoneMap(prisma)).values()])
+      : null;
+    const action =
+      input.isActive === false && before.isActive
+        ? "place.deactivate"
+        : input.isActive === true && !before.isActive
+          ? "place.reactivate"
+          : moved && Object.keys(input).every((k) => k === "latitude" || k === "longitude")
+            ? "place.move"
+            : "place.update";
+
+    const [place] = await prisma.$transaction([
+      prisma.place.update({
+        where: { id },
+        data: { ...input, ...(zone ? { zoneId: zone.id } : {}) },
+        select: ADMIN_PLACE_SELECT,
+      }),
+      prisma.adminAuditLog.create({
+        data: { actor: request.user!.userId, action, target: id, reason: change.slice(0, 1000) },
+      }),
+    ]);
+    clearPlaceCache(prisma);
+    return reply.send({ place });
   });
 }
