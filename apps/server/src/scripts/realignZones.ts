@@ -33,6 +33,7 @@
  */
 import type { PrismaClient, Zone } from "@prisma/client";
 import { haversineDistanceMeters, nearestZone } from "@rida/shared";
+import { SCRIPT_TX_OPTIONS } from "./scriptTx";
 
 /** Off campus (Accra Mall is a future feature): kept for old rides, used for nothing new. */
 export const RETIRED_ZONES = ["Accra Mall Junction"] as const;
@@ -133,35 +134,47 @@ export async function realignZones(prisma: PrismaClient, apply: boolean, now = n
     }),
   ]);
 
+  // Worked out before the transaction, so it holds only the writes: one
+  // update per changed zone, then one updateMany per target zone for the
+  // places and for the drivers (not one statement per row).
+  const changedZones = after.filter((z) => {
+    const before = zones.find((b) => b.id === z.id)!;
+    return (
+      before.name !== z.name ||
+      before.latitude !== z.latitude ||
+      before.longitude !== z.longitude ||
+      (before.retiredAt === null) !== (z.retiredAt === null)
+    );
+  });
+  const placesByZone = new Map<string, string[]>();
+  for (const p of places) {
+    const zoneId = nearestZone(p.latitude, p.longitude, inService)?.id;
+    if (!zoneId || zoneId === p.zoneId) continue;
+    placesByZone.set(zoneId, [...(placesByZone.get(zoneId) ?? []), p.id]);
+    report.placesRezoned += 1;
+  }
+  const driversByZone = new Map<string | null, string[]>();
+  for (const d of stranded) {
+    const gone = retired.find((z) => z.id === d.currentZoneId)!;
+    const zoneId = nearestZone(gone.latitude, gone.longitude, inService)?.id ?? null;
+    driversByZone.set(zoneId, [...(driversByZone.get(zoneId) ?? []), d.id]);
+    report.driversMoved += 1;
+  }
+
   await prisma.$transaction(async (tx) => {
-    for (const z of after) {
-      const before = zones.find((b) => b.id === z.id)!;
-      if (
-        before.name === z.name &&
-        before.latitude === z.latitude &&
-        before.longitude === z.longitude &&
-        (before.retiredAt === null) === (z.retiredAt === null)
-      ) {
-        continue;
-      }
+    for (const z of changedZones) {
       await tx.zone.update({
         where: { id: z.id },
         data: { name: z.name, latitude: z.latitude, longitude: z.longitude, retiredAt: z.retiredAt },
       });
     }
-    for (const p of places) {
-      const zoneId = nearestZone(p.latitude, p.longitude, inService)?.id;
-      if (!zoneId || zoneId === p.zoneId) continue;
-      await tx.place.update({ where: { id: p.id }, data: { zoneId } });
-      report.placesRezoned += 1;
+    for (const [zoneId, ids] of placesByZone) {
+      await tx.place.updateMany({ where: { id: { in: ids } }, data: { zoneId } });
     }
-    for (const d of stranded) {
-      const gone = retired.find((z) => z.id === d.currentZoneId)!;
-      const zoneId = nearestZone(gone.latitude, gone.longitude, inService)?.id ?? null;
-      await tx.driver.update({ where: { id: d.id }, data: { currentZoneId: zoneId } });
-      report.driversMoved += 1;
+    for (const [zoneId, ids] of driversByZone) {
+      await tx.driver.updateMany({ where: { id: { in: ids } }, data: { currentZoneId: zoneId } });
     }
-  });
+  }, SCRIPT_TX_OPTIONS);
   return report;
 }
 

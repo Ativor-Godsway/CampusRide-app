@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Zone } from "@prisma/client";
 import { prisma } from "../db/prisma";
 import { REAL_ZONE_CENTRES, RENAMED_ZONES, RETIRED_ZONES, isAlreadyAligned, realignZones } from "./realignZones";
 import { createTestDriver, cleanupDriver } from "../services/ride/testFixtures";
+import { SCRIPT_TX_OPTIONS } from "./scriptTx";
 
 /**
  * Runs against the seeded test zones and puts every one back afterwards
@@ -16,6 +17,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const z of snapshot) {
     await prisma.zone.update({
       where: { id: z.id },
@@ -96,5 +98,50 @@ describe("realignZones", () => {
       const original = Object.entries(RENAMED_ZONES).find(([, to]) => to === name)?.[0] ?? name;
       expect(seeded.has(original)).toBe(true);
     }
+  });
+
+  it("keeps the transaction short and gives it room: long timeout, one statement per zone, not per place", async () => {
+    // Many places that all change zone: grouped, they cost one statement per target zone.
+    const accra = snapshot.find((z) => z.name === "Accra Mall Junction")!;
+    await prisma.place.createMany({
+      data: Array.from({ length: 30 }, (_, i) => ({
+        name: `Spot ${i}`,
+        latitude: 5.64 + i * 0.0008,
+        longitude: -0.187,
+        zoneId: accra.id,
+        source: `${MARK}:many:${i}`,
+      })),
+    });
+
+    let options: unknown;
+    let statements = 0;
+    const real = prisma.$transaction.bind(prisma) as (fn: unknown, opts?: unknown) => Promise<unknown>;
+    vi.spyOn(prisma, "$transaction").mockImplementation(((fn: (tx: unknown) => Promise<unknown>, opts?: unknown) => {
+      options = opts;
+      return real(async (tx: Record<string, unknown>) => {
+        const counting = new Proxy(tx, {
+          get(target, model) {
+            const delegate = target[model as string];
+            if (typeof delegate !== "object" || delegate === null) return delegate;
+            return new Proxy(delegate as Record<string, unknown>, {
+              get(d, method) {
+                const f = d[method as string];
+                return typeof f === "function" ? (...args: unknown[]) => (statements++, (f as (...a: unknown[]) => unknown).apply(d, args)) : f;
+              },
+            });
+          },
+        });
+        return fn(counting);
+      }, opts);
+    }) as never);
+
+    const report = await realignZones(prisma, true);
+    expect(options).toEqual(SCRIPT_TX_OPTIONS);
+    expect(report.placesRezoned).toBeGreaterThanOrEqual(30);
+    const zonesChanged = report.actions.filter((a) => a.kind !== "leave").length;
+    const zoneCount = snapshot.length;
+    // Changed zones + at most one updateMany per target zone for places and for drivers.
+    expect(statements).toBeLessThanOrEqual(zonesChanged + 2 * zoneCount);
+    expect(statements).toBeLessThan(report.placesRezoned);
   });
 });
