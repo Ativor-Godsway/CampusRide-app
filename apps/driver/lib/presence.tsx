@@ -12,7 +12,7 @@ import { Alert } from "react-native";
 import * as Location from "expo-location";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  SERVICE_AREA_RADIUS_METERS,
+  DRIVER_OUTSIDE_AREA_MESSAGE,
   isOutsideServiceArea,
   isTransientRequestFailure,
   planZoneUpdate,
@@ -205,10 +205,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
           if (seq !== seqRef.current) return;
           applyOnline(false);
           setConfirmed(true);
-          Alert.alert(
-            "You're outside the CampusRide area",
-            `CampusRide works within ${SERVICE_AREA_RADIUS_METERS / 1000} km of campus. Go online when you're closer.`,
-          );
+          Alert.alert("You're outside the CampusRide area", DRIVER_OUTSIDE_AREA_MESSAGE);
           return;
         }
         if (coords) zoneId = zoneInServiceArea(coords, allZones)?.id;

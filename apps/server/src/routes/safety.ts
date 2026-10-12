@@ -4,6 +4,7 @@ import { requireAuth } from "../middleware/auth";
 import { config } from "../config";
 import { RideNotActiveError, raiseSos } from "../services/safety/sos";
 import { rideStatusLabel } from "../services/safety/rideStatusLabels";
+import { requestPlaceNames } from "./ridePins";
 
 /** Minimal HTML escaping for the values interpolated into the tracking page. */
 function escapeHtml(value: string): string {
@@ -73,8 +74,9 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
    * Unauthenticated by necessity — the emergency contact has no account — so
    * the unguessable token IS the credential. It returns a deliberately
    * minimal read-only view: status, route, driver and vehicle. It does NOT
-   * expose the rider's or driver's phone number, the fare, or anything that
-   * would turn a leaked link into a bigger problem than it needs to be.
+   * expose the rider's or driver's phone number, the fare, the exact pickup
+   * and drop-off coordinates (place names only), or anything that would
+   * turn a leaked link into a bigger problem than it needs to be.
    *
    * Served as a self-contained HTML page rather than JSON because the
    * recipient is a person opening an SMS link on their phone, and refreshes
@@ -107,11 +109,12 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
           .join(" ")
       : "";
 
+    const { pickupPlaceName, dropoffPlaceName } = requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name);
     const rows = [
       ["Status", statusLabel],
       ["Rider", rider?.name ?? "—"],
-      ["From", ride.pickupZone.name],
-      ["To", ride.dropoffZone.name],
+      ["From", pickupPlaceName],
+      ["To", dropoffPlaceName],
       ["Driver", driver?.name ?? "Not assigned yet"],
       ["Vehicle", vehicle || "—"],
       ["Plate", driver?.driver?.plate ?? "—"],

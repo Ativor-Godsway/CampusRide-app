@@ -31,6 +31,7 @@ import { registerAdminRoutes } from "./routes/admin";
 import { registerUssdRoutes } from "./routes/ussd";
 import { registerUploadRoutes } from "./routes/uploads";
 import { registerSafetyRoutes } from "./routes/safety";
+import { registerPlaceRoutes } from "./routes/places";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
 
@@ -170,6 +171,7 @@ async function bootstrap() {
   registerUssdRoutes(app, prisma);
   registerUploadRoutes(app);
   registerSafetyRoutes(app, prisma);
+  registerPlaceRoutes(app, prisma);
 
   // app.server is the underlying http.Server — attach Socket.io to it directly
   await app.ready();

@@ -27,9 +27,10 @@ const forced = new WeakSet<PrismaClient>();
  * The suite creates and deletes adjacency edges per test and expects them to
  * be seen at once, so under NODE_ENV=test the cache is bypassed unless a test
  * opts a client in (the round-trip budget test does, to measure what a
- * running server does).
+ * running server does). The place cache (services/places/placeCache.ts)
+ * follows the same switch.
  */
-function cacheEnabled(prisma: PrismaClient): boolean {
+export function cacheEnabled(prisma: PrismaClient): boolean {
   return process.env.NODE_ENV !== "test" || forced.has(prisma);
 }
 

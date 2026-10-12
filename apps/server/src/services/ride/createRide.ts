@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, RideSource, RideStatus, RideType } from "@rida/shared";
-import { getLoneFare, getSharedFarePerRider } from "@rida/shared";
+import { MIN_TRIP_METERS, getLoneFare, getSharedFarePerRider, haversineDistanceMeters } from "@rida/shared";
+import { resolveRideEnd, type ResolvedRideEnd, type RideEndInput } from "../places/rideEnds";
 import { broadcastRide } from "./dispatch";
 import { findActiveRideForRider } from "./activeRide";
 import { logger } from "../../lib/logger";
@@ -13,6 +14,15 @@ export class SameZoneError extends Error {
   constructor() {
     super("pickupZoneId and dropoffZoneId must differ");
     this.name = "SameZoneError";
+  }
+}
+
+/** Thrown by createRide when the pickup and drop-off pins are practically the same spot. */
+export class TripTooShortError extends Error {
+  readonly code = "TRIP_TOO_SHORT";
+  constructor() {
+    super("Your pickup and drop-off are the same place. Choose a different drop-off.");
+    this.name = "TripTooShortError";
   }
 }
 
@@ -38,8 +48,17 @@ export class ActiveRideExistsError extends Error {
 export interface CreateRideInput {
   riderId: string;
   type: RideType;
-  pickupZoneId: string;
-  dropoffZoneId: string;
+  /**
+   * Each end is EITHER a pin/place (`pickup` / `dropoff`, from current app
+   * builds) OR a zone id (older builds and USSD). A pin wins: the zone is
+   * then derived from it and any zone id sent alongside is ignored.
+   */
+  pickupZoneId?: string;
+  dropoffZoneId?: string;
+  pickup?: RideEndInput;
+  dropoff?: RideEndInput;
+  /** Already trimmed and length-checked (parsePickupNote). */
+  pickupNote?: string | null;
   /** Defaults to 1 — the occupancy at creation time (a fresh ride always starts with its requester as the sole passenger). */
   occupancy?: number;
   /** Defaults to "MOMO", matching the pre-extraction route default. */
@@ -58,14 +77,32 @@ export interface CreateRideInput {
  * active-ride-per-rider, locked fare, broadcastRide) are unchanged from the
  * pre-extraction inline version in routes/rides.ts — callers map the thrown
  * errors back to their own response shape.
+ *
+ * Exact pins (2026-10): an end given as a pin or place is resolved by
+ * resolveRideEnd (service area, label, nearest zone) and stored on both the
+ * ride and the first seat. With two pins, same-zone is allowed and only a
+ * trip shorter than MIN_TRIP_METERS is refused (TripTooShortError).
  */
 export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
-  const { riderId, type, pickupZoneId, dropoffZoneId } = input;
+  const { riderId, type } = input;
   const occupancy = input.occupancy ?? 1;
   const paymentMethod: PaymentMethod = input.paymentMethod ?? "MOMO";
   const source: RideSource = input.source ?? "APP";
 
-  if (pickupZoneId === dropoffZoneId) {
+  // Pins first: they can be refused (outside the area, unknown place) before
+  // anything else is read.
+  const [pickupPin, dropoffPin] = await Promise.all([
+    input.pickup ? resolveRideEnd(prisma, "pickup", input.pickup) : Promise.resolve(null),
+    input.dropoff ? resolveRideEnd(prisma, "dropoff", input.dropoff) : Promise.resolve(null),
+  ]);
+  const pickupZoneId = pickupPin?.zoneId ?? input.pickupZoneId;
+  const dropoffZoneId = dropoffPin?.zoneId ?? input.dropoffZoneId;
+  if (!pickupZoneId || !dropoffZoneId) throw new ZoneNotFoundError();
+
+  if (pickupPin && dropoffPin) {
+    // Two pins may share a zone (zones are big); only the same SPOT is refused.
+    if (haversineDistanceMeters(pickupPin, dropoffPin) < MIN_TRIP_METERS) throw new TripTooShortError();
+  } else if (pickupZoneId === dropoffZoneId) {
     throw new SameZoneError();
   }
 
@@ -86,6 +123,8 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
     throw new ActiveRideExistsError(existingActiveRide);
   }
 
+  const pins = pinColumns(pickupPin, dropoffPin, input.pickupNote ?? null);
+
   const lockedFare = type === "SHARED" ? getSharedFarePerRider(1) : getLoneFare();
 
   const ride = await prisma.ride.create({
@@ -99,6 +138,7 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
       occupancy,
       paymentMethod,
       broadcastStartedAt: new Date(),
+      ...pins,
       passengers: {
         create: {
           riderId,
@@ -106,6 +146,7 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
           dropoffZoneId,
           status: "WAITING",
           lockedFare,
+          ...pins,
         },
       },
     },
@@ -119,4 +160,19 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
   });
 
   return ride;
+}
+
+/** The pin columns for a new ride and its first seat (all null for a zone-only booking). */
+function pinColumns(pickup: ResolvedRideEnd | null, dropoff: ResolvedRideEnd | null, pickupNote: string | null) {
+  return {
+    pickupLat: pickup?.latitude ?? null,
+    pickupLng: pickup?.longitude ?? null,
+    pickupLabel: pickup?.label ?? null,
+    pickupPlaceId: pickup?.placeId ?? null,
+    dropoffLat: dropoff?.latitude ?? null,
+    dropoffLng: dropoff?.longitude ?? null,
+    dropoffLabel: dropoff?.label ?? null,
+    dropoffPlaceId: dropoff?.placeId ?? null,
+    pickupNote,
+  };
 }

@@ -3,12 +3,13 @@ import { useAuth } from "./auth";
 import { LoginScreen } from "./screens/LoginScreen";
 import { DriverQueue } from "./screens/DriverQueue";
 import { RideList } from "./screens/RideList";
+import { PlacesScreen } from "./screens/PlacesScreen";
 
-type Tab = "drivers" | "rides";
+type Tab = "drivers" | "rides" | "places";
 
 /**
- * Two screens behind one login gate. No router: adding one would buy
- * deep-linkable URLs for an internal tool that has exactly two views and is
+ * Three screens behind one login gate. No router: adding one would buy
+ * deep-linkable URLs for an internal tool with a handful of views that is
  * never linked to from anywhere.
  */
 export function App() {
@@ -36,6 +37,13 @@ export function App() {
           >
             Rides
           </button>
+          <button
+            type="button"
+            className={tab === "places" ? "tab active" : "tab"}
+            onClick={() => setTab("places")}
+          >
+            Places
+          </button>
         </nav>
         <div className="session">
           <span className="muted">{session.user.name}</span>
@@ -45,7 +53,7 @@ export function App() {
         </div>
       </header>
 
-      <main>{tab === "drivers" ? <DriverQueue /> : <RideList />}</main>
+      <main>{tab === "drivers" ? <DriverQueue /> : tab === "rides" ? <RideList /> : <PlacesScreen />}</main>
     </div>
   );
 }

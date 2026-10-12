@@ -24,6 +24,23 @@ export const zoneSelect = {
 } satisfies Prisma.ZoneSelect;
 
 /**
+ * Exact pins and their labels (2026-10). Selected for the rider-facing reads,
+ * which then blank other riders' pins (routes/ridePins.ts) — a rider sees
+ * their own pins, never a fellow passenger's.
+ */
+export const pinSelect = {
+  pickupLat: true,
+  pickupLng: true,
+  pickupLabel: true,
+  pickupPlaceId: true,
+  dropoffLat: true,
+  dropoffLng: true,
+  dropoffLabel: true,
+  dropoffPlaceId: true,
+  pickupNote: true,
+} satisfies Prisma.RideSelect & Prisma.RidePassengerSelect;
+
+/**
  * Ride fields safe to return to a RIDER.
  *
  * Deliberately omits `driverShare`: it is the platform's fare split, not the
@@ -50,6 +67,7 @@ export const riderRideSelect = {
   completedAt: true,
   broadcastStartedAt: true,
   decisionStartedAt: true,
+  ...pinSelect,
 } satisfies Prisma.RideSelect;
 
 /** Per-passenger fields, matching the shared RidePassenger contract. */
@@ -62,6 +80,7 @@ export const ridePassengerSelect = {
   fareCharged: true,
   lockedFare: true,
   status: true,
+  ...pinSelect,
 } satisfies Prisma.RidePassengerSelect;
 
 /** GET /rides/mine — ride plus its two zones. */

@@ -34,6 +34,18 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
+const PIN_KEYS = [
+  "pickupLat",
+  "pickupLng",
+  "pickupLabel",
+  "pickupPlaceId",
+  "dropoffLat",
+  "dropoffLng",
+  "dropoffLabel",
+  "dropoffPlaceId",
+  "pickupNote",
+];
+
 const RIDE_KEYS = [
   "id",
   "riderId",
@@ -54,6 +66,8 @@ const RIDE_KEYS = [
   "completedAt",
   "broadcastStartedAt",
   "decisionStartedAt",
+  // Exact pins (2026-10): the rider's own; another rider's are nulled (ridePins.ts).
+  ...PIN_KEYS,
 ].sort();
 
 const ZONE_KEYS = ["id", "name", "quadrant", "latitude", "longitude"].sort();
@@ -146,7 +160,7 @@ describe("GET /rides/:id", () => {
     expect(body.ride).not.toHaveProperty("driverShare");
 
     expect(Object.keys(body.ride.passengers[0]).sort()).toEqual(
-      ["id", "rideId", "riderId", "pickupZoneId", "dropoffZoneId", "fareCharged", "lockedFare", "status"].sort(),
+      ["id", "rideId", "riderId", "pickupZoneId", "dropoffZoneId", "fareCharged", "lockedFare", "status", ...PIN_KEYS].sort(),
     );
   });
 

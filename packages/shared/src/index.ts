@@ -30,3 +30,6 @@ export * from "./rides/addRiderPreview";
 export * from "./driver/autoArrival";
 export * from "./driver/serviceArea";
 export * from "./driver/slideToConfirm";
+export * from "./geo/serviceArea";
+export * from "./places/campusPlaces";
+export * from "./rides/ridePins";

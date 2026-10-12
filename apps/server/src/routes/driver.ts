@@ -15,6 +15,7 @@ import {
   onboardAddNotice,
   previewAddRider,
   splitFare,
+  type RidePinFields,
 } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
@@ -39,6 +40,9 @@ import {
 import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
 import { notifyUssdRider, notifyUssdRiders } from "../services/sms/notifyUssdRiders";
+import { getActivePlaces } from "../services/places/placeCache";
+import { approximatePins } from "../services/places/approximatePins";
+import { pinFieldsOf, requestPlaceNames } from "./ridePins";
 
 /** Returns the set of zone IDs a driver in `zoneId` is eligible to serve (same zone + 1 hop). */
 function computeEligibleZoneSet(
@@ -165,13 +169,18 @@ function passengerRefusal(from: string, to: string): string {
   return "That doesn't fit where this trip is now. Pull down to refresh.";
 }
 
-/** Only these PassengerInCar fields go to the app — no internal columns. */
+/**
+ * Only these PassengerInCar fields go to the app — no internal columns.
+ * Every caller is the car's own driver, so each rider's exact pins and note
+ * are included (that is what the driver navigates to).
+ */
 function passengerForApp(
-  p: { id: string; riderId: string; pickupZoneId: string; dropoffZoneId: string; lockedFare: number | null; status: string; arrivedAt: Date | null },
+  p: { id: string; riderId: string; pickupZoneId: string; dropoffZoneId: string; lockedFare: number | null; status: string; arrivedAt: Date | null } & Partial<RidePinFields>,
   zones: Map<string, { name: string }>,
   rider?: { name: string; phone: string } | null,
 ) {
   return {
+    ...pinFieldsOf(p),
     id: p.id,
     riderId: p.riderId,
     riderName: rider?.name ?? null,
@@ -368,6 +377,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         rideId: ride.id,
         pickupZoneName: ride.pickupZone.name,
         dropoffZoneName: ride.dropoffZone.name,
+        // The trip is over: where it went, by name only.
+        ...requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name),
         type: ride.type as "LONE" | "SHARED",
         source: ride.source as "APP" | "USSD",
         completedAt: (ride.completedAt ?? ride.createdAt).toISOString(),
@@ -743,14 +754,18 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       const farePesewas =
         ride.type === "LONE" ? getLoneFare() : getSharedFarePerRider(ride.occupancy);
       const { driverShare } = splitFare(farePesewas);
+      const pickupZoneName = zoneMap.get(ride.pickupZoneId)?.name ?? "";
+      const dropoffZoneName = zoneMap.get(ride.dropoffZoneId)?.name ?? "";
 
       return {
         rideId: ride.id,
         riderFirstName: firstName(ride.rider.name),
-        pickupZoneName: zoneMap.get(ride.pickupZoneId)?.name ?? "",
+        pickupZoneName,
         pickupZoneId: ride.pickupZoneId,
-        dropoffZoneName: zoneMap.get(ride.dropoffZoneId)?.name ?? "",
+        dropoffZoneName,
         dropoffZoneId: ride.dropoffZoneId,
+        // Names, never coordinates, before the driver accepts.
+        ...requestPlaceNames(ride, pickupZoneName, dropoffZoneName),
         type: ride.type as "LONE" | "SHARED",
         /** Riders on this request (a fresh request is its requester alone). */
         seats: ride.occupancy,
@@ -811,16 +826,22 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const existingRiderIds = new Set(anchor.passengers.map((p) => p.riderId));
     const isFull = anchor.occupancy >= PRICING.MAX_SHARED_OCCUPANCY;
 
-    const toSuggestion = (r: (typeof allCandidates)[number], compatible: boolean) => ({
-      requestRideId: r.id,
-      riderFirstName: firstName(r.rider.name),
-      pickupZoneName: zones.get(r.pickupZoneId)?.name ?? "",
-      pickupZoneId: r.pickupZoneId,
-      dropoffZoneName: zones.get(r.dropoffZoneId)?.name ?? "",
-      dropoffZoneId: r.dropoffZoneId,
-      createdAt: r.createdAt.toISOString(),
-      compatible,
-    });
+    const toSuggestion = (r: (typeof allCandidates)[number], compatible: boolean) => {
+      const pickupZoneName = zones.get(r.pickupZoneId)?.name ?? "";
+      const dropoffZoneName = zones.get(r.dropoffZoneId)?.name ?? "";
+      return {
+        requestRideId: r.id,
+        riderFirstName: firstName(r.rider.name),
+        pickupZoneName,
+        pickupZoneId: r.pickupZoneId,
+        dropoffZoneName,
+        dropoffZoneId: r.dropoffZoneId,
+        // Not this driver's rider yet: names only.
+        ...requestPlaceNames(r, pickupZoneName, dropoffZoneName),
+        createdAt: r.createdAt.toISOString(),
+        compatible,
+      };
+    };
 
     const suggestions = isFull
       ? []
@@ -914,8 +935,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       );
     }
 
+    // Only a request with pins needs the places (to approximate them); from memory once warm.
+    const places = requestRide.pickupLat != null || requestRide.dropoffLat != null ? await getActivePlaces(prisma) : [];
     const farePesewas = getSharedFarePerRider(1);
     const preview = previewAddRider({
+      // The car's own riders: this driver's, so their exact pins.
       passengers: car.passengers.map((p) => ({
         id: p.id,
         riderName: p.rider.name,
@@ -924,13 +948,17 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         lockedFare: p.lockedFare,
         status: p.status as PassengerStatus,
         arrivedAt: p.arrivedAt?.toISOString() ?? null,
+        ...pinFieldsOf(p),
       })),
+      // The rider being considered isn't this driver's yet: the named place
+      // their pin is at or near, never the pin itself (approximatePins).
       candidate: {
         requestRideId: requestRide.id,
         pickupZoneId: requestRide.pickupZoneId,
         dropoffZoneId: requestRide.dropoffZoneId,
         farePesewas,
         riderName: requestRide.rider.name,
+        ...approximatePins(requestRide, zones, places),
       },
       zones: [...zones.values()],
       routes: indexRoutes(storedRoutes),
@@ -947,6 +975,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       riderFirstName: firstName(requestRide.rider.name),
       pickupZoneName: zones.get(requestRide.pickupZoneId)?.name ?? "",
       dropoffZoneName: zones.get(requestRide.dropoffZoneId)?.name ?? "",
+      ...requestPlaceNames(
+        requestRide,
+        zones.get(requestRide.pickupZoneId)?.name ?? "",
+        zones.get(requestRide.dropoffZoneId)?.name ?? "",
+      ),
       farePesewas,
       driverSharePesewas: splitFare(farePesewas).driverShare,
       addedSeconds: Math.round(preview.addedSeconds),
@@ -963,8 +996,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         riderFirstName: st.riderFirstName,
         zoneId: st.zone.id,
         zoneName: st.zone.name,
-        latitude: st.zone.latitude,
-        longitude: st.zone.longitude,
+        // The stop's point: a pin for the car's riders, the named place for
+        // the new one (see above); the zone centre for rides without pins.
+        label: st.label,
+        latitude: st.point.latitude,
+        longitude: st.point.longitude,
       })),
       currentPolyline: encodePolyline(preview.currentPath),
       proposedPolyline: encodePolyline(preview.proposedPath),
@@ -992,12 +1028,18 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const from = Number.isFinite(lat) && Number.isFinite(lng) && body.lat !== undefined ? { latitude: lat, longitude: lng } : null;
 
     try {
-      const [zones, storedRoutes] = await Promise.all([getZoneMap(prisma), getStoredZoneRoutes(prisma)]);
+      const [zones, storedRoutes, places] = await Promise.all([
+        getZoneMap(prisma),
+        getStoredZoneRoutes(prisma),
+        getActivePlaces(prisma),
+      ]);
       // Worked out inside the transaction, with the car locked, so it is
       // exactly the car the rider joins.
       let onboardDelaySeconds: Record<string, number> = {};
       const car = await addRiderToCar(prisma, userId, rideId, requestRideId, {
         checkCar: ({ passengers, candidate }) => {
+          // Built exactly as GET /add-preview builds it, so the add is
+          // refused for the same reasons the preview showed.
           const preview = previewAddRider({
             passengers: passengers.map((p) => ({
               id: p.id,
@@ -1005,8 +1047,15 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
               dropoffZoneId: p.dropoffZoneId,
               lockedFare: p.lockedFare,
               status: p.status as PassengerStatus,
+              ...pinFieldsOf(p),
             })),
-            candidate: { requestRideId, ...candidate, farePesewas: getSharedFarePerRider(1) },
+            candidate: {
+              requestRideId,
+              pickupZoneId: candidate.pickupZoneId,
+              dropoffZoneId: candidate.dropoffZoneId,
+              farePesewas: getSharedFarePerRider(1),
+              ...approximatePins(candidate, zones, places),
+            },
             zones: [...zones.values()],
             routes: indexRoutes(storedRoutes),
             from,

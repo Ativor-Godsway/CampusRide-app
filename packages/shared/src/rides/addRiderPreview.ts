@@ -10,7 +10,7 @@
  */
 import type { PathPoint } from "../geo/polyline";
 import { planSeconds, planTimeline, tripPath, type RouteLookup } from "../geo/tripRoute";
-import { planTripStops, type TripPassenger, type TripStop, type TripZone } from "./tripStops";
+import { planTripStops, routeStops, type TripPassenger, type TripStop, type TripZone } from "./tripStops";
 
 /**
  * The most a new rider may delay any rider already IN the car (picked up),
@@ -28,6 +28,17 @@ export interface AddRiderCandidate {
   farePesewas: number;
   /** The new rider's name, when known. */
   riderName?: string | null;
+  /**
+   * Where to show the new rider's stops. The server passes an APPROXIMATE
+   * point here (the named place, never the rider's exact pin): the driver
+   * hasn't been given this rider yet.
+   */
+  pickupLat?: number | null;
+  pickupLng?: number | null;
+  pickupLabel?: string | null;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
+  dropoffLabel?: string | null;
 }
 
 export interface PreviewStop extends TripStop {
@@ -91,6 +102,12 @@ export function previewAddRider(input: {
         lockedFare: input.candidate.farePesewas,
         status: "WAITING",
         arrivedAt: null,
+        pickupLat: input.candidate.pickupLat ?? null,
+        pickupLng: input.candidate.pickupLng ?? null,
+        pickupLabel: input.candidate.pickupLabel ?? null,
+        dropoffLat: input.candidate.dropoffLat ?? null,
+        dropoffLng: input.candidate.dropoffLng ?? null,
+        dropoffLabel: input.candidate.dropoffLabel ?? null,
       },
     ],
     zones: zoneMap,
@@ -127,8 +144,8 @@ export function previewAddRider(input: {
     stops,
     pickupIndex,
     dropoffIndex,
-    currentPath: tripPath(input.from, currentZones, input.zones, input.routes),
-    proposedPath: tripPath(input.from, proposedZones, input.zones, input.routes),
+    currentPath: tripPath(input.from, routeStops(current.upcoming), input.zones, input.routes),
+    proposedPath: tripPath(input.from, routeStops(stops), input.zones, input.routes),
     currentSeconds,
     proposedSeconds,
     addedSeconds,

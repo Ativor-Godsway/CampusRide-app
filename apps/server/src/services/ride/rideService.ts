@@ -4,7 +4,7 @@ import {
   getSharedFarePerRider,
   validateSharedOccupancy,
 } from "@rida/shared";
-import type { PassengerStatus, RideStatus } from "@rida/shared";
+import type { PassengerStatus, RideStatus, RidePinFields } from "@rida/shared";
 import {
   isActivePassengerStatus,
   transitionPassenger,
@@ -288,7 +288,7 @@ export async function applyPassengerTransition(
  */
 const PASSENGER_TX_OPTIONS = { timeout: 20_000, maxWait: 10_000 } as const;
 
-export interface JoinSharedRideInput {
+export interface JoinSharedRideInput extends Partial<RidePinFields> {
   riderId: string;
   pickupZoneId: string;
   dropoffZoneId: string;
@@ -388,6 +388,15 @@ export async function joinLoadedSharedRideTx(
       dropoffZoneId: input.dropoffZoneId,
       status: "WAITING",
       lockedFare: newPassengerLockedFare,
+      pickupLat: input.pickupLat ?? null,
+      pickupLng: input.pickupLng ?? null,
+      pickupLabel: input.pickupLabel ?? null,
+      pickupPlaceId: input.pickupPlaceId ?? null,
+      dropoffLat: input.dropoffLat ?? null,
+      dropoffLng: input.dropoffLng ?? null,
+      dropoffLabel: input.dropoffLabel ?? null,
+      dropoffPlaceId: input.dropoffPlaceId ?? null,
+      pickupNote: input.pickupNote ?? null,
     },
   });
 

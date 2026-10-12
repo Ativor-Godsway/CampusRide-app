@@ -40,6 +40,34 @@ function CancelReason({ ride }: { ride: AdminRide }) {
   return <span className="muted">{ride.cancelReason ?? "—"}</span>;
 }
 
+/** A pin as a link to the map, for checking where a rider really was. */
+function PinLink({ lat, lng, label }: { lat: number | null; lng: number | null; label: string }) {
+  if (lat === null || lng === null) return <>{label}</>;
+  return (
+    <a href={`https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=18/${lat}/${lng}`} target="_blank" rel="noreferrer">
+      {label}
+    </a>
+  );
+}
+
+/** Place names (linked to the exact pin) when the ride has pins; zone names otherwise. */
+function RouteCell({ ride }: { ride: AdminRide }) {
+  const from = ride.pickupLabel ?? ride.pickupZone?.name ?? "?";
+  const to = ride.dropoffLabel ?? ride.dropoffZone?.name ?? "?";
+  return (
+    <div>
+      <PinLink lat={ride.pickupLat} lng={ride.pickupLng} label={from} /> →{" "}
+      <PinLink lat={ride.dropoffLat} lng={ride.dropoffLng} label={to} />
+      {ride.pickupLabel || ride.dropoffLabel ? (
+        <div className="muted small">
+          Zones: {ride.pickupZone?.name ?? "?"} → {ride.dropoffZone?.name ?? "?"}
+        </div>
+      ) : null}
+      {ride.pickupNote ? <q className="muted small">{ride.pickupNote}</q> : null}
+    </div>
+  );
+}
+
 /** Read-only oversight list. v1 filters: status and a createdAt window. */
 export function RideList() {
   const token = useToken();
@@ -146,7 +174,7 @@ export function RideList() {
                   <td>{ride.rider ? `${ride.rider.name} · ${ride.rider.phone}` : "—"}</td>
                   <td>{ride.driver ? `${ride.driver.name} · ${ride.driver.phone}` : "—"}</td>
                   <td>
-                    {ride.pickupZone?.name ?? "?"} → {ride.dropoffZone?.name ?? "?"}
+                    <RouteCell ride={ride} />
                   </td>
                   <td>{formatFare(ride.fareTotal)}</td>
                   <td>

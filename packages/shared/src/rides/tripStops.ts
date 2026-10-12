@@ -5,6 +5,7 @@
  * alike. Pure, so the ordering rules are tested once here.
  */
 import { haversineDistanceMeters } from "../geo/distance";
+import type { RouteStop } from "../geo/tripRoute";
 import type { PassengerStatus } from "../types/ride";
 
 /** How long a rider has to come out once the driver is at the pickup before "Rider didn't show" unlocks. */
@@ -33,6 +34,19 @@ export interface TripPassenger {
   status: PassengerStatus;
   /** ISO time the driver reached this rider's pickup. */
   arrivedAt?: string | null;
+  /** Exact pins and their labels; absent or null for a ride booked without them. */
+  pickupLat?: number | null;
+  pickupLng?: number | null;
+  pickupLabel?: string | null;
+  dropoffLat?: number | null;
+  dropoffLng?: number | null;
+  dropoffLabel?: string | null;
+  pickupNote?: string | null;
+}
+
+export interface StopPoint {
+  latitude: number;
+  longitude: number;
 }
 
 export type TripStopKind = "PICKUP" | "DROPOFF";
@@ -45,7 +59,16 @@ export interface TripStop {
   /** "Ama" — first name, or "" when not known (see riderName). */
   riderFirstName: string;
   riderPhone: string | null;
+  /** The zone the stop is in: drive times and the detour rule are worked out between zones. */
   zone: TripZone;
+  /** Where the car actually goes: the exact pin, or the zone centre for a ride without one. */
+  point: StopPoint;
+  /** What to call it: the pin's label ("Night Market"), or the zone name. */
+  label: string;
+  /** True when `point` is an exact pin (arrive within PIN_ARRIVAL_RADIUS_METERS, not the zone radius). */
+  exact: boolean;
+  /** The rider's note for the driver, on their pickup stop only. */
+  note: string | null;
   /** What this rider pays (shown large at their drop-off). */
   farePesewas: number | null;
   passengerStatus: PassengerStatus;
@@ -77,13 +100,14 @@ export function riderName(stop: Pick<TripStop, "riderFirstName">): string {
  * Without a name: "Pick up the rider at …".
  */
 export function nextStopInstruction(
-  stop: Pick<TripStop, "kind" | "riderFirstName" | "zone" | "farePesewas">,
+  stop: Pick<TripStop, "kind" | "riderFirstName" | "zone" | "farePesewas"> & { label?: string },
   options: { cash: boolean; formatFare: (pesewas: number) => string },
 ): string {
   const who = stop.riderFirstName || "the rider";
-  if (stop.kind === "PICKUP") return `Pick up ${who} at ${stop.zone.name}`;
+  const where = stop.label || stop.zone.name;
+  if (stop.kind === "PICKUP") return `Pick up ${who} at ${where}`;
   const collect = options.cash && stop.farePesewas !== null ? ` · collect ${options.formatFare(stop.farePesewas)}` : "";
-  return `Drop off ${who} at ${stop.zone.name}${collect}`;
+  return `Drop off ${who} at ${where}${collect}`;
 }
 
 /** Each rider's status in one word, for the stop list. */
@@ -108,13 +132,33 @@ export function riderStatusWord(status: PassengerStatus): string {
  */
 export function stepToast(
   done: { kind: TripStopKind; riderFirstName: string },
-  next: Pick<TripStop, "kind" | "riderFirstName" | "zone"> | undefined,
+  next: (Pick<TripStop, "kind" | "riderFirstName" | "zone"> & { label?: string }) | undefined,
 ): string {
   const who = done.riderFirstName || "Rider";
   const first = done.kind === "PICKUP" ? `${who} is in the car` : `${who} dropped off`;
   if (!next) return `${first} · that's everyone`;
-  const nextWho = next.riderFirstName || `the rider at ${next.zone.name}`;
+  const nextWho = next.riderFirstName || `the rider at ${next.label || next.zone.name}`;
   return `${first} · next: ${next.kind === "PICKUP" ? "pick up" : "drop off"} ${nextWho}`;
+}
+
+/** A stop's point and label: the exact pin when there is one, else the zone centre and name. */
+function where(
+  zone: TripZone,
+  lat: number | null | undefined,
+  lng: number | null | undefined,
+  label: string | null | undefined,
+): Pick<TripStop, "point" | "label" | "exact"> {
+  const exact = lat != null && lng != null;
+  return {
+    point: exact ? { latitude: lat, longitude: lng } : { latitude: zone.latitude, longitude: zone.longitude },
+    label: label?.trim() ? label : zone.name,
+    exact,
+  };
+}
+
+/** Stops as the route helpers take them (zone for drive times, point for the line). */
+export function routeStops(stops: readonly Pick<TripStop, "zone" | "point">[]): RouteStop[] {
+  return stops.map((s) => ({ id: s.zone.id, latitude: s.zone.latitude, longitude: s.zone.longitude, point: s.point }));
 }
 
 function isGone(status: PassengerStatus): boolean {
@@ -128,7 +172,7 @@ function isGone(status: PassengerStatus): boolean {
  * - A pickup the driver is already at (rider ARRIVED) comes first, so the
  *   stop being worked on never jumps away mid-pickup.
  * - Otherwise nearest-next from `from` (the driver's position), each stop
- *   then measured from the previous one — a greedy route, good enough for
+ *   (its exact pin, or zone centre without one) then measured from the previous one — a greedy route, good enough for
  *   four riders across a campus. Pickups win a tie, so a car picks up before
  *   it drops off at the same spot.
  */
@@ -158,10 +202,28 @@ export function planTripStops(input: {
 
     const pickedUp = p.status === "PICKED_UP" || p.status === "DROPPED_OFF";
     if (pickedUp) doneCount += 1;
-    else if (pickupZone) pending.push({ ...base, key: `${p.id}:PICKUP`, kind: "PICKUP", zone: pickupZone });
+    else if (pickupZone) {
+      pending.push({
+        ...base,
+        ...where(pickupZone, p.pickupLat, p.pickupLng, p.pickupLabel),
+        note: p.pickupNote ?? null,
+        key: `${p.id}:PICKUP`,
+        kind: "PICKUP",
+        zone: pickupZone,
+      });
+    }
 
     if (p.status === "DROPPED_OFF") doneCount += 1;
-    else if (dropoffZone) pending.push({ ...base, key: `${p.id}:DROPOFF`, kind: "DROPOFF", zone: dropoffZone });
+    else if (dropoffZone) {
+      pending.push({
+        ...base,
+        ...where(dropoffZone, p.dropoffLat, p.dropoffLng, p.dropoffLabel),
+        note: null,
+        key: `${p.id}:DROPOFF`,
+        kind: "DROPOFF",
+        zone: dropoffZone,
+      });
+    }
   }
 
   const upcoming: TripStop[] = [];
@@ -174,7 +236,7 @@ export function planTripStops(input: {
     upcoming.push(atPickup);
     pending.splice(pending.indexOf(atPickup), 1);
     pickupDone.add(atPickup.passengerId);
-    cursor = atPickup.zone;
+    cursor = atPickup.point;
   }
 
   while (pending.length > 0) {
@@ -184,7 +246,7 @@ export function planTripStops(input: {
     if (cursor) {
       let bestDistance = Infinity;
       for (const s of pool) {
-        const d = haversineDistanceMeters(cursor, s.zone) + (s.kind === "DROPOFF" ? 0.5 : 0);
+        const d = haversineDistanceMeters(cursor, s.point) + (s.kind === "DROPOFF" ? 0.5 : 0);
         if (d < bestDistance) {
           bestDistance = d;
           best = s;
@@ -194,7 +256,7 @@ export function planTripStops(input: {
     upcoming.push(best);
     pending.splice(pending.indexOf(best), 1);
     if (best.kind === "PICKUP") pickupDone.add(best.passengerId);
-    cursor = best.zone;
+    cursor = best.point;
   }
 
   return { upcoming, doneCount, totalCount: doneCount + upcoming.length };
@@ -211,7 +273,11 @@ export function seatStates(passengers: readonly Pick<TripPassenger, "status">[],
   );
 }
 
-/** True when `position` is within AT_STOP_RADIUS_METERS of the stop's zone centre. */
+/**
+ * True when `position` is within `radiusMeters` of the stop: pass the stop's
+ * point, with PIN_ARRIVAL_RADIUS_METERS for an exact pin and
+ * AT_STOP_RADIUS_METERS (the default) for a zone centre.
+ */
 export function isAtStop(
   position: { latitude: number; longitude: number } | null,
   zone: { latitude: number; longitude: number },

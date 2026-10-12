@@ -5,6 +5,7 @@ import {
   etaToStopMinutes,
   indexRoutes,
   legSeconds,
+  pathBetweenStops,
   pathBetweenZones,
   pathFromDriver,
   planSeconds,
@@ -55,9 +56,29 @@ describe("trip route", () => {
 
   it("chains the stops into one line without repeating shared points", () => {
     const path = tripPath(null, [A, B, C], zones, routes);
-    expect(path[0]).toEqual(A);
+    expect(path[0]).toEqual({ latitude: A.latitude, longitude: A.longitude });
     expect(path).toHaveLength(bend.length + 1); // A…B bend, then straight to C
     expect(tripPath(null, [], zones, routes)).toEqual([]);
+  });
+
+  it("draws to and from exact pins, keeping the stored road in between", () => {
+    const pinA = { latitude: 5.6503, longitude: -0.1863 };
+    const pinB = { latitude: 5.6522, longitude: -0.1852 };
+    const between = pathBetweenStops({ ...A, point: pinA }, { ...B, point: pinB }, routes);
+    expect(between[0]).toEqual(pinA);
+    expect(between[between.length - 1]).toEqual(pinB);
+    expect(between).toHaveLength(bend.length); // the road's inner points, ends swapped for the pins
+    // Two pins in one zone: straight between them (not skipped as "the same spot").
+    const pinA2 = { latitude: 5.6499, longitude: -0.1858 };
+    expect(tripPath(null, [{ ...A, point: pinA }, { ...A, point: pinA2 }], zones, routes)).toEqual([pinA, pinA2]);
+    // Without pins: exactly the zone route, as before.
+    expect(pathBetweenStops(A, B, routes)).toEqual(pathBetweenZones(A, B, routes));
+  });
+
+  it("ends the driver's way at the stop's pin", () => {
+    const pinB = { latitude: 5.6522, longitude: -0.1852 };
+    const path = pathFromDriver({ latitude: 5.6501, longitude: -0.186 }, { ...B, point: pinB }, zones, routes);
+    expect(path[path.length - 1]).toEqual(pinB);
   });
 
   it("estimates the time to a stop from the stored route", () => {

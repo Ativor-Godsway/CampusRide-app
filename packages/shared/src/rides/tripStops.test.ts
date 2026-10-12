@@ -79,6 +79,47 @@ describe("planTripStops", () => {
   it("skips a stop whose zone it doesn't know rather than crashing", () => {
     expect(keys(planTripStops({ passengers: [pax("ama", "ZZ", "A")], zones, from: null }))).toEqual(["ama:DROPOFF"]);
   });
+
+  it("goes to exact pins, with their labels and the pickup note", () => {
+    const plan = planTripStops({
+      passengers: [
+        pax("ama", "A", "C", "WAITING", {
+          pickupLat: 5.6502,
+          pickupLng: -0.1861,
+          pickupLabel: "Night Market",
+          pickupNote: "Blue shirt",
+          dropoffLat: 5.6521,
+          dropoffLng: -0.1859,
+          dropoffLabel: "Near Balme Library",
+        }),
+      ],
+      zones,
+      from: null,
+    });
+    const [pickup, dropoff] = plan.upcoming;
+    expect(pickup).toMatchObject({ point: { latitude: 5.6502, longitude: -0.1861 }, label: "Night Market", exact: true, note: "Blue shirt" });
+    expect(pickup!.zone.id).toBe("A");
+    expect(dropoff).toMatchObject({ label: "Near Balme Library", exact: true, note: null });
+    expect(nextStopInstruction(pickup!, { cash: true, formatFare: String })).toBe("Pick up ama at Night Market");
+  });
+
+  it("falls back to the zone centre and name for a ride without pins (old app builds)", () => {
+    const [pickup] = planTripStops({ passengers: [pax("ama", "A", "C")], zones, from: null }).upcoming;
+    expect(pickup).toMatchObject({ point: { latitude: 5.65, longitude: -0.186 }, label: "A", exact: false, note: null });
+  });
+
+  it("orders by the pins, not the zone centres", () => {
+    // Both pickups are in zone A, but kofi's pin is right next to the driver.
+    const plan = planTripStops({
+      passengers: [
+        pax("ama", "A", "E", "WAITING", { pickupLat: 5.6509, pickupLng: -0.186 }),
+        pax("kofi", "A", "E", "WAITING", { pickupLat: 5.6491, pickupLng: -0.186 }),
+      ],
+      zones,
+      from: { latitude: 5.649, longitude: -0.186 },
+    });
+    expect(keys(plan).slice(0, 2)).toEqual(["kofi:PICKUP", "ama:PICKUP"]);
+  });
 });
 
 describe("seatStates", () => {

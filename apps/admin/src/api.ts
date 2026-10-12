@@ -117,6 +117,14 @@ export interface AdminRide {
   driver: { id: string; name: string; phone: string } | null;
   pickupZone: { id: string; name: string } | null;
   dropoffZone: { id: string; name: string } | null;
+  /** Exact pins (null for rides booked by app builds without them). */
+  pickupLabel: string | null;
+  dropoffLabel: string | null;
+  pickupLat: number | null;
+  pickupLng: number | null;
+  dropoffLat: number | null;
+  dropoffLng: number | null;
+  pickupNote: string | null;
 }
 
 export function getPendingDrivers(token: string): Promise<{ drivers: PendingDriver[] }> {
@@ -153,4 +161,44 @@ export function getRides(token: string, filters: RideFilters): Promise<{ rides: 
   if (filters.to) params.set("to", `${filters.to}T23:59:59.999Z`);
   const query = params.toString();
   return request(`/admin/rides${query ? `?${query}` : ""}`, {}, token);
+}
+
+// ── Campus places ───────────────────────────────────────────────────────────
+
+export type PlaceCategory = "HALL" | "HOSTEL" | "FACULTY" | "GATE" | "FOOD" | "LANDMARK" | "OTHER";
+
+export interface AdminPlace {
+  id: string;
+  name: string;
+  aliases: string[];
+  latitude: number;
+  longitude: number;
+  category: PlaceCategory;
+  zoneId: string;
+  isActive: boolean;
+  /** "osm:way/…" for seeded places, null for ones added here. */
+  source: string | null;
+  updatedAt: string;
+  zone: { name: string };
+}
+
+export interface PlaceInput {
+  name?: string;
+  aliases?: string[];
+  latitude?: number;
+  longitude?: number;
+  category?: PlaceCategory;
+  isActive?: boolean;
+}
+
+export function getPlaces(token: string, q = ""): Promise<{ places: AdminPlace[] }> {
+  return request(`/admin/places${q ? `?q=${encodeURIComponent(q)}` : ""}`, {}, token);
+}
+
+export function createPlace(token: string, input: PlaceInput): Promise<{ place: AdminPlace }> {
+  return request("/admin/places", { method: "POST", body: JSON.stringify(input) }, token);
+}
+
+export function updatePlace(token: string, id: string, input: PlaceInput): Promise<{ place: AdminPlace }> {
+  return request(`/admin/places/${id}`, { method: "PATCH", body: JSON.stringify(input) }, token);
 }
