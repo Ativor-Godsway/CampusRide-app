@@ -18,6 +18,10 @@ import {
   formatWait,
   indexRoutes,
   isAtStop,
+  AT_STOP_RADIUS_METERS,
+  PIN_ARRIVAL_RADIUS_METERS,
+  haversineDistanceMeters,
+  routeStops,
   nextStopInstruction,
   noShowAvailableAt,
   riderName,
@@ -54,6 +58,7 @@ import {
   useAuth,
   useCountUp,
   useToast,
+  useLiveRoute,
   type FillSuggestion,
   type PassengerInCar,
   type RideWithZones,
@@ -169,6 +174,9 @@ export default function TripScreen() {
           dropoffZoneId: req.dropoffZoneId,
           pickupZoneName: req.pickupZoneName,
           dropoffZoneName: req.dropoffZoneName,
+          // Names only until the server confirms (seconds); then the exact pins.
+          pickupLabel: req.pickupPlaceName ?? null,
+          dropoffLabel: req.dropoffPlaceName ?? null,
           lockedFare: req.farePesewas,
           status: "WAITING",
           arrivedAt: null,
@@ -207,12 +215,51 @@ export default function TripScreen() {
     [passengers, zones, position],
   );
   const next: TripStop | undefined = plan.upcoming[0];
-  const path = useMemo(
-    () => tripPath(position, plan.upcoming.map((s) => s.zone), zoneList, routes),
+  // The road through every stop's exact pin (OSRM via the server), asked
+  // for once and re-asked only if the driver leaves it; the stored zone
+  // roads are the instant fallback.
+  const stopPoints = useMemo(() => plan.upcoming.slice(0, 9).map((s) => s.point), [plan.upcoming]);
+  const live = useLiveRoute({ from: position, stops: stopPoints, enabled: stopPoints.length > 0 });
+  const fallbackPath = useMemo(
+    () => tripPath(position, routeStops(plan.upcoming), zoneList, routes),
     [position, plan.upcoming, zoneList, routes],
   );
-  const etaMinutes = next ? etaToStopMinutes(position, next.zone, zoneList, routes) : null;
-  const atNextStop = next ? isAtStop(position, next.zone) : false;
+  const path = live.path ?? fallbackPath;
+  const etaMinutes =
+    next && live.secondsToFirstStop !== null && position
+      ? Math.max(1, Math.round(live.secondsToFirstStop / 60))
+      : next
+        ? etaToStopMinutes(position, next.zone, zoneList, routes)
+        : null;
+  // Arrived: within 50 m of an exact pin, or the zone radius for a ride booked without one.
+  const atNextStop = next
+    ? isAtStop(position, next.point, next.exact ? PIN_ARRIVAL_RADIUS_METERS : AT_STOP_RADIUS_METERS)
+    : false;
+  /** The road to the next stop only (the fake drive follows it). */
+  const pathToNext = useMemo(() => {
+    if (!next || path.length < 2) return null;
+    let best = path.length - 1;
+    let bestD = Infinity;
+    path.forEach((p, i) => {
+      const d = haversineDistanceMeters(p, next.point);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    });
+    const cut = path.slice(0, best + 1);
+    return cut.length >= 2 ? [...cut, next.point] : null;
+  }, [next, path]);
+  const mapStops = useMemo(
+    () =>
+      plan.upcoming.map((s) => ({
+        key: s.key,
+        kind: s.kind,
+        riderFirstName: s.riderFirstName,
+        zone: { name: s.label, latitude: s.point.latitude, longitude: s.point.longitude },
+      })),
+    [plan.upcoming],
+  );
 
   // ─── Done: the last drop-off (shown at once, optimistically) ─────────────
   const [done, setDone] = useState<DoneSummary | null>(null);
@@ -361,7 +408,7 @@ export default function TripScreen() {
         kind: st.kind,
         isNew: st.isNew,
         riderFirstName: st.riderFirstName,
-        zone: { name: st.zoneName, latitude: st.latitude, longitude: st.longitude },
+        zone: { name: st.label ?? st.zoneName, latitude: st.latitude, longitude: st.longitude },
       })),
       // What's ahead only: cut off what the driver has already driven.
       path: position && proposedFull.length >= 2 ? trimPathToPosition(proposedFull, position) : proposedFull,
@@ -537,10 +584,10 @@ export default function TripScreen() {
     <View style={styles.root}>
       <TripMap
         driver={position}
-        stops={plan.upcoming}
+        stops={mapStops}
         path={path}
         insets={{ top: topHeight, bottom: cardHeight }}
-        attribution={storedRoutes.length > 0 ? routeAttribution(storedRoutes[0]!.provider) : null}
+        attribution={live.attribution ?? (storedRoutes.length > 0 ? routeAttribution(storedRoutes[0]!.provider) : null)}
         preview={previewOverlay}
       />
 
@@ -583,7 +630,7 @@ export default function TripScreen() {
             onPress={() =>
               location.fake!.driving
                 ? location.fake!.driveAlong(null)
-                : location.fake!.driveAlong(position ? tripPath(position, [next.zone], zoneList, routes) : null)
+                : location.fake!.driveAlong(position ? pathToNext : null)
             }
             accessibilityRole="button"
             accessibilityLabel={location.fake.driving ? "Stop the fake drive" : "Fake-drive to the next stop"}
@@ -616,7 +663,8 @@ export default function TripScreen() {
                 {previewing.suggestion.compatible ? "NEW RIDER ON YOUR ROUTE" : "ADD THIS RIDER?"}
               </Text>
               <Text variant="bodyMedium" style={styles.previewRoute} numberOfLines={1}>
-                {previewing.suggestion.pickupZoneName} → {previewing.suggestion.dropoffZoneName}
+                {previewing.suggestion.pickupPlaceName ?? previewing.suggestion.pickupZoneName} →{" "}
+                {previewing.suggestion.dropoffPlaceName ?? previewing.suggestion.dropoffZoneName}
               </Text>
               <Text variant="caption" color="muted">
                 {previewData
@@ -752,6 +800,15 @@ function NextStopCard({
         </Text>
       ) : null}
 
+      {stop.note ? (
+        <View style={styles.noteRow} accessible accessibilityLabel={`Note from ${name}: ${stop.note}`}>
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.ink[500]} />
+          <Text variant="bodySmall" style={styles.noteText} numberOfLines={3}>
+            “{stop.note}”
+          </Text>
+        </View>
+      ) : null}
+
       {arrived && arrivedAt !== null ? (
         <View style={styles.waitRow}>
           <Ionicons name="checkmark-circle" size={18} color={colors.primary[500]} />
@@ -781,7 +838,7 @@ function NextStopCard({
           <Button
             label="Navigate"
             variant="secondary"
-            onPress={() => void openDirections({ latitude: stop.zone.latitude, longitude: stop.zone.longitude, label: stop.zone.name })}
+            onPress={() => void openDirections({ latitude: stop.point.latitude, longitude: stop.point.longitude, label: stop.label })}
           />
         </View>
         {stop.riderPhone ? (
@@ -941,6 +998,15 @@ function CountUpCedis({ pesewas }: { pesewas: number }) {
 }
 
 const styles = StyleSheet.create({
+  noteRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.xs,
+    padding: spacing.sm,
+    borderRadius: radii.md,
+    backgroundColor: colors.surfaceMuted,
+  },
+  noteText: { flex: 1, color: colors.ink[700], fontStyle: "italic" },
   root: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, paddingHorizontal: spacing.xl },
   centerText: { textAlign: "center" },

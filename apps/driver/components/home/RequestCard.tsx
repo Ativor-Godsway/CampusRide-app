@@ -11,9 +11,20 @@ export interface HomeRequest {
   pickupZoneId: string;
   pickupZoneName: string;
   dropoffZoneName: string;
+  /** Where the rider asked to go, by name — never coordinates before accepting. Absent from older servers. */
+  pickupPlaceName?: string;
+  dropoffPlaceName?: string;
   createdAt: string;
   riderFirstName?: string;
   distanceMeters: number | null;
+}
+
+/** "Night Market → Balme Library": place names, or zone names from an older server. */
+function from(item: HomeRequest): string {
+  return item.pickupPlaceName ?? item.pickupZoneName;
+}
+function to(item: HomeRequest): string {
+  return item.dropoffPlaceName ?? item.dropoffZoneName;
 }
 
 function typeLabel(item: HomeRequest): string {
@@ -24,7 +35,7 @@ function spoken(item: HomeRequest): string {
   const kind = item.type === "LONE" ? "Private ride" : `Shared ride, ${item.seats ?? 1} rider${(item.seats ?? 1) === 1 ? "" : "s"}`;
   const who = item.riderFirstName ? `${item.riderFirstName}, ` : "";
   const distance = item.distanceMeters !== null ? `${formatDistance(item.distanceMeters)} away, ` : "";
-  return `${who}${kind}, ${distance}${spokenCedis(item.farePesewas)}. From ${item.pickupZoneName} to ${item.dropoffZoneName}. ${requestedAgo(item.createdAt)}.`;
+  return `${who}${kind}, ${distance}${spokenCedis(item.farePesewas)}. From ${from(item)} to ${to(item)}. ${requestedAgo(item.createdAt)}.`;
 }
 
 /**
@@ -59,7 +70,7 @@ export function RequestCard({
           </Text>
         </View>
         <Text variant="bodyMedium" style={styles.route}>
-          {item.pickupZoneName} → {item.dropoffZoneName}
+          {from(item)} → {to(item)}
         </Text>
       </View>
       <View style={styles.bottom}>
@@ -90,7 +101,7 @@ export function RequestCard({
               label="Accept"
               fullWidth={false}
               onPress={onAccept}
-              accessibilityLabel={`Accept ride from ${item.pickupZoneName} to ${item.dropoffZoneName}`}
+              accessibilityLabel={`Accept ride from ${from(item)} to ${to(item)}`}
             />
           ) : null}
         </View>

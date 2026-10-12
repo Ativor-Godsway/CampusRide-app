@@ -1,4 +1,5 @@
 import { useRouter } from "expo-router";
+import { stopLabel } from "@rida/shared";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -45,7 +46,7 @@ export default function AccountTab() {
     // Logging out never cancels a ride; say so, so nobody logs out thinking
     // it does (or panics that it did).
     const message = activeRide
-      ? `Your ride to ${activeRide.dropoffZone.name} is still going on — logging out won't cancel it. Log back in to see it.`
+      ? `Your ride to ${stopLabel(activeRide.dropoffLabel, activeRide.dropoffZone.name)} is still going on — logging out won't cancel it. Log back in to see it.`
       : "Are you sure you want to log out?";
     Alert.alert("Log out", message, [
       { text: "Cancel", style: "cancel" },

@@ -1,4 +1,5 @@
 import { useRouter } from "expo-router";
+import { rideEnd, stopLabel, tripEndParams } from "@rida/shared";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Pressable, RefreshControl, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -158,14 +159,8 @@ export default function RidesTab() {
                           pathname: "/ride/type",
                           params: {
                             rideId: ride.mergedIntoRideId ?? ride.id,
-                            pickupZoneId: ride.pickupZoneId,
-                            dropoffZoneId: ride.dropoffZoneId,
-                            pickupZoneName: ride.pickupZone.name,
-                            dropoffZoneName: ride.dropoffZone.name,
-                            pickupLat: String(ride.pickupZone.latitude),
-                            pickupLng: String(ride.pickupZone.longitude),
-                            dropoffLat: String(ride.dropoffZone.latitude),
-                            dropoffLng: String(ride.dropoffZone.longitude),
+                            ...tripEndParams("pickup", rideEnd(ride, "pickup", ride.pickupZone)),
+                            ...tripEndParams("dropoff", rideEnd(ride, "dropoff", ride.dropoffZone)),
                           },
                         })
                     : undefined
@@ -186,10 +181,10 @@ export default function RidesTab() {
                     </View>
                     <View style={styles.routeLabels}>
                       <Text variant="bodyMedium" numberOfLines={1}>
-                        {ride.pickupZone.name}
+                        {stopLabel(ride.pickupLabel, ride.pickupZone.name)}
                       </Text>
                       <Text variant="bodyMedium" numberOfLines={1}>
-                        {ride.dropoffZone.name}
+                        {stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}
                       </Text>
                     </View>
                   </View>

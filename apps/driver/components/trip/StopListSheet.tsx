@@ -49,7 +49,7 @@ export function StopListSheet({
               disabled={!stop.riderPhone}
               onPress={() => stop.riderPhone && void callPhone(stop.riderPhone, name)}
               accessibilityRole="button"
-              accessibilityLabel={`Stop ${i + 1}: ${stop.kind === "PICKUP" ? "pick up" : "drop off"} ${name} at ${stop.zone.name}. ${word}.${stop.riderPhone ? " Double-tap to call." : ""}`}
+              accessibilityLabel={`Stop ${i + 1}: ${stop.kind === "PICKUP" ? "pick up" : "drop off"} ${name} at ${stop.label}. ${word}.${stop.riderPhone ? " Double-tap to call." : ""}`}
               style={styles.row}
             >
               <View style={[styles.number, stop.kind === "PICKUP" ? styles.pickup : styles.dropoff]}>
@@ -62,7 +62,7 @@ export function StopListSheet({
                   {stop.kind === "PICKUP" ? "Pick up" : "Drop off"} {name}
                 </Text>
                 <Text variant="caption" color="muted" numberOfLines={2}>
-                  {stop.zone.name}
+                  {stop.label}
                   {stop.kind === "DROPOFF" && stop.farePesewas !== null ? ` · ${formatCedis(stop.farePesewas)}` : ""}
                 </Text>
               </View>
@@ -81,7 +81,7 @@ export function StopListSheet({
               DONE
             </Text>
             {done.map((p) => (
-              <View key={p.id} style={styles.row} accessible accessibilityLabel={`${firstName(p.riderName) || "Rider"}: dropped off at ${p.dropoffZoneName}`}>
+              <View key={p.id} style={styles.row} accessible accessibilityLabel={`${firstName(p.riderName) || "Rider"}: dropped off at ${p.dropoffLabel ?? p.dropoffZoneName}`}>
                 <View style={[styles.number, styles.doneDot]}>
                   <Ionicons name="checkmark" size={14} color={colors.white} />
                 </View>
@@ -90,7 +90,7 @@ export function StopListSheet({
                     {firstName(p.riderName) || "Rider"}
                   </Text>
                   <Text variant="caption" color="muted" numberOfLines={1}>
-                    {p.dropoffZoneName}
+                    {p.dropoffLabel ?? p.dropoffZoneName}
                   </Text>
                 </View>
                 <Text variant="caption" color="muted">

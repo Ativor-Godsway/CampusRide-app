@@ -43,7 +43,7 @@ export function AddRiderSheet({
               <View key={s.requestRideId} style={styles.row}>
                 <View style={styles.text}>
                   <Text variant="bodyMedium" style={styles.route} numberOfLines={1}>
-                    {s.pickupZoneName} → {s.dropoffZoneName}
+                    {s.pickupPlaceName ?? s.pickupZoneName} → {s.dropoffPlaceName ?? s.dropoffZoneName}
                   </Text>
                   <View style={styles.meta}>
                     {s.compatible ? <Badge variant="accent" label="On your way" /> : null}
@@ -57,7 +57,7 @@ export function AddRiderSheet({
                   variant="secondary"
                   fullWidth={false}
                   onPress={() => onAdd(s)}
-                  accessibilityLabel={`See the route with the rider from ${s.pickupZoneName} to ${s.dropoffZoneName}`}
+                  accessibilityLabel={`See the route with the rider from ${s.pickupPlaceName ?? s.pickupZoneName} to ${s.dropoffPlaceName ?? s.dropoffZoneName}`}
                 />
               </View>
             ))

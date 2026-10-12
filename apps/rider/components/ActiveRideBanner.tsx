@@ -3,7 +3,7 @@ import { Animated, Easing, StyleSheet, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { activeRideStatusLine, estimateEtaMinutes } from "@rida/shared";
+import { activeRideStatusLine, estimateEtaMinutes, pickupPin, stopLabel, stopPoint } from "@rida/shared";
 import {
   PressableScale,
   Text,
@@ -82,7 +82,7 @@ export function ActiveRideBanner({ ride }: { ride: ActiveRideSummary }) {
     type: ride.type,
     legStatus: ride.legStatus,
     driverFirstName: ride.driver?.firstName,
-    etaMinutes: waitingForDriver ? estimateEtaMinutes(driverAt, ride.pickupZone) : null,
+    etaMinutes: waitingForDriver ? estimateEtaMinutes(driverAt, stopPoint(pickupPin(ride), ride.pickupZone)) : null,
   });
 
   return (
@@ -90,7 +90,7 @@ export function ActiveRideBanner({ ride }: { ride: ActiveRideSummary }) {
       <PressableScale
         onPress={() => router.push({ pathname: "/ride/type", params: activeRideParams(ride) })}
         accessibilityRole="button"
-        accessibilityLabel={`${status}. Ride to ${ride.dropoffZone.name}. Open your ride.`}
+        accessibilityLabel={`${status}. Ride to ${stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}. Open your ride.`}
         style={styles.banner}
       >
         <LiveDot />
@@ -99,7 +99,7 @@ export function ActiveRideBanner({ ride }: { ride: ActiveRideSummary }) {
             {status}
           </Text>
           <Text variant="bodySmall" style={styles.route} numberOfLines={1}>
-            To {ride.dropoffZone.name}
+            To {stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={20} color={colors.white} />

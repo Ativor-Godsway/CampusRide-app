@@ -6,7 +6,7 @@ import BottomSheet, {
   type BottomSheetBackdropProps,
 } from "@gorhom/bottom-sheet";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { activeRideStatusLine } from "@rida/shared";
+import { activeRideStatusLine, stopLabel } from "@rida/shared";
 import {
   Button,
   Illustration,
@@ -92,7 +92,7 @@ export function RideInProgressSheet({
         </Text>
         {ride ? (
           <Text variant="bodySmall" color="muted" style={styles.centered}>
-            {status} · to {ride.dropoffZone.name}
+            {status} · to {stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}
           </Text>
         ) : null}
         <View style={styles.actions}>

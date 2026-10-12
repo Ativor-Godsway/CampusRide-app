@@ -3,8 +3,8 @@ import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import type { Zone } from "@rida/shared";
-import { recentDestinations } from "@rida/shared";
+import type { TripEnd } from "@rida/shared";
+import { isSameSpot, recentTripEnds, tripEndParams, tripEndProblem } from "@rida/shared";
 import {
   Badge,
   Card,
@@ -27,7 +27,7 @@ import {
   useAuth,
   type RideSummary,
 } from "@rida/mobile-shared";
-import { chooseRideParams, useResolvePickup } from "../../lib/chooseRide";
+import { chooseRideParams, usePlaces, useResolvePickup } from "../../lib/chooseRide";
 import { TAB_SCREEN_BOTTOM_PADDING } from "../../lib/layout";
 
 /** Time-of-day greeting — label + a small Ionicons glyph for visual warmth. */
@@ -38,6 +38,11 @@ function getGreeting(): { label: string; icon: keyof typeof Ionicons.glyphMap } 
   return { label: "Good evening", icon: "moon-outline" };
 }
 
+/** A stable key for a recent place or pin. */
+function endKey(end: TripEnd): string {
+  return end.placeId ?? `${end.latitude.toFixed(5)},${end.longitude.toFixed(5)}`;
+}
+
 /**
  * Home: greeting → "Where to?" (the main action) → service tiles → Recent.
  * No avatar: the Account tab already is the way to your profile.
@@ -46,7 +51,8 @@ export default function HomeTab() {
   const router = useRouter();
   const { user } = useAuth();
   const resolvePickup = useResolvePickup();
-  const [openingZoneId, setOpeningZoneId] = useState<string | null>(null);
+  const [openingKey, setOpeningKey] = useState<string | null>(null);
+  const { data: places } = usePlaces();
 
   // Own cache key: the Rides tab caches history pages, a different shape.
   // Fetch a few more than we show so repeat trips still leave 3 distinct places.
@@ -59,7 +65,7 @@ export default function HomeTab() {
     queryKey: myRidesQueryKeys.recent,
     queryFn: () => getRecentRides(10),
   });
-  const recent = recentDestinations(rides ?? [], 3);
+  const recent = recentTripEnds(rides ?? [], places ?? null, 3);
 
   const greeting = getGreeting();
   const firstName = user?.name?.split(" ")[0] ?? "Rider";
@@ -73,18 +79,19 @@ export default function HomeTab() {
    * now. If we can't tell where that is (location off), or they're already
    * there, Plan your ride opens with the destination filled in instead.
    */
-  async function openRecent(destination: Zone) {
-    if (openingZoneId) return;
-    setOpeningZoneId(destination.id);
+  async function openRecent(destination: TripEnd) {
+    if (openingKey) return;
+    setOpeningKey(endKey(destination));
     try {
       const pickup = await resolvePickup();
-      if (pickup && pickup.id !== destination.id) {
+      // Off campus, or already there: let Plan your ride say so / ask for a pickup.
+      if (pickup && !tripEndProblem(pickup, "pickup") && !isSameSpot(pickup, destination)) {
         router.push({ pathname: "/ride/type", params: chooseRideParams(pickup, destination, "home") });
       } else {
-        router.push({ pathname: "/ride/location", params: { dropoffZoneId: destination.id } });
+        router.push({ pathname: "/ride/location", params: tripEndParams("dropoff", destination) });
       }
     } finally {
-      setOpeningZoneId(null);
+      setOpeningKey(null);
     }
   }
 
@@ -208,17 +215,17 @@ export default function HomeTab() {
         </Card>
       ) : recent.length > 0 ? (
         <Card>
-          {recent.map((zone, index) => (
-            <View key={zone.id}>
+          {recent.map((end, index) => (
+            <View key={endKey(end)}>
               <ListRow
-                title={zone.name}
+                title={end.label}
                 leading={<ListRow.Icon name="time-outline" color={colors.ink[500]} background={colors.surfaceMuted} />}
                 trailing={
-                  openingZoneId === zone.id ? <ActivityIndicator color={colors.primary[500]} /> : undefined
+                  openingKey === endKey(end) ? <ActivityIndicator color={colors.primary[500]} /> : undefined
                 }
-                showChevron={openingZoneId !== zone.id}
-                onPress={() => void openRecent(zone)}
-                accessibilityLabel={`Ride to ${zone.name}`}
+                showChevron={openingKey !== endKey(end)}
+                onPress={() => void openRecent(end)}
+                accessibilityLabel={`Ride to ${end.label}`}
               />
               {index < recent.length - 1 ? <View style={styles.divider} /> : null}
             </View>

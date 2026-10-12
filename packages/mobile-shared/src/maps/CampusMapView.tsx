@@ -16,6 +16,8 @@ export interface CampusMapZone extends LatLng {
    * that turns to face the direction it's moving. undefined = plain pin.
    */
   role?: "pickup" | "dropoff" | "driver";
+  /** Bump to re-place a marker the rider dragged (a drag moves the native marker, not the prop). */
+  version?: number;
 }
 
 export interface CampusMapViewProps {
@@ -55,6 +57,11 @@ export interface CampusMapViewProps {
   fitPadding?: EdgePadding;
   /** Lifts the recenter button above a bottom sheet covering this many points. */
   controlsBottomInset?: number;
+  /** Id of a zone the rider may drag ("Move pin to the exact spot"); reported through onZoneDragEnd. */
+  draggableZoneId?: string;
+  onZoneDragEnd?: (id: string, point: LatLng) => void;
+  /** A soft circle on the map, e.g. how far a pin may be moved. */
+  circle?: { center: LatLng; radiusMeters: number } | null;
 }
 
 /**
@@ -78,6 +85,9 @@ export function CampusMapView({
   fitTo,
   fitPadding,
   controlsBottomInset = 0,
+  draggableZoneId,
+  onZoneDragEnd,
+  circle,
 }: CampusMapViewProps) {
   const mapRef = useRef<MapView>(null);
   const reduceMotion = useReduceMotion();
@@ -118,9 +128,26 @@ export function CampusMapView({
       >
         {pulseZone ? <ZonePulse center={pulseZone} /> : null}
 
+        {circle ? (
+          <Circle
+            center={circle.center}
+            radius={circle.radiusMeters}
+            fillColor={withAlpha(colors.primary[500], 0.08)}
+            strokeColor={withAlpha(colors.primary[500], 0.5)}
+            strokeWidth={1.5}
+            zIndex={1}
+          />
+        ) : null}
+
         {zones.map((zone) =>
           zone.role ? (
-            <ArtMarker key={zone.id} zone={zone} onPress={() => onZonePress?.(zone.id)} />
+            <ArtMarker
+              key={`${zone.id}:${zone.version ?? 0}`}
+              zone={zone}
+              onPress={() => onZonePress?.(zone.id)}
+              draggable={zone.id === draggableZoneId}
+              onDragEnd={(point) => onZoneDragEnd?.(zone.id, point)}
+            />
           ) : (
             <Marker
               key={zone.id}
@@ -183,7 +210,17 @@ const CAR_SIZE = 52;
  * direction of travel (worked out from its last two positions). Markers stop
  * re-rendering once the image has loaded, which keeps Android smooth.
  */
-function ArtMarker({ zone, onPress }: { zone: CampusMapZone; onPress: () => void }) {
+function ArtMarker({
+  zone,
+  onPress,
+  draggable = false,
+  onDragEnd,
+}: {
+  zone: CampusMapZone;
+  onPress: () => void;
+  draggable?: boolean;
+  onDragEnd?: (point: LatLng) => void;
+}) {
   const isCar = zone.role === "driver";
   const [ready, setReady] = useState(false);
   const [heading, setHeading] = useState(0);
@@ -216,6 +253,8 @@ function ArtMarker({ zone, onPress }: { zone: CampusMapZone; onPress: () => void
       anchor={isCar ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 0.94 }}
       rotation={isCar ? heading : 0}
       flat={isCar}
+      draggable={draggable}
+      onDragEnd={(e) => onDragEnd?.(e.nativeEvent.coordinate)}
       tracksViewChanges={!ready}
       zIndex={isCar ? 3 : 2}
     >

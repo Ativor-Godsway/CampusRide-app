@@ -118,6 +118,8 @@ export default function DriverHomeScreen() {
           pickupZoneId: s.pickupZoneId,
           pickupZoneName: s.pickupZoneName,
           dropoffZoneName: s.dropoffZoneName,
+          pickupPlaceName: s.pickupPlaceName,
+          dropoffPlaceName: s.dropoffPlaceName,
           createdAt: s.createdAt,
           riderFirstName: s.riderFirstName,
         }));

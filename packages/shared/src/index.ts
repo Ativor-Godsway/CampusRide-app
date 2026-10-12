@@ -33,3 +33,5 @@ export * from "./driver/slideToConfirm";
 export * from "./geo/serviceArea";
 export * from "./places/campusPlaces";
 export * from "./rides/ridePins";
+export * from "./places/tripEnd";
+export * from "./geo/liveRoute";

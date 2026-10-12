@@ -77,6 +77,19 @@ date!`. Do this again whenever someone adds a migration.
 > This only ever runs against the dev database or local Postgres. It refuses
 > production.
 
+Then the campus places, the real zone positions and their roads (each safe to
+repeat; see [docs/places.md](../places.md)):
+
+```bash
+npm run places:seed:dev --workspace apps/server
+npm run zones:realign:dev --workspace apps/server -- --apply
+npm run routes:precompute --workspace apps/server -- --provider osrm   # ~4 min
+```
+
+With places in the database the simulator's riders book **real campus places
+with exact pins** (sometimes nudged or dropped near a place, sometimes with a
+note for the driver). Without them it falls back to zones, like old app builds.
+
 ## Step 2 — Start the server on your Mac
 
 **Terminal 1:**
@@ -355,8 +368,10 @@ automatic arrival never fires. Development builds can pretend to be on campus:
 2. Go online, accept a request. A yellow **Fake location** chip shows on the
    trip screen, with **▶ Drive (fake)**.
 3. Tap **▶ Drive (fake)**: the app drives along the route to the next stop at
-   about 30 km/h. When it gets within ~60 m of a pickup, **arrival is detected
-   automatically** — the rider is told you're here and the wait timer starts.
+   about 30 km/h, ending on the rider's exact pin. When it stays within ~50 m
+   of an exact pickup pin (~60 m of a zone centre, for a ride booked without
+   one), **arrival is detected automatically** — the rider is told you're
+   here and the wait timer starts.
 4. Tap **Off (real GPS)** in Account to go back to your real position.
 
 This is **impossible in a release build**: the code is behind React Native's
@@ -423,6 +438,35 @@ the server says no, the screen goes back and a red line says why.
 17. Drive, let it arrive, **slide "… picked up"**, drive, **slide "Cash
     collected …"**. ✔ each instant; the last one goes straight to Trip
     complete, then Home is free again.
+
+### Exact pickup and drop-off pins
+
+E1. Start riders: `npm run sim:riders -- --zone Balme --interval 20`. ✔ The
+    simulator log shows places, e.g. `Cedi Conference Centre (pin moved) →
+    Jubilee Hall  “Waiting at the bus stop”`.
+E2. ✔ **Home** shows each request by **place name** ("Cedi Conference Centre
+    → Jubilee Hall"), never coordinates. Accept one.
+E3. ✔ The trip screen's map pin sits on the exact spot (zoom in: it's on the
+    building or the moved pin, not at a zone centre); the card says "Pick up
+    Kwame at Cedi Conference Centre"; a rider who left a note shows it in
+    quotes under the instruction.
+E4. ✔ The blue line follows real roads to that pin ("Routes: OSRM ·
+    © OpenStreetMap contributors" in the corner). Before OSRM answers, or if
+    it can't, the zone road shows instead — that's expected.
+E5. Tap **Navigate**. ✔ Google Maps opens with directions to the exact point
+    (a pin, not a search for the name). Come back to the app.
+E6. **▶ Drive (fake)**. ✔ The car follows the line and stops on the pin;
+    about 10 s later the card says the rider knows you're here.
+E7. **Add a rider** (Shared): ✔ the preview shows the new rider's pins at the
+    named place, and their stop list entry by name.
+E8. With the rider app on a second account (or Expo Go on the same phone):
+    **Plan your ride** → ✔ pickup "Current location" (or "At Balme Library"
+    under it when you're within ~50 m); type `balm librray` → ✔ Balme Library;
+    **Choose on map** → move the map off campus → ✔ "outside the CampusRide
+    area" and the button is off; back on campus → **Set drop-off here**.
+E9. **Choose a ride** → **Move pin** → drag the green pin ✔ it can't go more
+    than 200 m (a light circle shows how far); **Add a note for your driver**;
+    request. ✔ The driver sees the moved pin and the note.
 
 ### Also check
 
