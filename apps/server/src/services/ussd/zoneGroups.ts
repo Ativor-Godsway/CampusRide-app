@@ -16,6 +16,8 @@ export const ZONE_GROUPS = {
     "Akuafo Hall",
     "Mensah Sarbah Hall",
     "Pentagon Hostel",
+    // Was "Botanical Gardens Gate" (LANDMARKS) until zones:realign renamed it.
+    "James Topp Nelson Yankah Hall (TF Hall)",
   ],
   // "Medical School (UGMS)" is renamed "UG Medical Centre (UGMC)" by
   // zones:realign (2026-10); both are listed so the menu works before and

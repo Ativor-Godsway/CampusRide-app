@@ -95,7 +95,7 @@ the map the same places spread over ~4.5 km. `zones:realign`
 ([scripts/realignZones.ts](../apps/server/src/scripts/realignZones.ts))
 applies the owner's decisions of 2026-10-12, in one transaction:
 
-- **Moves** 13 zones to their OpenStreetMap positions (148 m to 2.3 km).
+- **Moves** 14 zones to their OpenStreetMap positions (148 m to 2.3 km).
 - **Renames** "Medical School (UGMS)" to **"UG Medical Centre (UGMC)"** and
   puts it at the UGMC on campus (the real UG Medical School is at Korle
   Bu). The USSD menu lists both names, so it works before and after.
@@ -113,8 +113,9 @@ applies the owner's decisions of 2026-10-12, in one transaction:
   - places and the place seed use zones in service only; the realign
     re-zones every place and moves any driver still in it;
   - `routes:precompute` and the realign skip it.
-- **Leaves** "Botanical Gardens Gate" alone until the owner decides what
-  replaces it.
+- **Renames** "Botanical Gardens Gate" (OSM shows no clear named entrance)
+  to **"James Topp Nelson Yankah Hall (TF Hall)"** at TF Hall, to serve the
+  north of campus. USSD lists it under Halls.
 
 It is idempotent: a second run reports 0 m for every zone and changes
 nothing. Re-run `routes:precompute` afterwards (without `--only-missing`:

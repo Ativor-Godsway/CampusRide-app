@@ -21,7 +21,7 @@
  * 1. RETIRES the zones in RETIRED_ZONES (sets Zone.retiredAt; the row stays
  *    for old rides). Not moved.
  * 2. RENAMES per RENAMED_ZONES, and MOVES each zone in REAL_ZONE_CENTRES to
- *    its real position. A zone in neither table is left alone.
+ *    its real position. A zone in neither table is left alone (none today).
  * 3. Recomputes every place's zone over the zones in service, and moves any
  *    driver sitting in a retired zone to the in-service zone nearest it.
  *
@@ -37,16 +37,17 @@ import { haversineDistanceMeters, nearestZone } from "@rida/shared";
 /** Off campus (Accra Mall is a future feature): kept for old rides, used for nothing new. */
 export const RETIRED_ZONES = ["Accra Mall Junction"] as const;
 
-/** Current name → new name. The real UG Medical School is at Korle Bu; the Legon one is the UGMC. */
+/**
+ * Current name → new name. The real UG Medical School is at Korle Bu; the
+ * Legon one is the UGMC. "Botanical Gardens Gate" had no clear entrance in
+ * OSM, so the owner chose TF Hall to serve the north of campus (2026-10-12).
+ */
 export const RENAMED_ZONES: Record<string, string> = {
   "Medical School (UGMS)": "UG Medical Centre (UGMC)",
+  "Botanical Gardens Gate": "James Topp Nelson Yankah Hall (TF Hall)",
 };
 
-/**
- * Zone (by its name AFTER renaming) → real position, from OpenStreetMap.
- * "Botanical Gardens Gate" is deliberately absent: OSM has no clear named
- * entrance, and the owner decides what replaces it.
- */
+/** Zone (by its name AFTER renaming) → real position, from OpenStreetMap. */
 export const REAL_ZONE_CENTRES: Record<string, { latitude: number; longitude: number; from: string }> = {
   "Main Gate": { latitude: 5.65017, longitude: -0.17896, from: "Legon Station bus stop at the main gate (node 4981090362)" },
   "Legon Hall": { latitude: 5.649374, longitude: -0.187998, from: "Legon Hall (way 427645339)" },
@@ -65,6 +66,11 @@ export const REAL_ZONE_CENTRES: Record<string, { latitude: number; longitude: nu
     from: "University of Ghana Medical Centre (way 464683570)",
   },
   "Sports Stadium": { latitude: 5.63903, longitude: -0.180085, from: "UG Sports Stadium (way 1273337678)" },
+  "James Topp Nelson Yankah Hall (TF Hall)": {
+    latitude: 5.666259,
+    longitude: -0.182087,
+    from: "James Topp Nelson Yankah Hall (way 286261174)",
+  },
 };
 
 export type ZoneAction =

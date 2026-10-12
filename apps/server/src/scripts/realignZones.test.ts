@@ -34,7 +34,11 @@ describe("realignZones", () => {
       kind: "move",
       renamedFrom: "Medical School (UGMS)",
     });
-    expect(report.actions.find((a) => a.name === "Botanical Gardens Gate")).toMatchObject({ kind: "leave" });
+    expect(report.actions.find((a) => a.name === "James Topp Nelson Yankah Hall (TF Hall)")).toMatchObject({
+      kind: "move",
+      renamedFrom: "Botanical Gardens Gate",
+    });
+    expect(report.actions.some((a) => a.kind === "leave")).toBe(false);
     expect(await prisma.zone.findMany()).toEqual(expect.arrayContaining(snapshot));
   });
 
@@ -61,7 +65,11 @@ describe("realignZones", () => {
         expect(zones.find((z) => z.name === name)).toMatchObject({ latitude: real.latitude, longitude: real.longitude });
       }
       const botanical = snapshot.find((z) => z.name === "Botanical Gardens Gate")!;
-      expect(zones.find((z) => z.id === botanical.id)).toMatchObject({ latitude: botanical.latitude, longitude: botanical.longitude });
+      expect(zones.find((z) => z.id === botanical.id)).toMatchObject({
+        name: "James Topp Nelson Yankah Hall (TF Hall)",
+        latitude: 5.666259,
+        longitude: -0.182087,
+      });
 
       // Nothing is left pointing at the retired zone.
       expect((await prisma.place.findUniqueOrThrow({ where: { id: place.id } })).zoneId).not.toBe(accra.id);
