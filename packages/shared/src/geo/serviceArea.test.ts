@@ -22,7 +22,7 @@ describe("pointInPolygon", () => {
   });
 });
 
-describe("the CampusRide service area", () => {
+describe("the CampusRide service area (Legon campus + ~200 m)", () => {
   const inside: Record<string, [number, number]> = {
     "Balme Library": [5.65201, -0.18705],
     "Great Hall": [5.65063, -0.19622],
@@ -31,10 +31,8 @@ describe("the CampusRide service area", () => {
     "Pentagon hostels": [5.65765, -0.18202],
     "James Topp Nelson Yankah Hall (north end)": [5.66626, -0.18209],
     "Legon main gate / N4": [5.6505, -0.1795],
-    "Okponglo": [5.64134, -0.17809],
-    "Shiashie": [5.62768, -0.17644],
-    "Accra Mall": [5.62218, -0.17326],
-    "Accra Mall roundabout": [5.62204, -0.17473],
+    "Okponglo Gate": [5.63773, -0.17738],
+    "Legon Barrier": [5.64154, -0.19768],
   };
   const outside: Record<string, [number, number]> = {
     Kumasi: [6.6885, -1.6244],
@@ -42,6 +40,11 @@ describe("the CampusRide service area", () => {
     "GIMPA main entrance": [5.63988, -0.20455],
     "Kwame Nkrumah Circle": [5.57, -0.21],
     "East Legon (American House)": [5.6445, -0.1623],
+    // Off campus: a future feature, not served now.
+    "Accra Mall": [5.62218, -0.17326],
+    "Accra Mall roundabout": [5.62204, -0.17473],
+    Shiashie: [5.62768, -0.17644],
+    "Tetteh Quarshie Interchange": [5.624275, -0.173039],
   };
 
   it.each(Object.entries(inside))("includes %s", (_, [latitude, longitude]) => {
@@ -79,7 +82,7 @@ describe("zoneForPoint", () => {
   ];
   it("gives the nearest zone inside the area, however far its centre is", () => {
     expect(zoneForPoint({ latitude: 5.6534, longitude: -0.1873 }, zones)?.id).toBe("a");
-    expect(zoneForPoint({ latitude: 5.62218, longitude: -0.17326 }, zones)?.id).toBe("b");
+    expect(zoneForPoint({ latitude: 5.631864, longitude: -0.185925 }, zones)?.id).toBe("b"); // UGMC, ~1.9 km
   });
   it("gives none outside the area", () => {
     expect(zoneForPoint({ latitude: 6.6885, longitude: -1.6244 }, zones)).toBeNull();

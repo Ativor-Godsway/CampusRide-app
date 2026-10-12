@@ -17,7 +17,10 @@ export const ZONE_GROUPS = {
     "Mensah Sarbah Hall",
     "Pentagon Hostel",
   ],
-  ACADEMIC: ["School of Business", "Balme Library", "Medical School (UGMS)"],
+  // "Medical School (UGMS)" is renamed "UG Medical Centre (UGMC)" by
+  // zones:realign (2026-10); both are listed so the menu works before and
+  // after it runs (only one exists at a time; a missing name is skipped).
+  ACADEMIC: ["School of Business", "Balme Library", "UG Medical Centre (UGMC)", "Medical School (UGMS)"],
   LANDMARKS: [
     "Main Gate",
     "Sports Stadium",
@@ -52,7 +55,8 @@ export function zoneGroupFromMenuChoice(choice: number): ZoneGroupKey | null {
  */
 export async function getZonesInGroup(prisma: PrismaClient, group: ZoneGroupKey): Promise<Zone[]> {
   const names = ZONE_GROUPS[group];
-  const zones = await prisma.zone.findMany({ where: { name: { in: [...names] } } });
+  // A retired zone (e.g. Accra Mall Junction) is simply not offered.
+  const zones = await prisma.zone.findMany({ where: { name: { in: [...names] }, retiredAt: null } });
   const byName = new Map(zones.map((z) => [z.name, z]));
   return names.map((name) => byName.get(name)).filter((z): z is Zone => z !== undefined);
 }

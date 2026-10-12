@@ -15,9 +15,13 @@ export async function getEligibleDrivers(
   prisma: PrismaClient,
   ride: { pickupZoneId: string },
 ) {
+  // Edges to or from a retired zone don't count: eligibility never flows
+  // through a zone that is out of service.
   const adjacencies = await prisma.zoneAdjacency.findMany({
     where: {
       OR: [{ zoneId: ride.pickupZoneId }, { adjacentZoneId: ride.pickupZoneId }],
+      zone: { retiredAt: null },
+      adjacentZone: { retiredAt: null },
     },
   });
 
@@ -32,6 +36,7 @@ export async function getEligibleDrivers(
       isOnline: true,
       isApproved: true,
       currentZoneId: { in: Array.from(zoneIds) },
+      currentZone: { retiredAt: null },
     },
   });
 }

@@ -39,18 +39,13 @@ export interface PlaceRow {
 export const UG_CAMPUS_WAY_ID = 308668766;
 
 /**
- * Off-campus spots riders already use, by OSM id: they're inside the service
- * area but outside the campus boundary, so the campus query doesn't see them.
+ * Off-campus spots to include, by OSM id. Empty: the service area is the
+ * Legon campus only, and off-campus service is a future feature (owner,
+ * 2026-10-12). The campus query can't see outside the boundary, so this is
+ * where such spots would go back, e.g.
+ * "relation/8418096": { name: "Accra Mall", category: "LANDMARK" }.
  */
-export const OFF_CAMPUS_ALLOWLIST: Record<string, { name: string; category: PlaceCategory; aliases?: string[] }> = {
-  "relation/8418096": { name: "Accra Mall", category: "LANDMARK", aliases: ["Mall", "Accra Mall Junction"] },
-  "node/3045917870": { name: "Accra Mall Roundabout", category: "LANDMARK", aliases: ["Accra Mall Junction"] },
-  "node/1014251583": { name: "Tetteh Quarshie Interchange", category: "LANDMARK", aliases: ["Tetteh Quarshie", "TQ"] },
-  "node/2581150583": { name: "Shiashie", category: "LANDMARK", aliases: ["Shiashie bus stop"] },
-  "node/4981090374": { name: "Okponglo", category: "LANDMARK", aliases: ["Okponglo junction"] },
-  "node/5036565850": { name: "Atomic Junction", category: "LANDMARK", aliases: ["Atomic"] },
-  "node/1831959531": { name: "UPS Junction", category: "LANDMARK", aliases: ["UPS"] },
-};
+export const OFF_CAMPUS_ALLOWLIST: Record<string, { name: string; category: PlaceCategory; aliases?: string[] }> = {};
 
 /**
  * Places OSM doesn't name as such (the gates are unnamed barriers or bus
@@ -64,7 +59,8 @@ export const MANUAL_PLACES: PlaceRow[] = [
     longitude: -0.17896,
     aliases: ["Legon Main Gate", "Legon Station", "Main Entrance"],
     source: "manual:main-gate",
-    note: "At the Legon Station bus stop (OSM node 4981090362), where University Avenue meets the N4. Check it is the gate riders mean.",
+    // At the Legon Station bus stop (OSM node 4981090362). Confirmed by the owner, 2026-10-12.
+    note: "",
   },
   {
     name: "Okponglo Gate",
@@ -73,16 +69,18 @@ export const MANUAL_PLACES: PlaceRow[] = [
     longitude: -0.17738,
     aliases: ["Okponglo Second Gate", "Second Gate"],
     source: "manual:okponglo-gate",
-    note: "At the 'Okponglo Second Gate' bus stop (OSM node 6521403261) on the N4.",
+    // At the 'Okponglo Second Gate' bus stop (OSM node 6521403261). Confirmed by the owner, 2026-10-12.
+    note: "",
   },
   {
     name: "Legon Barrier",
     category: "GATE",
     latitude: 5.64154,
     longitude: -0.19768,
-    aliases: ["Barrier", "West Gate"],
+    aliases: ["Barrier"],
     source: "manual:legon-barrier",
-    note: "Between the two 'Legon Barrier' bus stops (OSM nodes 4981090364, 5028768235). 'West Gate' alias is a guess.",
+    // Between the two 'Legon Barrier' bus stops (OSM nodes 4981090364, 5028768235). Kept by the owner, 2026-10-12.
+    note: "",
   },
 ];
 
@@ -115,6 +113,8 @@ export const EXCLUDE = new Set<string>([
   "node/9661039848", // "Hall Library" — a room in a hall
   "way/718588091", // Mensah Sarbah Hall Mosque — riders say "Sarbah"
   "way/278303045", // "Anglican Church Legon Hall" — 20 m from the main Anglican church (kept)
+  "relation/5912384", // "International House" — removed by the owner, 2026-10-12
+  "way/394125199", // "International House" (second outline)
   "way/320073867", // "Legon Main Entrance" building — unclear; the Main Gate is added by hand
 ]);
 
@@ -231,13 +231,12 @@ export const ALIASES: Record<string, string[]> = {
   "Faculty of Arts (Languages)": ["Faculty of Arts", "Arts"],
 };
 
-/** What a reviewer should double-check, by final name. */
-export const NOTES: Record<string, string> = {
-  "Bush Canteen": "OSM has three 'Bush Canteen' points; this keeps the food court. Check it's the one riders mean.",
-  "Faculty of Arts (Languages)": "OSM calls it 'Faculty of Arts, Languages'. Check the name.",
-  "Akuafo Hall Annex": "The whole annex; Annex A–D are also listed. Keep both, or only one?",
-  "International House": "Tagged as a university building in OSM. Check what riders call it.",
-};
+/**
+ * What a reviewer should double-check, by final name. Empty: the owner
+ * reviewed the list on 2026-10-12 (kept: Akuafo Hall Annex and Annex A–D,
+ * "Faculty of Arts (Languages)", the food-court Bush Canteen).
+ */
+export const NOTES: Record<string, string> = {};
 
 /** "James Quartey Building, JQB" → name "James Quartey Building", alias "JQB". */
 export function splitAbbreviation(name: string): { name: string; alias: string | null } {
@@ -347,7 +346,7 @@ export function buildPlaceRows(campus: readonly OsmElement[], offCampus: readonl
       ...at,
       aliases: spec.aliases ?? [],
       source: `osm:${el.type}/${el.id}`,
-      note: "Off campus, inside the service area.",
+      note: "",
       rank: 3,
     });
   }

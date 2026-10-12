@@ -32,7 +32,7 @@ import {
 } from "@rida/shared";
 import { config } from "../../config";
 import { logger } from "../../lib/logger";
-import { getStoredZoneRoutes, getZoneMap } from "../zones/zoneCache";
+import { getActiveZones, getStoredZoneRoutes } from "../zones/zoneCache";
 
 export interface RouteLegSummary {
   distanceMeters: number;
@@ -129,8 +129,7 @@ function count(kind: "calls" | "fallbacks"): number {
 
 /** The instant fallback, leg by leg: stored zone roads with the ends moved to the points. */
 export async function fallbackRoute(prisma: PrismaClient, points: readonly PathPoint[]): Promise<PointRoute> {
-  const [zoneMap, stored] = await Promise.all([getZoneMap(prisma), getStoredZoneRoutes(prisma)]);
-  const zones = [...zoneMap.values()];
+  const [zones, stored] = await Promise.all([getActiveZones(prisma), getStoredZoneRoutes(prisma)]);
   const routes = indexRoutes(stored);
   const path: PathPoint[] = [points[0]!];
   const legs: RouteLegSummary[] = [];

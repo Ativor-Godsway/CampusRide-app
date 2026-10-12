@@ -123,7 +123,8 @@ export interface PrecomputeReport {
 export async function precomputeZoneRoutes(prisma: PrismaClient, opts: PrecomputeOptions): Promise<PrecomputeReport> {
   const log = opts.log ?? (() => {});
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const zones = await prisma.zone.findMany({ orderBy: { name: "asc" } });
+  // Zones in service only: no route is fetched to or from a retired zone.
+  const zones = await prisma.zone.findMany({ where: { retiredAt: null }, orderBy: { name: "asc" } });
   const existing = opts.onlyMissing
     ? new Set(
         (await prisma.zoneRoute.findMany({ select: { fromZoneId: true, toZoneId: true } })).map(

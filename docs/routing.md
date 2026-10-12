@@ -63,7 +63,8 @@ ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" \
 ```
 
 It prints each route as it saves it and a summary. It only writes `ZoneRoute`
-rows. Re-run it only if zones change.
+rows. Re-run it only if zones change. Retired zones (`Zone.retiredAt`) are
+skipped.
 
 ## Routes between exact pins (per trip)
 

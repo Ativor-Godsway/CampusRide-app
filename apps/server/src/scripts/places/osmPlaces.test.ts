@@ -89,8 +89,13 @@ describe("the CSV", () => {
     expect(rows.every((r) => isInServiceArea(r))).toBe(true);
     expect(new Set(rows.map((r) => r.source)).size).toBe(rows.length);
     const names = rows.map((r) => r.name);
-    for (const must of ["Balme Library", "Commonwealth Hall", "Night Market", "Main Gate", "University of Ghana Hospital", "Accra Mall"]) {
+    for (const must of ["Balme Library", "Commonwealth Hall", "Night Market", "Main Gate", "University of Ghana Hospital"]) {
       expect(names).toContain(must);
     }
+    // The owner's review, 2026-10-12: campus only, International House gone, no "West Gate".
+    for (const gone of ["Accra Mall", "Accra Mall Roundabout", "Atomic Junction", "Okponglo", "Shiashie", "Tetteh Quarshie Interchange", "UPS Junction", "International House"]) {
+      expect(names).not.toContain(gone);
+    }
+    expect(rows.find((r) => r.name === "Legon Barrier")!.aliases).toEqual(["Barrier"]);
   });
 });

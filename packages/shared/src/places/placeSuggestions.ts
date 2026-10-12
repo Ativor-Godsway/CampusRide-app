@@ -13,7 +13,6 @@ export const POPULAR_ZONE_NAMES = [
   "Main Gate",
   "Great Hall",
   "School of Business",
-  "Accra Mall Junction",
   "Sports Stadium",
 ] as const;
 

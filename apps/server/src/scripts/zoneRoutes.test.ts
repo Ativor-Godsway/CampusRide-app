@@ -66,4 +66,28 @@ describe("precomputeZoneRoutes", () => {
     });
     expect(again).toMatchObject({ saved: 1, skipped: n * (n - 1) - 1, failed: [] });
   });
+
+  it("never fetches a route to or from a retired zone", async () => {
+    const retired = await prisma.zone.create({
+      data: { name: `Retired ${Date.now()}`, quadrant: "SOUTH", latitude: 5.6505, longitude: -0.19, retiredAt: new Date() },
+    });
+    try {
+      const n = await prisma.zone.count({ where: { retiredAt: null } });
+      const touched: string[] = [];
+      const report = await precomputeZoneRoutes(prisma, {
+        provider: "test" as never,
+        onlyMissing: false,
+        minIntervalMs: 0,
+        fetchOne: async (from, to) => {
+          touched.push((from as { id?: string }).id ?? "", (to as { id?: string }).id ?? "");
+          return { polyline: "x", distanceMeters: 1, durationSeconds: 1 };
+        },
+      });
+      expect(report.pairs).toBe(n * (n - 1));
+      expect(touched).not.toContain(retired.id);
+    } finally {
+      await prisma.zoneRoute.deleteMany({ where: { provider: "test" } });
+      await prisma.zone.delete({ where: { id: retired.id } });
+    }
+  });
 });

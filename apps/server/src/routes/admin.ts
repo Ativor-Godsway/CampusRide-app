@@ -10,7 +10,7 @@ import {
   type PlaceCategory,
 } from "@rida/shared";
 import { requireAuth, requireAdmin } from "../middleware/auth";
-import { getZoneMap } from "../services/zones/zoneCache";
+import { getActiveZones } from "../services/zones/zoneCache";
 import { clearPlaceCache } from "../services/places/placeCache";
 
 /**
@@ -336,7 +336,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
     const input = parsePlaceInput(request.body, false);
     if ("error" in input) return reply.code(400).send({ error: input.error });
 
-    const zone = nearestZone(input.latitude!, input.longitude!, [...(await getZoneMap(prisma)).values()]);
+    const zone = nearestZone(input.latitude!, input.longitude!, await getActiveZones(prisma));
     if (!zone) return reply.code(409).send({ error: "No zones exist yet" });
 
     const place = await prisma.$transaction(async (tx) => {
@@ -383,7 +383,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
 
     const moved = input.latitude !== undefined && (input.latitude !== before.latitude || input.longitude !== before.longitude);
     const zone = moved
-      ? nearestZone(input.latitude!, input.longitude!, [...(await getZoneMap(prisma)).values()])
+      ? nearestZone(input.latitude!, input.longitude!, await getActiveZones(prisma))
       : null;
     const action =
       input.isActive === false && before.isActive
