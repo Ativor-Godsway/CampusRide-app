@@ -9,6 +9,8 @@ export interface SimOptions {
   sharedRatio: number;
   /** Share of riders who give up if nobody accepts within 20–60s (0–1). */
   cancelRatio: number;
+  /** Every rider cancels this many seconds after requesting if nobody accepted (overrides cancelRatio). */
+  cancelAfterSec: number | null;
   /** Force pickups into the zone whose name contains this text. */
   zone: string | null;
   /** Fire this many requests at once on start. */
@@ -30,13 +32,17 @@ the driver app with one phone. See docs/testing/SOLO_TESTING.md.
   --max-open <n>        most unaccepted requests at once        (default 4)
   --shared-ratio <0-1>  share of requests that are Shared       (default 0.7)
   --cancel-ratio <0-1>  share of riders who give up waiting     (default 0.15)
+  --cancel-after <sec>  EVERY rider cancels this long after requesting if
+                        nobody accepted — e.g. 8, to see an offer withdrawn
+                        while it's on your screen
   --zone <name>         force pickups in this zone, e.g. --zone "Balme"
   --burst <n>           fire n requests at once on start, e.g. --burst 5
   --riders <n>          number of fake riders, max ${MAX_SIM_RIDERS}             (default 10)
   --api <url>           your local server                       (default http://localhost:3000)
   --help                show this help
 
-Stop with Ctrl+C.
+While it runs, press  c  to make the newest waiting rider cancel right now
+(their offer closes on your phone). Stop with Ctrl+C.
 `;
 
 export class SimOptionError extends Error {}
@@ -59,6 +65,7 @@ export function parseSimOptions(argv: string[], env: NodeJS.ProcessEnv = {}): Si
     maxOpen: 4,
     sharedRatio: 0.7,
     cancelRatio: 0.15,
+    cancelAfterSec: null,
     zone: null,
     burst: 0,
     riders: 10,
@@ -83,6 +90,7 @@ export function parseSimOptions(argv: string[], env: NodeJS.ProcessEnv = {}): Si
       case "--max-open": opts.maxOpen = num(flag, value, 1, MAX_SIM_RIDERS, true); break;
       case "--shared-ratio": opts.sharedRatio = num(flag, value, 0, 1, false); break;
       case "--cancel-ratio": opts.cancelRatio = num(flag, value, 0, 1, false); break;
+      case "--cancel-after": opts.cancelAfterSec = num(flag, value, 3, 600, false); break;
       case "--burst": opts.burst = num(flag, value, 1, MAX_SIM_RIDERS, true); break;
       case "--riders": opts.riders = num(flag, value, 2, MAX_SIM_RIDERS, true); break;
       case "--zone":

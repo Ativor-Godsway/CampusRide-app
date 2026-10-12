@@ -511,6 +511,10 @@ model RideRejection {
   rideId       String
   driverUserId String
   createdAt    DateTime @default(now())
+  /// Why (2026-10, ride offers): "DECLINED" (the driver tapped Decline) or
+  /// "TIMED_OUT" (the offer's countdown ran out). For stats only — neither
+  /// penalises the driver. Null on rows from before offers.
+  reason       String?  @db.VarChar(20)
 
   ride   Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
   driver User @relation("DriverRejections", fields: [driverUserId], references: [id], onDelete: Cascade)

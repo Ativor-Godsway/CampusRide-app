@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as SecureStore from "expo-secure-store";
 import {
   CAR_SEATS,
+  DEFAULT_OFFER_SECONDS,
   NO_SHOW_AFTER_MS,
   addRiderPreviewLabel,
   classifyActionFailure,
@@ -66,9 +67,12 @@ import {
 import { driverActiveRideQueryKey, useDriverActiveTrip } from "../../lib/activeTrip";
 import { useDriverLocation, useLocationDemand } from "../../lib/location";
 import { useZoneRoutes, useZones } from "../../lib/zones";
+import { CountdownRing } from "../../components/offers/CountdownRing";
+import { alertNewOffer, tapFeedback } from "../../lib/offerAlert";
 import {
   claimPassengerId,
   clearClaim,
+  runRejectOffer,
   overlayPassengers,
   runAddRider,
   runPassengerAction,
@@ -363,6 +367,15 @@ export default function TripScreen() {
     if (message) setRefusal(message);
   }, []);
 
+  /** Skip (or the countdown ran out) on an automatic offer: recorded, never offered again. */
+  const passOnOffer = useCallback(
+    (reason: "DECLINED" | "TIMED_OUT") => {
+      if (previewing && !previewing.manual) runRejectOffer(previewing.suggestion.requestRideId, reason);
+      closePreview();
+    },
+    [previewing, closePreview],
+  );
+
   const previewQuery = useQuery({
     queryKey: ["addPreview", ride?.id, previewId],
     queryFn: () => getAddRiderPreview(ride!.id, previewId!, positionRef.current),
@@ -373,6 +386,31 @@ export default function TripScreen() {
     retry: (count, err) => classifyActionFailure(errorStatus(err)) === "retry" && count < 3,
   });
   const previewData = previewQuery.data?.requestRideId === previewId ? previewQuery.data : undefined;
+
+  // ─── Mid-trip OFFER: a rider who fits, offered with a countdown ─────────
+  // Only once the server's preview has passed the detour check (seats and
+  // the 5-minute limit): an offer that would break it is never shown. It
+  // counts down like a Home offer; Skip or running out records it on the
+  // server so this rider isn't offered to this driver again. A rider the
+  // driver opened themselves (Add rider / See route) has no countdown.
+  const autoOffer = previewing !== null && !previewing.manual;
+  const [offerClock, setOfferClock] = useState<{ rideId: string; shownAt: number; deadline: number } | null>(null);
+  useEffect(() => {
+    if (!autoOffer || !previewData || offerClock?.rideId === previewData.requestRideId) return;
+    const shownAt = Date.now();
+    const own = shownAt + DEFAULT_OFFER_SECONDS * 1000;
+    const requestEnds = Date.parse(previewData.expiresAt);
+    setOfferClock({ rideId: previewData.requestRideId, shownAt, deadline: Number.isFinite(requestEnds) ? Math.min(own, requestEnds) : own });
+    alertNewOffer();
+  }, [autoOffer, previewData, offerClock?.rideId]);
+  useEffect(() => {
+    if (!autoOffer) setOfferClock(null);
+  }, [autoOffer]);
+  useEffect(() => {
+    if (!offerClock || committing) return;
+    const t = setTimeout(() => passOnOffer("TIMED_OUT"), Math.max(0, offerClock.deadline - Date.now()));
+    return () => clearTimeout(t);
+  }, [offerClock, committing, passOnOffer]);
 
   // A refusal (the request was taken, the car filled up) ends the preview;
   // say why only if the driver opened it themselves.
@@ -496,6 +534,18 @@ export default function TripScreen() {
     navigation.setOptions({ gestureEnabled: !tripRunning, fullScreenGestureEnabled: false });
   }, [navigation, tripRunning]);
 
+  // Accept refused ("Ride taken by another driver"): say why, then back to
+  // Home by itself — the driver is never left on a dead screen.
+  const refused = !serverRide && claim?.state === "refused";
+  useEffect(() => {
+    if (!refused) return;
+    const t = setTimeout(() => {
+      clearClaim();
+      goHome();
+    }, 2_500);
+    return () => clearTimeout(t);
+  }, [refused, goHome]);
+
   if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
 
   // ─── Done ────────────────────────────────────────────────────────────────
@@ -531,11 +581,11 @@ export default function TripScreen() {
       <Screen>
         <View style={styles.center}>
           <Illustration name="searchEmpty" size={140} />
-          <Text variant="h2" style={styles.centerText}>
-            Not accepted
+          <Text variant="h2" style={styles.centerText} accessibilityRole="alert">
+            {claim.message ?? "Not accepted"}
           </Text>
           <Text variant="bodySmall" color="muted" style={styles.centerText}>
-            {claim.message}
+            Taking you back to Home…
           </Text>
           <Button
             label="Back to Home"
@@ -656,25 +706,59 @@ export default function TripScreen() {
           </View>
         ) : null}
 
-        {previewing ? (
+        {previewing && (!autoOffer || previewData) ? (
           <View style={styles.previewCard} accessibilityLiveRegion="polite">
+            {autoOffer && offerClock ? (
+              <CountdownRing deadline={offerClock.deadline} totalMs={offerClock.deadline - offerClock.shownAt} size={44} stroke={4} />
+            ) : null}
             <View style={styles.previewText}>
               <Text variant="label" style={styles.previewKicker}>
-                {previewing.suggestion.compatible ? "NEW RIDER ON YOUR ROUTE" : "ADD THIS RIDER?"}
+                {autoOffer ? "NEW RIDER ON YOUR ROUTE" : "ADD THIS RIDER?"}
               </Text>
               <Text variant="bodyMedium" style={styles.previewRoute} numberOfLines={1}>
                 {previewing.suggestion.pickupPlaceName ?? previewing.suggestion.pickupZoneName} →{" "}
                 {previewing.suggestion.dropoffPlaceName ?? previewing.suggestion.dropoffZoneName}
               </Text>
-              <Text variant="caption" color="muted">
+              <Text variant="caption" color="muted" numberOfLines={2}>
                 {previewData
-                  ? `Adds ~${previewData.addedMinutes} min · +${formatCedis(previewData.farePesewas)}`
+                  ? [
+                      passengers.some((p) => p.status === "PICKED_UP")
+                        ? previewData.maxOnboardDelayMinutes > 0
+                          ? `+${previewData.maxOnboardDelayMinutes} min for riders on board`
+                          : "No delay for riders on board"
+                        : `Adds ~${previewData.addedMinutes} min`,
+                      `+${formatCedis(previewData.farePesewas)}`,
+                      `${Math.max(0, freeSeats - 1)} seat${freeSeats - 1 === 1 ? "" : "s"} left`,
+                    ].join(" · ")
                   : "Working out the route…"}
               </Text>
             </View>
             <View style={styles.previewButtons}>
-              <Button label="Skip" variant="secondary" fullWidth={false} onPress={() => closePreview()} disabled={committing} />
-              <Button label="Add" fullWidth={false} onPress={acceptPreview} disabled={!previewData || committing} />
+              <Pressable
+                onPress={() => {
+                  tapFeedback();
+                  passOnOffer("DECLINED");
+                }}
+                disabled={committing}
+                accessibilityRole="button"
+                accessibilityLabel={autoOffer ? "Decline this rider" : "Skip"}
+                hitSlop={8}
+                style={styles.previewSkip}
+              >
+                <Ionicons name="close" size={20} color={colors.ink[600]} />
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  tapFeedback();
+                  acceptPreview();
+                }}
+                disabled={!previewData || committing}
+                accessibilityRole="button"
+                accessibilityLabel={previewData ? `Add this rider, plus ${formatCedis(previewData.farePesewas)}` : "Add this rider"}
+                style={({ pressed }) => [styles.previewAdd, (pressed || committing) && styles.previewAddPressed]}
+              >
+                <Text style={styles.previewAddText}>Add</Text>
+              </Pressable>
             </View>
           </View>
         ) : null}
@@ -1109,7 +1193,26 @@ const styles = StyleSheet.create({
   previewText: { flex: 1, gap: 2, minWidth: 0 },
   previewKicker: { color: colors.primary[600] },
   previewRoute: { fontWeight: typography.weight.bold },
-  previewButtons: { flexDirection: "row", gap: spacing.xs },
+  previewButtons: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  previewSkip: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.white,
+  },
+  previewAdd: {
+    minWidth: 76,
+    height: 44,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primary[500],
+  },
+  previewAddPressed: { backgroundColor: colors.primary[600] },
+  previewAddText: { color: colors.white, fontSize: 16, fontWeight: typography.weight.extrabold },
   refusal: {
     flexDirection: "row",
     alignItems: "center",

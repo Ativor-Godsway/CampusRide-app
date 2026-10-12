@@ -221,3 +221,13 @@ export async function routeThroughPoints(prisma: PrismaClient, points: readonly 
   if (live) logger.info("point route fallback", { event: "osrm_fallback", fallbacksToday: count("fallbacks") });
   return fallbackRoute(prisma, points);
 }
+
+/**
+ * A route estimate that never waits: OSRM's answer if this server already
+ * has it in memory, else the zone-road fallback. For numbers shown on a ride
+ * offer ("Trip 6 min · 2.3 km"), where a slow OSRM call must not hold up the
+ * offer list.
+ */
+export async function estimateRoute(prisma: PrismaClient, points: readonly PathPoint[]): Promise<PointRoute> {
+  return memory.get(pointRouteKey(points)) ?? fallbackRoute(prisma, points);
+}

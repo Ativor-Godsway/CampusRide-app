@@ -192,6 +192,12 @@ export const config = {
    */
   enableUssd: process.env.ENABLE_USSD === "true",
   /**
+   * How long a ride offer stays up on a driver's screen before it times out
+   * (seconds). The app reads it from each offer, so changing it needs no app
+   * release. Clamped to 5–60.
+   */
+  driverOfferSeconds: Math.min(60, Math.max(5, Number(process.env.DRIVER_OFFER_SECONDS ?? 15) || 15)),
+  /**
    * Road routes between exact pins (services/routing/pointRoutes.ts). OSRM's
    * public demo server by default; point OSRM_BASE_URL at a self-hosted OSRM
    * when we outgrow it (docs/routing.md). ROUTING_DISABLED=true serves only

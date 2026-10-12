@@ -1,6 +1,8 @@
 import type { PrismaClient, Ride } from "@prisma/client";
 import { getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
-import { emitDriverBroadcast } from "../../realtime/rideSocket";
+import { emitDriverBroadcast, emitOfferClosed } from "../../realtime/rideSocket";
+import { logger } from "../../lib/logger";
+import type { OfferClosedReason } from "@rida/shared";
 import { DriverHasActiveRideError, RideAlreadyClaimedError } from "./errors";
 import { ACTIVE_DRIVER_STATUSES } from "./stateMachine";
 import { requestPlaceNames } from "../../routes/ridePins";
@@ -10,10 +12,16 @@ import { requestPlaceNames } from "../../routes/ridePins";
  * online + approved drivers currently in the ride's pickup zone or a zone
  * adjacent to it. This is the candidate set only — ranking/"perfect match"
  * ordering of these candidates is Phase 2c, not handled here.
+ *
+ * With the ride's `id` (ride offers, 2026-10), drivers who already declined
+ * or let this ride's offer time out are left out: it is never offered to
+ * them again. Drivers on a trip stay in: a shared car with a free seat is
+ * offered riders mid-trip (fill-suggestions); the broadcast only tells the
+ * app to look.
  */
 export async function getEligibleDrivers(
   prisma: PrismaClient,
-  ride: { pickupZoneId: string },
+  ride: { id?: string; pickupZoneId: string },
 ) {
   // Edges to or from a retired zone don't count: eligibility never flows
   // through a zone that is out of service.
@@ -37,8 +45,25 @@ export async function getEligibleDrivers(
       isApproved: true,
       currentZoneId: { in: Array.from(zoneIds) },
       currentZone: { retiredAt: null },
+      ...(ride.id ? { user: { rideRejections: { none: { rideId: ride.id } } } } : {}),
     },
   });
+}
+
+/**
+ * A request stopped being available — another driver took it, the rider
+ * cancelled, or its window ran out. Every driver it could have been offered
+ * to hears `ride:offer_closed` and drops it from their offer queue and list
+ * at once, instead of on the next poll. Fire-and-forget: never throws.
+ */
+export function closeOffer(
+  prisma: PrismaClient,
+  ride: { id: string; pickupZoneId: string },
+  reason: OfferClosedReason,
+): void {
+  void getEligibleDrivers(prisma, { pickupZoneId: ride.pickupZoneId })
+    .then((drivers) => emitOfferClosed(drivers.map((d) => d.userId), { rideId: ride.id, reason }))
+    .catch((err) => logger.warn("closeOffer failed", { rideId: ride.id, err }));
 }
 
 /**
@@ -52,7 +77,7 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
     where: { id: rideId },
     include: { pickupZone: true, dropoffZone: true },
   });
-  const eligible = await getEligibleDrivers(prisma, ride);
+  const eligible = await getEligibleDrivers(prisma, { id: ride.id, pickupZoneId: ride.pickupZoneId });
 
   if (eligible.length > 0) {
     const farePesewas =

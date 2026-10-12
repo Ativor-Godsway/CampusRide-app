@@ -14,6 +14,7 @@ import {
   passengerCancel,
   passengerDropoff,
   passengerPickup,
+  rejectRide,
   serverReason,
   type EligibleRideItem,
   type FillSuggestion,
@@ -352,6 +353,17 @@ export function runClaim(request: EligibleRideItem) {
       hooks.refresh();
     }
   });
+}
+
+/**
+ * Pass on an offer (Decline, or its countdown ran out): the card is already
+ * gone; this records it so the ride is never offered to this driver again.
+ * Sent outside the trip queue — it must never hold up a trip action — and
+ * retried quietly until answered. A refusal (the ride was taken meanwhile)
+ * means there's nothing left to decline: ignored.
+ */
+export function runRejectOffer(rideId: string, reason: "DECLINED" | "TIMED_OUT") {
+  void sendUntilAnswered((timeoutMs) => rejectRide(rideId, reason, { timeoutMs }), "", () => {}).catch(() => {});
 }
 
 export function clearClaim() {

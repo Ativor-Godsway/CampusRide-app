@@ -468,6 +468,49 @@ E9. **Choose a ride** → **Move pin** → drag the green pin ✔ it can't go mo
     than 200 m (a light circle shows how far); **Add a note for your driver**;
     request. ✔ The driver sees the moved pin and the note.
 
+### Ride offer pop-ups
+
+O1. Online and free on **Home**, start riders:
+    `npm run sim:riders -- --zone Balme --interval 20`. ✔ Each new request
+    **slides up as a card** with a buzz and a short chime (iPhone on silent:
+    buzz only): fare large, Ride alone / Shared · seats, pickup → drop-off
+    by name, "To pickup" and "Trip" minutes and distance, the rider's first
+    name (and rating once drivers have rated them), a countdown ring from 15,
+    a big **Accept** and a small **Decline**. No map pin, no note.
+O2. **Queue:** stop it and run `npm run sim:riders -- --zone Balme --burst 4
+    --interval 300`. ✔ One card at a time, nearest pickup first, "+3 more
+    waiting"; each decline or timeout brings the next. The Home list behind
+    still shows all of them.
+O3. **Decline** one. ✔ The card closes; that request never pops up again
+    (it disappears from your list too) — the simulator's other riders are
+    unaffected.
+O4. **Let one run out.** ✔ At 0 the card closes by itself and that request
+    isn't offered to you again.
+O5. **Accept.** ✔ The trip opens at once (no waiting). Finish or cancel it.
+O6. **Withdrawn while showing:** with a card up, press **c** in the
+    simulator terminal (the newest waiting rider cancels). ✔ If that was the
+    card on screen it closes with "The rider cancelled"; if it was queued,
+    "+N more" drops by one. Or run with `--cancel-after 8` to make every
+    rider give up 8 s after requesting.
+O7. **Taken by someone else:** there's no second driver on one phone, so
+    this is covered by the server tests (two accepts at once: exactly one
+    wins, the other gets "Ride taken by another driver"). On the phone, if
+    an accept is refused, the trip screen says why and goes back to Home on
+    its own after ~2 s.
+O8. **Background:** with a card showing, switch to another app for 20 s and
+    come back. ✔ No expired card is waiting; the next live one (if any) pops
+    up. While the app is in the background **no offers are shown and no
+    sound plays** — keep the app open while online (push notifications come
+    with the Android pilot build).
+O9. **Mid-trip offer (Shared):** accept a Shared request, then keep the
+    simulator running with `--shared-ratio 1`. ✔ When a rider who fits your
+    route appears (within the 5-minute detour limit, a free seat), a
+    **compact card** appears above the NEXT STOP card — countdown, pickup →
+    drop-off, "+N min for riders on board" (or "Adds ~N min" before anyone
+    is on board), "+GH₵5", "N seats left" — with the dotted route on the
+    map. The NEXT STOP card and slider stay visible. **Add** → the new stops
+    join the stop list; **✕** or running out → closes, never offered again.
+
 ### Also check
 
 18. **A rider cancels:** with a trip running, cancel from the simulator side

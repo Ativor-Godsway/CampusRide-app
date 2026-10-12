@@ -128,11 +128,20 @@ export async function rateRider(input: {
 }
 
 /**
- * Explicitly decline a broadcast ride. Hides it from THIS driver's list
- * without withdrawing it from anyone else. Idempotent server-side.
+ * Explicitly decline a broadcast ride — tapped Decline, or let the offer's
+ * countdown run out (recorded for stats, never a penalty). Hides it from
+ * THIS driver for good without withdrawing it from anyone else. Idempotent.
  */
-export async function rejectRide(rideId: string): Promise<void> {
-  await api.post(`/rides/${rideId}/reject`);
+export async function rejectRide(
+  rideId: string,
+  reason: "DECLINED" | "TIMED_OUT" = "DECLINED",
+  options?: { timeoutMs?: number },
+): Promise<void> {
+  await api.post(
+    `/rides/${rideId}/reject`,
+    { reason },
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
+  );
 }
 
 export async function getDriverActiveRide(): Promise<RideWithZones | null> {
@@ -196,11 +205,34 @@ export interface EligibleRideItem {
   createdAt: string;
   /** True if this driver is the best-fit match for this ride (Phase-2e scoring). */
   bestFit: boolean;
+  /**
+   * Ride offers (servers from 2026-10; absent from older ones). Numbers and
+   * names only — the server never sends a pickup's coordinates or the
+   * rider's note before the driver accepts.
+   */
+  /** Average stars drivers gave this rider, or null if none yet. */
+  riderRating?: number | null;
+  /** From the driver to the pickup's named place, rounded. */
+  pickupDistanceMeters?: number | null;
+  pickupMinutes?: number | null;
+  /** The trip itself, pickup to drop-off. */
+  tripDistanceMeters?: number | null;
+  tripMinutes?: number | null;
+  /** When the request stops being offered at all (ISO). */
+  expiresAt?: string;
+  /** How long the offer's countdown runs, set by the server. */
+  offerSeconds?: number;
 }
 
-/** Fetch the list of REQUESTED rides this driver is currently eligible to claim. */
-export async function getEligibleRides(): Promise<EligibleRideItem[]> {
-  const res = await api.get<{ rides: EligibleRideItem[] }>("/driver/rides/eligible");
+/**
+ * Fetch the list of REQUESTED rides this driver is currently eligible to
+ * claim — the Home list and the offer pop-ups. Pass the driver's position
+ * so each offer says how far the pickup is from them.
+ */
+export async function getEligibleRides(position?: { latitude: number; longitude: number } | null): Promise<EligibleRideItem[]> {
+  const res = await api.get<{ rides: EligibleRideItem[] }>("/driver/rides/eligible", {
+    params: position ? { lat: position.latitude.toFixed(5), lng: position.longitude.toFixed(5) } : undefined,
+  });
   return readList<EligibleRideItem>(res.data, "rides");
 }
 
@@ -493,6 +525,8 @@ export interface AddRiderPreviewResult {
   driverSharePesewas: number;
   addedSeconds: number;
   addedMinutes: number;
+  /** How much later the most-delayed rider already in the car is dropped off (0 with nobody on board). */
+  maxOnboardDelayMinutes: number;
   /** When the request stops being offered (ISO). */
   expiresAt: string;
   pickupIndex: number;

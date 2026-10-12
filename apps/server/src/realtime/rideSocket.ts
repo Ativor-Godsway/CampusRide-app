@@ -10,6 +10,7 @@ import {
   type RideServerEventPayloads,
   type RideBroadcastPayload,
   type DriverLocationUpdatePayload,
+  type OfferClosedPayload,
 } from "@rida/shared";
 import { verifyAccessToken } from "../services/auth/tokens";
 
@@ -188,6 +189,12 @@ export function emitToRider<E extends RideServerEvent>(
 }
 
 /** Emits a ride:broadcast event to all specified driver user rooms. */
+/** A request offered to these drivers is gone (taken, cancelled, expired): their apps drop it at once. */
+export function emitOfferClosed(driverUserIds: string[], payload: OfferClosedPayload): void {
+  if (!ioRef || driverUserIds.length === 0) return;
+  ioRef.to(driverUserIds.map(roomForDriver)).emit(DRIVER_EVENTS.OFFER_CLOSED, payload);
+}
+
 export function emitDriverBroadcast(
   driverUserIds: string[],
   payload: RideBroadcastPayload,
