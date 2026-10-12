@@ -9,11 +9,15 @@
     "match anything are reported as stale so they get deleted rather than",
     "silently widening the exception over time.",
     "",
-    "CURRENTLY EMPTY. Phase 3B upgraded Expo SDK 54 -> 57, which cleared all",
-    "four previously-accepted entries (image-size x2, postcss x2 — they came",
-    "from expo@54's build toolchain). The gate reported them as stale, which",
-    "is how they were found and removed. Any high/critical advisory now fails",
-    "CI until it is fixed or deliberately listed here.",
+    "Phase 3B (Expo SDK 54 -> 57) cleared the four earlier entries (image-size x2,",
+    "postcss x2), which the gate then reported as stale and they were removed.",
+    "",
+    "2026-10-12: the two entries below have NO patched release (latest braces 3.0.3",
+    "and node-forge 1.4.0 are the vulnerable versions) and are reached only through",
+    "build/dev tooling, never the deployed server or the apps. Re-check by reviewBy;",
+    "once a fixed version ships, `npm update braces node-forge` and delete the entry.",
+    "The same day, http-cache-semantics, shell-quote and source-map-js were fixed by",
+    "a lockfile-only update.",
     "",
     "The 14 findings that remain are all MODERATE and therefore below this",
     "gate's threshold. They sit in @expo/* build tooling and expo-router's",
@@ -21,5 +25,18 @@
     "there is no version to upgrade to; npm's suggested 'fixes' for them are",
     "downgrades to expo@46 / expo-router@5 and are not real."
   ],
-  "allow": []
+  "allow": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "Stack-exhaustion DoS from deeply nested brace patterns. No patched version exists (<=3.0.3 = latest). Reached only via micromatch in Expo/Metro's file watcher and chokidar under ts-node-dev (local dev server); patterns come from our own config, never from users, and none of it runs in the deployed server (node dist/) or the apps.",
+      "reviewBy": "2027-01-12"
+    },
+    {
+      "id": "GHSA-86w9-cpqp-85rv",
+      "package": "node-forge",
+      "reason": "RSA PKCS#1 v1.5 signature forgery with low-exponent keys. No patched version exists (<=1.4.0 = latest). Reached only via @expo/cli and @expo/code-signing-certificates (Expo Updates code signing on a developer machine); we don't use Expo Updates code signing, and nothing at runtime loads node-forge.",
+      "reviewBy": "2027-01-12"
+    }
+  ]
 }
