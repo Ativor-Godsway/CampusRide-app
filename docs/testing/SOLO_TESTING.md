@@ -312,6 +312,52 @@ https://campusride-server-aaum.onrender.com`.
 
 ---
 
+## Testing the rider app with a fake driver (`sim:driver`)
+
+A fake driver, **Kwame (test)**, that behaves exactly like the driver app
+(real HTTP routes and the real socket): it goes online at a campus place,
+accepts **your** newest ride request (never a `sim:riders` fake rider's),
+drives the real road route to your exact pickup sending its position about
+once a second, arrives, waits, picks you up, drives to your drop-off and
+completes the trip. Development only: it refuses production and any
+non-local server.
+
+1. Server running (Step 2), `ENABLE_MOCK_DRIVER=false` (the server's own
+   mock driver would grab your request first).
+2. Point the **rider** app at your Mac (as in Step 4, with
+   `apps/rider/.env.development.local`) and sign in as a rider.
+3. In a second terminal:
+
+   ```bash
+   npm run sim:driver
+   ```
+
+   It prints "Online at Main Gate" and waits for a request.
+4. In the rider app, plan a ride and request it (either type).
+5. ✔ Within ~2 s: "Your driver is on the way" with Kwame, a white Toyota
+   Corolla, GT 1234-26. The car moves along the road on your map towards
+   your pickup pin, about once a second, and the ETA counts down.
+6. ✔ At your pickup: "Your driver has arrived". After the wait: you're in
+   the car, and the car drives to your drop-off.
+7. ✔ At the drop-off: trip complete, fare, rating. The terminal says
+   "trip complete" and Kwame goes offline. Run it again for another trip.
+
+Options:
+
+| Flag | What it does | Default |
+|---|---|---|
+| `--speed <km/h>` | how fast Kwame drives (5–120) | 30 |
+| `--wait <sec>` | how long he waits at your pickup (0–300) | 10 |
+| `--at <place>` | where he starts, e.g. `--at "Night Market"` | Main Gate |
+
+Also try: cancel in the rider app while he's driving — ✔ the terminal says
+"The ride was cancelled — stopping" and he goes offline. Ctrl+C at any time
+also takes him offline.
+
+Kwame is an approved driver account on the dev database (phone
++233099900001). `sim:cleanup` doesn't remove him: his finished trips are
+part of your rider account's history.
+
 ## Testing the rider app on its own (mock driver)
 
 For testing the rider app, the server can play a fake driver ("Kwame Mensah").

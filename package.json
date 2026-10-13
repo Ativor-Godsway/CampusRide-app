@@ -20,6 +20,7 @@
     "db:deploy:dev": "npm run db:deploy:dev --workspace=apps/server",
     "db:status:dev": "npm run db:status:dev --workspace=apps/server",
     "sim:riders": "npm run sim:riders --workspace=apps/server --",
+    "sim:driver": "npm run sim:driver --workspace=apps/server --",
     "sim:cleanup": "npm run sim:cleanup --workspace=apps/server",
     "sim:approve-driver": "npm run sim:approve-driver --workspace=apps/server --",
     "lint": "eslint .",

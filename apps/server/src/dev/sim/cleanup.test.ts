@@ -139,3 +139,29 @@ describe("simulator rider names", () => {
     await cleanupSimulatorData(prisma);
   });
 });
+
+describe("the fake driver (sim:driver)", () => {
+  it("is an approved driver with a complete car, reused on every run, and left alone by sim:cleanup", async () => {
+    const { ensureSimDriver, SIM_DRIVER_PHONE } = await import("./simAccounts");
+    const first = await ensureSimDriver(prisma);
+    const again = await ensureSimDriver(prisma);
+    expect(again.id).toBe(first.id);
+    expect(first.name).toBe("Kwame (test)");
+    const driver = await prisma.driver.findUniqueOrThrow({ where: { userId: first.id } });
+    expect(driver).toMatchObject({ isApproved: true, carMake: "Toyota", carModel: "Corolla", carColor: "White" });
+    expect(driver.plate).toBeTruthy();
+
+    await cleanupSimulatorData(prisma);
+    expect(await prisma.user.findUnique({ where: { phone: SIM_DRIVER_PHONE } })).not.toBeNull();
+
+    await prisma.driver.delete({ where: { userId: first.id } });
+    await prisma.user.delete({ where: { id: first.id } });
+  });
+
+  it("refuses its phone number if a real account has it", async () => {
+    const { ensureSimDriver, SIM_DRIVER_PHONE } = await import("./simAccounts");
+    const someone = await prisma.user.create({ data: { phone: SIM_DRIVER_PHONE, name: "Real Person", role: "DRIVER" } });
+    await expect(ensureSimDriver(prisma)).rejects.toThrow(/Refusing/);
+    await prisma.user.delete({ where: { id: someone.id } });
+  });
+});
