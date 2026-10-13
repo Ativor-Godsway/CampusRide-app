@@ -504,12 +504,27 @@ O8. **Background:** with a card showing, switch to another app for 20 s and
     with the Android pilot build).
 O9. **Mid-trip offer (Shared):** accept a Shared request, then keep the
     simulator running with `--shared-ratio 1`. ✔ When a rider who fits your
-    route appears (within the 5-minute detour limit, a free seat), a
-    **compact card** appears above the NEXT STOP card — countdown, pickup →
-    drop-off, "+N min for riders on board" (or "Adds ~N min" before anyone
-    is on board), "+GH₵5", "N seats left" — with the dotted route on the
-    map. The NEXT STOP card and slider stay visible. **Add** → the new stops
-    join the stop list; **✕** or running out → closes, never offered again.
+    route appears (within the 5-minute detour limit, a free seat), a simple
+    card appears above the NEXT STOP card: a thin bar along its top edge
+    counting down, the pickup (green dot) and drop-off (square) by their
+    FULL names, one big **Add**, and a small **✕** in the corner. The map
+    shows the dotted route with the new pickup (green) and drop-off (black
+    square) ringed in orange and tagged "New". The NEXT STOP card and slider
+    stay visible. **Add** → the new stops join the stop list; **✕** or the
+    bar running out → closes, never offered again.
+
+### The end of a shared trip (fixed 2026-10-13)
+
+T1. Accept a Shared rider, let a second one be added (or add one), then:
+    pick up the first, pick up the second, drop off the first, drop off the
+    second. ✔ After every slide the NEXT STOP card, the seat chip ("2 of 4",
+    "1 of 4", …) and the route on the map move on at once.
+T2. ✔ The last drop-off goes straight to **Trip complete** and STAYS there —
+    it never jumps back to "Pick up … at <first rider's pickup>". Back to
+    Home: no banner, and new offers pop up again.
+T3. The simulator's riders now have different first names (Ama, Kofi,
+    Akosua…, shown as "Ama (test)" in lists), so the stops say "Pick up Ama",
+    "Drop off Kofi".
 
 ### Also check
 

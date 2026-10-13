@@ -120,3 +120,22 @@ describe("cleanupSimulatorData", () => {
     expect(report.accounts).toBe(0);
   });
 });
+
+describe("simulator rider names", () => {
+  it("put the real name first, so the driver app's first names tell riders apart", async () => {
+    const { simRiderName, isSimRiderName } = await import("./simAccounts");
+    expect(simRiderName(0)).toBe("Ama (test)");
+    expect(simRiderName(1)).toBe("Kofi (test)");
+    expect(isSimRiderName("Esi (test)")).toBe(true);
+    expect(isSimRiderName("Test Ama")).toBe(true); // older accounts
+    expect(isSimRiderName("Ama Mensah")).toBe(false);
+  });
+
+  it("renames an account from before (\"Test Ama\") on the next run", async () => {
+    const phone = simRiderPhone(0);
+    await prisma.user.upsert({ where: { phone }, update: { name: "Test Ama" }, create: { phone, name: "Test Ama", role: "RIDER" } });
+    const [ama] = await ensureSimRiders(prisma, 1);
+    expect(ama!.name).toBe("Ama (test)");
+    await cleanupSimulatorData(prisma);
+  });
+});

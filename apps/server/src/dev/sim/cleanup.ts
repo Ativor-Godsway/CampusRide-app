@@ -29,7 +29,7 @@ export class SimCleanupEntangledError extends Error {
  * everything attached to it: its rides, passenger rows, ratings, commission
  * ledger rows, payments, driver rejections, refresh tokens and OTP codes.
  *
- * Scope: ONLY users matching simAccountWhere (the +233099… range, a "Test "
+ * Scope: ONLY users matching simAccountWhere (the +233099… range, a "… (test)" (or old "Test …")
  * name and the RIDER role), re-checked phone by phone in code. Other accounts
  * are never deleted — including the real driver who carried the fake riders;
  * only the rows describing those fake trips go.

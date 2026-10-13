@@ -180,7 +180,7 @@ class Simulator {
     await this.checkServer();
     await this.loadZones();
     this.riders = await ensureSimRiders(this.prisma, this.opts.riders);
-    log("👥", `${this.riders.length} fake riders ready (${this.riders.map((r) => r.name.slice(5)).join(", ")})`);
+    log("👥", `${this.riders.length} fake riders ready (${this.riders.map((r) => r.name.replace(" (test)", "")).join(", ")})`);
     await this.adoptExistingRides();
 
     this.timers.push(setInterval(() => void this.poll(), 2_000));

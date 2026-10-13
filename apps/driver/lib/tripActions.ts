@@ -1,9 +1,13 @@
 import { useSyncExternalStore } from "react";
 import {
   ACTION_RETRY_DELAYS_MS,
+  SEAT_RANK as RANK,
+  applySeatOverlays,
   classifyActionFailure,
   refusalMessage,
+  settleSeatOverlays,
   type PassengerStatus,
+  type SeatOverlay,
 } from "@rida/shared";
 import {
   addPassenger,
@@ -72,9 +76,6 @@ const FALLBACK: Record<PassengerAction, string> = {
   "no-show": "Couldn't mark the no-show.",
 };
 
-/** How far along a seat is; the screen never shows a seat going backwards. */
-const RANK: Record<PassengerStatus, number> = { WAITING: 0, ARRIVED: 1, PICKED_UP: 2, DROPPED_OFF: 3, CANCELLED: 3 };
-
 export class ActionRefusedError extends Error {}
 
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -107,11 +108,6 @@ export async function sendUntilAnswered<T>(
   }
 }
 
-interface SeatOverlay {
-  status: PassengerStatus;
-  arrivedAt?: string;
-}
-
 interface PendingAdd {
   suggestion: FillSuggestion;
   /** The fare the preview quoted, shown on the provisional seat. */
@@ -128,6 +124,12 @@ export interface PendingClaim {
   message: string | null;
   /** The rider's real seat id, once known. */
   passengerId: string | null;
+  /**
+   * The server has listed this trip since the accept. From then on the
+   * provisional trip is never shown again — when the server stops listing
+   * the trip, it has ENDED (see chooseTripSource).
+   */
+  serverSeen: boolean;
 }
 
 interface Snapshot {
@@ -318,7 +320,7 @@ export function runAddRider(
  */
 export function runClaim(request: EligibleRideItem) {
   forRide(request.rideId);
-  set({ claim: { rideId: request.rideId, request, state: "sending", message: null, passengerId: null } });
+  set({ claim: { rideId: request.rideId, request, state: "sending", message: null, passengerId: null, serverSeen: false } });
   let retrying = false;
   const onRetrying = (on: boolean) => {
     if (on !== retrying) setRetrying(on);
@@ -339,7 +341,14 @@ export function runClaim(request: EligibleRideItem) {
           ? (ride.passengers.find((p) => p.riderId === ride.riderId) ?? ride.passengers[0])
           : undefined;
       if (state.claim?.rideId === request.rideId) {
-        set({ claim: { ...state.claim, state: "confirmed", passengerId: seat?.id ?? null } });
+        set({
+          claim: {
+            ...state.claim,
+            state: "confirmed",
+            passengerId: seat?.id ?? null,
+            serverSeen: state.claim.serverSeen || Boolean(ride && ride.id === request.rideId),
+          },
+        });
       }
       if (seat) moveSeat(claimPassengerId(request.rideId), seat.id);
       if (ride) hooks.onRide(ride);
@@ -371,9 +380,7 @@ export function clearClaim() {
 }
 
 function applySeat(p: PassengerInCar): PassengerInCar {
-  const o = state.seats[p.id];
-  if (!o || RANK[p.status] >= RANK[o.status]) return p;
-  return { ...p, status: o.status, arrivedAt: o.arrivedAt ?? p.arrivedAt ?? null };
+  return applySeatOverlays([p], state.seats)[0]!;
 }
 
 /**
@@ -425,18 +432,18 @@ export function finishedLocally(ride: Pick<RideWithZones, "id" | "passengers">):
   );
 }
 
-/** Drops overlays the server has caught up with (call when trip data arrives). */
+/**
+ * The server's trip data arrived: drop overlays it has caught up with, and
+ * note that the accepted trip has now been seen on the server (so the
+ * provisional trip is never shown again for it).
+ */
 export function settleWith(rideId: string, passengers: readonly PassengerInCar[]) {
-  if (state.rideId !== rideId) return;
-  let changed = false;
-  const seats = { ...state.seats };
-  for (const p of passengers) {
-    const o = seats[p.id];
-    if (o && RANK[p.status] >= RANK[o.status]) {
-      delete seats[p.id];
-      changed = true;
-    }
+  if (state.claim?.rideId === rideId && !state.claim.serverSeen) {
+    set({ claim: { ...state.claim, serverSeen: true } });
   }
+  if (state.rideId !== rideId) return;
+  const seats = settleSeatOverlays(state.seats, passengers) as Record<string, SeatOverlay>;
+  let changed = seats !== state.seats;
   const adds = { ...state.adds };
   for (const [key, { passengerId }] of Object.entries(adds)) {
     if (passengerId && passengers.some((p) => p.id === passengerId)) {
