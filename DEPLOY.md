@@ -125,6 +125,10 @@ Routes between exact pins (defaults are right for now; see
 `ROUTING_DISABLED`, `ROUTING_TIMEOUT_MS`, `ROUTING_MIN_INTERVAL_MS`,
 `ROUTING_DAILY_WARN_AT`, `RATE_LIMIT_ROUTE_LEGS`
 
+Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
+offer's countdown runs on the driver's screen. The app reads it from each
+offer, so changing it needs no app release.
+
 ---
 
 ## Reading OTPs in dummy mode

@@ -112,7 +112,15 @@ export type RideClientEvent = (typeof RIDE_CLIENT_EVENTS)[keyof typeof RIDE_CLIE
 /** Server → driver events emitted to the driver's personal socket room. */
 export const DRIVER_EVENTS = {
   RIDE_BROADCAST: "ride:broadcast",
+  /** A request offered to this driver was taken, cancelled or expired: drop it from the offer queue. */
+  OFFER_CLOSED: "ride:offer_closed",
 } as const;
+
+/** Sent to the drivers a request was offered to when it stops being available. */
+export interface OfferClosedPayload {
+  rideId: string;
+  reason: "TAKEN" | "CANCELLED" | "EXPIRED";
+}
 
 export type DriverServerEvent = (typeof DRIVER_EVENTS)[keyof typeof DRIVER_EVENTS];
 

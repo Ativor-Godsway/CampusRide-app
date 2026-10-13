@@ -39,7 +39,9 @@ import {
  */
 const BUDGET = {
   "GET /driver/rides/active": 4,
-  "GET /driver/rides/eligible": 4,
+  // 5 since ride offers (2026-10): + riders' ratings for the offer card
+  // (read in parallel with the drivers query, so no extra latency).
+  "GET /driver/rides/eligible": 5,
   "GET /rides/:id/fill-suggestions": 4,
   "GET /rides/:id/add-preview": 5,
   "POST /rides/:id/claim": 2,

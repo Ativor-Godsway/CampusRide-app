@@ -60,3 +60,11 @@ describe("planner", () => {
     for (const r of [0, 0.5, 0.7, 0.99]) expect(pickDecision("LONE", () => r)).not.toBe("SWITCH_TO_LONE");
   });
 });
+
+describe("--cancel-after", () => {
+  it("makes every rider cancel after that many seconds; off by default; bounded", () => {
+    expect(parseSimOptions([]).cancelAfterSec).toBeNull();
+    expect(parseSimOptions(["--cancel-after", "8"]).cancelAfterSec).toBe(8);
+    expect(() => parseSimOptions(["--cancel-after", "1"])).toThrow(SimOptionError);
+  });
+});

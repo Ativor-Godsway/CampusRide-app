@@ -186,17 +186,57 @@ class Simulator {
     this.timers.push(setInterval(() => void this.poll(), 2_000));
     this.timers.push(setInterval(() => void this.requestTick(), this.opts.intervalSec * 1000));
 
+    this.listenForKeys();
+
     if (this.opts.burst > 0) {
-      log("💥", c.bold(`Burst: ${this.opts.burst} requests at once`));
+      log("💥", c.bold(`Burst: ${this.opts.burst} requests at once`) + c.dim("  — they pop up on your phone one at a time, nearest first"));
       await this.requestTick(this.opts.burst);
     } else {
       await this.requestTick();
     }
   }
 
+  /**
+   * Keys while running: `c` makes the newest rider still waiting cancel now
+   * — to watch an offer close on the phone while it's showing. Ctrl+C stops
+   * (raw mode swallows the signal, so it's passed on by hand).
+   */
+  private listenForKeys(): void {
+    if (!process.stdin.isTTY) return;
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (key: string) => {
+      if (key === "\u0003") {
+        process.kill(process.pid, "SIGINT");
+        return;
+      }
+      if (key.toLowerCase() === "c") this.cancelNewestWaiting();
+    });
+    log("⌨", c.dim("Press c to make the newest waiting rider cancel now"));
+  }
+
+  private cancelNewestWaiting(): void {
+    const waiting = [...this.tracks.values()].filter(
+      (t) => t.rideId !== "" && t.rideStatus === "REQUESTED" && !t.everAccepted,
+    );
+    const newest = waiting[waiting.length - 1];
+    if (!newest) {
+      log("·", c.dim("Nobody is waiting for a driver right now"));
+      return;
+    }
+    newest.giveUpAt = Date.now();
+    log("⌨", `Making ${c.bold(newest.rider.name)} cancel now…`);
+    void this.poll();
+  }
+
   async stop(): Promise<void> {
     this.stopped = true;
     for (const t of this.timers) clearInterval(t);
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+      process.stdin.pause();
+    }
 
     // Withdraw requests nobody has accepted, so they don't linger in the
     // driver app. Accepted trips are left alone for you to finish.
@@ -476,7 +516,12 @@ class Simulator {
       dropoff: dropoff.description,
       rideStatus: "REQUESTED",
       legStatus: "WAITING",
-      giveUpAt: giveUp === null ? null : Date.now() + giveUp,
+      giveUpAt:
+        this.opts.cancelAfterSec !== null
+          ? Date.now() + this.opts.cancelAfterSec * 1000
+          : giveUp === null
+            ? null
+            : Date.now() + giveUp,
       deciding: false,
       everAccepted: false,
     });

@@ -9,7 +9,7 @@ import { InvalidTransitionError, RideSwitchNotAllowedError } from "../services/r
 import { fareForType, switchRideType } from "../services/ride/switchRideType";
 import { findActiveRideForRider } from "../services/ride/activeRide";
 import { emitRideEvent } from "../realtime/rideSocket";
-import { broadcastRide } from "../services/ride/dispatch";
+import { broadcastRide, closeOffer } from "../services/ride/dispatch";
 import {
   createRide,
   ActiveRideExistsError,
@@ -441,6 +441,10 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         riderCancel: { reason: input.reason, note: input.note },
       });
       emitRideEvent(id, "ride:status", { rideId: id, status: updated.status });
+      // Drivers who were being offered it drop it at once.
+      if (ride.status === "REQUESTED" || ride.status === "AWAITING_RIDER_DECISION") {
+        closeOffer(prisma, ride, "CANCELLED");
+      }
 
       const flagged = input.reason !== null && FLAGGED_RIDER_CANCEL_REASONS.includes(input.reason);
       request.log[flagged ? "warn" : "info"](

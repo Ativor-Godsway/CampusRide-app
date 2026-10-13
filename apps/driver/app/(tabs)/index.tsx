@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState, type ReactElement } from "react";
-import { useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useIsFocused, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { FlatList, Pressable, RefreshControl, StyleSheet, Switch, View } from "react-native";
 import {
@@ -22,6 +22,7 @@ import {
   spacing,
   typography,
   useAuth,
+  type EligibleRideItem,
 } from "@rida/mobile-shared";
 import { markTripOpened, useDriverActiveTrip, wasTripOpened } from "../../lib/activeTrip";
 import { useDriverPresence } from "../../lib/presence";
@@ -29,6 +30,8 @@ import { useRequestsNearYou } from "../../lib/requests";
 import { overlayPassengers, runAddRider, runClaim, useTripActions } from "../../lib/tripActions";
 import { useZones } from "../../lib/zones";
 import { RequestCard, type HomeRequest } from "../../components/home/RequestCard";
+import { OfferCard } from "../../components/offers/OfferCard";
+import { useOfferQueue } from "../../lib/offers";
 
 const FILTERS: { value: RequestTypeFilter; label: string }[] = [
   { value: "ALL", label: "All" },
@@ -71,7 +74,7 @@ export default function DriverHomeScreen() {
 
   // ─── Requests when free ─────────────────────────────────────────────────
   const free = isOnline && !trip;
-  const eligible = useRequestsNearYou(free);
+  const eligible = useRequestsNearYou(free, position);
 
   // ─── Riders who fit a shared trip ───────────────────────────────────────
   const sharedTrip =
@@ -105,7 +108,18 @@ export default function DriverHomeScreen() {
   const items: HomeRequest[] = useMemo(() => {
     if (free) {
       const open = (eligible.data ?? []).filter((r) => r.rideId !== actions.claim?.rideId);
-      return filterRequestsByType(sortRequestsNearestFirst(open, position, zones), filter);
+      // The server's distance to each pickup's named place when it sends one
+      // (the same number the offer pop-up shows); else from the zone centre.
+      const measured = sortRequestsNearestFirst(open, position, zones).map((r) => ({
+        ...r,
+        distanceMeters: r.pickupDistanceMeters ?? r.distanceMeters,
+      }));
+      measured.sort((a, b) =>
+        a.distanceMeters !== null && b.distanceMeters !== null && a.distanceMeters !== b.distanceMeters
+          ? a.distanceMeters - b.distanceMeters
+          : 0,
+      );
+      return filterRequestsByType(measured, filter);
     }
     if (sharedTrip && freeSeats > 0) {
       const fits = (fill.data?.suggestions ?? [])
@@ -128,6 +142,24 @@ export default function DriverHomeScreen() {
     return [];
   }, [free, eligible.data, actions.claim, actions.adds, position, zones, filter, sharedTrip, freeSeats, fill.data, sharedFare]);
 
+  // ─── Offer pop-ups (one at a time, nearest first) ───────────────────────
+  // Over Home only, while it's on screen, online and free. Accept is the
+  // same instant accept as the list's (lib/tripActions).
+  const focused = useIsFocused();
+  const acceptRequest = useCallback(
+    (request: EligibleRideItem) => {
+      runClaim(request);
+      markTripOpened(request.rideId);
+      router.push(`/ride/${request.rideId}`);
+    },
+    [router],
+  );
+  const offers = useOfferQueue({
+    enabled: free && focused && !actions.claim,
+    items: eligible.data ?? [],
+    onAccept: acceptRequest,
+  });
+
   if (authLoading || tripLoading || !user) {
     return (
       <Screen>
@@ -143,9 +175,8 @@ export default function DriverHomeScreen() {
   const accept = (item: HomeRequest) => {
     const request = eligible.data?.find((r) => r.rideId === item.rideId);
     if (!request) return;
-    runClaim(request);
-    markTripOpened(item.rideId);
-    router.push(`/ride/${item.rideId}`);
+    offers.markHandled(request.rideId);
+    acceptRequest(request);
   };
   const add = (item: HomeRequest) => {
     const suggestion = fill.data?.suggestions.find((s) => s.requestRideId === item.rideId);
@@ -293,6 +324,22 @@ export default function DriverHomeScreen() {
           ) : undefined
         }
       />
+      {offers.notice ? (
+        <View style={styles.offerNotice} pointerEvents="none" accessibilityLiveRegion="polite" accessibilityRole="alert">
+          <Text variant="bodySmall" style={styles.offerNoticeText}>
+            {offers.notice}
+          </Text>
+        </View>
+      ) : null}
+      {offers.offer ? (
+        <OfferCard
+          key={offers.offer.item.rideId}
+          offer={offers.offer}
+          waiting={offers.waiting}
+          onAccept={offers.accept}
+          onDecline={offers.decline}
+        />
+      ) : null}
     </Screen>
   );
 }
@@ -316,6 +363,18 @@ function EmptyState({ illustration, title, body }: { illustration: ReactElement;
 }
 
 const styles = StyleSheet.create({
+  offerNotice: {
+    position: "absolute",
+    left: spacing.lg,
+    right: spacing.lg,
+    bottom: spacing.xl,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radii.lg,
+    backgroundColor: colors.ink[900],
+    alignItems: "center",
+  },
+  offerNoticeText: { color: colors.white, fontWeight: typography.weight.semibold },
   // One side padding (16) and one gap between sections, everywhere on Home.
   content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl },
   headerBlock: { gap: spacing.md, marginBottom: spacing.lg },
