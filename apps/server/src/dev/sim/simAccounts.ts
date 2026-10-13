@@ -94,3 +94,25 @@ export async function ensureSimRiders(prisma: PrismaClient, count: number): Prom
   }
   return riders;
 }
+
+/** The fake driver for testing the RIDER app with one phone (`npm run sim:driver`). */
+export const SIM_DRIVER_PHONE = "+233099900001";
+export const SIM_DRIVER_NAME = `Kwame${SIM_NAME_SUFFIX}`;
+
+/**
+ * Creates (or reuses) the fake driver: an approved DRIVER account with a
+ * complete car profile, so it can go online straight away. Refuses a phone
+ * that belongs to anything else. Not removed by sim:cleanup (which only
+ * touches fake RIDERS): its finished trips are your rider account's history.
+ */
+export async function ensureSimDriver(prisma: PrismaClient): Promise<{ id: string; name: string }> {
+  const existing = await prisma.user.findUnique({ where: { phone: SIM_DRIVER_PHONE }, include: { driver: true } });
+  if (existing && (existing.role !== "DRIVER" || !isSimRiderName(existing.name))) {
+    throw new Error(`Phone ${SIM_DRIVER_PHONE} already belongs to "${existing.name}" (${existing.role}). Refusing to use it.`);
+  }
+  const user =
+    existing ?? (await prisma.user.create({ data: { phone: SIM_DRIVER_PHONE, name: SIM_DRIVER_NAME, role: "DRIVER" } }));
+  const car = { carMake: "Toyota", carModel: "Corolla", carColor: "White", plate: "GT 1234-26", isApproved: true };
+  await prisma.driver.upsert({ where: { userId: user.id }, update: car, create: { userId: user.id, ...car } });
+  return { id: user.id, name: user.name };
+}
