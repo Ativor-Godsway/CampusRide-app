@@ -12,6 +12,7 @@ import {
 import { DriverPresenceProvider } from "../lib/presence";
 import { DriverLocationProvider } from "../lib/location";
 import { TripRuntime } from "../lib/tripRuntime";
+import { OnlineKeepAwake } from "../lib/onlineKeepAwake";
 
 const queryClient = new QueryClient();
 
@@ -52,6 +53,7 @@ export default function RootLayout() {
               <SessionCacheReset />
               {/* Live location + automatic arrival on every screen during a trip. */}
               <TripRuntime />
+              <OnlineKeepAwake />
               <Stack screenOptions={{ headerShown: false }} />
             </DriverPresenceProvider>
           </DriverLocationProvider>
