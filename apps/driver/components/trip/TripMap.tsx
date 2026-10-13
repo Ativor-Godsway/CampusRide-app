@@ -201,11 +201,13 @@ const styles = StyleSheet.create({
     ...shadows.md,
   },
   pickupPin: { backgroundColor: colors.primary[500] },
-  dropoffPin: { backgroundColor: colors.ink[900] },
+  // Drop-offs are squares, as on the rider app and the offer cards.
+  dropoffPin: { backgroundColor: colors.ink[900], borderRadius: 8 },
   nextPin: { transform: [{ scale: 1.2 }] },
   pinColumn: { alignItems: "center" },
-  newPin: { backgroundColor: colors.white, borderColor: colors.primary[300], borderStyle: "dashed" },
-  newPinNumber: { color: colors.primary[600] },
+  // A previewed rider's stops keep their pickup/drop-off look, with an orange ring.
+  newPin: { borderColor: colors.accent[500] },
+  newPinNumber: { color: colors.white },
   newTag: {
     backgroundColor: colors.accent[500],
     borderRadius: radii.full,

@@ -12,8 +12,14 @@ import type { Prisma, PrismaClient } from "@prisma/client";
  */
 export const SIM_PHONE_PREFIX = "+233099";
 
-/** Every simulator account's name starts with this, so it is obvious in any list. */
-export const SIM_NAME_PREFIX = "Test ";
+/**
+ * Every simulator account's name ends with this, so it is obvious in any
+ * list: "Ama (test)". The real name comes FIRST because the driver app shows
+ * first names — "Test Ama" read as "Test" for every rider.
+ */
+export const SIM_NAME_SUFFIX = " (test)";
+/** How simulator names looked before 2026-10-13 ("Test Ama"); still recognised, and renamed on the next run. */
+export const OLD_SIM_NAME_PREFIX = "Test ";
 
 const FIRST_NAMES = [
   "Ama", "Kofi", "Akosua", "Kwame", "Abena", "Yaw", "Efua", "Kojo", "Adwoa", "Kwesi",
@@ -28,7 +34,12 @@ export function simRiderPhone(index: number): string {
 }
 
 export function simRiderName(index: number): string {
-  return `${SIM_NAME_PREFIX}${FIRST_NAMES[index % FIRST_NAMES.length]}`;
+  return `${FIRST_NAMES[index % FIRST_NAMES.length]}${SIM_NAME_SUFFIX}`;
+}
+
+/** A simulator rider's name, in the current or the old form. */
+export function isSimRiderName(name: string): boolean {
+  return name.endsWith(SIM_NAME_SUFFIX) || name.startsWith(OLD_SIM_NAME_PREFIX);
 }
 
 /** True only for a phone number in the simulator's own range. */
@@ -37,13 +48,13 @@ export function isSimulatorPhone(phone: string): boolean {
 }
 
 /**
- * Which accounts belong to the simulator: its phone range AND its name
- * prefix AND the RIDER role. All three, so a real account can never match by
- * sharing one of them.
+ * Which accounts belong to the simulator: its phone range AND a simulator
+ * name ("… (test)", or the old "Test …") AND the RIDER role. All three, so a
+ * real account can never match by sharing one of them.
  */
 export const simAccountWhere: Prisma.UserWhereInput = {
   phone: { startsWith: SIM_PHONE_PREFIX },
-  name: { startsWith: SIM_NAME_PREFIX },
+  OR: [{ name: { endsWith: SIM_NAME_SUFFIX } }, { name: { startsWith: OLD_SIM_NAME_PREFIX } }],
   role: "RIDER",
 };
 
@@ -59,17 +70,25 @@ export async function ensureSimRiders(prisma: PrismaClient, count: number): Prom
   for (let i = 0; i < count; i++) {
     const phone = simRiderPhone(i);
     const name = simRiderName(i);
-    const user = await prisma.user.upsert({
+    let user = await prisma.user.upsert({
       where: { phone },
       update: {},
       create: { phone, name, role: "RIDER" },
       select: { id: true, name: true, phone: true, role: true },
     });
-    if (user.role !== "RIDER" || !user.name.startsWith(SIM_NAME_PREFIX)) {
+    if (user.role !== "RIDER" || !isSimRiderName(user.name)) {
       throw new Error(
         `Phone ${phone} already belongs to "${user.name}" (${user.role}), which is not a ` +
           `simulator rider. Refusing to use it.`,
       );
+    }
+    // An account from before the rename ("Test Ama") becomes "Ama (test)".
+    if (user.name !== name) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { name },
+        select: { id: true, name: true, phone: true, role: true },
+      });
     }
     riders.push({ id: user.id, name: user.name, phone: user.phone });
   }

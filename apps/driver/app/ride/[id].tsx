@@ -8,8 +8,9 @@ import * as SecureStore from "expo-secure-store";
 import {
   CAR_SEATS,
   DEFAULT_OFFER_SECONDS,
+  chooseTripSource,
+  summaryGivesWay,
   NO_SHOW_AFTER_MS,
-  addRiderPreviewLabel,
   classifyActionFailure,
   decodePolyline,
   trimPathToPosition,
@@ -67,7 +68,7 @@ import {
 import { driverActiveRideQueryKey, useDriverActiveTrip } from "../../lib/activeTrip";
 import { useDriverLocation, useLocationDemand } from "../../lib/location";
 import { useZoneRoutes, useZones } from "../../lib/zones";
-import { CountdownRing } from "../../components/offers/CountdownRing";
+import { CountdownBar } from "../../components/offers/CountdownBar";
 import { alertNewOffer, tapFeedback } from "../../lib/offerAlert";
 import {
   claimPassengerId,
@@ -150,8 +151,15 @@ export default function TripScreen() {
   // the request itself, so the screen is the full trip at once (no
   // "Confirming…"). Its rider's seat is provisional; steps taken on it wait
   // in the action queue until the real seat id arrives.
+  // Only until the server's trip arrives: once the server has listed it,
+  // a missing trip means it ENDED — never fall back to this (chooseTripSource).
+  const source = chooseTripSource({
+    hasServerRide: Boolean(serverRide),
+    claimState: claim?.state ?? null,
+    serverSeen: claim?.serverSeen ?? false,
+  });
   const provisional = useMemo<RideWithZones | null>(() => {
-    if (serverRide || !claim || claim.state === "refused") return null;
+    if (source !== "provisional" || !claim) return null;
     const req = claim.request;
     const pickupZone = zones.get(req.pickupZoneId);
     const dropoffZone = zones.get(req.dropoffZoneId);
@@ -187,7 +195,7 @@ export default function TripScreen() {
         },
       ],
     } as unknown as RideWithZones;
-  }, [serverRide, claim, zones]);
+  }, [source, claim, zones]);
   const ride: RideWithZones | null = serverRide ?? provisional;
 
   // Drop optimistic overlays once the server has caught up.
@@ -272,7 +280,9 @@ export default function TripScreen() {
     if (!ride) return;
     if (plan.upcoming.length > 0) {
       hadStopsRef.current = true;
-      if (done?.rideId === ride.id) setDone(null); // a refused drop-off came back
+      // Back to the trip only if the SERVER still has stops to do (it
+      // refused a drop-off) — never for a provisional trip.
+      if (done?.rideId === ride.id && summaryGivesWay({ source, upcomingStops: plan.upcoming.length })) setDone(null);
       return;
     }
     if (!hadStopsRef.current || done) return;
@@ -287,7 +297,7 @@ export default function TripScreen() {
       commissionPesewas: commission,
       cash: ride.paymentMethod === "CASH",
     });
-  }, [ride, plan.upcoming.length, passengers, done]);
+  }, [ride, plan.upcoming.length, passengers, done, source]);
 
   // Live location to the riders and automatic arrival run on every screen
   // during a trip (lib/tripRuntime), not just here.
@@ -641,13 +651,6 @@ export default function TripScreen() {
         preview={previewOverlay}
       />
 
-      {previewData ? (
-        <View pointerEvents="none" style={[styles.previewPill, { top: topHeight + spacing.xs }]}>
-          <Text variant="bodySmall" style={styles.previewPillText}>
-            {addRiderPreviewLabel(previewData.addedMinutes, formatCedis(previewData.farePesewas))}
-          </Text>
-        </View>
-      ) : null}
 
       {seatLegend ? (
         <Pressable
@@ -707,59 +710,61 @@ export default function TripScreen() {
         ) : null}
 
         {previewing && (!autoOffer || previewData) ? (
+          // The new rider, plainly: where from, where to, and Add. Never
+          // taller than it needs to be, so the NEXT STOP card and its slider
+          // below always stay in view.
           <View style={styles.previewCard} accessibilityLiveRegion="polite">
             {autoOffer && offerClock ? (
-              <CountdownRing deadline={offerClock.deadline} totalMs={offerClock.deadline - offerClock.shownAt} size={44} stroke={4} />
+              <CountdownBar deadline={offerClock.deadline} totalMs={offerClock.deadline - offerClock.shownAt} />
             ) : null}
-            <View style={styles.previewText}>
-              <Text variant="label" style={styles.previewKicker}>
-                {autoOffer ? "NEW RIDER ON YOUR ROUTE" : "ADD THIS RIDER?"}
-              </Text>
-              <Text variant="bodyMedium" style={styles.previewRoute} numberOfLines={1}>
-                {previewing.suggestion.pickupPlaceName ?? previewing.suggestion.pickupZoneName} →{" "}
-                {previewing.suggestion.dropoffPlaceName ?? previewing.suggestion.dropoffZoneName}
-              </Text>
-              <Text variant="caption" color="muted" numberOfLines={2}>
-                {previewData
-                  ? [
-                      passengers.some((p) => p.status === "PICKED_UP")
-                        ? previewData.maxOnboardDelayMinutes > 0
-                          ? `+${previewData.maxOnboardDelayMinutes} min for riders on board`
-                          : "No delay for riders on board"
-                        : `Adds ~${previewData.addedMinutes} min`,
-                      `+${formatCedis(previewData.farePesewas)}`,
-                      `${Math.max(0, freeSeats - 1)} seat${freeSeats - 1 === 1 ? "" : "s"} left`,
-                    ].join(" · ")
-                  : "Working out the route…"}
-              </Text>
+            <Pressable
+              onPress={() => {
+                tapFeedback();
+                passOnOffer("DECLINED");
+              }}
+              disabled={committing}
+              accessibilityRole="button"
+              accessibilityLabel={autoOffer ? "Decline this rider" : "Close"}
+              hitSlop={10}
+              style={styles.previewClose}
+            >
+              <Ionicons name="close" size={20} color={colors.ink[500]} />
+            </Pressable>
+            <View
+              style={styles.previewRoute}
+              accessible
+              accessibilityLabel={`New rider, from ${previewing.suggestion.pickupPlaceName ?? previewing.suggestion.pickupZoneName} to ${previewing.suggestion.dropoffPlaceName ?? previewing.suggestion.dropoffZoneName}`}
+            >
+              <View style={styles.previewMarkers}>
+                <View style={styles.previewPickupDot} />
+                <View style={styles.previewConnector} />
+                <View style={styles.previewDropoffSquare} />
+              </View>
+              <View style={styles.previewPlaces}>
+                <Text style={styles.previewPlace}>
+                  {previewing.suggestion.pickupPlaceName ?? previewing.suggestion.pickupZoneName}
+                </Text>
+                <Text style={styles.previewPlace}>
+                  {previewing.suggestion.dropoffPlaceName ?? previewing.suggestion.dropoffZoneName}
+                </Text>
+              </View>
             </View>
-            <View style={styles.previewButtons}>
-              <Pressable
-                onPress={() => {
-                  tapFeedback();
-                  passOnOffer("DECLINED");
-                }}
-                disabled={committing}
-                accessibilityRole="button"
-                accessibilityLabel={autoOffer ? "Decline this rider" : "Skip"}
-                hitSlop={8}
-                style={styles.previewSkip}
-              >
-                <Ionicons name="close" size={20} color={colors.ink[600]} />
-              </Pressable>
-              <Pressable
-                onPress={() => {
-                  tapFeedback();
-                  acceptPreview();
-                }}
-                disabled={!previewData || committing}
-                accessibilityRole="button"
-                accessibilityLabel={previewData ? `Add this rider, plus ${formatCedis(previewData.farePesewas)}` : "Add this rider"}
-                style={({ pressed }) => [styles.previewAdd, (pressed || committing) && styles.previewAddPressed]}
-              >
-                <Text style={styles.previewAddText}>Add</Text>
-              </Pressable>
-            </View>
+            <Pressable
+              onPress={() => {
+                tapFeedback();
+                acceptPreview();
+              }}
+              disabled={!previewData || committing}
+              accessibilityRole="button"
+              accessibilityLabel="Add this rider"
+              style={({ pressed }) => [
+                styles.previewAdd,
+                (pressed || committing) && styles.previewAddPressed,
+                !previewData && styles.previewAddWaiting,
+              ]}
+            >
+              <Text style={styles.previewAddText}>{previewData ? "Add" : "Checking the route…"}</Text>
+            </Pressable>
           </View>
         ) : null}
 
@@ -1172,47 +1177,44 @@ const styles = StyleSheet.create({
     ...shadows.md,
   },
   legendText: { color: colors.ink[700], fontWeight: typography.weight.semibold },
-  previewPill: {
-    position: "absolute",
-    alignSelf: "center",
-    backgroundColor: colors.surfaceDark,
-    borderRadius: radii.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    ...shadows.md,
-  },
-  previewPillText: { color: colors.white, fontWeight: typography.weight.semibold },
   previewCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
+    gap: spacing.md,
     backgroundColor: colors.primary[50],
     borderRadius: radii.lg,
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md + 4,
+    paddingBottom: spacing.md,
+    overflow: "hidden",
   },
-  previewText: { flex: 1, gap: 2, minWidth: 0 },
-  previewKicker: { color: colors.primary[600] },
-  previewRoute: { fontWeight: typography.weight.bold },
-  previewButtons: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  previewSkip: {
-    width: 40,
-    height: 40,
+  previewClose: {
+    position: "absolute",
+    top: spacing.sm,
+    right: spacing.sm,
+    width: 32,
+    height: 32,
     borderRadius: radii.full,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.white,
+    zIndex: 1,
   },
+  previewRoute: { flexDirection: "row", gap: spacing.md, paddingRight: 36 },
+  previewMarkers: { alignItems: "center", paddingTop: 7, width: 12 },
+  previewPickupDot: { width: 11, height: 11, borderRadius: radii.full, backgroundColor: colors.primary[500] },
+  previewConnector: { width: 2, flex: 1, minHeight: 14, backgroundColor: colors.primary[200], marginVertical: 3 },
+  previewDropoffSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.ink[900], marginBottom: 7 },
+  previewPlaces: { flex: 1, gap: spacing.sm },
+  previewPlace: { fontSize: 18, lineHeight: 23, fontWeight: typography.weight.bold, color: colors.ink[900] },
   previewAdd: {
-    minWidth: 76,
-    height: 44,
-    paddingHorizontal: spacing.lg,
-    borderRadius: radii.full,
+    height: 52,
+    borderRadius: radii.lg,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primary[500],
   },
   previewAddPressed: { backgroundColor: colors.primary[600] },
-  previewAddText: { color: colors.white, fontSize: 16, fontWeight: typography.weight.extrabold },
+  previewAddWaiting: { backgroundColor: colors.primary[300] },
+  previewAddText: { color: colors.white, fontSize: 18, fontWeight: typography.weight.extrabold },
   refusal: {
     flexDirection: "row",
     alignItems: "center",

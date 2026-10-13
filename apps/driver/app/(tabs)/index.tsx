@@ -155,7 +155,8 @@ export default function DriverHomeScreen() {
     [router],
   );
   const offers = useOfferQueue({
-    enabled: free && focused && !actions.claim,
+    // Not while an accept is still on its way (a finished trip's accept doesn't count).
+    enabled: free && focused && actions.claim?.state !== "sending",
     items: eligible.data ?? [],
     onAccept: acceptRequest,
   });

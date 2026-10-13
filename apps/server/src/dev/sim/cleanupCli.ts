@@ -31,7 +31,7 @@ async function main(): Promise<void> {
     ] as const) {
       console.log(`  ${String(n).padStart(5)}  ${label}`);
     }
-    console.log("\nOnly +233099… \"Test …\" rider accounts were removed. Your own accounts are untouched.\n");
+    console.log("\nOnly +233099… \"… (test)\" rider accounts were removed. Your own accounts are untouched.\n");
   } catch (err) {
     if (err instanceof SimCleanupEntangledError) {
       console.error(`\n✗ ${err.message}\n`);

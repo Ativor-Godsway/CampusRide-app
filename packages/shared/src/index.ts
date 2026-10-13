@@ -36,3 +36,4 @@ export * from "./rides/ridePins";
 export * from "./places/tripEnd";
 export * from "./geo/liveRoute";
 export * from "./driver/rideOffers";
+export * from "./rides/tripView";
