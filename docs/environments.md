@@ -4,7 +4,7 @@ CampusRide uses **three isolated databases**, all Neon branches of one project:
 
 | Env         | NODE_ENV      | Neon branch                                     | Local env file                        | Who uses it                     |
 | ----------- | ------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------- |
-| Production  | `production`  | `main` (compute host `ep-ancient-butterfly…`)   | **none** — values live only in Render | The deployed server             |
+| Production  | `production`  | `main` (compute host `ep-empty-violet…`, Frankfurt / eu-central-1) | **none** — values live only in Render | The deployed server             |
 | Development | `development` | `dev` (`ep-flat-rain…`)                         | `apps/server/.env.development`        | `npm run dev`, local scripts    |
 | Test        | `test`        | **local Postgres** (`localhost:5432/rida_test`) | `apps/server/.env.test`               | `vitest` (creates/deletes rows) |
 
@@ -36,7 +36,8 @@ the correct file explicitly.
 ## Safety gate
 
 `apps/server/src/test/setup.ts` throws before any query if `DATABASE_URL` points
-at the production host (`ep-ancient-butterfly`). Running the test suite can never
+at a known production host (currently `ep-empty-violet` in Frankfurt and the
+former `ep-ancient-butterfly` in us-east-1). Running the test suite can never
 touch production, even if `.env.test` is misconfigured.
 
 ## Migration workflow — dev first, prod as a deliberate act

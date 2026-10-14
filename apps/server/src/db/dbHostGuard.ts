@@ -28,6 +28,9 @@ const ALWAYS_ALLOWED_HOSTS = ["localhost", "127.0.0.1", "::1", "host.docker.inte
  */
 export const KNOWN_PROD_DB_HOSTS = [
   "ep-ancient-butterfly",
+  // Frankfurt (eu-central-1) — the current production database, migrated from
+  // us-east-1 on 2026-10-14.
+  "ep-empty-violet",
   // The host .env.test pointed at when ~353 fixture accounts reached
   // production. Listed as production until proven otherwise; if it is in fact
   // a disposable branch, remove it here rather than working around it.
