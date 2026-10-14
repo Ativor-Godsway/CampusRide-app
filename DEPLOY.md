@@ -13,6 +13,83 @@ apps/driver) are distributed via Expo Go / EAS and connect to this server.
 
 ---
 
+## Production at a glance
+
+| What | Value |
+|---|---|
+| **API (public URL)** | `https://api.campusride.app` — HTTP and Socket.io (`wss://`) on the same origin |
+| **Health check** | `https://api.campusride.app/health` |
+| **Render service** | `campusride-server` (Web Service), region **Frankfurt** |
+| **Database** | Neon `main` branch, Frankfurt / eu-central-1 (same region as the API) |
+| **Admin site** | `campusride-admin` (Static Site), calls the API above |
+| **SOS tracking links** | `https://api.campusride.app/track/<token>` (from `PUBLIC_BASE_URL`) |
+
+Every client uses `api.campusride.app`, never a `*.onrender.com` address, so
+the service behind the name can be replaced without an app release. The
+previous server, `https://campusride-server-aaum.onrender.com` (Oregon), is
+being retired; nothing in the repo points at it any more.
+
+### The custom domain
+
+`api.campusride.app` is a custom domain on the `campusride-server` service:
+
+1. Render dashboard → `campusride-server` → **Settings → Custom Domains** →
+   add `api.campusride.app`.
+2. At the DNS provider for `campusride.app`, add the record Render shows: a
+   `CNAME` from `api` to the service's `*.onrender.com` host.
+3. Wait for Render to show the domain as **Verified** and the certificate as
+   issued. Render serves HTTPS on it automatically.
+
+`render.yaml` lists the domain under `domains:` so the blueprint matches.
+
+---
+
+## Mobile apps — which server a build talks to
+
+The rider and driver apps resolve the API URL in this order
+([packages/mobile-shared/src/config/serverUrl.ts](packages/mobile-shared/src/config/serverUrl.ts)):
+
+1. `EXPO_PUBLIC_API_URL`, inlined into the bundle when it is built.
+2. `expo.extra.SERVER_URL` in the app's `app.json` — also
+   `https://api.campusride.app`, the fallback for a build with no value in (1).
+
+For EAS builds, (1) comes from the build profile in `apps/rider/eas.json` and
+`apps/driver/eas.json`:
+
+| Profile | `EXPO_PUBLIC_API_URL` | EAS environment | Distribution |
+|---|---|---|---|
+| `production` | `https://api.campusride.app` | `production` | store |
+| `preview` | same (extends `production`) | `production` | internal (installable link) |
+
+The URL lives in `eas.json` rather than in the expo.dev dashboard because it
+is public and belongs in review: a change to it shows up in a PR. Keep it in
+one place — don't also create `EXPO_PUBLIC_API_URL` as an EAS environment
+variable on expo.dev, or the two can drift apart. The profiles still set
+`"environment": "production"`, so a value that must stay out of git can later
+be added on expo.dev (project → **Environment variables**, environment
+`production`) and reach the build. Anything named `EXPO_PUBLIC_*` ends up in
+the shipped bundle, so never put a secret there.
+
+The apps' `.env` files are gitignored, so EAS never uploads them; a cloud
+build sees only what `eas.json` and expo.dev provide.
+
+Under `expo start`, (1) comes from the app's `.env` files instead, and
+`.env.development.local` can point it at a server on your Mac
+([docs/testing/SOLO_TESTING.md](docs/testing/SOLO_TESTING.md)). A release build
+refuses a local or Wi-Fi address and falls back to (2).
+
+Build commands, run from the app's directory (`apps/rider` or `apps/driver`):
+
+```bash
+npx eas-cli@latest build --profile production --platform all
+npx eas-cli@latest build --profile preview --platform android   # test build
+```
+
+The apps are linked to the `campusride-gh` Expo organization
+(`@campusride-gh/campusride-rider`, `@campusride-gh/campusride-driver`).
+
+---
+
 ## Prerequisites
 
 1. **Neon database provisioned** with the schema already applied.  
@@ -223,13 +300,13 @@ oversight list. **The blueprint file does not create the service.** Connecting
 it is a dashboard action, and must be done by hand:
 
 1. Render dashboard → **New → Static Site**, pointing at this repository.
-2. **Name:** `campusride-admin` · **Region:** same as `campusride-server`.
+2. **Name:** `campusride-admin` · **Region:** same as `campusride-server` (Frankfurt).
 3. **Build command:** `npm install && npm run build:admin`
 4. **Publish directory:** `apps/admin/dist`
 5. **Redirects/Rewrites:** add a rewrite `/*` → `/index.html` (SPA routing —
    without it a page refresh returns 404).
 6. **Environment → `VITE_API_URL`**: the public URL of `campusride-server`,
-   `https://campusride-server-aaum.onrender.com`, with no trailing slash.
+   `https://api.campusride.app`, with no trailing slash.
    Vite inlines this at build time, so changing it needs a **redeploy**.
 7. Once Render assigns the static site its URL, go back to
    **campusride-server → Environment** and add that origin to

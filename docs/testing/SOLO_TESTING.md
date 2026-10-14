@@ -150,7 +150,7 @@ Expo terminal prints:
 [CampusRide] API server: http://192.168.1.23:3000
 ```
 
-If it says `onrender.com`, the switch didn't take. Check the file name and run
+If it says `api.campusride.app`, the switch didn't take. Check the file name and run
 with `--clear` again.
 
 **Why this file and not `.env`?** Expo reads `.env.development.local` only while
@@ -305,7 +305,7 @@ rider, that trip disappears from your app.
 2. Restart the app with a clean build: stop Expo (Ctrl+C in Terminal 3), then
    `npm run dev:driver -- --clear`.
 3. Check the Expo terminal says `[CampusRide] API server:
-https://campusride-server-aaum.onrender.com`.
+https://api.campusride.app`.
 4. Sign in again with your real account. Production and dev are separate
    databases with separate accounts.
 5. Stop the local server (Ctrl+C in Terminal 1) if you're done.
@@ -590,7 +590,7 @@ T3. The simulator's riders now have different first names (Ama, Kofi,
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Can't reach your local server at http://localhost:3000`        | Start it: `npm run dev:server` (Step 2).                                                                                                       |
 | App shows network errors / can't sign in                        | Phone and Mac on the same Wi-Fi? Does `http://<mac-ip>:3000/health` open in the phone's browser? Did the IP change (Step 3)?                   |
-| Expo terminal still shows `onrender.com`                        | Check the file is exactly `apps/driver/.env.development.local`, then `npm run dev:driver -- --clear`.                                          |
+| Expo terminal still shows `api.campusride.app`                  | Check the file is exactly `apps/driver/.env.development.local`, then `npm run dev:driver -- --clear`.                                          |
 | `Waiting for a driver to go online…`                            | Go online in the driver app. Approved? `npm run sim:approve-driver`.                                                                           |
 | `Driver account is not approved yet` in the app                 | `npm run sim:approve-driver -- <your number>`                                                                                                  |
 | `The server rejected the simulator's sign-in (401)`             | The server was started some other way. Stop it and use `npm run dev:server`.                                                                   |

@@ -82,7 +82,7 @@ describe("assertLocalApiUrl", () => {
   });
 
   it("refuses the deployed server and any public host", () => {
-    for (const url of ["https://campusride-server-aaum.onrender.com", "http://8.8.8.8:3000", "nonsense"]) {
+    for (const url of ["https://api.campusride.app", "http://8.8.8.8:3000", "nonsense"]) {
       expect(() => assertLocalApiUrl(url, CTX), url).toThrow();
     }
   });
