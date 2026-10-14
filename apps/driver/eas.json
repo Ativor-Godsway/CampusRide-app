@@ -4,16 +4,23 @@
     "appVersionSource": "remote"
   },
   "build": {
+    "development": {
+      "extends": "production",
+      "distribution": "internal",
+      "channel": "development"
+    },
+    "preview": {
+      "extends": "production",
+      "distribution": "internal",
+      "channel": "preview"
+    },
     "production": {
       "environment": "production",
       "autoIncrement": true,
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.campusride.app"
-      }
-    },
-    "preview": {
-      "extends": "production",
-      "distribution": "internal"
+      },
+      "channel": "production"
     }
   },
   "submit": {

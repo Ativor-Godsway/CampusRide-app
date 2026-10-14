@@ -60,6 +60,9 @@ For EAS builds, (1) comes from the build profile in `apps/rider/eas.json` and
 |---|---|---|---|
 | `production` | `https://api.campusride.app` | `production` | store |
 | `preview` | same (extends `production`) | `production` | internal (installable link) |
+| `development` | same (extends `production`) | `production` | internal (installable link) |
+
+Each profile is also an EAS Update **channel** of the same name.
 
 The URL lives in `eas.json` rather than in the expo.dev dashboard because it
 is public and belongs in review: a change to it shows up in a PR. Keep it in
@@ -71,7 +74,9 @@ be added on expo.dev (project → **Environment variables**, environment
 the shipped bundle, so never put a secret there.
 
 The apps' `.env` files are gitignored, so EAS never uploads them; a cloud
-build sees only what `eas.json` and expo.dev provide.
+build sees only what `eas.json` and expo.dev provide. An over-the-air update
+is different: `eas update` bundles on your Mac, where `.env` *is* read — so
+publish with `scripts/eas-update.sh`, which sets (1) from `eas.json` first.
 
 Under `expo start`, (1) comes from the app's `.env` files instead, and
 `.env.development.local` can point it at a server on your Mac
@@ -84,6 +89,10 @@ Build commands, run from the app's directory (`apps/rider` or `apps/driver`):
 npx eas-cli@latest build --profile production --platform all
 npx eas-cli@latest build --profile preview --platform android   # test build
 ```
+
+Shipping a release — over-the-air update or new store build, rollback, and
+checking what a phone runs — is a step-by-step guide of its own:
+[docs/runbooks/releasing.md](docs/runbooks/releasing.md).
 
 The apps are linked to the `campusride-gh` Expo organization
 (`@campusride-gh/campusride-rider`, `@campusride-gh/campusride-driver`).

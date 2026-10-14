@@ -133,6 +133,28 @@ export default tseslint.config(
       // Genuinely useful (stale closures cause real bugs here) but noisy to
       // adopt mid-project, so it reports without blocking.
       "react-hooks/exhaustive-deps": "warn",
+      // EAS Update applies a downloaded update the next time the app starts
+      // (app.json `updates`). reloadAsync() would restart the app on the spot
+      // — possibly mid-ride — so it is banned (docs/runbooks/releasing.md).
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "expo-updates",
+              importNames: ["reloadAsync"],
+              message: "Never restart the app to apply an update; it applies on the next launch.",
+            },
+          ],
+        },
+      ],
+      "no-restricted-properties": [
+        "error",
+        {
+          property: "reloadAsync",
+          message: "Never restart the app to apply an update; it applies on the next launch.",
+        },
+      ],
     },
   },
 
