@@ -30,3 +30,8 @@ npm-debug.log*
 
 # Coverage output
 coverage/
+
+# Firebase config for the Android apps (push notifications). Kept out of this
+# public repository: EAS builds get it from the secret GOOGLE_SERVICES_JSON
+# file variable (docs/runbooks/push-notifications.md).
+google-services*.json

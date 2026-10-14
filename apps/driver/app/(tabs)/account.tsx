@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useRouter } from "expo-router";
 import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -27,6 +28,7 @@ import { useDriverPhotoUpload, type DriverPhotoResult, type PhotoSource } from "
 
 /** Account tab — view profile (name, vehicle, photo, approval) and edit it in place. */
 export default function AccountTab() {
+  const router = useRouter();
   const { user, refreshMe, signOut, deleteAccount } = useAuth();
   const driver = user?.driver;
 
@@ -265,6 +267,17 @@ export default function AccountTab() {
         <View style={styles.editButton}>
           <Button label="Edit profile" variant="secondary" onPress={startEdit} />
         </View>
+      )}
+
+      {!editing && (
+        <Card style={styles.logoutCard}>
+          <ListRow
+            title="Notifications"
+            subtitle="Ride requests when the app is closed"
+            leading={<ListRow.Icon name="notifications-outline" />}
+            onPress={() => router.push("/notifications")}
+          />
+        </Card>
       )}
 
       {!editing && <FakeLocationCard />}

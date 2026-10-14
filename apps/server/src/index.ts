@@ -32,6 +32,8 @@ import { registerUssdRoutes } from "./routes/ussd";
 import { registerUploadRoutes } from "./routes/uploads";
 import { registerSafetyRoutes } from "./routes/safety";
 import { registerPlaceRoutes } from "./routes/places";
+import { registerPushRoutes } from "./routes/push";
+import { checkPushReceipts } from "./services/push/pushService";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
 
@@ -39,6 +41,10 @@ import { initRideSocket } from "./realtime/rideSocket";
 // request traffic; 30s still keeps the 90s dispatch/decision timeouts
 // responsive (worst case +30s) while halving the steady-state query load.
 const TIMEOUT_POLL_INTERVAL_MS = 30_000;
+
+// Push receipts are only ready ~15 minutes after a send (services/push), so a
+// slow sweep is plenty; it also deletes tokens Expo reports as unregistered.
+const PUSH_RECEIPT_POLL_INTERVAL_MS = 5 * 60_000;
 
 export { paymentService, routeService, otpService };
 
@@ -172,6 +178,7 @@ async function bootstrap() {
   registerUploadRoutes(app);
   registerSafetyRoutes(app, prisma);
   registerPlaceRoutes(app, prisma);
+  registerPushRoutes(app, prisma);
 
   // app.server is the underlying http.Server — attach Socket.io to it directly
   await app.ready();
@@ -208,6 +215,10 @@ async function bootstrap() {
       app.log.error({ err }, "processTimeouts failed");
     });
   }, TIMEOUT_POLL_INTERVAL_MS);
+
+  setInterval(() => {
+    void checkPushReceipts(prisma);
+  }, PUSH_RECEIPT_POLL_INTERVAL_MS);
 }
 
 bootstrap().catch((err) => {

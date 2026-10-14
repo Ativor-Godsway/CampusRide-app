@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import type { PaymentMethod, PassengerStatus, RideSource, RideStatus } from "@rida/shared";
+import type { PaymentMethod, PassengerStatus, RideSource, RideStatus, RiderPushKind } from "@rida/shared";
 import {
   DISPATCH_WINDOW_MS,
   PRICING,
@@ -45,6 +45,7 @@ import {
 import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
 import { notifyUssdRider, notifyUssdRiders } from "../services/sms/notifyUssdRiders";
+import { notifyRider } from "../services/push/notify";
 import { getActivePlaces } from "../services/places/placeCache";
 import { approximatePins } from "../services/places/approximatePins";
 import { pinFieldsOf, requestPlaceNames } from "./ridePins";
@@ -619,6 +620,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       // Every other driver it was offered to drops it from their offers now.
       closeOffer(prisma, ride, "TAKEN");
       emitRideEvent(rideId, "ride:status", { rideId, status: ride.status });
+      notifyRider(prisma, ride.riderId, "DRIVER_ASSIGNED", rideId, { driverUserId: userId });
       const driverInfo = await getDriverInfo(prisma, userId);
       if (driverInfo) emitRideEvent(rideId, "ride:driver_assigned", { rideId, ...driverInfo });
       if (ride.source === "USSD") {
@@ -695,6 +697,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     try {
       const updated = await applyRideTransition(prisma, rideId, "ARRIVED");
       emitRideEvent(rideId, "ride:status", { rideId, status: updated.status });
+      notifyRider(prisma, updated.riderId, "DRIVER_ARRIVED", rideId, { driverUserId: userId });
       if (updated.source === "USSD") {
         void notifyUssdRider(prisma, updated.riderId, "Your driver has arrived.");
       }
@@ -731,6 +734,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     try {
       const updated = await departRide(prisma, userId, rideId);
       emitRideEvent(rideId, "ride:status", { rideId, status: updated.status });
+      notifyRider(prisma, updated.riderId, "TRIP_STARTED", rideId);
       return reply.code(200).send({ ride: updated });
     } catch (err) {
       if (err instanceof InvalidTransitionError) {
@@ -1148,9 +1152,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       // exactly the car the rider joins.
       let onboardDelaySeconds: Record<string, number> = {};
       let requestPickupZoneId: string | null = null;
+      let requestRiderId: string | null = null;
       const car = await addRiderToCar(prisma, userId, rideId, requestRideId, {
         checkCar: ({ passengers, candidate }) => {
           requestPickupZoneId = candidate.pickupZoneId;
+          requestRiderId = candidate.riderId;
           // Built exactly as GET /add-preview builds it, so the add is
           // refused for the same reasons the preview showed.
           const preview = previewAddRider({
@@ -1184,6 +1190,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         // MERGED_INTO_ANOTHER_RIDE. That rider's app is still tracking it, so
         // tell its room — the client follows mergedIntoRideId to this car.
         emitRideEvent(requestRideId, "ride:status", { rideId: requestRideId, status: "CANCELLED" });
+        if (requestRiderId) notifyRider(prisma, requestRiderId, "DRIVER_ASSIGNED", rideId, { driverUserId: userId });
         // Riders already in the car hear about the detour.
         for (const p of car.passengers) {
           const delay = onboardDelaySeconds[p.id];
@@ -1255,6 +1262,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     try {
       const updated = await applyRideTransition(prisma, rideId, "COMPLETED");
       emitRideEvent(rideId, "ride:status", { rideId, status: updated.status });
+      notifyRider(prisma, updated.riderId, "TRIP_COMPLETED", rideId);
 
       await finalizeRideCompletion(prisma, updated, userId);
 
@@ -1303,6 +1311,13 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     "no-show": { to: "CANCELLED", onlyFrom: ["ARRIVED"], noShow: true },
   };
   const NO_SHOW_CANCEL = PASSENGER_ACTIONS["no-show"]!;
+  /** The push notification each per-passenger action sends that rider. */
+  const PASSENGER_PUSH: Partial<Record<PassengerStatus, RiderPushKind>> = {
+    ARRIVED: "DRIVER_ARRIVED",
+    PICKED_UP: "TRIP_STARTED",
+    DROPPED_OFF: "TRIP_COMPLETED",
+    CANCELLED: "DRIVER_CANCELLED",
+  };
 
   for (const [action, baseSpec] of Object.entries(PASSENGER_ACTIONS)) {
     app.post(`/rides/:id/passengers/:passengerId/${action}`, { preHandler: requireAuth }, async (request, reply) => {
@@ -1364,6 +1379,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         });
         if (ride.status !== rideStatusBefore) {
           emitRideEvent(rideId, "ride:status", { rideId, status: ride.status as RideStatus });
+        }
+        const pushKind = PASSENGER_PUSH[spec.to];
+        if (pushKind) {
+          notifyRider(prisma, passenger.riderId, pushKind, rideId, { driverUserId: userId, noShow: spec.noShow });
         }
         if (spec.to === "ARRIVED" && ride.source === "USSD") {
           void notifyUssdRider(prisma, passenger.riderId, "Your driver has arrived.");

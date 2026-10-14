@@ -12,6 +12,7 @@ import {
 import { DriverPresenceProvider } from "../lib/presence";
 import { DriverLocationProvider } from "../lib/location";
 import { TripRuntime } from "../lib/tripRuntime";
+import { DriverPushNotifications } from "../lib/push";
 
 const queryClient = new QueryClient();
 
@@ -50,6 +51,7 @@ export default function RootLayout() {
             <DriverPresenceProvider>
               <DeepLinkGuard />
               <SessionCacheReset />
+              <DriverPushNotifications />
               {/* Live location + automatic arrival on every screen during a trip. */}
               <TripRuntime />
               <Stack screenOptions={{ headerShown: false }} />

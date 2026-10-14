@@ -80,8 +80,11 @@ export async function refreshTokens(refreshToken: string): Promise<AuthTokens> {
   return res.data;
 }
 
-export async function logout(refreshToken: string): Promise<void> {
-  await rawApi.post("/auth/logout", { refreshToken }).catch(() => undefined);
+/** `pushToken`: this install's, so the server stops sending this user's notifications here. */
+export async function logout(refreshToken: string, pushToken?: string | null): Promise<void> {
+  await rawApi
+    .post("/auth/logout", { refreshToken, ...(pushToken ? { pushToken } : {}) })
+    .catch(() => undefined);
 }
 
 /**

@@ -187,6 +187,8 @@ export async function logout(
   prisma: PrismaClient,
   refreshToken: string,
   now: Date = new Date(),
+  /** The push token of the install logging out: it stops getting this user's notifications. */
+  pushToken?: string,
 ): Promise<void> {
   const tokenHash = sha256(refreshToken);
 
@@ -199,6 +201,10 @@ export async function logout(
     where: { id: stored.id },
     data: { revokedAt: now },
   });
+
+  if (pushToken) {
+    await prisma.pushToken.deleteMany({ where: { userId: stored.userId, token: pushToken } });
+  }
 }
 
 /** Revokes all of a user's active refresh tokens (e.g. on suspected compromise). */

@@ -13,6 +13,7 @@ import {
   type OfferClosedPayload,
 } from "@rida/shared";
 import { verifyAccessToken } from "../services/auth/tokens";
+import { checkDriverArriving } from "../services/push/notify";
 
 let ioRef: SocketIOServer | null = null;
 
@@ -110,6 +111,8 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
           lng: data.lng,
           ts: Date.now(),
         });
+        // "Almost at your pickup" for riders still waiting (throttled per ride).
+        checkDriverArriving(prisma, data.rideId, userId, { latitude: data.lat, longitude: data.lng });
       });
     });
   });

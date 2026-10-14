@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { RIDER_DEEP_LINK_POLICY } from "@rida/shared";
 import { AuthProvider, installAppStateFocusManager, useDeepLinkGuard } from "@rida/mobile-shared";
 import { useResetCacheOnAccountChange } from "../lib/activeRide";
+import { RiderPushNotifications } from "../lib/push";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,7 @@ export default function RootLayout() {
         <AuthProvider>
           <DeepLinkGuard />
           <SessionCacheReset />
+          <RiderPushNotifications />
           <Stack screenOptions={{ headerShown: false }} />
         </AuthProvider>
       </QueryClientProvider>

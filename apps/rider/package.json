@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "lint": "eslint app components lib",
     "lint:fix": "eslint app components lib --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "eas-build-post-install": "node ../../scripts/eas-google-services.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.17",
@@ -25,6 +26,7 @@
     "expo": "~57.0.29",
     "expo-asset": "~57.0.20",
     "expo-constants": "~57.0.22",
+    "expo-device": "~57.0.2",
     "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
     "expo-haptics": "~57.0.3",
@@ -32,6 +34,7 @@
     "expo-keep-awake": "~57.0.2",
     "expo-linking": "~57.0.13",
     "expo-location": "~57.0.21",
+    "expo-notifications": "~57.0.23",
     "expo-router": "~57.0.27",
     "expo-secure-store": "~57.0.4",
     "expo-status-bar": "~57.0.1",

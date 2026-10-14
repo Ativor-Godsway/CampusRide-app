@@ -47,6 +47,7 @@ export const DELETED_NAME_PLACEHOLDER = "Deleted user";
  *   - refresh tokens -> all revoked, so no session can be extended.
  *   - driver profile -> plate and photo cleared (both identify a person),
  *                    taken offline and un-approved so dispatch skips them.
+ *   - push tokens   -> deleted, so no phone is notified for this account.
  *
  * Runs in a transaction: a partial deletion that revoked tokens but left the
  * name in place, or vice versa, is worse than either outcome.
@@ -91,5 +92,8 @@ export async function deleteAccount(
       where: { userId },
       data: { plate: null, photoUrl: null, isOnline: false, isApproved: false, currentZoneId: null },
     });
+
+    // No more notifications to any of their phones.
+    await tx.pushToken.deleteMany({ where: { userId } });
   });
 }
