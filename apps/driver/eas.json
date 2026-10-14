@@ -1,0 +1,22 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "production": {
+      "environment": "production",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.campusride.app"
+      }
+    },
+    "preview": {
+      "extends": "production",
+      "distribution": "internal"
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

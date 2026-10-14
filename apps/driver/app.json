@@ -51,7 +51,7 @@
       "typedRoutes": true
     },
     "extra": {
-      "SERVER_URL": "https://campusride-server-aaum.onrender.com",
+      "SERVER_URL": "https://api.campusride.app",
       "eas": {
         "projectId": "1fa78ede-bba8-434c-a6be-a6a7a8306392"
       }

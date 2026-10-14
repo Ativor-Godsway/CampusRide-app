@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isLocalDevServerUrl, resolveServerUrl } from "./serverUrl";
 
-const PROD = "https://campusride-server-aaum.onrender.com";
+const PROD = "https://api.campusride.app";
 
 describe("isLocalDevServerUrl", () => {
   it("recognises this machine and private-network addresses", () => {

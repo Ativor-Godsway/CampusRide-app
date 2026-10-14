@@ -15,6 +15,10 @@ CampusRide uses **three isolated databases**, all Neon branches of one project:
 > kept as a commented fallback in `.env.test`. Start a local Postgres with
 > `docker compose up -d` (repo-root `docker-compose.yml`) or use a native install.
 
+The production **API** runs on Render in the same region as its database:
+`https://api.campusride.app` (service `campusride-server`, Frankfurt). Clients
+and URLs are listed in [DEPLOY.md](../DEPLOY.md#production-at-a-glance).
+
 The real `.env.development` / `.env.test` files are **gitignored**. Commit only
 the `.env.*.example` templates. **Production secrets are never stored on disk** —
 they live in the Render dashboard (Environment tab) only.

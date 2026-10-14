@@ -7,6 +7,7 @@
  * Expo reads during `expo start` only. This is the second lock on that door:
  * even if a local address ends up in a file a RELEASE build does read (.env),
  * a release build refuses it and uses the production URL from app.json.
+ * (EAS production builds set EXPO_PUBLIC_API_URL from apps/<app>/eas.json.)
  */
 
 /** True for a server on this machine or a private network (localhost, 10.x, 172.16–31.x, 192.168.x, *.local). */

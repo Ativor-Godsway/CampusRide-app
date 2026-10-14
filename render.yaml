@@ -28,10 +28,19 @@ services:
   - type: web
     name: campusride-server
     runtime: node
-    # Change region to match your Neon database region for lowest latency.
-    # Options: oregon, frankfurt, singapore, ohio, virginia
-    region: oregon
+    # Same region as the production Neon branch (Frankfurt / eu-central-1),
+    # so every query stays inside one region. Render cannot move an existing
+    # service between regions: changing this means a new service.
+    region: frankfurt
     plan: free
+
+    # Public URL of the API: https://api.campusride.app. The rider and driver
+    # apps (apps/<app>/eas.json), the admin site (VITE_API_URL below) and the
+    # SOS links (PUBLIC_BASE_URL) all use this name, never the service's
+    # *.onrender.com address. DNS: a CNAME from api.campusride.app to the
+    # service's onrender.com host; Render issues the TLS certificate.
+    domains:
+      - api.campusride.app
 
     # Builds packages/shared first (apps/server needs its dist/ at runtime),
     # then builds apps/server (prisma generate + tsc).
@@ -171,7 +180,7 @@ services:
       # of this service — the recipient opens it on their own phone. If it is
       # unset the link falls back to http://localhost:PORT and the SOS arrives
       # pointing nowhere, which defeats the feature.
-      # Set to this service's Render URL: https://campusride-server-aaum.onrender.com
+      # Set to this service's public URL: https://api.campusride.app
       - key: PUBLIC_BASE_URL
         sync: false
 
@@ -254,4 +263,4 @@ services:
       # secret, and because a missing value here fails in a confusing way:
       # the app builds fine and falls back to http://localhost:3000.
       - key: VITE_API_URL
-        value: https://campusride-server-aaum.onrender.com
+        value: https://api.campusride.app
