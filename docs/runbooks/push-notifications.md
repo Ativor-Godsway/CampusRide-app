@@ -89,14 +89,16 @@ so one variable per app covers them all.
 
 ```bash
 cd apps/rider
-npx -y eas-cli@24 env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment production --visibility secret
+npx -y eas-cli@24 env:set --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment production --visibility secret
 
 cd ../driver
-npx -y eas-cli@24 env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment production --visibility secret
+npx -y eas-cli@24 env:set --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment production --visibility secret
 ```
 
-If you ever replace a file, update both copies: put the new file on your Mac,
-then run the same command with `--force` added.
+`env:set` creates the variable or replaces it, so if you ever replace a file,
+put the new file on your Mac and run the same command again. Both copies must
+always match. To check the variable is there (its value stays hidden):
+`npx -y eas-cli@24 env:list --environment production`.
 
 ### Step 3: let Expo send through Firebase (FCM V1 key)
 
