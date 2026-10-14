@@ -11,6 +11,7 @@ import {
   colors,
   confirmDeleteAccount,
   describeDeleteAccountError,
+  getAppVersionLabel,
   radii,
   spacing,
   useAuth,
@@ -151,6 +152,11 @@ export default function AccountTab() {
           showChevron={false}
         />
       </Card>
+
+      {/* Which build/update this phone runs — docs/runbooks/releasing.md. */}
+      <Text variant="caption" color="subtle" style={styles.versionLabel} selectable>
+        {getAppVersionLabel()}
+      </Text>
     </Screen>
   );
 }
@@ -205,5 +211,9 @@ const styles = StyleSheet.create({
   },
   logoutCard: {
     marginTop: spacing.xl,
+  },
+  versionLabel: {
+    marginTop: spacing.xl,
+    textAlign: "center",
   },
 });

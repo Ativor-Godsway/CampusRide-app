@@ -22,6 +22,7 @@ export * from "./rides/driverTripStatus";
 export * from "./driver/zoneUpdate";
 export * from "./driver/requestsNearYou";
 export * from "./config/serverUrl";
+export * from "./config/appVersion";
 export * from "./geo/polyline";
 export * from "./rides/tripStops";
 export * from "./driver/actionFailure";

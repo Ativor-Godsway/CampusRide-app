@@ -1,6 +1,7 @@
 export * from "./design";
 export * from "./auth";
 export * from "./config/serverUrl";
+export * from "./config/appVersion";
 export * from "./config/mapboxToken";
 export * from "./uploads/driverPhoto";
 export * from "./rides";
