@@ -3,17 +3,20 @@
     "name": "CampusRide",
     "owner": "campusride-gh",
     "slug": "campusride-rider",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "campusride-rider",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "gh.edu.ug.rida.rider"
+      "bundleIdentifier": "com.campusride.rider",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "gh.edu.ug.rida.rider",
+      "package": "com.campusride.rider",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F6F7F6"
