@@ -3,17 +3,20 @@
     "name": "CampusRide Driver",
     "owner": "campusride-gh",
     "slug": "campusride-driver",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "campusride-driver",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "gh.edu.ug.rida.driver"
+      "bundleIdentifier": "com.campusride.driver",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
-      "package": "gh.edu.ug.rida.driver",
+      "package": "com.campusride.driver",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F6F7F6"
