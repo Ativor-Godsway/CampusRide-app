@@ -10,8 +10,7 @@
     "web": "expo start --web",
     "lint": "eslint app components lib",
     "lint:fix": "eslint app components lib --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "eas-build-post-install": "node ../../scripts/eas-google-services.mjs"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.17",

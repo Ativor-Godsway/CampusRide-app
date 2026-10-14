@@ -82,10 +82,16 @@ Your Mac needs these copies because:
 
 ### Step 2: give EAS the same files, as secret file variables
 
-EAS Build never sees ignored files, so it gets each file from a secret
-variable. A small hook (`scripts/eas-google-services.mjs`) copies it into place
-during the build. All three build profiles use the `production` environment,
-so one variable per app covers them all.
+EAS Build only uploads files tracked by git, so it gets each file from a
+secret file variable instead. `apps/<app>/app.config.js` points the app at
+`GOOGLE_SERVICES_JSON` when it is set (on an EAS build worker) and at
+`./google-services.json` otherwise (on your Mac). The fingerprint hashes the
+file's contents, not where it is, so both give the same fingerprint as long as
+the two are the same file. All three build profiles use the `production`
+environment, so the production variable is the one builds read.
+
+`eas config` on your Mac still shows `./google-services.json`. That's expected:
+a secret variable is only ever available on EAS's build workers.
 
 ```bash
 cd apps/rider
