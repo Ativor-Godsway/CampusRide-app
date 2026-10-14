@@ -127,7 +127,7 @@ export default function AccountTab() {
         <ListRow
           title="Notifications"
           leading={<ListRow.Icon name="notifications-outline" />}
-          onPress={() => showComingSoon("Notification settings")}
+          onPress={() => router.push("/notifications")}
         />
         <View style={styles.divider} />
         <ListRow

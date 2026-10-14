@@ -203,6 +203,19 @@ export const config = {
    * when we outgrow it (docs/routing.md). ROUTING_DISABLED=true serves only
    * the stored zone routes. Never contacted under NODE_ENV=test.
    */
+  /**
+   * Push notifications through the Expo push service (services/push). On by
+   * default; PUSH_DISABLED=true switches every send off (the rest of the app
+   * is unaffected). Never contacted under NODE_ENV=test.
+   *
+   * EXPO_ACCESS_TOKEN is only needed if "Enhanced Security for Push
+   * Notifications" is turned on for the Expo account. It is a secret: never
+   * log it.
+   */
+  push: {
+    enabled: process.env.PUSH_DISABLED !== "true" && process.env.NODE_ENV !== "test",
+    accessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
+  },
   routing: {
     osrmBaseUrl: process.env.OSRM_BASE_URL ?? "https://router.project-osrm.org",
     disabled: process.env.ROUTING_DISABLED === "true" || process.env.NODE_ENV === "test",

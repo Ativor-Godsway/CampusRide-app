@@ -241,14 +241,16 @@ export function registerAuthRoutes(
   });
 
   app.post("/auth/logout", async (request, reply) => {
-    const body = request.body as { refreshToken?: unknown };
+    const body = request.body as { refreshToken?: unknown; pushToken?: unknown };
 
     if (!isNonEmptyString(body.refreshToken)) {
       return reply.code(400).send({ error: "refreshToken is required" });
     }
 
     try {
-      await logout(prisma, body.refreshToken);
+      // Optional pushToken: this install's push token, deleted with the session.
+      const pushToken = isNonEmptyString(body.pushToken) ? body.pushToken : undefined;
+      await logout(prisma, body.refreshToken, new Date(), pushToken);
       return reply.code(200).send({ ok: true });
     } catch (err) {
       if (err instanceof InvalidRefreshTokenError) {

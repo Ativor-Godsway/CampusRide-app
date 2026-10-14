@@ -2,7 +2,15 @@ import { useEffect } from "react";
 import { View } from "react-native";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { LoadingState, RoleMismatchScreen, Screen, colors, shadows, useAuth } from "@rida/mobile-shared";
+import {
+  LoadingState,
+  RoleMismatchScreen,
+  Screen,
+  colors,
+  shadows,
+  useAuth,
+  usePushPermissionPrompt,
+} from "@rida/mobile-shared";
 import { ActiveRideBanner } from "../../components/ActiveRideBanner";
 import { activeRideParams, claimLaunchRideCheck, useActiveRide } from "../../lib/activeRide";
 
@@ -17,6 +25,12 @@ export default function TabsLayout() {
     if (!activeRideChecked || !claimLaunchRideCheck()) return;
     if (activeRide) router.push({ pathname: "/ride/type", params: activeRideParams(activeRide) });
   }, [activeRideChecked, activeRide, router]);
+
+  // Once, after login, and never mid-ride: explain notifications, then ask.
+  usePushPermissionPrompt(
+    !isLoading && isAuthenticated && user?.role === "RIDER" && activeRideChecked && !activeRide,
+    () => router.push("/notifications"),
+  );
 
   if (isLoading) {
     return (

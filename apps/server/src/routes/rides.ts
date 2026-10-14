@@ -34,6 +34,7 @@ import { getDriverInfo } from "../services/user/driverInfo";
 import { logger } from "../lib/logger";
 import { riderRideDetailSelect, riderRideListSelect } from "./selects";
 import { startMockDriverForRide } from "../dev/mockDriver";
+import { notifyRiderCancelled } from "../services/push/notify";
 
 /**
  * Shape returned by `POST /rides/:id/initiate-payment` while
@@ -441,6 +442,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         riderCancel: { reason: input.reason, note: input.note },
       });
       emitRideEvent(id, "ride:status", { rideId: id, status: updated.status });
+      // A driver who had already accepted it hears at once, even with the app closed.
+      notifyRiderCancelled(prisma, ride);
       // Drivers who were being offered it drop it at once.
       if (ride.status === "REQUESTED" || ride.status === "AWAITING_RIDER_DECISION") {
         closeOffer(prisma, ride, "CANCELLED");

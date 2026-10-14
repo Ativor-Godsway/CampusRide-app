@@ -54,6 +54,15 @@ fi
 
 cd "apps/$app"
 
+# google-services.json is part of the app's fingerprint (its contents, not
+# just its name). Without this Mac's copy — byte-identical to the one in the
+# GOOGLE_SERVICES_JSON EAS variable — the update would be labelled for a
+# build that doesn't exist and reach nobody.
+if [[ ! -f google-services.json ]]; then
+  echo "Error: apps/$app/google-services.json is missing. See docs/runbooks/push-notifications.md, step 1." >&2
+  exit 1
+fi
+
 api_url="$(node -p 'require("./eas.json").build.production.env.EXPO_PUBLIC_API_URL')"
 export EXPO_PUBLIC_API_URL="$api_url"
 

@@ -15,9 +15,11 @@
     "@tanstack/react-query": "^5.40.0",
     "axios": "^1.20.0",
     "expo-constants": "*",
+    "expo-device": "*",
     "expo-file-system": "*",
     "expo-linking": "*",
     "expo-location": "*",
+    "expo-notifications": "*",
     "expo-router": "*",
     "expo-secure-store": "*",
     "expo-updates": "*",
@@ -45,6 +47,9 @@
     "expo-constants": {
       "optional": true
     },
+    "expo-device": {
+      "optional": true
+    },
     "expo-file-system": {
       "optional": true
     },
@@ -52,6 +57,9 @@
       "optional": true
     },
     "expo-location": {
+      "optional": true
+    },
+    "expo-notifications": {
       "optional": true
     },
     "expo-router": {

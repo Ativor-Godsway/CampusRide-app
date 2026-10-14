@@ -206,6 +206,13 @@ services:
       - key: CLOUDINARY_API_SECRET
         sync: false
 
+      # ── Push notifications (Expo push service) ─────────────────────────────
+      # Nothing to set for push to work. EXPO_ACCESS_TOKEN only if "Enhanced
+      # Security for Push Notifications" is on for the Expo account (secret).
+      # PUSH_DISABLED=true is the kill switch. docs/runbooks/push-notifications.md
+      - key: EXPO_ACCESS_TOKEN
+        sync: false
+
   # ───────────────────────────────────────────────────────────────────────────
   # ADMIN APP (Phase 5) — CONFIGURATION ONLY, NOT YET CONNECTED
   #

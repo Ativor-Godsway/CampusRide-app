@@ -6,6 +6,7 @@ import type { OfferClosedReason } from "@rida/shared";
 import { DriverHasActiveRideError, RideAlreadyClaimedError } from "./errors";
 import { ACTIVE_DRIVER_STATUSES } from "./stateMachine";
 import { requestPlaceNames } from "../../routes/ridePins";
+import { notifyRideRequest } from "../push/notify";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -84,6 +85,7 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
       ride.type === "LONE" ? getLoneFare() : getSharedFarePerRider(ride.occupancy);
     const { driverShare } = splitFare(farePesewas);
     const expiresAt = (ride.broadcastStartedAt?.getTime() ?? Date.now()) + 90_000;
+    const placeNames = requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name);
 
     emitDriverBroadcast(
       eligible.map((d) => d.userId),
@@ -92,13 +94,15 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
         pickupZoneName: ride.pickupZone.name,
         dropoffZoneName: ride.dropoffZone.name,
         // Names only: no driver gets a rider's coordinates before accepting.
-        ...requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name),
+        ...placeNames,
         type: ride.type,
         farePesewas,
         driverSharePesewas: driverShare,
         expiresAt,
       },
     );
+    // Drivers whose app is in the background or closed get it as a push.
+    notifyRideRequest(prisma, ride.id, eligible.map((d) => d.userId), placeNames.pickupPlaceName);
   }
 
   return eligible;

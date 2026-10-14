@@ -297,5 +297,10 @@ An update must always match a commit, so it can be found and rolled back.
 **The release script says "production updates are published from main only".**
 Use the preview → republish route in section 3, or switch to an up-to-date `main`.
 
+**The release script says "google-services.json is missing".** Put the app's
+Firebase file in place (see [push-notifications.md](push-notifications.md),
+step 1). It's part of the fingerprint, so an update made without it would
+reach no phone.
+
 **`eas` asks you to log in.** Run `npx -y eas-cli@24 login` with the Expo account
 that belongs to the `campusride-gh` organisation.

@@ -4,6 +4,7 @@ import { applyRideTransition } from "./rideService";
 import { emitRideEvent } from "../../realtime/rideSocket";
 import { notifyUssdRider } from "../sms/notifyUssdRiders";
 import { closeOffer } from "./dispatch";
+import { notifyRider } from "../push/notify";
 
 /** Shared with the rider app's countdown, so the two can never disagree. */
 const BROADCAST_TIMEOUT_MS = DISPATCH_WINDOW_MS;
@@ -100,6 +101,7 @@ export async function processTimeouts(
         emitRideEvent(ride.id, RIDE_EVENTS.STATUS, { rideId: ride.id, status: "AWAITING_RIDER_DECISION" });
         // Its window is over: no driver should still be looking at the offer.
         closeOffer(prisma, ride, "EXPIRED");
+        notifyRider(prisma, ride.riderId, "NO_DRIVER_FOUND", ride.id);
         logger.info({ rideId: ride.id }, "[timeout] REQUESTED → AWAITING_RIDER_DECISION");
         transitioned.push({ rideId: ride.id, from: ride.status, to: "AWAITING_RIDER_DECISION" });
         // USSD riders have no socket to receive AWAITING_RIDER_DECISION on

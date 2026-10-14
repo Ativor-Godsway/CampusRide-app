@@ -16,6 +16,7 @@ import {
 } from "./storage";
 import { getAccessToken, setAccessToken } from "./tokenStore";
 import { isSessionRejection, setSessionRejectedHandler } from "./apiClient";
+import { getCurrentPushToken, setCurrentPushToken } from "../push/currentToken";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -115,10 +116,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     const storedRefreshToken = await getStoredRefreshToken();
+    const pushToken = getCurrentPushToken();
+    setCurrentPushToken(null);
     await clearLocalSession();
     if (storedRefreshToken) {
       // Best effort, not awaited: apiLogout already swallows its own errors.
-      void apiLogout(storedRefreshToken);
+      // The push token goes with it, so this phone stops getting the
+      // signed-out user's notifications.
+      void apiLogout(storedRefreshToken, pushToken);
     }
   }, [clearLocalSession]);
 
@@ -127,6 +132,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // NOT clear local state — the account still exists and the user is still
     // signed in.
     await apiDeleteAccount();
+    // The server deleted every push token of the account.
+    setCurrentPushToken(null);
     await clearLocalSession();
   }, [clearLocalSession]);
 

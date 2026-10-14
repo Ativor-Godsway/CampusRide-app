@@ -20,11 +20,20 @@
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#F6F7F6"
-      }
+      },
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       "expo-router",
       "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#19743C",
+          "defaultChannel": "ride-updates"
+        }
+      ],
       [
         "expo-location",
         {

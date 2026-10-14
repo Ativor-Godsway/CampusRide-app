@@ -136,6 +136,7 @@ model User {
   ratingsReceived           Rating[]           @relation("RatingsReceived")
   driverCommissionLedger    CommissionLedger[] @relation("DriverCommission")
   rideRejections            RideRejection[]    @relation("DriverRejections")
+  pushTokens                PushToken[]
 }
 
 model Driver {
@@ -479,6 +480,29 @@ model RefreshToken {
   @@index([userId])
   @@index([tokenHash])
   @@index([familyId])
+}
+
+/// An Expo push token: one row per app install on a phone (services/push).
+/// Registered by the app after the user allows notifications, deleted on log
+/// out, on account deletion, and when Expo reports the install is gone
+/// (DeviceNotRegistered). The same phone signing in as someone else moves the
+/// row to them, so a token only ever reaches the person signed in on it.
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  /// "ExponentPushToken[...]". Identifies one install of one app.
+  token     String   @unique @db.VarChar(255)
+  /// Which app it belongs to: "rider" or "driver". A send only uses the
+  /// tokens of the app the message is for.
+  app       String   @db.VarChar(10)
+  /// "android" or "ios".
+  platform  String   @db.VarChar(10)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 /// Phase 5c: a rider rating their driver (or vice versa, in future) at the
