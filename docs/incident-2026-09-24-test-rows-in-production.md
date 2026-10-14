@@ -45,7 +45,7 @@ The hosts each env file targets today:
 
 | File | Host |
 | --- | --- |
-| `.env` | **was** `ep-ancient-butterfly` (production) — repointed at the dev branch on 2026-09-30 |
+| `.env` | **was** `ep-ancient-butterfly` (production, us-east-1) — repointed at the dev branch on 2026-09-30. Production moved to `ep-empty-violet` (Frankfurt, eu-central-1) on 2026-10-14. |
 | `.env.development` | `ep-flat-rain-…` (Neon dev) |
 | `.env.test` | `localhost:5432/rida_test`, with `ep-blue-union-…` commented out |
 
