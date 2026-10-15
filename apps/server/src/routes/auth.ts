@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { OtpService } from "../services/otp/OtpService";
 import { requestOtp, verifyOtp } from "../services/auth/otp";
@@ -11,6 +11,9 @@ import {
   type SignupRole,
 } from "../services/auth/authService";
 import {
+  AdminNotAllowedError,
+  AdminSessionEndedError,
+  NotAnAdminError,
   InvalidOtpError,
   InvalidRefreshTokenError,
   InvalidVerificationTokenError,
@@ -35,6 +38,7 @@ import { disconnectUser } from "../realtime/rideSocket";
 import { RateLimitedError, enforce } from "../rateLimit/limiter";
 import { RULES } from "../rateLimit/rules";
 import { clientIpForLimits, sendRateLimited } from "../rateLimit/reply";
+import { isAdminSiteRequest, recordAdminLogin, type AdminLoginFailure } from "../services/admin/loginAudit";
 
 const OTP_PURPOSES = ["SIGNUP", "LOGIN"] as const;
 const SIGNUP_ROLES = ["RIDER", "DRIVER"] as const;
@@ -71,6 +75,22 @@ export function registerAuthRoutes(
   otpService: OtpService,
 ): void {
   /**
+   * Whether this login step goes in the admin sign-in record (see
+   * services/admin/loginAudit.ts): it came from the admin site, or it is
+   * about an admin's number — on the allowlist, or an ADMIN account's —
+   * whichever app sent it.
+   */
+  async function adminLoginWatch(request: FastifyRequest, phone: string) {
+    const user = await prisma.user.findUnique({ where: { phone }, select: { id: true, role: true, deletedAt: true } });
+    const account = user && !user.deletedAt ? user : null;
+    const watched =
+      isAdminSiteRequest(request) || config.adminPhoneAllowlist.phones.includes(phone) || account?.role === "ADMIN";
+    const record = (outcome: "code_sent" | "failure" | "success", reason?: AdminLoginFailure) =>
+      watched ? recordAdminLogin(prisma, request, { outcome, phone, userId: account?.id ?? null, reason }) : Promise.resolve();
+    return { record };
+  }
+
+  /**
    * Rate limits on these public routes are per PHONE NUMBER (services/auth/otp.ts,
    * and login.15m below), never per IP: a hostel on one Wi-Fi is one IP. The
    * per-IP backstop (rateLimit/http.ts) sits behind them, far higher.
@@ -87,11 +107,16 @@ export function registerAuthRoutes(
       return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
     }
 
+    const watch = await adminLoginWatch(request, phone);
     try {
       await requestOtp(prisma, otpService, phone, body.purpose, new Date(), { ip: clientIpForLimits(request) });
+      await watch.record("code_sent");
       return reply.code(200).send({ ok: true });
     } catch (err) {
-      if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
+      if (err instanceof RateLimitedError) {
+        await watch.record("failure", "rate_limited");
+        return sendRateLimited(reply, err.retryAfterMs);
+      }
       throw err;
     }
   });
@@ -107,16 +132,23 @@ export function registerAuthRoutes(
       return reply.code(400).send({ error: "phone, code, and purpose (SIGNUP|LOGIN) are required" });
     }
 
-    try {
-      const phone = normalizePhone(body.phone);
-      if (!phone) {
-        return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
-      }
+    const phone = normalizePhone(body.phone);
+    if (!phone) {
+      return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
+    }
+    const watch = await adminLoginWatch(request, phone);
 
+    try {
       const result = await verifyOtp(prisma, phone, body.code, body.purpose);
       return reply.code(200).send(result);
     } catch (err) {
-      if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
+      if (err instanceof RateLimitedError) {
+        await watch.record("failure", "rate_limited");
+        return sendRateLimited(reply, err.retryAfterMs);
+      }
+      if (err instanceof InvalidOtpError) await watch.record("failure", "bad_code");
+      if (err instanceof OtpExpiredError) await watch.record("failure", "code_expired");
+      if (err instanceof OtpAttemptsExceededError) await watch.record("failure", "too_many_attempts");
       if (
         err instanceof InvalidOtpError ||
         err instanceof OtpExpiredError ||
@@ -185,20 +217,37 @@ export function registerAuthRoutes(
       return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
     }
 
+    const watch = await adminLoginWatch(request, phone);
     try {
       await enforce([{ rule: RULES.login15m, subject: phone }]);
       const result = await login(prisma, {
         phone,
         verifiedToken: body.verifiedToken,
+        adminSite: isAdminSiteRequest(request),
       });
+      await watch.record("success");
       return reply.code(200).send(result);
     } catch (err) {
-      if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
+      if (err instanceof RateLimitedError) {
+        await watch.record("failure", "rate_limited");
+        return sendRateLimited(reply, err.retryAfterMs);
+      }
       if (err instanceof InvalidVerificationTokenError) {
+        await watch.record("failure", "invalid_verification");
         return reply.code(401).send({ error: err.message });
       }
       if (err instanceof UserNotFoundError) {
+        await watch.record("failure", "no_account");
         return reply.code(404).send({ error: err.message });
+      }
+      if (err instanceof AdminNotAllowedError) {
+        await watch.record("failure", "not_allowlisted");
+        request.log.warn({ event: "admin_login_not_allowlisted", userId: err.userId }, "ADMIN login refused: not on ADMIN_PHONE_ALLOWLIST");
+        return reply.code(403).send({ error: err.message, code: "ADMIN_NOT_ALLOWED" });
+      }
+      if (err instanceof NotAnAdminError) {
+        await watch.record("failure", "not_admin");
+        return reply.code(403).send({ error: err.message, code: "NOT_AN_ADMIN" });
       }
       throw err;
     }
@@ -218,6 +267,13 @@ export function registerAuthRoutes(
       // Per login and per account (authService.refresh). 429 is never read as
       // a dead session by the apps, so nobody is signed out by it.
       if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
+      if (err instanceof AdminSessionEndedError) {
+        request.log.info(
+          { event: "admin_session_ended", userId: err.userId, reason: err.reason },
+          "Admin session ended; a new sign-in is needed",
+        );
+        return reply.code(401).send({ error: err.message, code: "ADMIN_SESSION_ENDED" });
+      }
       if (err instanceof RefreshTokenReuseError) {
         // Every token in this login's rotation chain has just been revoked.
         // Log it as the security event it is — but answer EXACTLY as for any

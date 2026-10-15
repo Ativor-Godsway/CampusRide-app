@@ -192,6 +192,42 @@ async function accountFor(prisma: PrismaClient, phone: string) {
 }
 
 export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient): void {
+  // ─── Recent admin logins ─────────────────────────────────────────────────
+  //
+  // Every attempt to sign in to the admin site (services/admin/loginAudit.ts),
+  // newest first, so a login from an unfamiliar place or device — the sign
+  // of a stolen SIM — stands out. Read-only, like the ride list: not itself
+  // audit-logged.
+
+  app.get("/admin/audit/logins", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const { limit } = (request.query ?? {}) as { limit?: unknown };
+    const rows = await prisma.adminAuditLog.findMany({
+      where: { action: { startsWith: "admin.login." } },
+      orderBy: { timestamp: "desc" },
+      take: Math.min(Math.max(Number(limit) || 50, 1), 200),
+    });
+    const actorIds = [...new Set(rows.map((r) => r.actor).filter((a) => a !== "unknown"))];
+    const actors = await prisma.user.findMany({
+      where: { id: { in: actorIds } },
+      select: { id: true, name: true, role: true },
+    });
+    const byId = new Map(actors.map((a) => [a.id, a]));
+    return reply.send({
+      logins: rows.map((r) => ({
+        id: r.id,
+        at: r.timestamp.toISOString(),
+        outcome: r.action.slice("admin.login.".length),
+        reason: r.reason,
+        ip: r.ip,
+        userAgent: r.userAgent,
+        account: byId.get(r.actor) ?? null,
+        /** For an attempt with no account: the number, partly masked. */
+        target: r.actor === "unknown" ? r.target : null,
+      })),
+    });
+  });
+
   // ─── Rate limits ─────────────────────────────────────────────────────────
   //
   // For "I can't log in" calls: what a phone number's limits look like now,

@@ -67,9 +67,17 @@ services:
       - key: DIRECT_URL
         sync: false
 
-      # Long random secret for JWT signing.
+      # Long random secret for JWT signing: at least 32 random bytes, or the
+      # server refuses to start (lib/productionEnv.ts).
       # Generate with: openssl rand -hex 32
       - key: JWT_SECRET
+        sync: false
+
+      # REQUIRED (Stage 3). The only phone numbers that may use the admin site,
+      # even if an account is ADMIN in the database. Comma-separated, any
+      # spelling. The server refuses to start in production without one.
+      # docs/security/admin-and-secrets.md
+      - key: ADMIN_PHONE_ALLOWLIST
         sync: false
 
       # Render injects PORT automatically — do not set this manually.
@@ -185,11 +193,10 @@ services:
       - key: PUBLIC_BASE_URL
         sync: false
 
+      # REQUIRED in production (the server refuses to start without it).
       # Fixed number texted on EVERY SOS, in addition to the rider's own
-      # emergency contact. This is the backstop that stops an SOS from a rider
-      # who never saved a contact reaching nobody at all. Leave unset and the
-      # SOS still works — it just won't reach support. Full SOS visibility is
-      # a Phase 5 admin-panel item; this is the stopgap.
+      # emergency contact: the backstop that stops an SOS from a rider who
+      # never saved a contact reaching nobody at all.
       - key: SUPPORT_CONTACT_PHONE
         sync: false
 
@@ -253,14 +260,41 @@ services:
         source: /*
         destination: /index.html
 
+    # Security headers (Stage 3). An internal operator tool with authority
+    # over who may drive: never framed, never indexed, and allowed to run only
+    # its own script and talk only to the API.
+    #
+    # The Content-Security-Policy names the API (https://api.campusride.app,
+    # same as VITE_API_URL below), Cloudinary (driver photos) and
+    # OpenStreetMap's tiles (the places map). Change VITE_API_URL and you must
+    # change connect-src here too, or every request is blocked. Styles may be
+    # inline (React and Leaflet set them at runtime; a style can't run code);
+    # scripts may not.
     headers:
-      # An internal operator tool has no business being framed or indexed.
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://res.cloudinary.com https://tile.openstreetmap.org; font-src 'self' data:; connect-src 'self' https://api.campusride.app; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests"
       - path: /*
         name: X-Frame-Options
         value: DENY
       - path: /*
         name: X-Robots-Tag
         value: noindex, nofollow
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=15552000; includeSubDomains
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Permissions-Policy
+        value: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+      - path: /*
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
 
     envVars:
       # Vite inlines this at BUILD time — changing it requires a REDEPLOY, not

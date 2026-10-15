@@ -146,3 +146,22 @@ describe("HTTP and Socket.io share one policy", () => {
     expect(resolveCorsOrigin(parseOriginAllowlist(raw), "production")).toEqual(resolved);
   });
 });
+
+describe("the admin site's own request header", () => {
+  it("is allowed in the preflight, so marking admin requests never breaks the admin site", async () => {
+    const app = await serverWith("https://campusride-admin.onrender.com", "production");
+    const res = await app.inject({
+      method: "OPTIONS",
+      url: "/health",
+      headers: {
+        origin: "https://campusride-admin.onrender.com",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,authorization,x-campusride-client",
+      },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe("https://campusride-admin.onrender.com");
+    expect(String(res.headers["access-control-allow-headers"]).toLowerCase()).toContain("x-campusride-client");
+    await app.close();
+  });
+});

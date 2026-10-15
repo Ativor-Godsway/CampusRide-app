@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import path from "node:path";
 import { resolveCloudinaryConfig } from "./services/uploads/cloudinaryConfig";
+import { normalizePhone } from "./lib/phone";
 
 // Per-environment .env loading (dev/test/prod split — see docs/environments.md).
 // NODE_ENV picks the file: `.env.development` (default), `.env.test` (vitest
@@ -40,6 +41,30 @@ export function rateLimitMultiplier(nodeEnv: string, raw: string | undefined): n
   return nodeEnv === "production" ? 1 : positiveInt(raw, 10);
 }
 
+export interface PhoneList {
+  /** Canonical "+233…" numbers. */
+  phones: string[];
+  /** Entries that aren't a Ghanaian number (a typo): production refuses to boot with any. */
+  invalid: string[];
+}
+
+/** "0241234567, +233 54 860 8146" -> canonical numbers, in any spelling, comma or space separated. */
+export function parsePhoneList(raw: string | undefined): PhoneList {
+  const entries = (raw ?? "")
+    .split(/[,;\n]/)
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const phones: string[] = [];
+  const invalid: string[] = [];
+  for (const entry of entries) {
+    const phone = normalizePhone(entry);
+    if (phone) {
+      if (!phones.includes(phone)) phones.push(phone);
+    } else invalid.push(entry);
+  }
+  return { phones, invalid };
+}
+
 /**
  * First value that is set AND not blank. `??` alone is wrong for the CORS
  * fallback: a var set to "" in a dashboard is not null/undefined, so it would
@@ -57,6 +82,24 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL ?? "",
   nodeEnv: process.env.NODE_ENV ?? "development",
   jwtSecret: process.env.JWT_SECRET ?? "",
+  /**
+   * The only phone numbers that may use the admin site, even if an account's
+   * role is ADMIN in the database (Stage 3). Comma-separated, any spelling.
+   * In production an empty list means NOBODY gets in (and the server won't
+   * boot without one: lib/productionEnv.ts); elsewhere it means any ADMIN.
+   */
+  adminPhoneAllowlist: parsePhoneList(process.env.ADMIN_PHONE_ALLOWLIST),
+  /**
+   * Admin sessions are short (services/auth/authService.ts): the admin site
+   * holds a 10-minute access token, renewed while it's in use; 30 minutes
+   * without using it signs it out, and nothing lasts past 8 hours from the
+   * login. Rider and driver sessions are unchanged.
+   */
+  adminSession: {
+    accessTokenMinutes: Math.min(60, positive("ADMIN_ACCESS_TOKEN_MINUTES", 10)),
+    idleMinutes: Math.min(240, positive("ADMIN_IDLE_MINUTES", 30)),
+    maxHours: Math.min(24, positive("ADMIN_SESSION_MAX_HOURS", 8)),
+  },
   mnotify: {
     enabled: process.env.MNOTIFY_ENABLED === "true",
     apiKey: process.env.MNOTIFY_API_KEY ?? "",

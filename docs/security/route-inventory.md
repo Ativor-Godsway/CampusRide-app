@@ -9,7 +9,7 @@ fails if a route exists that is not in these tables, if a row names a route
 that no longer exists, or if the **Login** column disagrees with the code. Add
 the row in the same change as the route.
 
-Last reviewed: 2026-10-15 (pre-launch hardening, Stages 1–2).
+Last reviewed: 2026-10-15 (pre-launch hardening, Stages 1–3).
 
 ## How to read it
 
@@ -42,7 +42,7 @@ Last reviewed: 2026-10-15 (pre-launch hardening, Stages 1–2).
 | `POST /auth/request-otp` | No | — | Sends a code to the phone given. | per number: 1 per 60 s, 5 / 15 min, 10 / 24 h (an admin's number: 3 / 15 min, 6 / 24 h); per IP: 200 codes / 15 min; IP backstop |
 | `POST /auth/verify-otp` | No | — | Returns a 5-minute verification token for that phone only. 5 wrong tries burns the code. | per number: 10 / 15 min (an admin's: 5); IP backstop |
 | `POST /auth/signup` | No | — | Needs a verification token for the same phone. Role can only be RIDER or DRIVER; a new driver is never approved. | per number: 10 / 15 min (with log-ins); IP backstop |
-| `POST /auth/login` | No | — | Needs a verification token for the same phone. Refuses deleted accounts. | per number: 10 / 15 min (with sign-ups); IP backstop |
+| `POST /auth/login` | No | — | Needs a verification token for the same phone. Refuses deleted accounts, and ADMIN accounts not on `ADMIN_PHONE_ALLOWLIST`. From the admin site (`X-CampusRide-Client: admin`), only an allowed ADMIN account gets a session. Attempts from the admin site, or about an admin's number, are recorded. | per number: 10 / 15 min (with sign-ups); IP backstop |
 | `POST /auth/refresh` | No | — | The refresh token is the credential. One-time use; re-using one revokes that whole login. Refuses deleted accounts. | per login: 10 / 15 min; per account: 30 / 15 min; IP backstop |
 | `POST /auth/logout` | No | — | The refresh token is the credential; only that token's own push token is removed. | IP backstop |
 | `POST /demo/otp/send` | No | — | Showcase demo only, separate table from real logins. | its own (per phone 1 / min and 5 / day, per IP 10 / hour, all phones 300 / day); IP backstop |
@@ -123,9 +123,12 @@ The request names a resource. If it isn't the caller's: **404**, same body as
 
 ## Admin
 
-ADMIN accounts only; riders and drivers get 403. Every change writes an
-`AdminAuditLog` row in the same transaction. (Stage 3 adds the phone
-allowlist and shorter admin sessions.)
+Two keys, both needed: the account's role is ADMIN in the database **and**
+its phone is on `ADMIN_PHONE_ALLOWLIST` (set on Render). Anyone else gets 403,
+riders and unlisted admins alike. Every change writes an `AdminAuditLog` row
+in the same transaction. Admin sessions are short: a 10-minute access token
+renewed while in use, ended by 30 idle minutes or 8 hours after signing in.
+See [admin-and-secrets.md](admin-and-secrets.md).
 
 | Route | Login | Roles | Ownership rule | Rate limit |
 |---|---|---|---|---|
@@ -136,6 +139,7 @@ allowlist and shorter admin sessions.)
 | `GET /admin/places` | Yes | ADMIN | All places. | account default |
 | `POST /admin/places` | Yes | ADMIN | Audit-logged. | account default |
 | `PATCH /admin/places/:id` | Yes | ADMIN | Audit-logged. | account default |
+| `GET /admin/audit/logins` | Yes | ADMIN | Every attempt to sign in to the admin site, with time, IP and device (for spotting a stranger). | account default |
 | `GET /admin/rate-limits` | Yes | ADMIN | A phone number's limits in use (and its account's). Audit-logged. | account default |
 | `POST /admin/rate-limits/clear` | Yes | ADMIN | Clears one number's and its account's limits, nobody else's. Audit-logged. | account default |
 

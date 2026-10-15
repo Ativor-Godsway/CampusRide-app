@@ -101,3 +101,33 @@ export class InvalidVerificationTokenError extends Error {
     this.name = "InvalidVerificationTokenError";
   }
 }
+
+/** An ADMIN account whose phone isn't on ADMIN_PHONE_ALLOWLIST tried to log in. */
+export class AdminNotAllowedError extends Error {
+  constructor(readonly userId: string) {
+    super("This account can't use the admin site.");
+    this.name = "AdminNotAllowedError";
+  }
+}
+
+/** A non-admin account tried to log in through the admin site. */
+export class NotAnAdminError extends Error {
+  constructor(readonly userId: string) {
+    super("This account is not an administrator.");
+    this.name = "NotAnAdminError";
+  }
+}
+
+/**
+ * An admin session reached its hard maximum, or its number was taken off
+ * the allowlist: the whole login is revoked and must start again.
+ */
+export class AdminSessionEndedError extends Error {
+  constructor(
+    readonly userId: string,
+    readonly reason: "max_length" | "not_allowlisted",
+  ) {
+    super("Your admin session has ended. Sign in again.");
+    this.name = "AdminSessionEndedError";
+  }
+}

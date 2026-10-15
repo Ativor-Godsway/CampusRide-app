@@ -588,7 +588,7 @@ model CommissionLedger {
 }
 
 /// Phase 5: an append-only record of every action an admin takes in the admin
-/// app. Approving or rejecting a driver is an irreversible-feeling, real-world
+/// app, and (Stage 3) of every attempt to sign in to it. Approving or rejecting a driver is an irreversible-feeling, real-world
 /// decision (it decides who can earn), so each one must be attributable to a
 /// named admin after the fact. Deliberately NOT a relation-heavy model:
 /// `target` is a free-form id (today a Driver.id) and `actor` is a User.id
@@ -606,8 +606,15 @@ model AdminAuditLog {
   /// Optional operator-supplied justification (the reject reason).
   reason    String?
   timestamp DateTime @default(now())
+  /// Admin sign-in events (action "admin.login.*", Stage 3): where the
+  /// attempt came from, so a stranger signing in — say after a SIM swap —
+  /// stands out on the admin site's "Recent admin logins". Null for other
+  /// actions and for rows from before these columns.
+  ip        String?  @db.VarChar(64)
+  userAgent String?  @db.VarChar(512)
 
   @@index([actor])
   @@index([target])
   @@index([timestamp])
+  @@index([action, timestamp])
 }

@@ -8,13 +8,14 @@ import { useAuth } from "../auth";
  * → /auth/login chain exactly as the rider and driver apps do. There is no
  * separate admin credential anywhere.
  *
- * The ADMIN gate is applied AFTER a successful login: a rider or driver can
- * authenticate here (their phone is a real account) but gets no session. The
- * real enforcement is server-side in requireAdmin — this check exists so a
- * non-admin sees an honest message instead of a screen of 403s.
+ * The site marks its requests (X-CampusRide-Client: admin, in api.ts), so
+ * the server issues a session only to an ADMIN account whose number is on
+ * ADMIN_PHONE_ALLOWLIST, refuses everyone else with an honest message, and
+ * records every attempt for "Recent admin logins". The role check below is a
+ * second line, not the gate.
  */
 export function LoginScreen() {
-  const { signIn } = useAuth();
+  const { signIn, endedReason } = useAuth();
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
@@ -68,7 +69,12 @@ export function LoginScreen() {
         return;
       }
 
-      signIn({ user: result.user, accessToken: result.accessToken });
+      signIn({
+        user: result.user,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        sessionExpiresAt: result.sessionExpiresAt,
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not sign in");
     } finally {
@@ -131,6 +137,7 @@ export function LoginScreen() {
         )}
 
         {error ? <p className="error">{error}</p> : null}
+        {!error && endedReason ? <p className="muted">{endedReason}</p> : null}
       </div>
     </div>
   );

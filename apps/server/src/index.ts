@@ -22,6 +22,7 @@ import { registerAllRoutes } from "./routes";
 import { checkPushReceipts } from "./services/push/pushService";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
+import { checkDeployEnv, checkProductionEnv } from "./lib/productionEnv";
 
 // 15s was too aggressive for Neon's pooled connection budget alongside
 // request traffic; 30s still keeps the 90s dispatch/decision timeouts
@@ -58,6 +59,22 @@ async function bootstrap() {
       "TRUST_PROXY is a hop count. Behind Render (Cloudflare + a load balancer) that resolves to a proxy, " +
         "so the per-IP backstop is switched off. Delete TRUST_PROXY on Render to use the default.",
     );
+  }
+
+  // Fail loud before binding a port: a production server missing a required
+  // setting (or with a weak JWT_SECRET) never takes traffic. Only variable
+  // NAMES are logged, never values. See lib/productionEnv.ts for the list.
+  const deployProblem = checkDeployEnv(process.env);
+  if (deployProblem) throw new Error(`Refusing to start: ${deployProblem}`);
+  if (config.nodeEnv === "production") {
+    const { errors, warnings } = checkProductionEnv(process.env);
+    for (const warning of warnings) app.log.warn({ event: "production_env_warning" }, warning);
+    if (errors.length > 0) {
+      for (const error of errors) app.log.error({ event: "production_env_error" }, error);
+      throw new Error(`Refusing to start: ${errors.length} required production setting(s) missing or invalid — see the lines above`);
+    }
+  } else if (config.adminPhoneAllowlist.phones.length === 0) {
+    app.log.warn("ADMIN_PHONE_ALLOWLIST is empty: outside production any ADMIN account may use the admin site");
   }
 
   // Security headers (HSTS, X-Content-Type-Options, frame-ancestors denial,
