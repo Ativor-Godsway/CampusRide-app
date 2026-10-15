@@ -17,6 +17,8 @@
  * separately-configured logger instances in one process.
  */
 
+import { redactError, redactText, redactValue } from "./redact";
+
 type LogLevel = "info" | "warn" | "error";
 
 /** Structured fields attached to a log line. `err` is unwrapped, not stringified. */
@@ -24,22 +26,17 @@ export interface LogContext {
   [key: string]: unknown;
 }
 
-function serializeError(err: unknown): unknown {
-  if (err instanceof Error) {
-    return { type: err.name, message: err.message, stack: err.stack };
-  }
-  return err;
-}
-
 function emit(level: LogLevel, message: string, context: LogContext = {}): void {
   const { err, ...rest } = context;
 
+  // Scrubbed like every other log line: no full phone numbers, tokens or
+  // secrets (lib/redact.ts).
   const line = JSON.stringify({
     level,
     time: new Date().toISOString(),
-    msg: message,
-    ...rest,
-    ...(err !== undefined ? { err: serializeError(err) } : {}),
+    msg: redactText(message),
+    ...(redactValue(rest) as LogContext),
+    ...(err !== undefined ? { err: redactError(err) } : {}),
   });
 
   if (level === "error") {

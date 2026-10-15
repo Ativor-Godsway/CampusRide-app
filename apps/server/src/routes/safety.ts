@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient, Ride, Zone } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
 import { config } from "../config";
@@ -7,6 +8,7 @@ import { rideStatusLabel } from "../services/safety/rideStatusLabels";
 import { requestPlaceNames } from "./ridePins";
 import { rateLimitMessage } from "@rida/shared";
 import { limiter } from "../rateLimit/limiter";
+import { bodyOptional, empty, idParams, object, text } from "../http/schemas";
 import { RULES } from "../rateLimit/rules";
 
 /** Minimal HTML escaping for the values interpolated into the tracking page. */
@@ -26,10 +28,13 @@ function escapeHtml(value: string): string {
  * `GET /track/:token`   — PUBLIC, unauthenticated, the page that contact opens.
  */
 export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient): void {
+  useRequestValidation(app);
   app.post(
     "/rides/:id/sos",
     {
-      preHandler: requireAuth,
+      onRequest: requireAuth,
+      preValidation: bodyOptional,
+      schema: { params: idParams, body: empty },
       // NEVER rate limited: an emergency is never answered with "try again
       // later". The texts are what cost money, so raiseSos skips re-texting
       // the same people for a repeat press within a couple of minutes.
@@ -90,7 +95,12 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
    * recipient is a person opening an SMS link on their phone, and refreshes
    * itself so a contact can leave it open and watch the trip progress.
    */
-  app.get("/track/:token", async (request, reply) => {
+  // The token is only length-checked here: a malformed one gets the
+  // friendly "link not valid" page from the handler, not a JSON 400.
+  app.get(
+    "/track/:token",
+    { schema: { params: object({ token: text(128, { nonEmpty: true }) }, ["token"]), querystring: empty } },
+    async (request, reply) => {
     const { token } = request.params as { token: string };
 
     if (!TRACKING_TOKEN_PATTERN.test(token)) {

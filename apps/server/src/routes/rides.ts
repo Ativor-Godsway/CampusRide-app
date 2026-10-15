@@ -1,7 +1,13 @@
 import type { FastifyInstance } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { PassengerStatus, PaymentMethod, RideStatus, RideType } from "@rida/shared";
-import { FLAGGED_RIDER_CANCEL_REASONS, parsePickupNote, parseRiderCancelInput } from "@rida/shared";
+import {
+  FLAGGED_RIDER_CANCEL_REASONS,
+  RIDER_CANCEL_REASONS,
+  parsePickupNote,
+  parseRiderCancelInput,
+} from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { applyPassengerTransition, applyRideTransition } from "../services/ride/rideService";
 import { isActivePassengerStatus } from "../services/ride/stateMachine";
@@ -36,6 +42,20 @@ import { logger } from "../lib/logger";
 import { riderRideDetailSelect, riderRideListSelect } from "./selects";
 import { startMockDriverForRide } from "../dev/mockDriver";
 import { RULES } from "../rateLimit/rules";
+import {
+  MAX,
+  bodyOptional,
+  empty,
+  id,
+  idParams,
+  latitude,
+  longitude,
+  noInput,
+  object,
+  oneOf,
+  phone as phoneField,
+  text,
+} from "../http/schemas";
 import { notifyRiderCancelled } from "../services/push/notify";
 
 /**
@@ -53,6 +73,45 @@ const RIDE_TYPES = ["LONE", "SHARED"] as const;
 const PAYMENT_METHODS = ["CASH", "MOMO"] as const;
 const MOOLRE_CHANNELS = ["MTN", "TELECEL", "AT"] as const;
 const DECISION_ACTIONS: readonly RiderDecisionAction[] = ["KEEP_WAITING", "SWITCH_TO_LONE", "CANCEL"];
+
+/** A pickup or drop-off: a campus place, a pin, or both (the parsers check which combinations make sense). */
+const rideEnd = object({ placeId: id, latitude, longitude });
+
+/** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
+const SCHEMAS = {
+  create: {
+    body: object(
+      {
+        pickup: rideEnd,
+        dropoff: rideEnd,
+        pickupZoneId: id,
+        dropoffZoneId: id,
+        type: oneOf(RIDE_TYPES),
+        pickupNote: text(MAX.freeText, { nullable: true }),
+        // Not an enum on purpose: anything but MOMO falls back to CASH (cash-only launch).
+        paymentMethod: text(20),
+      },
+      ["type"],
+    ),
+  },
+  // limit is read leniently by the handler (junk ignored, too big capped).
+  mine: { querystring: object({ cursor: id, limit: text(20) }) },
+  active: noInput,
+  detail: { params: idParams, querystring: empty },
+  decision: { params: idParams, body: object({ action: oneOf(DECISION_ACTIONS) }, ["action"]) },
+  cancel: {
+    params: idParams,
+    body: object({ reason: oneOf(RIDER_CANCEL_REASONS, { nullable: true }), note: text(MAX.freeText, { nullable: true }) }),
+  },
+  switch: { params: idParams, body: object({ type: oneOf(RIDE_TYPES) }, ["type"]) },
+  initiatePayment: {
+    params: idParams,
+    // Not required here: the "payments are off, pay cash" answer must come
+    // before any field is checked; the handler checks them after it.
+    body: object({ phone: phoneField, network: oneOf(MOOLRE_CHANNELS), otpcode: text(MAX.otpCode, { nonEmpty: true }) }),
+  },
+  paymentStatus: { params: idParams, querystring: empty },
+};
 
 function isRideType(value: unknown): value is RideType {
   return typeof value === "string" && (RIDE_TYPES as readonly string[]).includes(value);
@@ -113,10 +172,12 @@ const RIDER_CANCELLABLE_STATUSES: RideStatus[] = [
  * NOTE_TOO_LONG — each with `error` in words the app can show as-is.
  */
 export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): void {
+  useRequestValidation(app);
   app.post(
     "/rides",
     {
-      preHandler: requireAuth,
+      onRequest: requireAuth,
+      schema: SCHEMAS.create,
       // Per rider, on top of the one-active-ride rule (createRide).
       config: { limits: { user: [RULES.rideCreate] } },
     },
@@ -212,7 +273,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     return reply.code(201).send({ ride });
   });
 
-  app.get("/rides/mine", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/rides/mine", { onRequest: requireAuth, schema: SCHEMAS.mine }, async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
     const riderId = request.user!.userId;
@@ -268,7 +329,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    * Pickup/drop-off are the rider's OWN (their seat's), which differ from
    * the ride's for a rider merged into someone else's car.
    */
-  app.get("/rides/active", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/rides/active", { onRequest: requireAuth, schema: SCHEMAS.active }, async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
     const active = await findActiveRideForRider(prisma, request.user!.userId);
@@ -302,7 +363,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     });
   });
 
-  app.get("/rides/:id", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/rides/:id", { onRequest: requireAuth, schema: SCHEMAS.detail }, async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
     const { id } = request.params as { id: string };
@@ -347,7 +408,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       .send({ ride: hideOtherRidersPins(ride, userId), driver, ...(fareSummary ? { fareSummary } : {}) });
   });
 
-  app.post("/rides/:id/decision", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/rides/:id/decision", { onRequest: requireAuth, schema: SCHEMAS.decision }, async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
     const { id } = request.params as { id: string };
@@ -404,7 +465,12 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    */
   app.post(
     "/rides/:id/cancel",
-    { preHandler: requireAuth, config: { limits: { user: [RULES.rideCancel] } } },
+    {
+      onRequest: requireAuth,
+      preValidation: bodyOptional,
+      schema: SCHEMAS.cancel,
+      config: { limits: { user: [RULES.rideCancel] } },
+    },
     async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
@@ -518,7 +584,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    */
   app.post(
     "/rides/:id/switch",
-    { preHandler: requireAuth, config: { limits: { user: [RULES.rideSwitch] } } },
+    { onRequest: requireAuth, schema: SCHEMAS.switch, config: { limits: { user: [RULES.rideSwitch] } } },
     async (request, reply) => {
       if (!(await requireRider(request, reply))) return;
 
@@ -571,7 +637,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
   app.post(
     "/rides/:id/initiate-payment",
     {
-      preHandler: requireAuth,
+      onRequest: requireAuth,
+      schema: SCHEMAS.initiatePayment,
       config: { limits: { user: [RULES.paymentInit] } },
     },
     async (request, reply) => {
@@ -649,7 +716,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
   });
 
   /** Poll the rider's Moolre payment status for a completed MOMO ride. */
-  app.get("/rides/:id/payment-status", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/rides/:id/payment-status", { onRequest: requireAuth, schema: SCHEMAS.paymentStatus }, async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };

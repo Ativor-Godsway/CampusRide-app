@@ -37,6 +37,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@fastify/ajv-compiler": "^4.0.6",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.1",
     "@prisma/client": "^5.14.0",

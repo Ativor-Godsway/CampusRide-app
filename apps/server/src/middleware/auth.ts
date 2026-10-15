@@ -36,13 +36,18 @@ async function refuse(request: FastifyRequest, reply: FastifyReply, error: strin
 }
 
 /**
- * Fastify preHandler that validates the `Authorization: Bearer <token>`
+ * Fastify onRequest hook that validates the `Authorization: Bearer <token>`
  * access token and attaches the caller as `request.user`. Replies 401 and
  * short-circuits the handler if the header is missing, the token is invalid,
  * expired or not an access token, or the account has since been deleted.
  *
  * `request.user.role` is the account's role in the database right now, not
  * the one written into the token (see services/auth/accountStatus.ts).
+ */
+/*
+ * It runs as onRequest — before the body is parsed or validated — so someone
+ * who isn't signed in learns nothing about a route's inputs, and their
+ * request costs no parsing.
  */
 export async function requireAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const header = request.headers.authorization;
@@ -73,9 +78,9 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
 /**
  * Gate for the admin surface, mirroring `requireDriver` in routes/driver.ts:
  * run it as the FIRST line of a handler that already has `requireAuth` as
- * its preHandler, and bail when it returns false.
+ * its onRequest hook, and bail when it returns false.
  *
- *   app.post("/admin/...", { preHandler: requireAuth }, async (req, reply) => {
+ *   app.post("/admin/...", { onRequest: requireAuth }, async (req, reply) => {
  *     if (!(await requireAdmin(req, reply))) return;
  *
  * Two keys, both needed: the account's role is ADMIN in the database, AND
@@ -87,6 +92,15 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
  * RIDER|DRIVER (see SignupRole), so the only way an account gets this role
  * is src/scripts/seedAdmin.ts, run by hand against the database.
  */
+/**
+ * requireAdmin as an onRequest hook, after requireAuth: a non-admin is
+ * refused (403) before the request is even validated, so the admin routes'
+ * inputs are no business of theirs either.
+ */
+export async function adminOnly(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  await requireAdmin(request, reply);
+}
+
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
   const userId = request.user?.userId;
   const account = userId && request.user?.role === "ADMIN" ? await loadActiveAccount(prisma, userId) : null;

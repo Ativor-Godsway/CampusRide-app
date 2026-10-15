@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { OtpService } from "../services/otp/OtpService";
 import {
@@ -6,6 +7,7 @@ import {
   verifyDemoOtp,
   type DemoOtpLimits,
 } from "../services/demoOtp/demoOtp";
+import { MAX, object, text } from "../http/schemas";
 
 /**
  * Public, namespaced OTP endpoints for the showcase demo site.
@@ -53,9 +55,11 @@ export function registerDemoOtpRoutes(
   prisma: PrismaClient,
   otpService: OtpService,
 ): void {
+  useRequestValidation(app);
   const deps = { prisma, otpService, limits: DEMO_OTP_LIMITS };
 
-  app.post("/demo/otp/send", async (request, reply) => {
+  // Not required by the schema: the demo site expects its own { ok, reason } answer.
+  app.post("/demo/otp/send", { schema: { body: object({ phone: text(MAX.phone) }) } }, async (request, reply) => {
     const body = request.body as { phone?: unknown };
     if (!isNonEmptyString(body.phone)) {
       return reply.code(400).send({ ok: false, reason: "Phone number is required." });
@@ -76,17 +80,21 @@ export function registerDemoOtpRoutes(
     return reply.code(result.status).send({ ok: false, reason: result.reason });
   });
 
-  app.post("/demo/otp/verify", async (request, reply) => {
-    const body = request.body as { phone?: unknown; code?: unknown };
-    if (!isNonEmptyString(body.phone) || !isNonEmptyString(body.code)) {
-      return reply.code(400).send({ ok: false, reason: "Phone and code are required." });
-    }
+  app.post(
+    "/demo/otp/verify",
+    { schema: { body: object({ phone: text(MAX.phone), code: text(MAX.otpCode) }) } },
+    async (request, reply) => {
+      const body = request.body as { phone?: unknown; code?: unknown };
+      if (!isNonEmptyString(body.phone) || !isNonEmptyString(body.code)) {
+        return reply.code(400).send({ ok: false, reason: "Phone and code are required." });
+      }
 
-    const result = await verifyDemoOtp(deps, { phone: body.phone, code: body.code });
+      const result = await verifyDemoOtp(deps, { phone: body.phone, code: body.code });
 
-    if (result.ok) {
-      return reply.code(200).send({ ok: true });
-    }
-    return reply.code(result.status).send({ ok: false, reason: result.reason });
-  });
+      if (result.ok) {
+        return reply.code(200).send({ ok: true });
+      }
+      return reply.code(result.status).send({ ok: false, reason: result.reason });
+    },
+  );
 }

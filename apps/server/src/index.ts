@@ -23,6 +23,14 @@ import { checkPushReceipts } from "./services/push/pushService";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
 import { checkDeployEnv, checkProductionEnv } from "./lib/productionEnv";
+import { SOCKET_MAX_PAYLOAD_BYTES, serverOptions } from "./http/serverOptions";
+import { createShutdown } from "./lib/shutdown";
+import { installFatalHandlers, onFatal } from "./lib/fatal";
+import { logger } from "./lib/logger";
+
+// From the very first line: an error nothing caught is logged and ends the
+// process (Render restarts it), never left to run in an unknown state.
+installFatalHandlers();
 
 // 15s was too aggressive for Neon's pooled connection budget alongside
 // request traffic; 30s still keeps the 90s dispatch/decision timeouts
@@ -52,7 +60,8 @@ async function bootstrap() {
   // by it) however many hops there are, and never lets a client pick its own
   // "IP" with a forged X-Forwarded-For. See lib/security.ts#resolveTrustProxy.
   const trustProxy = resolveTrustProxy(config.trustProxy, config.nodeEnv);
-  const app = Fastify({ logger: true, trustProxy: toFastifyTrustProxy(trustProxy) });
+  // Scrubbed logs, a 64 KB body limit, random request ids (http/serverOptions.ts).
+  const app = Fastify({ ...serverOptions(), trustProxy: toFastifyTrustProxy(trustProxy) });
   if (config.nodeEnv === "production" && typeof trustProxy === "number") {
     app.log.warn(
       { trustProxy },
@@ -163,6 +172,9 @@ async function bootstrap() {
   // ride socket in a visitor's browser regardless of the HTTP CORS rules.
   const io = new SocketServer(app.server, {
     cors: { origin: corsOrigin },
+    // No socket message needs more than a few hundred bytes; a bigger one
+    // closes that connection instead of being read.
+    maxHttpBufferSize: SOCKET_MAX_PAYLOAD_BYTES,
   });
 
   io.on("connection", (socket) => {
@@ -185,22 +197,40 @@ async function bootstrap() {
 
   // Periodically sweep REQUESTED/AWAITING_RIDER_DECISION rides for the 90s
   // dispatch and decision-grace timeouts (see services/ride/timeouts.ts).
-  setInterval(() => {
+  const timeoutSweep = setInterval(() => {
     processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
       app.log.error({ err }, "processTimeouts failed");
     });
   }, TIMEOUT_POLL_INTERVAL_MS);
 
-  setInterval(() => {
+  const receiptSweep = setInterval(() => {
     void checkPushReceipts(prisma);
   }, PUSH_RECEIPT_POLL_INTERVAL_MS);
+
+  // A deploy (SIGTERM from Render) or Ctrl-C finishes in-flight requests,
+  // closes sockets and the database, then exits (lib/shutdown.ts). A fatal
+  // error does the same, faster, and exits non-zero so Render restarts us.
+  const shutdown = createShutdown({
+    app,
+    io,
+    log: app.log,
+    timers: [timeoutSweep, receiptSweep],
+    disconnectDatabase: () => prisma.$disconnect(),
+  });
+  // `once`: a second Ctrl-C while shutting down falls back to Node's default
+  // and stops the process at once.
+  process.once("SIGTERM", () => void shutdown("SIGTERM"));
+  process.once("SIGINT", () => void shutdown("SIGINT"));
+  onFatal((kind, err) => {
+    app.log.fatal({ err, event: "fatal", kind }, `Fatal ${kind}: shutting down`);
+    void shutdown(kind, 1);
+  });
 }
 
 bootstrap().catch((err) => {
   // Last-resort handler: bootstrap has failed, so the Fastify logger may never
-  // have been constructed. console is the only output guaranteed to exist on
-  // the way to exit(1).
-  // eslint-disable-next-line no-console
-  console.error("Failed to start server:", err);
+  // have been constructed. lib/logger needs nothing but stdout, and scrubs the
+  // error (a database error can carry a connection string) on the way to exit(1).
+  logger.error("Failed to start server", { err });
   process.exit(1);
 });

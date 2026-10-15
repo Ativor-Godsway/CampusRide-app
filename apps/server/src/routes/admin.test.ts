@@ -319,7 +319,7 @@ describe("ADMIN is not self-assignable", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json().error).toContain("RIDER|DRIVER");
+    expect(JSON.stringify(res.json())).toContain("role");
     expect(await prisma.user.findUnique({ where: { phone: "+233594826399" } })).toBeNull();
   });
 });

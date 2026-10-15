@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
 import {
@@ -8,6 +9,19 @@ import {
 } from "../services/push/pushService";
 
 import { RULES } from "../rateLimit/rules";
+import { MAX, empty, object, oneOf, text } from "../http/schemas";
+
+const pushToken = text(MAX.pushToken, { nonEmpty: true });
+/** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
+const SCHEMAS = {
+  register: {
+    body: object(
+      { token: pushToken, app: oneOf(["rider", "driver"]), platform: oneOf(["android", "ios"]) },
+      ["token", "app", "platform"],
+    ),
+  },
+  remove: { body: object({ token: pushToken }, ["token"]), querystring: empty },
+};
 
 /** Per account: an app registers on each launch, rarely more. */
 const perUser = { limits: { user: [RULES.pushToken] } };
@@ -24,9 +38,10 @@ const perUser = { limits: { user: [RULES.pushToken] } };
  *   same through POST /auth/logout's optional pushToken.
  */
 export function registerPushRoutes(app: FastifyInstance, prisma: PrismaClient): void {
+  useRequestValidation(app);
   app.put(
     "/me/push-token",
-    { preHandler: requireAuth, config: perUser },
+    { onRequest: requireAuth, schema: SCHEMAS.register, config: perUser },
     async (request, reply) => {
       const body = (request.body ?? {}) as { token?: unknown; app?: unknown; platform?: unknown };
       try {
@@ -46,7 +61,7 @@ export function registerPushRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
   app.delete(
     "/me/push-token",
-    { preHandler: requireAuth, config: perUser },
+    { onRequest: requireAuth, schema: SCHEMAS.remove, config: perUser },
     async (request, reply) => {
       const { token } = (request.body ?? {}) as { token?: unknown };
       if (typeof token !== "string" || token.length === 0 || token.length > 255) {
