@@ -245,6 +245,12 @@ a link texted by an SOS keeps working after the ride ends. While the ride is
 going on it always works. See
 [docs/security/route-inventory.md](docs/security/route-inventory.md).
 
+Logs: `LOG_LEVEL` (default `info`) — leave unset. Phone numbers, codes and
+tokens are scrubbed from every line; every response has an `X-Request-Id`, and
+searching the logs for it finds that request. A deploy shuts the old server
+down cleanly (in-flight requests finish first). See
+[docs/security/validation-and-errors.md](docs/security/validation-and-errors.md).
+
 Push notifications ([docs/runbooks/push-notifications.md](docs/runbooks/push-notifications.md))
 need no server variable. `PUSH_DISABLED=true` switches every send off without
 touching the ride flow. `EXPO_ACCESS_TOKEN` is needed only if "Enhanced

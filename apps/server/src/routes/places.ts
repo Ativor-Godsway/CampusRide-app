@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import {
   PLACES_ATTRIBUTION,
@@ -13,6 +14,7 @@ import { requireAuth } from "../middleware/auth";
 import { getActivePlaces } from "../services/places/placeCache";
 import { MAX_ROUTE_POINTS, routeThroughPoints } from "../services/routing/pointRoutes";
 import { RULES } from "../rateLimit/rules";
+import { MAX, integer, latitude, longitude, noInput, object, text } from "../http/schemas";
 
 /** What the apps get for a place: no internal columns (source, timestamps). */
 function placeForApp(p: {
@@ -60,12 +62,16 @@ function parsePoints(raw: unknown): PathPoint[] | null {
  * Place coordinates are public campus landmarks, not anyone's position.
  */
 export function registerPlaceRoutes(app: FastifyInstance, prisma: PrismaClient): void {
-  app.get("/places", { preHandler: requireAuth }, async (_request, reply) => {
+  useRequestValidation(app);
+  app.get("/places", { onRequest: requireAuth, schema: noInput }, async (_request, reply) => {
     const places = await getActivePlaces(prisma);
     return reply.code(200).send({ places: places.map(placeForApp), attribution: PLACES_ATTRIBUTION });
   });
 
-  app.get("/places/search", { preHandler: requireAuth }, async (request, reply) => {
+  app.get(
+    "/places/search",
+    { onRequest: requireAuth, schema: { querystring: object({ q: text(MAX.query), limit: integer(1, 100) }) } },
+    async (request, reply) => {
     const { q, limit } = (request.query ?? {}) as { q?: unknown; limit?: unknown };
     const query = typeof q === "string" ? q.slice(0, 80) : "";
     const n = Math.min(Math.max(Number(limit) || 8, 1), 20);
@@ -73,7 +79,7 @@ export function registerPlaceRoutes(app: FastifyInstance, prisma: PrismaClient):
     return reply.code(200).send({ places: places.map(placeForApp), attribution: PLACES_ATTRIBUTION });
   });
 
-  app.get("/service-area", { preHandler: requireAuth }, async (_request, reply) => {
+  app.get("/service-area", { onRequest: requireAuth, schema: noInput }, async (_request, reply) => {
     return reply.code(200).send({
       polygon: SERVICE_AREA_POLYGON.map(([latitude, longitude]) => ({ latitude, longitude })),
       message: outsideServiceAreaMessage("pickup"),
@@ -90,7 +96,20 @@ export function registerPlaceRoutes(app: FastifyInstance, prisma: PrismaClient):
   app.post(
     "/routes/legs",
     {
-      preHandler: requireAuth,
+      onRequest: requireAuth,
+      schema: {
+        body: object(
+          {
+            points: {
+              type: "array",
+              minItems: 2,
+              maxItems: MAX_ROUTE_POINTS,
+              items: object({ latitude, longitude }, ["latitude", "longitude"]),
+            },
+          },
+          ["points"],
+        ),
+      },
       // Per account: each call may reach OSRM.
       config: { limits: { user: [RULES.routeLegs] } },
     },

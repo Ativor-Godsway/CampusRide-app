@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentService } from "../services/payment/PaymentService";
 import {
@@ -8,6 +9,7 @@ import {
 } from "../services/payment/paymentFlow";
 import { UnknownPaymentReferenceError } from "../services/payment/errors";
 import { config } from "../config";
+import { object, text } from "../http/schemas";
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -44,6 +46,7 @@ export function registerWebhookRoutes(
   webhookSecret: string,
   enabled: boolean = config.moolre.paymentsEnabled,
 ): void {
+  useRequestValidation(app);
   // Cash-only lockdown (Phase 1): with Moolre disabled there is no collection
   // this webhook could legitimately resolve, and an open callback that can
   // flip payments to COLLECTED / trigger a disbursement is pure attack
@@ -52,7 +55,18 @@ export function registerWebhookRoutes(
   // comes back the moment MOOLRE_ENABLED flips to "true".
   if (!enabled) return;
 
-  app.post("/webhooks/moolre", async (request, reply) => {
+  // Only the fields used are kept; Moolre's others are dropped. Nothing is
+  // required by the schema, so a missing secret is still answered 401.
+  app.post(
+    "/webhooks/moolre",
+    {
+      schema: {
+        body: object({
+          data: object({ secret: text(512), txstatus: { type: "number" }, externalref: text(200) }),
+        }),
+      },
+    },
+    async (request, reply) => {
     // NB: never log `request.body` here — the payload carries the shared
     // webhook secret in `data.secret`, so dumping it puts a credential that
     // authorizes driver disbursements into the log stream (and into any log

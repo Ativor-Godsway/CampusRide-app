@@ -35,28 +35,30 @@ Updated at the end of each stage.
 | ✅ | 10x looser in development and tests; production can't be loosened |
 | ✅ | Tests: A using up any limit never affects B, even on the same IP; SOS guarantee; `Retry-After` |
 
-## Stage 3 — Admin protection and secrets 🔶 (branch `security-stage3-admin-secrets`)
+## Stage 3 — Admin protection and secrets ✅ (PR #38)
 
 | | Item |
 |---|---|
-| 🔶 | `ADMIN_PHONE_ALLOWLIST`: admin routes, admin login and admin session renewal refuse any number not on it, whatever the database says |
-| 🔶 | Short admin sessions: 10-minute access token, signed out after 30 idle minutes, 8-hour hard maximum; no long-lived token |
-| 🔶 | Every admin sign-in attempt recorded (time, IP, device), shown on the admin site's "Admin logins" tab |
-| ⬜ | Second factor for admins: proposed (authenticator-app code), **waiting for your OK** — [admin-and-secrets.md](admin-and-secrets.md#proposal-not-built-a-second-factor-for-admins) |
-| 🔶 | Admin site headers: strict CSP with `frame-ancestors 'none'`, HSTS, noindex and more; tested against the real build in Chrome |
-| 🔶 | Full git history scanned (gitleaks, 205 commits, 40 branches + project-specific patterns): no secrets; the old prod `.env` backup is gone and was never committed |
-| 🔶 | Production boot refuses a missing/weak `JWT_SECRET` and any missing required setting (names listed, values never logged) |
-| 🔶 | Rotation list: every secret, where it's set, how to rotate ([admin-and-secrets.md](admin-and-secrets.md#secrets-to-rotate-before-launch)) |
+| ✅ | `ADMIN_PHONE_ALLOWLIST`: admin routes, admin login and admin session renewal refuse any number not on it, whatever the database says |
+| ✅ | Short admin sessions: 10-minute access token, signed out after 30 idle minutes, 8-hour hard maximum; no long-lived token |
+| ✅ | Every admin sign-in attempt recorded (time, IP, device), shown on the admin site's "Admin logins" tab |
+| ⬜ | Second factor for admins (authenticator-app code): **approved**, to be built after Stage 6 as its own step — [admin-and-secrets.md](admin-and-secrets.md#proposal-not-built-a-second-factor-for-admins) |
+| ✅ | Admin site headers: strict CSP with `frame-ancestors 'none'`, HSTS, noindex and more; tested against the real build in Chrome |
+| ✅ | Full git history scanned (gitleaks, 205 commits, 40 branches + project-specific patterns): no secrets; the old prod `.env` backup is gone and was never committed |
+| ✅ | Production boot refuses a missing/weak `JWT_SECRET` and any missing required setting (names listed, values never logged) |
+| ✅ | Rotation list: every secret, where it's set, how to rotate ([admin-and-secrets.md](admin-and-secrets.md#secrets-to-rotate-before-launch)) |
 
-## Stage 4 — Input validation and error handling ⬜
+## Stage 4 — Input validation and error handling 🔶 (branch `security-stage4-validation`)
 
 | | Item |
 |---|---|
-| ⬜ | JSON schema on every route (no extra fields, length limits, phone/id formats); body and socket payload size limits |
-| ⬜ | No stack traces, Prisma or SQL errors to clients in production; request id instead |
-| ⬜ | No OTPs, tokens or full phone numbers in logs |
-| ⬜ | Unhandled rejections/exceptions logged, then a clean exit |
-| ⬜ | Graceful shutdown on deploy |
+| 🔶 | JSON schema on every route: unlisted fields dropped, every string length-limited, ids, coordinates, choices and numbers checked, no type conversion of bodies; a test fails on any route without one — [validation-and-errors.md](validation-and-errors.md) |
+| 🔶 | Sign-in checked before the body is looked at (401/403 first, whatever was sent) |
+| 🔶 | Request body limit 64 KB (413), Socket.io message limit 16 KB |
+| 🔶 | No stack traces, Prisma or SQL errors to clients, in any environment: one error shape with a plain sentence, a code and a request id; `X-Request-Id` on every response |
+| 🔶 | No login codes, tokens, push tokens, credentials or full phone numbers in logs (`+233*****146`), including careless future log lines, URLs and error stacks |
+| 🔶 | Unhandled rejections and exceptions logged (scrubbed), then a clean shutdown and exit 1 |
+| 🔶 | Graceful shutdown on deploy: in-flight requests finish, sockets and database close, 20 s safety limit |
 
 ## Stage 5 — Monitoring ⬜
 
@@ -79,7 +81,16 @@ Updated at the end of each stage.
 
 ## Things only you can do by hand
 
-**Now (Stage 3)** — in this order:
+**Now (Stage 4)** — nothing is required before merging: no migration, no new
+setting, no app update. After the deploy, in Render → the server → **Logs**:
+
+1. Around the deploy, the old server should log `"event":"shutdown"` and then
+   `"event":"shutdown_complete"`. If you see `"event":"shutdown_timeout"`
+   instead, tell me.
+2. Search for `+233`: every number should look like `+233*****146`.
+3. Leave `LOG_LEVEL` unset (it defaults to `info`).
+
+**Stage 3, if not done yet** — in this order:
 
 1. **Before merging,** on Render → the server → Environment, make sure each of
    these is set (the new version refuses to start without them):
@@ -99,9 +110,10 @@ Updated at the end of each stage.
    [admin-and-secrets.md](admin-and-secrets.md#secrets-to-rotate-before-launch),
    starting with the Neon production password, `JWT_SECRET` and the Moolre
    SMS key.
-5. **Clean up `apps/server/.env` on your Mac:** it holds the production
-   database URLs; it should hold development values only.
-6. **Decide** on the admin second factor (proposal in admin-and-secrets.md).
+5. ~~Clean up `apps/server/.env` on your Mac~~ — done 2026-10-15: it holds
+   the development database URLs only.
+6. ~~Decide on the admin second factor~~ — approved 2026-10-15; built after
+   Stage 6.
 
 **Earlier stages, if not done yet:** Stage 1 — apply migration
 `20261015180000_tracking_links` (SOS fails without it). Stage 2 — delete
@@ -114,3 +126,4 @@ Updated at the end of each stage.
 - [ ] Switch the UptimeRobot monitor to `/health/ready` — Stage 5
 - [ ] Make a weekly Neon backup branch (`backup-YYYY-MM-DD`) — Stage 6
 - [ ] Choose the Render plan (free vs paid) — Stage 6
+- [ ] Set up the admin authenticator app (QR code, recovery codes) — after Stage 6

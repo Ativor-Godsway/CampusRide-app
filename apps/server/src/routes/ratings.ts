@@ -1,9 +1,23 @@
 import type { FastifyInstance } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
 import { RULES } from "../rateLimit/rules";
+import { MAX, empty, id, idParams, integer, object, text } from "../http/schemas";
 
 const ratingLimits = { limits: { user: [RULES.rating] } };
+
+/** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
+const SCHEMAS = {
+  rate: { body: object({ rideId: id, stars: integer(1, 5), comment: text(MAX.comment, { nullable: true }) }, ["rideId", "stars"]) },
+  rateRider: {
+    body: object(
+      { rideId: id, riderId: id, stars: integer(1, 5), comment: text(MAX.comment, { nullable: true }) },
+      ["rideId", "riderId", "stars"],
+    ),
+  },
+  rateable: { params: idParams, querystring: empty },
+};
 
 function isStars(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5;
@@ -41,7 +55,8 @@ const RIDE_NOT_FOUND = { error: "Ride not found" } as const;
  * part: see tripParticipants.
  */
 export function registerRatingRoutes(app: FastifyInstance, prisma: PrismaClient): void {
-  app.post("/ratings", { preHandler: requireAuth, config: ratingLimits }, async (request, reply) => {
+  useRequestValidation(app);
+  app.post("/ratings", { onRequest: requireAuth, schema: SCHEMAS.rate, config: ratingLimits }, async (request, reply) => {
     const body = request.body as { rideId?: unknown; stars?: unknown; comment?: unknown };
 
     if (!isNonEmptyString(body.rideId) || !isStars(body.stars)) {
@@ -91,7 +106,7 @@ export function registerRatingRoutes(app: FastifyInstance, prisma: PrismaClient)
    * therefore required and validated against the ride's manifest — a driver
    * cannot rate someone who was not on the trip.
    */
-  app.post("/ratings/rider", { preHandler: requireAuth, config: ratingLimits }, async (request, reply) => {
+  app.post("/ratings/rider", { onRequest: requireAuth, schema: SCHEMAS.rateRider, config: ratingLimits }, async (request, reply) => {
     if (request.user?.role !== "DRIVER") {
       return reply.code(403).send({ error: "Driver role required" });
     }
@@ -145,7 +160,7 @@ export function registerRatingRoutes(app: FastifyInstance, prisma: PrismaClient)
    * the driver has already given. Lets the driver app show the rating prompt
    * without the client having to reconstruct the manifest itself.
    */
-  app.get("/rides/:id/rateable-riders", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/rides/:id/rateable-riders", { onRequest: requireAuth, schema: SCHEMAS.rateable }, async (request, reply) => {
     if (request.user?.role !== "DRIVER") {
       return reply.code(403).send({ error: "Driver role required" });
     }

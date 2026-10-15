@@ -1,4 +1,4 @@
-import type { FastifyInstance, onRequestHookHandler, preHandlerHookHandler } from "fastify";
+import type { FastifyInstance, onRequestHookHandler } from "fastify";
 import { config } from "../config";
 import { isDevLoopbackExempt } from "../lib/security";
 import { requireAuth } from "../middleware/auth";
@@ -28,7 +28,7 @@ declare module "fastify" {
 /**
  * Gives every route registered after it its HTTP limits:
  *
- * - signed-in route (requireAuth in its preHandler): the account's default
+ * - signed-in route (requireAuth in its onRequest): the account's default
  *   (RULES.userDefault) plus any `config.limits.user`, counted by account id
  *   once requireAuth has identified the caller. Never by IP — a hostel on one
  *   Wi-Fi is hundreds of accounts.
@@ -36,6 +36,10 @@ declare module "fastify" {
  *   the real client IP is known (clientIpForLimits).
  *
  * Development requests from this Mac itself are not limited (the simulator).
+ *
+ * The limit runs in onRequest, right after requireAuth and before the body
+ * is parsed or validated, so a refused request costs almost nothing and an
+ * invalid one still counts.
  */
 export function installRateLimits(app: FastifyInstance): void {
   if (config.nodeEnv === "production") {
@@ -47,11 +51,11 @@ export function installRateLimits(app: FastifyInstance): void {
     const limits = route.config?.limits;
     if (limits === false) return;
 
-    const existing = route.preHandler === undefined ? [] : [route.preHandler].flat();
-    const signedIn = existing.includes(requireAuth as preHandlerHookHandler);
+    const existing = route.onRequest === undefined ? [] : [route.onRequest].flat();
+    const signedIn = existing.includes(requireAuth as onRequestHookHandler);
     const extra = limits?.user ?? [];
 
-    const limit: preHandlerHookHandler = async (request, reply) => {
+    const limit: onRequestHookHandler = async (request, reply) => {
       if (isDevLoopbackExempt(request.ip, config.nodeEnv)) return;
       const checks: LimitCheck[] = [];
       if (signedIn) {
@@ -67,6 +71,6 @@ export function installRateLimits(app: FastifyInstance): void {
       if (!outcome.ok) return sendRateLimited(reply, outcome.retryAfterMs);
     };
 
-    route.preHandler = [...existing, limit];
+    route.onRequest = [...existing, limit];
   });
 }

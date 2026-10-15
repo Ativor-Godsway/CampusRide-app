@@ -9,7 +9,7 @@ fails if a route exists that is not in these tables, if a row names a route
 that no longer exists, or if the **Login** column disagrees with the code. Add
 the row in the same change as the route.
 
-Last reviewed: 2026-10-15 (pre-launch hardening, Stages 1–3).
+Last reviewed: 2026-10-15 (pre-launch hardening, Stages 1–4).
 
 ## How to read it
 
@@ -25,6 +25,9 @@ Last reviewed: 2026-10-15 (pre-launch hardening, Stages 1–3).
   as for something that doesn't exist**, so trying ids confirms nothing. A
   wrong *role* gets 403 instead: that refuses a kind of request, not someone's
   resource.
+- **Input.** Every route checks what it is sent against a schema (no
+  unlisted fields, length limits, id and coordinate formats) after the login
+  check: [validation-and-errors.md](validation-and-errors.md).
 - **Rate limit.** Counted per **person**: the phone number before login,
   the account after. "Account default" is 120 requests a minute per account
   on any signed-in route. "IP backstop" is 1,000 requests per 15 minutes per

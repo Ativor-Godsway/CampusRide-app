@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import { requireAuth } from "../middleware/auth";
 import { config } from "../config";
 import { buildDriverPhotoUploadTicket } from "../services/uploads/cloudinarySignature";
 import { missingCloudinaryVars } from "../services/uploads/cloudinaryConfig";
 import { RULES } from "../rateLimit/rules";
+import { bodyOptional, empty, integer, object, oneOf, text } from "../http/schemas";
 
 /** Failure kinds the app may report from the Cloudinary leg of an upload. */
 const REPORTABLE_FAILURE_KINDS = [
@@ -39,11 +41,17 @@ export function sanitizeUploadFailureMessage(message: unknown): string | null {
  *   this the real cause would only ever be visible on the phone.
  */
 export function registerUploadRoutes(app: FastifyInstance): void {
+  useRequestValidation(app);
   // Signing is cheap but each ticket authorizes a write into our Cloudinary
   // account, so tickets have their own per-driver limit.
   app.post(
     "/uploads/driver-photo/signature",
-    { preHandler: requireAuth, config: { limits: { user: [RULES.upload] } } },
+    {
+      onRequest: requireAuth,
+      preValidation: bodyOptional,
+      schema: { body: empty },
+      config: { limits: { user: [RULES.upload] } },
+    },
     async (request, reply) => {
       if (request.user?.role !== "DRIVER") {
         return reply
@@ -76,7 +84,15 @@ export function registerUploadRoutes(app: FastifyInstance): void {
 
   app.post(
     "/uploads/driver-photo/failure",
-    { preHandler: requireAuth },
+    {
+      onRequest: requireAuth,
+      schema: {
+        body: object(
+          { kind: oneOf(REPORTABLE_FAILURE_KINDS), status: integer(0, 999), message: text(2000, { nullable: true }) },
+          ["kind"],
+        ),
+      },
+    },
     async (request, reply) => {
       if (request.user?.role !== "DRIVER") {
         return reply

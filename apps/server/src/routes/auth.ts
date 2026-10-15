@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { OtpService } from "../services/otp/OtpService";
 import { requestOtp, verifyOtp } from "../services/auth/otp";
@@ -39,9 +40,53 @@ import { RateLimitedError, enforce } from "../rateLimit/limiter";
 import { RULES } from "../rateLimit/rules";
 import { clientIpForLimits, sendRateLimited } from "../rateLimit/reply";
 import { isAdminSiteRequest, recordAdminLogin, type AdminLoginFailure } from "../services/admin/loginAudit";
+import { MAX, bodyOptional, empty, noInput, object, oneOf, phone as phoneField, text } from "../http/schemas";
+
 
 const OTP_PURPOSES = ["SIGNUP", "LOGIN"] as const;
 const SIGNUP_ROLES = ["RIDER", "DRIVER"] as const;
+
+const purpose = oneOf(OTP_PURPOSES);
+const verifiedToken = text(MAX.token, { nonEmpty: true });
+const refreshToken = text(MAX.token, { nonEmpty: true });
+
+/** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
+const SCHEMAS = {
+  requestOtp: { body: object({ phone: phoneField, purpose }, ["phone", "purpose"]) },
+  verifyOtp: {
+    body: object({ phone: phoneField, code: text(MAX.otpCode, { nonEmpty: true }), purpose }, ["phone", "code", "purpose"]),
+  },
+  signup: {
+    body: object(
+      { phone: phoneField, name: text(MAX.name, { nonEmpty: true }), role: oneOf(SIGNUP_ROLES), verifiedToken },
+      ["phone", "name", "role", "verifiedToken"],
+    ),
+  },
+  login: { body: object({ phone: phoneField, verifiedToken }, ["phone", "verifiedToken"]) },
+  refresh: { body: object({ refreshToken }, ["refreshToken"]) },
+  logout: { body: object({ refreshToken, pushToken: text(MAX.pushToken) }, ["refreshToken"]) },
+  me: noInput,
+  patchMe: {
+    body: object({
+      name: text(MAX.name),
+      emergencyContactName: text(MAX.name, { nullable: true }),
+      emergencyContactPhone: text(MAX.phone, { nullable: true }),
+    }),
+  },
+  deleteMe: { querystring: empty, body: empty },
+  driverProfile: {
+    body: object(
+      {
+        carMake: text(MAX.vehicleField, { nonEmpty: true }),
+        carModel: text(MAX.vehicleField, { nonEmpty: true }),
+        carColor: text(MAX.vehicleField, { nonEmpty: true }),
+        plate: text(MAX.plate, { nonEmpty: true }),
+        photoUrl: text(MAX.url),
+      },
+      ["carMake", "carModel", "carColor", "plate"],
+    ),
+  },
+};
 
 function isOtpPurpose(value: unknown): value is (typeof OTP_PURPOSES)[number] {
   return typeof value === "string" && (OTP_PURPOSES as readonly string[]).includes(value);
@@ -74,6 +119,7 @@ export function registerAuthRoutes(
   prisma: PrismaClient,
   otpService: OtpService,
 ): void {
+  useRequestValidation(app);
   /**
    * Whether this login step goes in the admin sign-in record (see
    * services/admin/loginAudit.ts): it came from the admin site, or it is
@@ -95,7 +141,7 @@ export function registerAuthRoutes(
    * and login.15m below), never per IP: a hostel on one Wi-Fi is one IP. The
    * per-IP backstop (rateLimit/http.ts) sits behind them, far higher.
    */
-  app.post("/auth/request-otp", async (request, reply) => {
+  app.post("/auth/request-otp", { schema: SCHEMAS.requestOtp }, async (request, reply) => {
     const body = request.body as { phone?: unknown; purpose?: unknown };
 
     if (!isNonEmptyString(body.phone) || !isOtpPurpose(body.purpose)) {
@@ -121,7 +167,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/verify-otp", async (request, reply) => {
+  app.post("/auth/verify-otp", { schema: SCHEMAS.verifyOtp }, async (request, reply) => {
     const body = request.body as { phone?: unknown; code?: unknown; purpose?: unknown };
 
     if (
@@ -160,7 +206,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/signup", async (request, reply) => {
+  app.post("/auth/signup", { schema: SCHEMAS.signup }, async (request, reply) => {
     const body = request.body as {
       phone?: unknown;
       name?: unknown;
@@ -205,7 +251,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/login", async (request, reply) => {
+  app.post("/auth/login", { schema: SCHEMAS.login }, async (request, reply) => {
     const body = request.body as { phone?: unknown; verifiedToken?: unknown };
 
     if (!isNonEmptyString(body.phone) || !isNonEmptyString(body.verifiedToken)) {
@@ -253,7 +299,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/refresh", async (request, reply) => {
+  app.post("/auth/refresh", { schema: SCHEMAS.refresh }, async (request, reply) => {
     const body = request.body as { refreshToken?: unknown };
 
     if (!isNonEmptyString(body.refreshToken)) {
@@ -292,7 +338,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post("/auth/logout", async (request, reply) => {
+  app.post("/auth/logout", { schema: SCHEMAS.logout }, async (request, reply) => {
     const body = request.body as { refreshToken?: unknown; pushToken?: unknown };
 
     if (!isNonEmptyString(body.refreshToken)) {
@@ -312,7 +358,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.get("/me", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/me", { onRequest: requireAuth, schema: SCHEMAS.me }, async (request, reply) => {
     // Explicit select (routes/selects.ts) so a future User column is not
     // published to clients just by existing.
     const user = await prisma.user.findUnique({
@@ -336,7 +382,10 @@ export function registerAuthRoutes(
    * needs a fresh OTP verification of the new number (its own flow, not this
    * one).
    */
-  app.patch("/me", { preHandler: requireAuth, config: { limits: { user: [RULES.profile] } } }, async (request, reply) => {
+  app.patch(
+    "/me",
+    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.patchMe, config: { limits: { user: [RULES.profile] } } },
+    async (request, reply) => {
     const body = (request.body ?? {}) as {
       name?: unknown;
       emergencyContactName?: unknown;
@@ -391,7 +440,10 @@ export function registerAuthRoutes(
    * for why the row has to survive. Idempotent from the client's point of
    * view: a second call with a still-valid access token gets 404, not a 500.
    */
-  app.delete("/me", { preHandler: requireAuth, config: { limits: { user: [RULES.accountDelete] } } }, async (request, reply) => {
+  app.delete(
+    "/me",
+    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.deleteMe, config: { limits: { user: [RULES.accountDelete] } } },
+    async (request, reply) => {
     const userId = request.user!.userId;
 
     try {
@@ -412,7 +464,10 @@ export function registerAuthRoutes(
     return reply.code(200).send({ deleted: true });
   });
 
-  app.post("/driver/profile", { preHandler: requireAuth, config: { limits: { user: [RULES.profile] } } }, async (request, reply) => {
+  app.post(
+    "/driver/profile",
+    { onRequest: requireAuth, schema: SCHEMAS.driverProfile, config: { limits: { user: [RULES.profile] } } },
+    async (request, reply) => {
     const body = request.body as {
       carMake?: unknown;
       carModel?: unknown;

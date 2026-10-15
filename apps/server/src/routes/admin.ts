@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import {
   FLAGGED_RIDER_CANCEL_REASONS,
@@ -9,11 +10,26 @@ import {
   searchPlaces,
   type PlaceCategory,
 } from "@rida/shared";
-import { requireAuth, requireAdmin } from "../middleware/auth";
+import { adminOnly, requireAuth, requireAdmin } from "../middleware/auth";
 import { getActiveZones } from "../services/zones/zoneCache";
 import { clearPlaceCache } from "../services/places/placeCache";
 import { normalizePhone } from "../lib/phone";
 import { clearPersonLimits, personLimitStatus } from "../rateLimit/admin";
+import {
+  MAX,
+  boolean,
+  bodyOptional,
+  empty,
+  idParams,
+  integer,
+  latitude,
+  longitude,
+  noInput,
+  object,
+  oneOf,
+  phone as phoneField,
+  text,
+} from "../http/schemas";
 
 /**
  * Phase 5 admin surface. Closes the gap where `Driver.isApproved` was enforced
@@ -191,7 +207,39 @@ async function accountFor(prisma: PrismaClient, phone: string) {
   return prisma.user.findUnique({ where: { phone }, select: { id: true, name: true, role: true } });
 }
 
+/** Place fields; POST requires name and position, PATCH takes any of them. */
+const placeFields = {
+  name: text(PLACE_NAME_MAX + 40),
+  aliases: { type: "array", maxItems: ALIASES_MAX + 10, items: text(ALIAS_MAX + 40) },
+  latitude,
+  longitude,
+  category: oneOf(PLACE_CATEGORIES),
+  isActive: boolean,
+};
+
+/** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
+const SCHEMAS = {
+  logins: { querystring: object({ limit: integer(1, 1000) }) },
+  rateLimits: { querystring: object({ phone: phoneField }, ["phone"]) },
+  clearRateLimits: { body: object({ phone: phoneField }, ["phone"]) },
+  pendingDrivers: noInput,
+  approve: { params: idParams, body: empty },
+  reject: { params: idParams, body: object({ reason: text(MAX.reason, { nullable: true }) }) },
+  rides: {
+    querystring: object({
+      status: oneOf(RIDE_STATUSES),
+      from: text(40),
+      to: text(40),
+      limit: integer(1, 1000),
+    }),
+  },
+  places: { querystring: object({ q: text(MAX.query) }) },
+  createPlace: { body: object(placeFields, ["name", "latitude", "longitude"]) },
+  updatePlace: { params: idParams, body: object(placeFields) },
+};
+
 export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient): void {
+  useRequestValidation(app);
   // ─── Recent admin logins ─────────────────────────────────────────────────
   //
   // Every attempt to sign in to the admin site (services/admin/loginAudit.ts),
@@ -199,7 +247,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
   // of a stolen SIM — stands out. Read-only, like the ride list: not itself
   // audit-logged.
 
-  app.get("/admin/audit/logins", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/admin/audit/logins", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.logins }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     const { limit } = (request.query ?? {}) as { limit?: unknown };
     const rows = await prisma.adminAuditLog.findMany({
@@ -236,7 +284,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
   // (src/rateLimit), so clearing one person never touches anyone else.
 
   /** `?phone=` in any spelling. Lists only the limits in use, blocked ones first. */
-  app.get("/admin/rate-limits", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/admin/rate-limits", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.rateLimits }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     const { phone: raw } = (request.query ?? {}) as { phone?: unknown };
     const phone = typeof raw === "string" ? normalizePhone(raw) : null;
@@ -251,7 +299,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
   });
 
   /** Body `{ phone }`. Clears every limit counted against that number and its account. */
-  app.post("/admin/rate-limits/clear", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/admin/rate-limits/clear", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.clearRateLimits }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     const { phone: raw } = (request.body ?? {}) as { phone?: unknown };
     const phone = typeof raw === "string" ? normalizePhone(raw) : null;
@@ -278,7 +326,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
   });
 
   /** Drivers awaiting a decision: everything still sitting at isApproved=false. */
-  app.get("/admin/drivers/pending", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/admin/drivers/pending", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.pendingDrivers }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
 
     const drivers = await prisma.driver.findMany({
@@ -290,7 +338,10 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
     return reply.send({ drivers });
   });
 
-  app.post("/admin/drivers/:id/approve", { preHandler: requireAuth }, async (request, reply) => {
+  app.post(
+    "/admin/drivers/:id/approve",
+    { onRequest: [requireAuth, adminOnly], preValidation: bodyOptional, schema: SCHEMAS.approve },
+    async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
 
     const { id } = request.params as { id: string };
@@ -319,7 +370,10 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
    * immediately, and an online driver who stays online would keep receiving
    * dispatches until they happened to toggle off.
    */
-  app.post("/admin/drivers/:id/reject", { preHandler: requireAuth }, async (request, reply) => {
+  app.post(
+    "/admin/drivers/:id/reject",
+    { onRequest: [requireAuth, adminOnly], preValidation: bodyOptional, schema: SCHEMAS.reject },
+    async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
 
     const { id } = request.params as { id: string };
@@ -355,7 +409,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
    * (from/to). Read-only, so no audit row — the log records decisions, not
    * every page view.
    */
-  app.get("/admin/rides", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/admin/rides", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.rides }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
 
     const query = request.query as { status?: unknown; from?: unknown; to?: unknown; limit?: unknown };
@@ -412,7 +466,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
   // search without touching history. A move recomputes the place's zone.
 
   /** Every place, inactive ones too. `?q=` searches names and aliases the way riders do (typos and all). */
-  app.get("/admin/places", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/admin/places", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.places }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     const { q } = (request.query ?? {}) as { q?: unknown };
     const query = typeof q === "string" ? q.trim().slice(0, 80) : "";
@@ -423,7 +477,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
     return reply.send({ places: query ? searchPlaces(all, query, all.length) : all });
   });
 
-  app.post("/admin/places", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/admin/places", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.createPlace }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     const input = parsePlaceInput(request.body, false);
     if ("error" in input) return reply.code(400).send({ error: input.error });
@@ -458,7 +512,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
     return reply.code(201).send({ place });
   });
 
-  app.patch("/admin/places/:id", { preHandler: requireAuth }, async (request, reply) => {
+  app.patch("/admin/places/:id", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.updatePlace }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     const { id } = request.params as { id: string };
     const input = parsePlaceInput(request.body, true);

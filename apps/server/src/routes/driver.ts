@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, PassengerStatus, RideSource, RideStatus, RiderPushKind } from "@rida/shared";
 import {
@@ -52,6 +53,52 @@ import { approximatePins } from "../services/places/approximatePins";
 import { pinFieldsOf, requestPlaceNames } from "./ridePins";
 import { estimateRoute } from "../services/routing/pointRoutes";
 import { RULES } from "../rateLimit/rules";
+import {
+  MAX,
+  bodyOptional,
+  boolean,
+  empty,
+  id,
+  idParams,
+  latitude,
+  longitude,
+  noInput,
+  nullableId,
+  object,
+  oneOf,
+  text,
+} from "../http/schemas";
+
+/** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
+const SCHEMAS = {
+  availability: { body: object({ isOnline: boolean, zoneId: nullableId }, ["isOnline"]) },
+  zone: { body: object({ zoneId: nullableId }, ["zoneId"]) },
+  activeRide: noInput,
+  history: noInput,
+  profile: {
+    body: object({
+      name: text(MAX.name),
+      carMake: text(MAX.vehicleField),
+      carModel: text(MAX.vehicleField),
+      carColor: text(MAX.vehicleField),
+      plate: text(MAX.plate),
+      photoUrl: text(MAX.url),
+    }),
+  },
+  noBodyAction: { params: idParams, body: empty },
+  reject: { params: idParams, body: object({ reason: oneOf(["DECLINED", "TIMED_OUT"]) }) },
+  eligible: { querystring: object({ lat: latitude, lng: longitude }) },
+  fillSuggestions: { params: idParams, querystring: empty },
+  addPreview: {
+    params: idParams,
+    querystring: object({ requestRideId: id, lat: latitude, lng: longitude }, ["requestRideId"]),
+  },
+  addPassenger: { params: idParams, body: object({ requestRideId: id, lat: latitude, lng: longitude }, ["requestRideId"]) },
+  passengerAction: {
+    params: object({ id, passengerId: id }, ["id", "passengerId"]),
+    body: object({ reason: oneOf(["NO_SHOW"]) }),
+  },
+};
 
 /** Returns the set of zone IDs a driver in `zoneId` is eligible to serve (same zone + 1 hop). */
 function computeEligibleZoneSet(
@@ -253,11 +300,12 @@ async function offerDistances(
 }
 
 export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient): void {
+  useRequestValidation(app);
   /**
    * Set the driver's online/offline status and current zone.
    * Going online makes the driver eligible for ride broadcasts.
    */
-  app.patch("/driver/availability", { preHandler: requireAuth }, async (request, reply) => {
+  app.patch("/driver/availability", { onRequest: requireAuth, schema: SCHEMAS.availability }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const body = request.body as { isOnline?: unknown; zoneId?: unknown };
@@ -310,7 +358,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * /driver/availability so a zone update can never flip a driver online: an
    * offline driver gets 409 and nothing changes.
    */
-  app.patch("/driver/zone", { preHandler: requireAuth }, async (request, reply) => {
+  app.patch("/driver/zone", { onRequest: requireAuth, schema: SCHEMAS.zone }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const body = (request.body ?? {}) as { zoneId?: unknown };
@@ -344,7 +392,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * everything the trip screen needs. Three queries: the ride, its
    * passengers, their riders; zones come from the in-memory zone cache.
    */
-  app.get("/driver/rides/active", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/driver/rides/active", { onRequest: requireAuth, schema: SCHEMAS.activeRide }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const userId = request.user!.userId;
@@ -405,7 +453,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * recomputed on cancels and can understate completers when a rider cancels
    * after another has already been dropped off.
    */
-  app.get("/driver/rides/history", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/driver/rides/history", { onRequest: requireAuth, schema: SCHEMAS.history }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const userId = request.user!.userId;
@@ -487,7 +535,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * preserves the "complete profile" invariant that going online depends on
    * (see PATCH /driver/availability). Fields that are omitted are left as-is.
    */
-  app.patch("/driver/profile", { preHandler: requireAuth, config: { limits: { user: [RULES.profile] } } }, async (request, reply) => {
+  app.patch(
+    "/driver/profile",
+    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.profile, config: { limits: { user: [RULES.profile] } } },
+    async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const userId = request.user!.userId;
@@ -575,7 +626,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * Safe to retry: claiming a ride this driver already holds answers 200 —
    * the app retries after a timeout, and the first attempt often landed.
    */
-  app.post("/rides/:id/claim", { preHandler: requireAuth, config: { limits: { user: [RULES.driverAccept] } } }, async (request, reply) => {
+  app.post(
+    "/rides/:id/claim",
+    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.noBodyAction, config: { limits: { user: [RULES.driverAccept] } } },
+    async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -663,7 +717,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * never offered to this driver again (eligible list, broadcast,
    * fill-suggestions all skip it).
    */
-  app.post("/rides/:id/reject", { preHandler: requireAuth, config: { limits: { user: [RULES.driverDecline] } } }, async (request, reply) => {
+  app.post(
+    "/rides/:id/reject",
+    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.reject, config: { limits: { user: [RULES.driverDecline] } } },
+    async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -698,7 +755,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   });
 
   /** Driver has arrived at the pickup zone — transitions MATCHED → ARRIVED. */
-  app.post("/rides/:id/arrived", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/rides/:id/arrived", { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.noBodyAction }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -731,7 +788,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * and leave passengers stuck at WAITING/ARRIVED while the ride itself
    * reports IN_PROGRESS, so it's rejected here.
    */
-  app.post("/rides/:id/depart", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/rides/:id/depart", { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.noBodyAction }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -767,7 +824,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * unclaimed, and the broadcast window (90 s) hasn't expired. Each ride includes a
    * `bestFit` flag derived from the existing Phase-2e bestFit scoring logic.
    */
-  app.get("/driver/rides/eligible", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/driver/rides/eligible", { onRequest: requireAuth, schema: SCHEMAS.eligible }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const userId = request.user!.userId;
@@ -923,7 +980,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * (MATCHED/ARRIVED, checked above). No fare-impact preview — shared fare
    * is flat per rider, unaffected by who's added.
    */
-  app.get("/rides/:id/fill-suggestions", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/rides/:id/fill-suggestions", { onRequest: requireAuth, schema: SCHEMAS.fillSuggestions }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -1014,7 +1071,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * not be added right now, so the app only ever previews an add that would
    * succeed.
    */
-  app.get("/rides/:id/add-preview", { preHandler: requireAuth }, async (request, reply) => {
+  app.get("/rides/:id/add-preview", { onRequest: requireAuth, schema: SCHEMAS.addPreview }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -1142,7 +1199,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * atomic, car-locking `addRiderToCar`. Safe to retry: adding a rider who is
    * already in this car answers 200.
    */
-  app.post("/rides/:id/add-passenger", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/rides/:id/add-passenger", { onRequest: requireAuth, schema: SCHEMAS.addPassenger }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -1256,7 +1313,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * below) — calling this directly on a SHARED ride could complete it while
    * passengers are still WAITING/ARRIVED/PICKED_UP, so it's rejected here.
    */
-  app.post("/rides/:id/complete", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/rides/:id/complete", { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.noBodyAction }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -1334,7 +1391,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   };
 
   for (const [action, baseSpec] of Object.entries(PASSENGER_ACTIONS)) {
-    app.post(`/rides/:id/passengers/:passengerId/${action}`, { preHandler: requireAuth }, async (request, reply) => {
+    app.post(
+      `/rides/:id/passengers/:passengerId/${action}`,
+      { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.passengerAction },
+      async (request, reply) => {
       if (!(await requireDriver(request, reply))) return;
 
       const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };

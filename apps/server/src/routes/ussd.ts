@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
+import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import { handleUssdRequest, type MoolreUssdRequest } from "../services/ussd/ussdHandler";
 import { getSession } from "../services/ussd/session";
 import { config } from "../config";
 import { limiter } from "../rateLimit/limiter";
+import { object, text } from "../http/schemas";
 import { RULES } from "../rateLimit/rules";
 
 function isNonEmptyString(value: unknown): value is string {
@@ -41,6 +43,7 @@ export function registerUssdRoutes(
   prisma: PrismaClient,
   enabled: boolean = config.enableUssd,
 ): void {
+  useRequestValidation(app);
   // USSD is shelved for this launch (ENABLE_USSD defaults to false). The
   // callback is unauthenticated and, via findOrCreateRiderByPhone, will mint
   // a rider account for ANY msisdn with no verification — so while the flag
@@ -51,7 +54,21 @@ export function registerUssdRoutes(
   // Every callback comes from Moolre's gateway, so an IP limit would be one
   // bucket for every subscriber; the limit is per subscriber (msisdn) instead.
   // A Moolre gateway IP allowlist is still needed before switching USSD on.
-  app.post("/ussd/callback", async (request, reply) => {
+  // No field is required by the schema: Moolre's gateway must always get a
+  // 200 with a message, so a missing field is answered by the handler.
+  app.post(
+    "/ussd/callback",
+    {
+      schema: {
+        body: object({
+          sessionId: text(100),
+          new: { type: ["boolean", "string", "number"] },
+          msisdn: text(20),
+          message: text(500),
+        }),
+      },
+    },
+    async (request, reply) => {
     const body = request.body as {
       sessionId?: unknown;
       new?: unknown;

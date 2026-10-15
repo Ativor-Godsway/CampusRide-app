@@ -30,7 +30,4 @@ export async function isAdminNumber(prisma: PrismaClient, phone: string): Promis
 }
 
 /** "+233548608146" -> "+233*****146": enough to recognise a number in a log, not to dial it. */
-export function maskPhone(phone: string): string {
-  if (phone.length <= 7) return "*".repeat(phone.length);
-  return `${phone.slice(0, 4)}*****${phone.slice(-3)}`;
-}
+export { maskPhone } from "../../lib/redact";
