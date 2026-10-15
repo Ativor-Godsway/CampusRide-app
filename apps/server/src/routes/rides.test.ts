@@ -160,7 +160,7 @@ describe("GET /rides/:id", () => {
     expect(res.statusCode).toBe(404);
   });
 
-  it("403s for a rider who is neither the ride's rider nor a passenger", async () => {
+  it("404s for a rider who is neither the ride's rider nor a passenger", async () => {
     const { ride } = await createTestRide({ type: "LONE", status: "REQUESTED" });
     createdRideIds.push(ride.id);
     const { token } = await authedRider();
@@ -170,7 +170,7 @@ describe("GET /rides/:id", () => {
       url: `/rides/${ride.id}`,
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
   });
 
   it("returns the ride with zones and a null driver when unassigned", async () => {
@@ -272,7 +272,7 @@ describe("POST /rides/:id/decision", () => {
     expect(res.statusCode).toBe(400);
   });
 
-  it("403s for a rider who doesn't own the ride", async () => {
+  it("404s for a rider who doesn't own the ride", async () => {
     const { ride } = await createTestRide({
       type: "LONE",
       status: "AWAITING_RIDER_DECISION",
@@ -287,7 +287,7 @@ describe("POST /rides/:id/decision", () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { action: "CANCEL" },
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
   });
 
   it("409s when the ride isn't AWAITING_RIDER_DECISION", async () => {
@@ -385,7 +385,7 @@ describe("POST /rides/:id/cancel", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("403s for a rider who doesn't own the ride", async () => {
+  it("404s for a rider who doesn't own the ride", async () => {
     const { ride } = await createTestRide({ type: "LONE", status: "REQUESTED" });
     createdRideIds.push(ride.id);
     const { token } = await authedRider();
@@ -395,7 +395,7 @@ describe("POST /rides/:id/cancel", () => {
       url: `/rides/${ride.id}/cancel`,
       headers: { authorization: `Bearer ${token}` },
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
   });
 
   it("cancels a REQUESTED ride with reason RIDER_CANCELLED", async () => {

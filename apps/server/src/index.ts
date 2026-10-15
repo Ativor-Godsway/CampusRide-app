@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import { Server as SocketServer } from "socket.io";
-import { APP_NAME, config } from "./config";
+import { config } from "./config";
 import { prisma } from "./db/prisma";
 import { assertDatabaseAllowedForEnv } from "./db/dbHostGuard";
 import {
@@ -20,19 +20,7 @@ import {
   paymentService,
   routeService,
 } from "./services/active";
-import { registerAuthRoutes } from "./routes/auth";
-import { registerDemoOtpRoutes } from "./routes/demoOtp";
-import { registerWebhookRoutes } from "./routes/webhooks";
-import { registerZoneRoutes } from "./routes/zones";
-import { registerRideRoutes } from "./routes/rides";
-import { registerRatingRoutes } from "./routes/ratings";
-import { registerDriverRoutes } from "./routes/driver";
-import { registerAdminRoutes } from "./routes/admin";
-import { registerUssdRoutes } from "./routes/ussd";
-import { registerUploadRoutes } from "./routes/uploads";
-import { registerSafetyRoutes } from "./routes/safety";
-import { registerPlaceRoutes } from "./routes/places";
-import { registerPushRoutes } from "./routes/push";
+import { registerAllRoutes } from "./routes";
 import { checkPushReceipts } from "./services/push/pushService";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
@@ -162,23 +150,7 @@ async function bootstrap() {
     },
   );
 
-  app.get("/health", async () => {
-    return { status: "ok", app: APP_NAME };
-  });
-
-  registerAuthRoutes(app, prisma, otpService);
-  registerDemoOtpRoutes(app, prisma, otpService);
-  registerWebhookRoutes(app, prisma, paymentService, config.moolre.webhookSecret);
-  registerZoneRoutes(app, prisma);
-  registerRideRoutes(app, prisma);
-  registerRatingRoutes(app, prisma);
-  registerDriverRoutes(app, prisma);
-  registerAdminRoutes(app, prisma);
-  registerUssdRoutes(app, prisma);
-  registerUploadRoutes(app);
-  registerSafetyRoutes(app, prisma);
-  registerPlaceRoutes(app, prisma);
-  registerPushRoutes(app, prisma);
+  registerAllRoutes(app, prisma, { otpService, paymentService });
 
   // app.server is the underlying http.Server — attach Socket.io to it directly
   await app.ready();

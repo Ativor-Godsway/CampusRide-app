@@ -71,7 +71,7 @@ describe("POST /ratings", () => {
     await prisma.user.delete({ where: { id: rider.id } });
   });
 
-  it("403s for a rider who wasn't part of the ride", async () => {
+  it("404s for a rider who wasn't part of the ride", async () => {
     const { ride } = await createTestRide({ type: "LONE", status: "COMPLETED" });
     createdRideIds.push(ride.id);
 
@@ -84,7 +84,7 @@ describe("POST /ratings", () => {
       headers: { authorization: `Bearer ${token}` },
       payload: { rideId: ride.id, stars: 5 },
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
 
     await prisma.user.delete({ where: { id: rider.id } });
   });

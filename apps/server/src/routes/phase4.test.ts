@@ -367,7 +367,7 @@ describe("POST /rides/:id/sos", () => {
       headers: auth(stranger.token),
     });
 
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
     expect(sendSms).not.toHaveBeenCalled();
   });
 
@@ -699,7 +699,7 @@ describe("POST /ratings/rider", () => {
       payload: { rideId: ride.id, riderId: rider.id, stars: 5 },
     });
 
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
   });
 
   it("refuses a rider role", async () => {

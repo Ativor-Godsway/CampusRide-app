@@ -8,6 +8,7 @@ import {
   cleanupRide,
   createTestDriver,
   createTestRide,
+  createTestUser,
   getTestZones,
 } from "../services/ride/testFixtures";
 
@@ -80,8 +81,10 @@ describe("PATCH /driver/zone", () => {
 
   it("is drivers only", async () => {
     const { pickup } = await getTestZones();
-    const riderToken = signAccessToken({ userId: "someone", role: "RIDER" });
+    const rider = await createTestUser("RIDER");
+    const riderToken = signAccessToken({ userId: rider.id, role: "RIDER" });
     expect((await patchZone(riderToken, { zoneId: pickup.id })).statusCode).toBe(403);
+    await prisma.user.delete({ where: { id: rider.id } });
   });
 
   it("changes which requests the driver is shown", async () => {

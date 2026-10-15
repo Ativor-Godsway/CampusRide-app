@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 /**
  * Exact pickup and drop-off pins (2026-10), with zones kept behind the
  * scenes:
@@ -357,9 +358,11 @@ describe("who sees the pins", () => {
     await addPlace("Balme Library", BALME);
     const { token } = await rider();
     const created = (await book(token, { type: "LONE", pickup: BALME, dropoff: NIGHT_MARKET })).json().ride;
-    await prisma.ride.update({ where: { id: created.id }, data: { trackingToken: `${MARK}-track` } });
+    // A link from before per-rider links: the ride's own (legacy) token.
+    const legacyToken = randomBytes(16).toString("hex");
+    await prisma.ride.update({ where: { id: created.id }, data: { trackingToken: legacyToken } });
 
-    const res = await app.inject({ method: "GET", url: `/track/${MARK}-track` });
+    const res = await app.inject({ method: "GET", url: `/track/${legacyToken}` });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain("Balme Library");
     expect(mentions(res.body, BALME.latitude, BALME.longitude, NIGHT_MARKET.latitude, NIGHT_MARKET.longitude)).toBe(false);
