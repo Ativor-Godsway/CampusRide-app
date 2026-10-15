@@ -65,6 +65,7 @@ import {
   RideRequestRefusedError,
   getRoadRoute,
   useLiveRoute,
+  rateLimitText,
 } from "@rida/mobile-shared";
 import { CancelRideSheet, type SwitchOffer } from "../../components/ride/CancelRideSheet";
 import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
@@ -373,7 +374,7 @@ export default function RideTypeScreen() {
         // Outside the area, a place that's gone, the same spot twice: the server's own words.
         Alert.alert("Couldn't request this ride", err.message);
       } else {
-        Alert.alert("Couldn't request a ride", "Please check your connection and try again.");
+        Alert.alert("Couldn't request a ride", rateLimitText(err) ?? "Please check your connection and try again.");
       }
     } finally {
       setSubmitting(false);
@@ -413,8 +414,8 @@ export default function RideTypeScreen() {
       await submitRideDecision(activeRideId, "KEEP_WAITING");
       // Refetch so broadcastStartedAt is fresh for the restarted countdown.
       await refreshRide();
-    } catch {
-      Alert.alert("Something went wrong", "Please try again.");
+    } catch (err) {
+      Alert.alert("Something went wrong", rateLimitText(err) ?? "Please try again.");
     } finally {
       setDecisionBusy(null);
     }
@@ -439,7 +440,7 @@ export default function RideTypeScreen() {
           "Your ride just changed — a driver may have accepted it. Check the latest status.",
         );
       } else {
-        Alert.alert("Couldn't switch", "Please check your connection and try again.");
+        Alert.alert("Couldn't switch", rateLimitText(err) ?? "Please check your connection and try again.");
       }
     } finally {
       setSwitching(false);
@@ -462,7 +463,7 @@ export default function RideTypeScreen() {
         setCancelSheetOpen(false);
         Alert.alert("Can't cancel now", "This ride can no longer be cancelled.");
       } else {
-        Alert.alert("Couldn't cancel", "Please check your connection and try again.");
+        Alert.alert("Couldn't cancel", rateLimitText(err) ?? "Please check your connection and try again.");
       }
     } finally {
       setCancelling(false);
@@ -1067,7 +1068,13 @@ function RideSafetyActions({ rideId, driver }: { rideId: string; driver: RideDri
                 if (result.smsDelivered && result.contactName) reached.push(result.contactName);
                 if (result.supportNotified) reached.push("CampusRide support");
 
-                if (reached.length > 0) {
+                if (reached.length > 0 && result.alreadyAlerted) {
+                  // A repeat press: the first one got through moments ago.
+                  Alert.alert(
+                    "SOS already sent",
+                    `${reached.join(" and ")} ${reached.length === 1 ? "was" : "were"} sent a link to follow your trip a moment ago. If you're in danger, call someone now.`,
+                  );
+                } else if (reached.length > 0) {
                   const nudge = result.hasEmergencyContact
                     ? ""
                     : "\n\nAdd an emergency contact in Account → Safety so someone you know is alerted too.";
@@ -1253,8 +1260,8 @@ function RatingPanel({
     try {
       await submitRating({ rideId, stars });
       setSubmitted(true);
-    } catch {
-      Alert.alert("Couldn't submit rating", "Please try again.");
+    } catch (err) {
+      Alert.alert("Couldn't submit rating", rateLimitText(err) ?? "Please try again.");
     } finally {
       setSubmitting(false);
     }

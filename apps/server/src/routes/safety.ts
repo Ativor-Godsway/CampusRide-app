@@ -5,6 +5,9 @@ import { config } from "../config";
 import { RideNotActiveError, TRACKING_TOKEN_PATTERN, raiseSos } from "../services/safety/sos";
 import { rideStatusLabel } from "../services/safety/rideStatusLabels";
 import { requestPlaceNames } from "./ridePins";
+import { rateLimitMessage } from "@rida/shared";
+import { limiter } from "../rateLimit/limiter";
+import { RULES } from "../rateLimit/rules";
 
 /** Minimal HTML escaping for the values interpolated into the tracking page. */
 function escapeHtml(value: string): string {
@@ -27,10 +30,10 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
     "/rides/:id/sos",
     {
       preHandler: requireAuth,
-      // An SOS sends an SMS, which costs money and could be used to spam a
-      // number. The cap is generous enough that a panicking rider tapping
-      // repeatedly is never blocked, but bounded.
-      config: { rateLimit: { max: config.rateLimit.sosMax, timeWindow: "15 minutes" } },
+      // NEVER rate limited: an emergency is never answered with "try again
+      // later". The texts are what cost money, so raiseSos skips re-texting
+      // the same people for a repeat press within a couple of minutes.
+      config: { limits: false },
     },
     async (request, reply) => {
       if (request.user?.role !== "RIDER") {
@@ -90,7 +93,22 @@ export function registerSafetyRoutes(app: FastifyInstance, prisma: PrismaClient)
   app.get("/track/:token", async (request, reply) => {
     const { token } = request.params as { token: string };
 
-    const link = TRACKING_TOKEN_PATTERN.test(token) ? await findTrackingLink(prisma, token) : null;
+    if (!TRACKING_TOKEN_PATTERN.test(token)) {
+      return sendPage(reply, 404, page("Link not found", "<p>This tracking link is not valid.</p>"));
+    }
+    // Per link: a contact (or several) watching refreshes every 15 s; more
+    // than that is something hammering the link.
+    const allowed = await limiter.consume([{ rule: RULES.trackLink, subject: token }]);
+    if (!allowed.ok) {
+      const seconds = Math.max(1, Math.ceil(allowed.retryAfterMs / 1000));
+      return sendPage(
+        reply.header("retry-after", String(seconds)),
+        429,
+        page("Too many requests", `<p>${escapeHtml(rateLimitMessage(seconds))}</p>`),
+      );
+    }
+
+    const link = await findTrackingLink(prisma, token);
     if (!link) {
       return sendPage(reply, 404, page("Link not found", "<p>This tracking link is not valid.</p>"));
     }

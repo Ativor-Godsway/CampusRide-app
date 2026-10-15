@@ -1,10 +1,10 @@
 import { describe, it, expect, afterEach, afterAll, beforeAll } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
-import rateLimit from "@fastify/rate-limit";
 import { getLoneFare, getSharedFarePerRider, RIDER_CANCEL_NOTE_MAX } from "@rida/shared";
 import type { RideStatus, RideType } from "@rida/shared";
 import { prisma } from "../db/prisma";
-import { config } from "../config";
+import { RULES } from "../rateLimit/rules";
+import { installRateLimits } from "../rateLimit/http";
 import { registerRideRoutes } from "./rides";
 import { registerAdminRoutes } from "./admin";
 import { signAccessToken } from "../services/auth/tokens";
@@ -28,9 +28,8 @@ const driverUserIds: string[] = [];
 
 beforeAll(async () => {
   app = Fastify();
-  // global: false — only routes that declare their own limit are limited,
-  // which isolates the per-user limits under test from the global cap.
-  await app.register(rateLimit, { global: false });
+  // The production limits, so the per-rider limit is tested as it runs.
+  installRateLimits(app);
   registerRideRoutes(app, prisma);
   registerAdminRoutes(app, prisma);
   await app.ready();
@@ -352,7 +351,7 @@ describe("POST /rides/:id/switch", () => {
 
   it("rate-limits per rider, not per IP", async () => {
     const { ride, token } = await searchingRide("LONE");
-    const max = config.rateLimit.rideSwitchMax;
+    const max = RULES.rideSwitch.max;
     // Same-type switches are refused (409) but still count towards the limit.
     for (let i = 0; i < max; i++) {
       expect((await switchTo(ride.id, token, "LONE")).statusCode).toBe(409);

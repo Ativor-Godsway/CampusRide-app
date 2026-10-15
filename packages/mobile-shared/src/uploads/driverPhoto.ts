@@ -1,4 +1,5 @@
 import { File, UploadType, type UploadResult, type UploadTask } from "expo-file-system";
+import { rateLimitText } from "../auth/errorMessage";
 import { api } from "../auth/apiClient";
 
 /**
@@ -28,7 +29,8 @@ export type DriverPhotoErrorKind =
   | "signature_failed"
   | "upload_failed"
   | "network"
-  | "session_expired";
+  | "session_expired"
+  | "rate_limited";
 
 export class DriverPhotoError extends Error {
   readonly kind: DriverPhotoErrorKind;
@@ -92,6 +94,7 @@ async function requestTicket(): Promise<UploadTicket> {
     const status = httpStatus(error);
     if (status === undefined) throw new DriverPhotoError("network");
     if (status === 401) throw new DriverPhotoError("session_expired");
+    if (status === 429) throw new DriverPhotoError("rate_limited", { detail: rateLimitText(error) ?? undefined });
     if (status === 503)
       throw new DriverPhotoError("not_configured", { detail: serverMessage(error) });
     throw new DriverPhotoError("signature_failed", {
@@ -298,6 +301,13 @@ export function describeDriverPhotoError(error: unknown): FriendlyError {
         title: "Please log in again",
         message: "Your session has ended. Log in again to continue.",
       };
+    case "rate_limited":
+      return {
+        title: "Too many uploads",
+        message:
+          (error instanceof DriverPhotoError && error.detail) ||
+          "Too many attempts. Please wait a few minutes and try again.",
+      };
     case "upload_failed":
     default:
       return {
@@ -339,6 +349,6 @@ export function describeProfileSaveError(error: unknown): FriendlyError {
     };
   }
   if (status === 429)
-    return { title, message: "Too many attempts. Please wait a few minutes and try again." };
+    return { title, message: rateLimitText(error) ?? "Too many attempts. Please wait a few minutes and try again." };
   return { title, message: "Something went wrong on our server. Please try again in a moment." };
 }

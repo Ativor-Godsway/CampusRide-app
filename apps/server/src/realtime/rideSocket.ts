@@ -16,6 +16,8 @@ import {
 import { verifyAccessToken } from "../services/auth/tokens";
 import { loadActiveAccount } from "../services/auth/accountStatus";
 import { checkDriverArriving } from "../services/push/notify";
+import { limiter } from "../rateLimit/limiter";
+import { RULES } from "../rateLimit/rules";
 
 let ioRef: SocketIOServer | null = null;
 
@@ -126,7 +128,11 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
     socket.on(RIDE_CLIENT_EVENTS.SUBSCRIBE, (rideId: unknown, ack?: unknown) => {
       const reply = typeof ack === "function" ? (ack as (r: { ok: boolean }) => void) : () => {};
       if (!isRideId(rideId)) return reply({ ok: false });
-      loadActiveAccount(prisma, userId)
+      // Each check reads the database; past the per-account limit the
+      // answer is simply no (the app re-subscribes on its next screen).
+      limiter
+        .consume([{ rule: RULES.socketSubscribe, subject: userId }])
+        .then((allowed) => (allowed.ok ? loadActiveAccount(prisma, userId) : null))
         .then((account) => (account ? authorizeRideAccess(prisma, rideId, userId) : false))
         .then(
           (allowed) => {
@@ -154,9 +160,15 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
       driverRideChecks.set(rideId, { allowed, at: Date.now() });
       return allowed;
     };
+    // At most one position per driver every RATE_LIMIT_DRIVER_LOCATION_SECONDS
+    // (the app sends every 4 s); extras are dropped silently, never answered
+    // with a disconnect, so a chatty phone just has fewer positions relayed.
     socket.on(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, (data: unknown) => {
       if (!isDriverLocationUpdate(data)) return;
-      checkDriverRide(data.rideId).then(
+      limiter
+        .consume([{ rule: RULES.driverLocation, subject: userId }])
+        .then((allowed) => (allowed.ok ? checkDriverRide(data.rideId) : false))
+        .then(
         (allowed) => {
           if (!allowed) return;
           ioRef?.to(roomForRide(data.rideId)).emit(RIDE_EVENTS.DRIVER_LOCATION, {

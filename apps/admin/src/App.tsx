@@ -4,11 +4,12 @@ import { LoginScreen } from "./screens/LoginScreen";
 import { DriverQueue } from "./screens/DriverQueue";
 import { RideList } from "./screens/RideList";
 import { PlacesScreen } from "./screens/PlacesScreen";
+import { RateLimitsScreen } from "./screens/RateLimitsScreen";
 
-type Tab = "drivers" | "rides" | "places";
+type Tab = "drivers" | "rides" | "places" | "limits";
 
 /**
- * Three screens behind one login gate. No router: adding one would buy
+ * A few screens behind one login gate. No router: adding one would buy
  * deep-linkable URLs for an internal tool with a handful of views that is
  * never linked to from anywhere.
  */
@@ -44,6 +45,13 @@ export function App() {
           >
             Places
           </button>
+          <button
+            type="button"
+            className={tab === "limits" ? "tab active" : "tab"}
+            onClick={() => setTab("limits")}
+          >
+            Rate limits
+          </button>
         </nav>
         <div className="session">
           <span className="muted">{session.user.name}</span>
@@ -53,7 +61,17 @@ export function App() {
         </div>
       </header>
 
-      <main>{tab === "drivers" ? <DriverQueue /> : tab === "rides" ? <RideList /> : <PlacesScreen />}</main>
+      <main>
+        {tab === "drivers" ? (
+          <DriverQueue />
+        ) : tab === "rides" ? (
+          <RideList />
+        ) : tab === "places" ? (
+          <PlacesScreen />
+        ) : (
+          <RateLimitsScreen />
+        )}
+      </main>
     </div>
   );
 }

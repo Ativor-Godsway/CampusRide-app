@@ -1,13 +1,11 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
-import rateLimit from "@fastify/rate-limit";
 import { Server as SocketServer } from "socket.io";
 import { config } from "./config";
 import { prisma } from "./db/prisma";
 import { assertDatabaseAllowedForEnv } from "./db/dbHostGuard";
 import {
-  isDevLoopbackExempt,
   parseOriginAllowlist,
   resolveCorsOrigin,
   resolveTrustProxy,
@@ -47,32 +45,20 @@ async function bootstrap() {
   // login OTPs is not serviceable (see services/active.ts).
   assertOtpServiceAllowedInProduction(otpService, config.nodeEnv);
 
-  // trustProxy: Render terminates TLS at a proxy, so the socket IP is the
-  // proxy's. Trusting it makes request.ip (and therefore the rate limiter's
-  // per-IP keys) resolve to the real client via X-Forwarded-For, rather than
-  // rate-limiting every user under one shared proxy IP.
-  //
-  // This is a HOP COUNT, not `true`. `true` trusts the entire forwarded
-  // chain, so any client could send its own X-Forwarded-For and pick a fresh
-  // "IP" per request, silently defeating every per-IP limit in
-  // config.rateLimit. See lib/security.ts#resolveTrustProxy.
+  // trustProxy: requests reach us through Cloudflare and Render's load
+  // balancer, so the socket IP is a proxy's. Trusting exactly those proxy
+  // address ranges makes request.ip the real client (the IP backstop counts
+  // by it) however many hops there are, and never lets a client pick its own
+  // "IP" with a forged X-Forwarded-For. See lib/security.ts#resolveTrustProxy.
   const trustProxy = resolveTrustProxy(config.trustProxy, config.nodeEnv);
   const app = Fastify({ logger: true, trustProxy: toFastifyTrustProxy(trustProxy) });
-
-  // Global rate limiter. Routes without an explicit `config.rateLimit`
-  // override fall back to globalMax per minute per IP. Per-route overrides
-  // (auth/ride/payment/ussd) are set on each route's options. Keyed on
-  // request.ip (real client IP thanks to trustProxy above). Sensitive OTP/
-  // payment routes tighten this further; none of it removes the existing
-  // per-phone OTP caps in services/auth/otp.ts — the two layers stack.
-  await app.register(rateLimit, {
-    global: true,
-    max: config.rateLimit.globalMax,
-    timeWindow: "1 minute",
-    // Inherited by every per-route limit too. Development only — see
-    // lib/security.ts#isDevLoopbackExempt.
-    allowList: (request) => isDevLoopbackExempt(request.ip, config.nodeEnv),
-  });
+  if (config.nodeEnv === "production" && typeof trustProxy === "number") {
+    app.log.warn(
+      { trustProxy },
+      "TRUST_PROXY is a hop count. Behind Render (Cloudflare + a load balancer) that resolves to a proxy, " +
+        "so the per-IP backstop is switched off. Delete TRUST_PROXY on Render to use the default.",
+    );
+  }
 
   // Security headers (HSTS, X-Content-Type-Options, frame-ancestors denial,
   // Referrer-Policy, and friends) — the API previously sent none at all.

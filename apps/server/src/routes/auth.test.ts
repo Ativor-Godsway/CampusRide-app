@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import { prisma } from "../db/prisma";
 import { config } from "../config";
 import { registerAuthRoutes } from "./auth";
-import { OTP } from "../services/auth/constants";
+import { RULES } from "../rateLimit/rules";
 import { CapturingOtpService, cleanupOtpCodes, cleanupUser, uniqueTestPhone } from "../services/auth/testFixtures";
 
 let app: FastifyInstance;
@@ -169,10 +169,10 @@ describe("auth routes — signup + login round trip", () => {
     expect(verifyRes.statusCode).toBe(400);
   });
 
-  it("rejects the 4th OTP request within 15 minutes with 429", async () => {
+  it("refuses codes past the number's allowance with a 429, Retry-After and a friendly message", async () => {
     const phone = newPhone();
 
-    for (let i = 0; i < OTP.OTP_MAX_SENDS_PER_15MIN; i++) {
+    for (let i = 0; i < RULES.otpCooldown.max; i++) {
       const res = await app.inject({
         method: "POST",
         url: "/auth/request-otp",
@@ -181,12 +181,20 @@ describe("auth routes — signup + login round trip", () => {
       expect(res.statusCode).toBe(200);
     }
 
-    const fourth = await app.inject({
+    const refused = await app.inject({
       method: "POST",
       url: "/auth/request-otp",
       payload: { phone, purpose: "SIGNUP" },
     });
-    expect(fourth.statusCode).toBe(429);
+    expect(refused.statusCode).toBe(429);
+    const seconds = Number(refused.headers["retry-after"]);
+    expect(seconds).toBeGreaterThan(0);
+    expect(seconds).toBeLessThanOrEqual(RULES.otpCooldown.windowMs / 1000);
+    expect(refused.json()).toEqual({
+      error: expect.stringMatching(/^Too many attempts\. Try again in \d+ (seconds?|minutes?)\.$/),
+      code: "RATE_LIMITED",
+      retryAfterSeconds: seconds,
+    });
   });
 });
 

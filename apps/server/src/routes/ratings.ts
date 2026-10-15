@@ -1,6 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
+import { RULES } from "../rateLimit/rules";
+
+const ratingLimits = { limits: { user: [RULES.rating] } };
 
 function isStars(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 5;
@@ -38,7 +41,7 @@ const RIDE_NOT_FOUND = { error: "Ride not found" } as const;
  * part: see tripParticipants.
  */
 export function registerRatingRoutes(app: FastifyInstance, prisma: PrismaClient): void {
-  app.post("/ratings", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/ratings", { preHandler: requireAuth, config: ratingLimits }, async (request, reply) => {
     const body = request.body as { rideId?: unknown; stars?: unknown; comment?: unknown };
 
     if (!isNonEmptyString(body.rideId) || !isStars(body.stars)) {
@@ -88,7 +91,7 @@ export function registerRatingRoutes(app: FastifyInstance, prisma: PrismaClient)
    * therefore required and validated against the ride's manifest — a driver
    * cannot rate someone who was not on the trip.
    */
-  app.post("/ratings/rider", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/ratings/rider", { preHandler: requireAuth, config: ratingLimits }, async (request, reply) => {
     if (request.user?.role !== "DRIVER") {
       return reply.code(403).send({ error: "Driver role required" });
     }

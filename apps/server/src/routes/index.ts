@@ -16,6 +16,7 @@ import { registerUploadRoutes } from "./uploads";
 import { registerSafetyRoutes } from "./safety";
 import { registerPlaceRoutes } from "./places";
 import { registerPushRoutes } from "./push";
+import { installRateLimits } from "../rateLimit/http";
 
 export interface RouteDeps {
   otpService: OtpService;
@@ -36,7 +37,11 @@ export function registerAllRoutes(
   prisma: PrismaClient,
   deps: RouteDeps,
 ): void {
-  app.get("/health", async () => {
+  // First: it gives every route registered after it its limits.
+  installRateLimits(app);
+
+  // Unlimited: Render's health check and UptimeRobot poll it.
+  app.get("/health", { config: { limits: false } }, async () => {
     return { status: "ok", app: APP_NAME };
   });
 

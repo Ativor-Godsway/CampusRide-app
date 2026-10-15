@@ -1,4 +1,5 @@
 import { Alert } from "react-native";
+import { rateLimitText } from "./errorMessage";
 
 /**
  * Two-step confirmation for permanent account deletion, shared by the rider
@@ -64,5 +65,5 @@ export function describeDeleteAccountError(error: unknown): string {
     ?.error;
 
   if (status === 409 && serverMessage) return serverMessage;
-  return "We couldn't delete your account. Please check your connection and try again.";
+  return rateLimitText(error) ?? "We couldn't delete your account. Please check your connection and try again.";
 }

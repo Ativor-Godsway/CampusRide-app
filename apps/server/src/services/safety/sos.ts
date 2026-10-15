@@ -3,6 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import { sendSms } from "../sms/sendSms";
 import { logger } from "../../lib/logger";
 import { rideStatusLabel } from "./rideStatusLabels";
+import { limiter } from "../../rateLimit/limiter";
+import { RULES } from "../../rateLimit/rules";
 
 /** Ride statuses during which an SOS makes sense — the rider is mid-journey. */
 export const SOS_ACTIVE_STATUSES = ["MATCHED", "ARRIVED", "IN_PROGRESS"] as const;
@@ -56,6 +58,24 @@ export interface SosResult {
   supportNotified: boolean;
   /** False when the rider should be nudged to add a contact. */
   hasEmergencyContact: boolean;
+  /**
+   * True when this press repeated one that had already texted people a
+   * moment ago: nobody was texted again, and smsDelivered/supportNotified
+   * report that earlier alert (so the app still says who knows).
+   */
+  alreadyAlerted: boolean;
+}
+
+/**
+ * What the last SOS from a rider on a ride reached, kept for the repeat
+ * window so a repeat press can say so. In memory (one server instance); the
+ * window itself is a rate limit (RULES.sosRepeatSms) in the shared store.
+ */
+const recentAlerts = new Map<string, { smsDelivered: boolean; supportNotified: boolean; until: number }>();
+
+function rememberAlert(key: string, outcome: { smsDelivered: boolean; supportNotified: boolean }, now: number) {
+  for (const [k, v] of recentAlerts) if (v.until <= now) recentAlerts.delete(k);
+  recentAlerts.set(key, { ...outcome, until: now + RULES.sosRepeatSms.windowMs });
 }
 
 /** One SMS segment. Past this a message is split and can arrive out of order. */
@@ -173,6 +193,11 @@ async function trySendSms(
  * SOS calls, so a link already sent to a contact keeps working rather than
  * going dead the moment the rider taps SOS again.
  *
+ * NEVER refused or rate limited. The texts are the only part with a cost,
+ * so a repeat press within RATE_LIMIT_SOS_REPEAT_MINUTES of one that reached
+ * someone returns the same link and says who already knows, without texting
+ * them again. If the earlier press reached nobody, a repeat tries again.
+ *
  * A failed SMS does NOT throw. A half-working SOS is still worth reporting:
  * the tracking URL is returned either way so the rider can share it another
  * way, and throwing would make the button look broken at the worst possible
@@ -201,6 +226,28 @@ export async function raiseSos(
 
   const token = await trackingTokenFor(prisma, rideId, riderId);
   const trackingUrl = `${baseUrl.replace(/\/+$/, "")}/track/${token}`;
+
+  const base = {
+    trackingUrl,
+    contactName: rider.emergencyContactName,
+    contactPhone: rider.emergencyContactPhone,
+    hasEmergencyContact,
+  };
+
+  // One text per rider per ride per repeat window. Counted before sending so
+  // two quick presses can't both text; given back if nothing went out.
+  const repeat = { rule: RULES.sosRepeatSms, subject: `${rideId}:${riderId}` };
+  const now = Date.now();
+  if (!(await limiter.consume([repeat], now)).ok) {
+    const earlier = recentAlerts.get(repeat.subject);
+    logger.warn("SOS repeated within the repeat window; not texting again", { rideId, riderId });
+    return {
+      ...base,
+      smsDelivered: earlier?.smsDelivered ?? hasEmergencyContact,
+      supportNotified: earlier?.supportNotified ?? Boolean(supportPhone),
+      alreadyAlerted: true,
+    };
+  }
 
   const driver = ride.driverId
     ? await prisma.user.findUnique({ where: { id: ride.driverId }, include: { driver: true } })
@@ -238,12 +285,8 @@ export async function raiseSos(
     reachedNobody: !smsDelivered && !supportNotified,
   });
 
-  return {
-    trackingUrl,
-    contactName: rider.emergencyContactName,
-    contactPhone: rider.emergencyContactPhone,
-    smsDelivered,
-    supportNotified,
-    hasEmergencyContact,
-  };
+  if (smsDelivered || supportNotified) rememberAlert(repeat.subject, { smsDelivered, supportNotified }, now);
+  else await limiter.release(repeat, now); // reached nobody: the next press tries again
+
+  return { ...base, smsDelivered, supportNotified, alreadyAlerted: false };
 }

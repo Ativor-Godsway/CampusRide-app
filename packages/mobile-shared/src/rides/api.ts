@@ -262,6 +262,12 @@ export interface SosResult {
   supportNotified: boolean;
   /** False when the rider should be nudged to add a contact. */
   hasEmergencyContact: boolean;
+  /**
+   * True when this press repeated one that already reached people a moment
+   * ago: they weren't texted again, and smsDelivered/supportNotified describe
+   * that earlier alert. Absent from servers older than the repeat window.
+   */
+  alreadyAlerted?: boolean;
 }
 
 /**

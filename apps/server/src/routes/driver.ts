@@ -51,6 +51,7 @@ import { getActivePlaces } from "../services/places/placeCache";
 import { approximatePins } from "../services/places/approximatePins";
 import { pinFieldsOf, requestPlaceNames } from "./ridePins";
 import { estimateRoute } from "../services/routing/pointRoutes";
+import { RULES } from "../rateLimit/rules";
 
 /** Returns the set of zone IDs a driver in `zoneId` is eligible to serve (same zone + 1 hop). */
 function computeEligibleZoneSet(
@@ -486,7 +487,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * preserves the "complete profile" invariant that going online depends on
    * (see PATCH /driver/availability). Fields that are omitted are left as-is.
    */
-  app.patch("/driver/profile", { preHandler: requireAuth }, async (request, reply) => {
+  app.patch("/driver/profile", { preHandler: requireAuth, config: { limits: { user: [RULES.profile] } } }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const userId = request.user!.userId;
@@ -574,7 +575,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * Safe to retry: claiming a ride this driver already holds answers 200 —
    * the app retries after a timeout, and the first attempt often landed.
    */
-  app.post("/rides/:id/claim", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/rides/:id/claim", { preHandler: requireAuth, config: { limits: { user: [RULES.driverAccept] } } }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
@@ -662,7 +663,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * never offered to this driver again (eligible list, broadcast,
    * fill-suggestions all skip it).
    */
-  app.post("/rides/:id/reject", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/rides/:id/reject", { preHandler: requireAuth, config: { limits: { user: [RULES.driverDecline] } } }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };

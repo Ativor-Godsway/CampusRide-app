@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
+import Fastify from "fastify";
 import {
+  RENDER_TRUSTED_PROXIES,
   isDevLoopbackExempt,
+  isProxyAddress,
   parseOriginAllowlist,
   resolveCorsOrigin,
   resolveTrustProxy,
@@ -70,9 +73,9 @@ describe("resolveCorsOrigin", () => {
 });
 
 describe("resolveTrustProxy", () => {
-  it("defaults to a single hop in production (Render's TLS proxy)", () => {
-    expect(resolveTrustProxy(undefined, "production")).toBe(1);
-    expect(resolveTrustProxy("", "production")).toBe(1);
+  it("defaults to Render's proxy ranges in production (private networks and Cloudflare)", () => {
+    expect(resolveTrustProxy(undefined, "production")).toBe(RENDER_TRUSTED_PROXIES);
+    expect(resolveTrustProxy("", "production")).toBe(RENDER_TRUSTED_PROXIES);
   });
 
   it("defaults to trusting nothing outside production", () => {
@@ -143,5 +146,81 @@ describe("isDevLoopbackExempt", () => {
 
   it("keeps the phone on the Wi-Fi rate-limited", () => {
     expect(isDevLoopbackExempt("192.168.1.40", "development")).toBe(false);
+  });
+});
+
+/**
+ * PROOF that request.ip is the real client behind Render. A request reaches
+ * the server as client -> Cloudflare -> Render's load balancer -> us; each
+ * hop appends the address it received from to X-Forwarded-For, and the TCP
+ * peer is Render's internal proxy. (Observed on Render: a spoofed value stays
+ * on the left and the real client is appended after it, then Cloudflare,
+ * then a 10.x address.) These build a server exactly as index.ts does in
+ * production and replay that chain.
+ */
+describe("request.ip behind Render, with the production trustProxy", () => {
+  async function ipSeen(forwardedFor: string | undefined, remoteAddress = "10.204.7.21"): Promise<string> {
+    const app = Fastify({ trustProxy: toFastifyTrustProxy(resolveTrustProxy(undefined, "production")) });
+    app.get("/ip", async (request) => ({ ip: request.ip }));
+    const res = await app.inject({
+      method: "GET",
+      url: "/ip",
+      remoteAddress,
+      headers: forwardedFor === undefined ? {} : { "x-forwarded-for": forwardedFor },
+    });
+    await app.close();
+    return res.json().ip;
+  }
+
+  it("is the client, not Render's load balancer or Cloudflare", async () => {
+    expect(await ipSeen("41.66.200.17, 172.71.140.5, 10.17.3.9")).toBe("41.66.200.17");
+  });
+
+  it("can't be forged: a client's own X-Forwarded-For is to the left of what the proxies append", async () => {
+    expect(await ipSeen("1.2.3.4, 41.66.200.17, 172.71.140.5, 10.17.3.9")).toBe("41.66.200.17");
+    expect(await ipSeen("10.0.0.1, 41.66.200.17, 172.71.140.5, 10.17.3.9")).toBe("41.66.200.17");
+  });
+
+  it("works for IPv6 clients and Cloudflare's IPv6 edge", async () => {
+    expect(await ipSeen("2c0f:2a80:10:1::5, 2606:4700:10::ac43:1a2b, 10.17.3.9")).toBe("2c0f:2a80:10:1::5");
+  });
+
+  it("tells two students on different networks apart, and two on one hostel Wi-Fi together", async () => {
+    const hostel = await ipSeen("154.160.1.20, 172.71.140.5, 10.17.3.9");
+    const sameHostel = await ipSeen("154.160.1.20, 162.158.22.4, 10.17.3.10");
+    const mobileData = await ipSeen("102.176.65.3, 172.71.140.5, 10.17.3.9");
+    expect(hostel).toBe(sameHostel);
+    expect(hostel).not.toBe(mobileData);
+  });
+
+  it("with the old one-hop setting, every request looked like Render's load balancer", async () => {
+    const app = Fastify({ trustProxy: toFastifyTrustProxy(1) });
+    app.get("/ip", async (request) => ({ ip: request.ip }));
+    const seen = new Set<string>();
+    for (const client of ["41.66.200.17", "102.176.65.3", "154.160.1.20"]) {
+      const res = await app.inject({
+        method: "GET",
+        url: "/ip",
+        remoteAddress: "10.204.7.21",
+        headers: { "x-forwarded-for": `${client}, 172.71.140.5, 10.17.3.9` },
+      });
+      seen.add(res.json().ip);
+    }
+    await app.close();
+    expect([...seen]).toEqual(["10.17.3.9"]); // three people, one "IP"
+  });
+});
+
+describe("isProxyAddress", () => {
+  it("flags private, loopback, carrier-NAT and Cloudflare addresses, in both families", () => {
+    for (const ip of ["10.17.3.9", "172.16.0.1", "192.168.1.5", "127.0.0.1", "::1", "::ffff:10.1.2.3", "100.64.3.2", "172.71.140.5", "104.16.0.1", "2606:4700::1", "fd00::1", "fe80::1", "not-an-ip"]) {
+      expect(isProxyAddress(ip), ip).toBe(true);
+    }
+  });
+
+  it("lets real client addresses through", () => {
+    for (const ip of ["41.66.200.17", "154.160.1.20", "102.176.65.3", "::ffff:41.66.200.17", "2c0f:2a80:10:1::5"]) {
+      expect(isProxyAddress(ip), ip).toBe(false);
+    }
   });
 });

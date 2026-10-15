@@ -8,6 +8,8 @@ import {
   UserNotFoundError,
 } from "./errors";
 import { signAccessToken, verifyVerificationToken } from "./tokens";
+import { enforce } from "../../rateLimit/limiter";
+import { RULES } from "../../rateLimit/rules";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -180,6 +182,16 @@ export async function refresh(
   if (stored.expiresAt < now || stored.user.deletedAt) {
     throw new InvalidRefreshTokenError();
   }
+
+  // Per login (rotation chain) and per account, never per IP. Checked before
+  // rotating, so a refused refresh leaves the token valid to try again.
+  await enforce(
+    [
+      { rule: RULES.refreshSession, subject: stored.familyId },
+      { rule: RULES.refreshUser, subject: stored.userId },
+    ],
+    now.getTime(),
+  );
 
   await prisma.refreshToken.update({
     where: { id: stored.id },

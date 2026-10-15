@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import type { PassengerStatus, PaymentMethod, RideStatus, RideType } from "@rida/shared";
 import { FLAGGED_RIDER_CANCEL_REASONS, parsePickupNote, parseRiderCancelInput } from "@rida/shared";
@@ -35,6 +35,7 @@ import { getDriverInfo } from "../services/user/driverInfo";
 import { logger } from "../lib/logger";
 import { riderRideDetailSelect, riderRideListSelect } from "./selects";
 import { startMockDriverForRide } from "../dev/mockDriver";
+import { RULES } from "../rateLimit/rules";
 import { notifyRiderCancelled } from "../services/push/notify";
 
 /**
@@ -89,23 +90,6 @@ function rideNotFound(reply: Parameters<typeof requireAuth>[1]) {
   return reply.code(404).send({ error: "Ride not found" });
 }
 
-/**
- * Per-USER rate limit for a route behind requireAuth. Runs as a preHandler
- * so it comes after requireAuth has set request.user; keying on the user id
- * means one rider on a shared campus Wi-Fi IP can't use up everyone's quota,
- * and switching networks doesn't reset a rider's own.
- */
-function perUserRateLimit(max: number) {
-  return {
-    rateLimit: {
-      max,
-      timeWindow: "15 minutes",
-      hook: "preHandler" as const,
-      keyGenerator: (request: FastifyRequest) => `user:${request.user?.userId ?? request.ip}`,
-    },
-  };
-}
-
 /** Statuses from which a rider can still cancel (IN_PROGRESS is the point of no return). */
 const RIDER_CANCELLABLE_STATUSES: RideStatus[] = [
   "REQUESTED",
@@ -133,7 +117,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     "/rides",
     {
       preHandler: requireAuth,
-      config: { rateLimit: { max: config.rateLimit.rideCreateMax, timeWindow: "15 minutes" } },
+      // Per rider, on top of the one-active-ride rule (createRide).
+      config: { limits: { user: [RULES.rideCreate] } },
     },
     async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
@@ -419,7 +404,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    */
   app.post(
     "/rides/:id/cancel",
-    { preHandler: requireAuth, config: perUserRateLimit(config.rateLimit.rideCancelMax) },
+    { preHandler: requireAuth, config: { limits: { user: [RULES.rideCancel] } } },
     async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 
@@ -533,7 +518,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    */
   app.post(
     "/rides/:id/switch",
-    { preHandler: requireAuth, config: perUserRateLimit(config.rateLimit.rideSwitchMax) },
+    { preHandler: requireAuth, config: { limits: { user: [RULES.rideSwitch] } } },
     async (request, reply) => {
       if (!(await requireRider(request, reply))) return;
 
@@ -587,7 +572,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     "/rides/:id/initiate-payment",
     {
       preHandler: requireAuth,
-      config: { rateLimit: { max: config.rateLimit.paymentInitMax, timeWindow: "15 minutes" } },
+      config: { limits: { user: [RULES.paymentInit] } },
     },
     async (request, reply) => {
     if (!(await requireRider(request, reply))) return;

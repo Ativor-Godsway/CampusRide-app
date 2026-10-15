@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import {
   PLACES_ATTRIBUTION,
@@ -10,9 +10,9 @@ import {
   type PathPoint,
 } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
-import { config } from "../config";
 import { getActivePlaces } from "../services/places/placeCache";
 import { MAX_ROUTE_POINTS, routeThroughPoints } from "../services/routing/pointRoutes";
+import { RULES } from "../rateLimit/rules";
 
 /** What the apps get for a place: no internal columns (source, timestamps). */
 function placeForApp(p: {
@@ -91,14 +91,8 @@ export function registerPlaceRoutes(app: FastifyInstance, prisma: PrismaClient):
     "/routes/legs",
     {
       preHandler: requireAuth,
-      config: {
-        rateLimit: {
-          max: config.rateLimit.routeLegsMax,
-          timeWindow: "15 minutes",
-          hook: "preHandler" as const,
-          keyGenerator: (request: FastifyRequest) => `user:${request.user?.userId ?? request.ip}`,
-        },
-      },
+      // Per account: each call may reach OSRM.
+      config: { limits: { user: [RULES.routeLegs] } },
     },
     async (request, reply) => {
       const points = parsePoints((request.body as { points?: unknown } | undefined)?.points);

@@ -17,6 +17,8 @@ import { config } from "../config";
 import { signAccessToken, signVerificationToken } from "../services/auth/tokens";
 import { deleteAccount } from "../services/auth/deleteAccount";
 import { createTestDriver, createTestUser, getTestZones } from "../services/ride/testFixtures";
+import { RULES } from "../rateLimit/rules";
+import { limiter } from "../rateLimit/limiter";
 import {
   SOCKET_AUTH_ERROR,
   disconnectUser,
@@ -280,6 +282,49 @@ describe("ride rooms and driver positions", () => {
     emitRideEvent(s.trip.id, RIDE_EVENTS.STATUS, { rideId: s.trip.id, status: "IN_PROGRESS" });
     expect(await leavingHears).toHaveLength(0);
     expect(await stayingHears).toHaveLength(1);
+  });
+});
+
+describe("socket rate limits", () => {
+  it("relays at most one position per driver per window, dropping extras silently; drivers don't share a window", async () => {
+    const [booker, otherBooker, ownDriver, otherDriver] = await Promise.all([rider(), rider(), driver(), driver()]);
+    const tripA = await car("IN_PROGRESS", ownDriver.id, [{ riderId: booker.id, status: "PICKED_UP" }]);
+    const tripB = await car("IN_PROGRESS", otherDriver.id, [{ riderId: otherBooker.id, status: "PICKED_UP" }]);
+    const listenerA = await connectAs(tokenFor(booker));
+    const listenerB = await connectAs(tokenFor(otherBooker));
+    expect(await subscribe(listenerA, tripA.id)).toBe(true);
+    expect(await subscribe(listenerB, tripB.id)).toBe(true);
+    const driverA = await connectAs(tokenFor(ownDriver));
+    const driverB = await connectAs(tokenFor(otherDriver));
+
+    const heardA = collect<{ lat: number }>(listenerA, RIDE_EVENTS.DRIVER_LOCATION, 600);
+    const heardB = collect<{ lat: number }>(listenerB, RIDE_EVENTS.DRIVER_LOCATION, 600);
+    for (let i = 0; i < 5; i++) driverA.emit(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, { rideId: tripA.id, lat: 5.6 + i / 1000, lng: -0.18 });
+    driverB.emit(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, { rideId: tripB.id, lat: 5.7, lng: -0.18 });
+    expect(await heardA).toHaveLength(1);
+    expect(await heardB).toHaveLength(1);
+    expect(driverA.connected).toBe(true);
+
+    // After the window, the next position goes through again.
+    await new Promise((r) => setTimeout(r, RULES.driverLocation.windowMs + 100));
+    const heardAgain = collect(listenerA, RIDE_EVENTS.DRIVER_LOCATION, 500);
+    driverA.emit(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, { rideId: tripA.id, lat: 5.61, lng: -0.18 });
+    expect(await heardAgain).toHaveLength(1);
+  });
+
+  it("answers no to subscriptions past the account's limit, without affecting anyone else", async () => {
+    const [booker, other, ownDriver] = await Promise.all([rider(), rider(), driver()]);
+    const trip = await car("MATCHED", ownDriver.id, [
+      { riderId: booker.id, status: "WAITING" },
+      { riderId: other.id, status: "WAITING" },
+    ]);
+    for (let i = 0; i < RULES.socketSubscribe.max; i++) {
+      await limiter.consume([{ rule: RULES.socketSubscribe, subject: booker.id }]);
+    }
+    const limited = await connectAs(tokenFor(booker));
+    const fine = await connectAs(tokenFor(other));
+    expect(await subscribe(limited, trip.id)).toBe(false);
+    expect(await subscribe(fine, trip.id)).toBe(true);
   });
 });
 
