@@ -1,6 +1,7 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { View, StyleSheet } from "react-native";
+import { GHANA_PHONE_EXAMPLE, normalizeGhanaPhone } from "@rida/shared";
 import { requestOtp } from "../api";
 import { Button, Screen, Text, Input, colors, radii, spacing } from "../../design";
 import { errorMessage } from "../errorMessage";
@@ -27,16 +28,24 @@ export function PhoneScreen({
   const [error, setError] = useState<string | null>(null);
 
   async function handleContinue(purpose: "SIGNUP" | "LOGIN") {
-    if (!phone) {
+    if (!phone.trim()) {
       setError("Enter your phone number");
+      return;
+    }
+    // The shared parser (the server's too): any normal way of typing a Ghana
+    // number, including invisible characters from paste or autofill, becomes
+    // +233XXXXXXXXX before it leaves the phone.
+    const canonical = normalizeGhanaPhone(phone);
+    if (!canonical) {
+      setError(GHANA_PHONE_EXAMPLE);
       return;
     }
 
     setError(null);
     setIsSubmitting(true);
     try {
-      await requestOtp(phone, purpose);
-      router.push({ pathname: "/auth/otp", params: { phone, purpose } });
+      await requestOtp(canonical, purpose);
+      router.push({ pathname: "/auth/otp", params: { phone: canonical, purpose } });
     } catch (err) {
       setError(errorMessage(err));
     } finally {

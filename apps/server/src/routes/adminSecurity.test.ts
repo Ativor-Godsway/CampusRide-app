@@ -298,9 +298,14 @@ describe("the record of admin sign-ins", () => {
 
   it("a stranger's number tried on the admin site is recorded, masked", async () => {
     const stranger = uniqueGhanaPhone();
+    const since = new Date();
     const res = await loginRequest(stranger);
     expect(res.statusCode).toBe(404);
-    const [event] = await loginEvents(maskPhone(stranger));
+    // Masked numbers can coincide across test files (same last digits), so
+    // only this attempt's row counts.
+    const event = await prisma.adminAuditLog.findFirst({
+      where: { target: maskPhone(stranger), reason: "no_account", timestamp: { gte: since } },
+    });
     expect(event).toMatchObject({
       actor: "unknown",
       action: "admin.login.failure",

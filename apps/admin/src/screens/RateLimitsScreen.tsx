@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { retryAfterText } from "@rida/shared";
+import { GHANA_PHONE_EXAMPLE, normalizeGhanaPhone, retryAfterText } from "@rida/shared";
 import { ApiError, clearRateLimits, getRateLimits, type RateLimitLookup } from "../api";
 import { useAuth, useToken } from "../auth";
 
@@ -37,7 +37,12 @@ export function RateLimitsScreen() {
 
   function lookUp(event: React.FormEvent) {
     event.preventDefault();
-    void run(async () => setResult(await getRateLimits(token, phone.trim())));
+    const canonical = normalizeGhanaPhone(phone);
+    if (!canonical) {
+      setError(GHANA_PHONE_EXAMPLE);
+      return;
+    }
+    void run(async () => setResult(await getRateLimits(token, canonical)));
   }
 
   function clear() {

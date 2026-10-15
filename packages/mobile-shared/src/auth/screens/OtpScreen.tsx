@@ -1,7 +1,7 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import { View, StyleSheet } from "react-native";
-import { OTP_RESEND_COOLDOWN_SECONDS, formatCountdown, retryAfterSecondsOf } from "@rida/shared";
+import { OTP_RESEND_COOLDOWN_SECONDS, formatCountdown, formatGhanaPhone, retryAfterSecondsOf } from "@rida/shared";
 import { useAuth } from "../AuthContext";
 import { requestOtp, verifyOtp, type OtpPurpose } from "../api";
 import { Button, Screen, Input, Text, colors, radii, spacing, typography } from "../../design";
@@ -78,7 +78,7 @@ export function OtpScreen() {
 
   return (
     <Screen scroll noPadding edges={["top"]}>
-      <AuthHero compact title="Verify your number" subtitle={`We sent a 6-digit code to ${phone}`} onBack={() => router.back()} />
+      <AuthHero compact title="Verify your number" subtitle={`We sent a 6-digit code to ${formatGhanaPhone(phone)}`} onBack={() => router.back()} />
       <View style={styles.panel}>
         <Input
           label="Verification code"

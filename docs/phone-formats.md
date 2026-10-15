@@ -19,6 +19,18 @@ which accepts any spelling.
 | Local | `0548608146` | What a Ghanaian user actually types |
 | MSISDN | `233548608146` | Moolre's USSD callback, and what Moolre's SMS API wants |
 
+**One parser for everything:** `normalizeGhanaPhone` in `@rida/shared`
+(`packages/shared/src/phone/ghanaPhone.ts`). The server's `normalizePhone`
+is that function, and the rider, driver and admin login screens run it
+before sending, so the apps and the server can't disagree. It accepts
+`0548617924`, `+233548617924`, `233548617924` and `00233548617924`, a
+local `0` kept after the country code (`+233 (0) 54…`), any spaces, dashes,
+dots, slashes or brackets, and the invisible characters phones and browsers
+add to copied or autofilled numbers (direction marks such as U+202A/U+202C,
+zero-width spaces, non-breaking spaces). Those invisible characters are why
+the admin login refused `0548617924` in October 2026: a person couldn't see
+them, the old parser couldn't ignore them.
+
 `src/lib/phone.ts` converts between them:
 
 - `normalizePhone(input)` → `+233XXXXXXXXX` or `null`
