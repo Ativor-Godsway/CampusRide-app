@@ -14,15 +14,68 @@ export class ApiError extends Error {
     readonly status: number,
     /** On a 429: whole seconds until the API will accept the request again. */
     readonly retryAfterSeconds: number | null = null,
+    /** The API's machine-readable reason, when it gave one (e.g. "ADMIN_SESSION_ENDED"). */
+    readonly code: string | null = null,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
+/**
+ * Admin sessions are short (10-minute access tokens, renewed while in use;
+ * 30 idle minutes or 8 hours in total end them — decided by the server). The
+ * signed-in session registers these so a request that meets an expired
+ * access token renews it once and retries, and a session the server won't
+ * renew signs the site out.
+ */
+export interface SessionHooks {
+  refreshToken: () => string | null;
+  onRenewed: (tokens: { accessToken: string; refreshToken: string }) => void;
+  onEnded: (message: string) => void;
+}
+
+let sessionHooks: SessionHooks | null = null;
+let renewing: Promise<string | null> | null = null;
+
+export function setSessionHooks(hooks: SessionHooks | null): void {
+  sessionHooks = hooks;
+}
+
+/** One renewal at a time: refresh tokens are single-use, so parallel 401s share it. */
+function renewAccessToken(): Promise<string | null> {
+  if (renewing) return renewing;
+  renewing = (async () => {
+    const refreshToken = sessionHooks?.refreshToken();
+    if (!refreshToken) return null;
+    try {
+      const tokens = await request<{ accessToken: string; refreshToken: string }>("/auth/refresh", {
+        method: "POST",
+        body: JSON.stringify({ refreshToken }),
+      });
+      sessionHooks?.onRenewed(tokens);
+      return tokens.accessToken;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 429) throw err;
+      sessionHooks?.onEnded(
+        err instanceof ApiError && err.code === "ADMIN_SESSION_ENDED"
+          ? "Your admin session has ended (sessions last at most 8 hours). Please sign in again."
+          : "You were signed out after a while without activity. Please sign in again.",
+      );
+      return null;
+    } finally {
+      renewing = null;
+    }
+  })();
+  return renewing;
+}
+
+async function request<T>(path: string, init: RequestInit = {}, token?: string, retried = false): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
+  // Marks the admin site to the API: only an allowed ADMIN account gets a
+  // session here, and every sign-in attempt is recorded.
+  headers.set("X-CampusRide-Client", "admin");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
   let res: Response;
@@ -36,6 +89,11 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
 
   const text = await res.text();
   const body = text ? (JSON.parse(text) as unknown) : {};
+
+  if (res.status === 401 && token && !retried) {
+    const renewed = await renewAccessToken();
+    if (renewed) return request<T>(path, init, renewed, true);
+  }
 
   if (res.status === 429) {
     // "Too many attempts. Try again in 3 minutes." — from the body, or the
@@ -51,7 +109,8 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
       typeof body === "object" && body !== null && "error" in body
         ? String((body as { error: unknown }).error)
         : `Request failed (${res.status})`;
-    throw new ApiError(message, res.status);
+    const code = (body as { code?: unknown }).code;
+    throw new ApiError(message, res.status, null, typeof code === "string" ? code : null);
   }
 
   return body as T;
@@ -70,6 +129,8 @@ export interface LoginResult {
   user: AuthUser;
   accessToken: string;
   refreshToken: string;
+  /** When this admin session ends whatever happens (ISO time). */
+  sessionExpiresAt?: string;
 }
 
 export function requestOtp(phone: string): Promise<{ ok: true }> {
@@ -91,6 +152,11 @@ export function login(phone: string, verifiedToken: string): Promise<LoginResult
     method: "POST",
     body: JSON.stringify({ phone, verifiedToken }),
   });
+}
+
+/** Ends the session on the server too. Best effort: signing out never waits on it. */
+export function logout(refreshToken: string): Promise<unknown> {
+  return request("/auth/logout", { method: "POST", body: JSON.stringify({ refreshToken }) }).catch(() => undefined);
 }
 
 // ── Admin ───────────────────────────────────────────────────────────────────
@@ -245,4 +311,24 @@ export function clearRateLimits(
   phone: string,
 ): Promise<{ phone: string; cleared: PersonLimit[] }> {
   return request("/admin/rate-limits/clear", { method: "POST", body: JSON.stringify({ phone }) }, token);
+}
+
+// ── Recent admin logins ─────────────────────────────────────────────────────
+
+export interface AdminLoginEvent {
+  id: string;
+  at: string;
+  /** "success", "failure" or "code_sent". */
+  outcome: string;
+  /** Why a failure failed, e.g. "bad_code", "not_admin". */
+  reason: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  account: { id: string; name: string; role: string } | null;
+  /** For an attempt with no account: the number, partly masked. */
+  target: string | null;
+}
+
+export function getRecentLogins(token: string): Promise<{ logins: AdminLoginEvent[] }> {
+  return request("/admin/audit/logins?limit=100", {}, token);
 }

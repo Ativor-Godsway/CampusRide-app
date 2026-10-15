@@ -20,6 +20,8 @@ import type { PrismaClient, UserRole } from "@prisma/client";
 export interface ActiveAccount {
   userId: string;
   role: UserRole;
+  /** Canonical phone: what the admin allowlist is checked against. */
+  phone: string;
 }
 
 export const ACCOUNT_CACHE_TTL_MS = 10_000;
@@ -42,9 +44,9 @@ export async function loadActiveAccount(
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, deletedAt: true },
+    select: { id: true, role: true, phone: true, deletedAt: true },
   });
-  const account = user && !user.deletedAt ? { userId: user.id, role: user.role } : null;
+  const account = user && !user.deletedAt ? { userId: user.id, role: user.role, phone: user.phone } : null;
 
   if (cache.size >= ACCOUNT_CACHE_MAX) {
     // Maps iterate in insertion order: drop the oldest entry.

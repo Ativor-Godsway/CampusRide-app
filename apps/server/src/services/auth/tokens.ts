@@ -32,11 +32,15 @@ const JWT_ALGORITHMS: jwt.Algorithm[] = ["HS256"];
 
 const USER_ROLES: readonly UserRole[] = ["RIDER", "DRIVER", "ADMIN"];
 
-/** Signs a short-lived access token carrying userId + role. */
-export function signAccessToken(payload: AccessTokenPayload): string {
+/**
+ * Signs a short-lived access token carrying userId + role. `expiresInSeconds`
+ * overrides the usual lifetime (admin sessions are shorter, and never outlive
+ * their hard maximum).
+ */
+export function signAccessToken(payload: AccessTokenPayload, expiresInSeconds?: number): string {
   return jwt.sign({ userId: payload.userId, role: payload.role, typ: ACCESS_TYP }, config.jwtSecret, {
     algorithm: "HS256",
-    expiresIn: `${TOKEN.ACCESS_TOKEN_TTL_MINUTES}m`,
+    expiresIn: expiresInSeconds ?? `${TOKEN.ACCESS_TOKEN_TTL_MINUTES}m`,
   });
 }
 

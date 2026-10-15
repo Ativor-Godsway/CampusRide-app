@@ -156,7 +156,16 @@ Set these as individual env vars — never commit actual values to the repo.
 |---|---|
 | `DATABASE_URL` | Neon **pooled** connection string. **Must** include `pgbouncer=true&connection_limit=5`. See format below. |
 | `DIRECT_URL` | Neon **direct** (non-pooled) connection string. Used by Prisma for migrations. |
-| `JWT_SECRET` | Long random secret for signing access tokens. Generate with: `openssl rand -hex 32` |
+| `JWT_SECRET` | Long random secret for signing access tokens, at least 32 random bytes. Generate with: `openssl rand -hex 32` |
+| `PUBLIC_BASE_URL` | `https://api.campusride.app` — SOS tracking links are built from it. |
+| `CORS_ALLOWED_ORIGINS` | The admin site's origin, e.g. `https://campusride-admin.onrender.com`. |
+| `ADMIN_PHONE_ALLOWLIST` | The admin's phone number(s), comma-separated. Nobody else can use the admin site. |
+| `SUPPORT_CONTACT_PHONE` | Texted on every SOS. |
+| Login-code SMS | `OTP_PROVIDER=moolre`, `MOOLRE_SMS_ENABLED=true`, `MOOLRE_VAS_KEY`, `MOOLRE_SMS_SENDER_ID`. |
+
+The server checks all of these at start-up in production and refuses to run
+if one is missing or invalid (see
+[docs/security/admin-and-secrets.md](docs/security/admin-and-secrets.md#what-the-server-refuses-to-start-without-production)).
 
 #### DATABASE_URL format
 
@@ -189,7 +198,7 @@ postgresql://<user>:<password>@<direct-host>.neon.tech/<dbname>?sslmode=require
 |---|---|---|
 | `NODE_ENV` | `production` | Disables dev-only behaviour. |
 | `MOOLRE_ENABLED` | `false` | Keeps DummyPaymentService active — no real payments. |
-| `OTP_PROVIDER` | `dummy` | Logs OTPs to the server console; no SMS sent. Switch to `moolre` or `mnotify` when SMS is configured. |
+| `OTP_PROVIDER` | `moolre` | Sends login codes by SMS. `dummy` (no SMS) is for local development only: production refuses to start with it. |
 | `ENABLE_MOCK_DRIVER` | `false` | Mock driver is dev-only; never enable in production. |
 
 ### Render-managed (do NOT set manually)
@@ -215,6 +224,15 @@ Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each
 offer, so changing it needs no app release.
 
+**Required in production** — the server refuses to start without these, and
+logs which are missing (names only): `DATABASE_URL`, `DIRECT_URL`,
+`JWT_SECRET` (32+ random bytes), `PUBLIC_BASE_URL` (https), 
+`CORS_ALLOWED_ORIGINS`, `ADMIN_PHONE_ALLOWLIST`, `SUPPORT_CONTACT_PHONE`, and
+working login-code SMS settings. The full list and rules:
+[docs/security/admin-and-secrets.md](docs/security/admin-and-secrets.md#what-the-server-refuses-to-start-without-production).
+Admin sessions: `ADMIN_ACCESS_TOKEN_MINUTES` (10), `ADMIN_IDLE_MINUTES` (30),
+`ADMIN_SESSION_MAX_HOURS` (8).
+
 Rate limits: every limit is a `RATE_LIMIT_*` variable with a sensible default
 (full list: [docs/security/rate-limits.md](docs/security/rate-limits.md)).
 Leave them unset unless a limit needs changing. **Don't set `TRUST_PROXY`**:
@@ -235,12 +253,11 @@ secret, so set it in the dashboard only.
 
 ---
 
-## Reading OTPs in dummy mode
+## Login codes in development
 
-With `OTP_PROVIDER=dummy`, every OTP is printed to the server's **Logs** tab
-in the Render dashboard (look for a line like `[DummyOtpService] OTP for
-+233… is 123456`). This is intentional for the first deploy — flip to a real
-SMS provider once the service is stable.
+With `OTP_PROVIDER=dummy` (local development only), no SMS is sent and a
+development server prints each code in its own terminal. Production refuses
+to start with the dummy provider, so codes are never written to Render's logs.
 
 ---
 

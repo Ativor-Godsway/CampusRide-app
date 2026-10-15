@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { prisma } from "../db/prisma";
 import { verifyAccessToken, type AccessTokenPayload } from "../services/auth/tokens";
 import { loadActiveAccount } from "../services/auth/accountStatus";
+import { adminPhoneAllowed } from "../services/auth/adminAccess";
 import { config } from "../config";
 import { isDevLoopbackExempt } from "../lib/security";
 import { limiter } from "../rateLimit/limiter";
@@ -70,19 +71,29 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
 }
 
 /**
- * Role gate for the admin surface, mirroring `requireDriver` in
- * routes/driver.ts: run it as the FIRST line of a handler that already has
- * `requireAuth` as its preHandler, and bail when it returns false.
+ * Gate for the admin surface, mirroring `requireDriver` in routes/driver.ts:
+ * run it as the FIRST line of a handler that already has `requireAuth` as
+ * its preHandler, and bail when it returns false.
  *
  *   app.post("/admin/...", { preHandler: requireAuth }, async (req, reply) => {
  *     if (!(await requireAdmin(req, reply))) return;
+ *
+ * Two keys, both needed: the account's role is ADMIN in the database, AND
+ * its phone is on ADMIN_PHONE_ALLOWLIST (services/auth/adminAccess.ts). A
+ * number that isn't on the list gets the same 403 as a rider, so the list's
+ * existence isn't confirmed.
  *
  * ADMIN is never self-assignable: POST /auth/signup only accepts
  * RIDER|DRIVER (see SignupRole), so the only way an account gets this role
  * is src/scripts/seedAdmin.ts, run by hand against the database.
  */
 export async function requireAdmin(request: FastifyRequest, reply: FastifyReply): Promise<boolean> {
-  if (request.user?.role !== "ADMIN") {
+  const userId = request.user?.userId;
+  const account = userId && request.user?.role === "ADMIN" ? await loadActiveAccount(prisma, userId) : null;
+  if (!account || account.role !== "ADMIN" || !adminPhoneAllowed(account.phone)) {
+    if (account?.role === "ADMIN") {
+      request.log.warn({ event: "admin_not_allowlisted", userId }, "ADMIN account refused: phone not on ADMIN_PHONE_ALLOWLIST");
+    }
     reply.code(403).send({ error: "Admin role required" });
     return false;
   }

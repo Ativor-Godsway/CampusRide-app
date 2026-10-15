@@ -119,6 +119,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /admin/places": "admin",
   "PATCH /admin/places/:id": "admin",
   "GET /admin/rate-limits": "admin",
+  "GET /admin/audit/logins": "admin",
   "POST /admin/rate-limits/clear": "admin",
 };
 

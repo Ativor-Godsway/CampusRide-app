@@ -5,8 +5,9 @@ import { DriverQueue } from "./screens/DriverQueue";
 import { RideList } from "./screens/RideList";
 import { PlacesScreen } from "./screens/PlacesScreen";
 import { RateLimitsScreen } from "./screens/RateLimitsScreen";
+import { AdminLoginsScreen } from "./screens/AdminLoginsScreen";
 
-type Tab = "drivers" | "rides" | "places" | "limits";
+type Tab = "drivers" | "rides" | "places" | "limits" | "logins";
 
 /**
  * A few screens behind one login gate. No router: adding one would buy
@@ -52,10 +53,17 @@ export function App() {
           >
             Rate limits
           </button>
+          <button
+            type="button"
+            className={tab === "logins" ? "tab active" : "tab"}
+            onClick={() => setTab("logins")}
+          >
+            Admin logins
+          </button>
         </nav>
         <div className="session">
           <span className="muted">{session.user.name}</span>
-          <button type="button" className="secondary" onClick={signOut}>
+          <button type="button" className="secondary" onClick={() => signOut()}>
             Sign out
           </button>
         </div>
@@ -68,8 +76,10 @@ export function App() {
           <RideList />
         ) : tab === "places" ? (
           <PlacesScreen />
-        ) : (
+        ) : tab === "limits" ? (
           <RateLimitsScreen />
+        ) : (
+          <AdminLoginsScreen />
         )}
       </main>
     </div>

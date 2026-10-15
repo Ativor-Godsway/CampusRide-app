@@ -18,7 +18,7 @@ async function user() {
 describe("loadActiveAccount", () => {
   it("answers with the database role, not anything the caller claims", async () => {
     const u = await user();
-    expect(await loadActiveAccount(prisma, u.id)).toEqual({ userId: u.id, role: "RIDER" });
+    expect(await loadActiveAccount(prisma, u.id)).toEqual({ userId: u.id, role: "RIDER", phone: u.phone });
   });
 
   it("is null for an account that doesn't exist or has been deleted", async () => {
