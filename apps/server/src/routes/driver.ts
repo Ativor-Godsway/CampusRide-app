@@ -41,8 +41,9 @@ import {
   RideNotFillableError,
   NoSeatsAvailableError,
   RequestRideUnavailableError,
+  RideNotReadyToDepartError,
 } from "../services/ride/errors";
-import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
+import { emitRideEvent, emitToRider, removeRiderFromRide } from "../realtime/rideSocket";
 import { getRidePaymentSummary } from "../services/payment/paymentFlow";
 import { notifyUssdRider, notifyUssdRiders } from "../services/sms/notifyUssdRiders";
 import { notifyRider } from "../services/push/notify";
@@ -160,6 +161,14 @@ function refuse(reply: FastifyReply, status: number, code: string, error: string
 }
 
 /**
+ * Another driver's trip gets exactly the answer a trip that doesn't exist
+ * gets, so trying ride ids confirms nothing about other drivers' rides.
+ */
+function rideNotFound(reply: FastifyReply) {
+  return reply.code(404).send({ error: "Ride not found" });
+}
+
+/**
  * Why a passenger action was refused, in words a driver understands.
  * `from` is the passenger's status when the action arrived.
  */
@@ -179,7 +188,9 @@ function passengerRefusal(from: string, to: string): string {
 /**
  * Only these PassengerInCar fields go to the app — no internal columns.
  * Every caller is the car's own driver, so each rider's exact pins and note
- * are included (that is what the driver navigates to).
+ * are included (that is what the driver navigates to). A rider's phone goes
+ * only while they are still to be picked up or in the car: once dropped off
+ * or cancelled, the driver has no reason to call them.
  */
 function passengerForApp(
   p: { id: string; riderId: string; pickupZoneId: string; dropoffZoneId: string; lockedFare: number | null; status: string; arrivedAt: Date | null } & Partial<RidePinFields>,
@@ -191,7 +202,7 @@ function passengerForApp(
     id: p.id,
     riderId: p.riderId,
     riderName: rider?.name ?? null,
-    riderPhone: rider?.phone ?? null,
+    riderPhone: isActivePassengerStatus(p.status as PassengerStatus) ? (rider?.phone ?? null) : null,
     pickupZoneId: p.pickupZoneId,
     dropoffZoneId: p.dropoffZoneId,
     pickupZoneName: zones.get(p.pickupZoneId)?.name ?? "",
@@ -363,9 +374,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // active ride and dropped the moment it completes (this route only ever
     // returns a live ride), which keeps rider contact details tied to the
     // trip that justifies them.
+    const ownerSeat = passengers.find((p) => p.riderId === ride.riderId);
     const owner =
-      passengers.find((p) => p.riderId === ride.riderId)?.rider ??
+      ownerSeat?.rider ??
       (await prisma.user.findUnique({ where: { id: ride.riderId }, select: { id: true, name: true, phone: true } }));
+    const ownerStillAboard = !ownerSeat || isActivePassengerStatus(ownerSeat.status);
 
     return reply.code(200).send({
       ride: {
@@ -374,7 +387,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         dropoffZone: zones.get(ride.dropoffZoneId) ?? null,
         // The ride owner, for a LONE ride that has no RidePassenger row.
         riderName: owner?.name ?? null,
-        riderPhone: owner?.phone ?? null,
+        riderPhone: ownerStillAboard ? (owner?.phone ?? null) : null,
         passengers: passengers.map((p) => passengerForApp(p, zones, p.rider)),
       },
     });
@@ -691,8 +704,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const userId = request.user!.userId;
 
     const ride = await prisma.ride.findUnique({ where: { id: rideId } });
-    if (!ride) return reply.code(404).send({ error: "Ride not found" });
-    if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+    if (!ride || ride.driverId !== userId) return rideNotFound(reply);
 
     try {
       const updated = await applyRideTransition(prisma, rideId, "ARRIVED");
@@ -724,8 +736,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
 
+    // Ownership first: nothing about another driver's ride (not even its
+    // type) is answered.
     const existingRide = await prisma.ride.findUnique({ where: { id: rideId } });
-    if (existingRide?.type === "SHARED") {
+    if (!existingRide || existingRide.driverId !== userId) return rideNotFound(reply);
+    if (existingRide.type === "SHARED") {
       return reply
         .code(409)
         .send({ error: "SHARED rides depart automatically on the first passenger pickup" });
@@ -737,9 +752,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       notifyRider(prisma, updated.riderId, "TRIP_STARTED", rideId);
       return reply.code(200).send({ ride: updated });
     } catch (err) {
-      if (err instanceof InvalidTransitionError) {
+      if (err instanceof InvalidTransitionError || err instanceof RideNotReadyToDepartError) {
         return reply.code(409).send({ error: "Invalid transition from current ride status" });
       }
+      if (err instanceof NotRideOwnerError) return rideNotFound(reply);
       throw err;
     }
   });
@@ -926,8 +942,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       getZoneAdjacency(prisma),
       getZoneMap(prisma),
     ]);
-    if (!anchor) return reply.code(404).send({ error: "Ride not found" });
-    if (anchor.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+    if (!anchor || anchor.driverId !== userId) return rideNotFound(reply);
     if (anchor.type !== "SHARED") return reply.code(400).send({ error: "Ride is not SHARED" });
     if (!(FILLABLE_STATUSES as readonly string[]).includes(anchor.status)) {
       return reply.code(400).send({ error: "Riders can't be added to this trip now" });
@@ -1029,8 +1044,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       getStoredZoneRoutes(prisma),
     ]);
 
-    if (!car) return reply.code(404).send({ error: "Ride not found" });
-    if (car.driverId !== userId) return refuse(reply, 403, "NOT_YOUR_RIDE", "This trip belongs to another driver.");
+    if (!car || car.driverId !== userId) return rideNotFound(reply);
     if (car.type !== "SHARED" || !(FILLABLE_STATUSES as readonly string[]).includes(car.status)) {
       return refuse(reply, 409, "CAR_CLOSED", "Riders can't be added to this trip now.");
     }
@@ -1210,8 +1224,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           .map((p) => passengerForApp(p, zones)),
       });
     } catch (err) {
-      if (err instanceof NotRideOwnerError) {
-        return refuse(reply, 403, "NOT_YOUR_RIDE", "This trip belongs to another driver.");
+      if (err instanceof NotRideOwnerError || (err instanceof RideNotFillableError && err.status === "MISSING")) {
+        return rideNotFound(reply);
       }
       if (err instanceof RideNotFillableError) {
         return refuse(reply, 409, "CAR_CLOSED", "Riders can't be added to this trip now.");
@@ -1251,8 +1265,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       where: { id: rideId },
       include: { passengers: true },
     });
-    if (!ride) return reply.code(404).send({ error: "Ride not found" });
-    if (ride.driverId !== userId) return reply.code(403).send({ error: "Forbidden" });
+    if (!ride || ride.driverId !== userId) return rideNotFound(reply);
     if (ride.type === "SHARED") {
       return reply
         .code(409)
@@ -1339,11 +1352,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           noShow: spec.noShow,
         });
       } catch (err) {
-        if (err instanceof PassengerNotFoundError) {
+        // A seat on another driver's trip is answered exactly like a seat
+        // that doesn't exist.
+        if (err instanceof PassengerNotFoundError || err instanceof NotRideOwnerError) {
           return refuse(reply, 404, "PASSENGER_NOT_FOUND", "This rider is no longer on your trip.");
-        }
-        if (err instanceof NotRideOwnerError) {
-          return refuse(reply, 403, "NOT_YOUR_RIDE", "This trip belongs to another driver.");
         }
         if (err instanceof NoShowTooEarlyError) {
           const wait = err.availableAt ? Math.max(1, Math.ceil((err.availableAt.getTime() - Date.now()) / 60_000)) : null;
@@ -1395,6 +1407,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
             ride.passengers,
           );
         }
+        // Out of the car: their phone stops following it (after the events
+        // above, so they still hear how their own trip ended).
+        if (!isActivePassengerStatus(passenger.status)) removeRiderFromRide(passenger.riderId, rideId);
       })().catch((err) => request.log.error({ err, rideId, passengerId }, `passenger ${action}: follow-up failed`));
       return reply;
     });

@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 import { ACTIVE_RIDE_STATUSES } from "../ride/createRide";
+import { forgetAccount } from "./accountStatus";
 
 /**
  * Thrown when the caller still has a ride in flight. Deleting mid-trip would
@@ -48,6 +49,8 @@ export const DELETED_NAME_PLACEHOLDER = "Deleted user";
  *   - driver profile -> plate and photo cleared (both identify a person),
  *                    taken offline and un-approved so dispatch skips them.
  *   - push tokens   -> deleted, so no phone is notified for this account.
+ *   - access tokens -> refused from the next request on (requireAuth checks
+ *                    deletedAt); the route also closes the account's sockets.
  *
  * Runs in a transaction: a partial deletion that revoked tokens but left the
  * name in place, or vice versa, is worse than either outcome.
@@ -96,4 +99,8 @@ export async function deleteAccount(
     // No more notifications to any of their phones.
     await tx.pushToken.deleteMany({ where: { userId } });
   });
+
+  // Access tokens already handed out stop working on the next request,
+  // rather than when the cached "account is open" answer runs out.
+  forgetAccount(userId);
 }

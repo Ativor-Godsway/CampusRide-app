@@ -176,7 +176,7 @@ describe("GET /rides/:id", () => {
       headers: { authorization: `Bearer ${token}` },
     });
 
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
     await prisma.user.delete({ where: { id: stranger.id } });
   });
 });

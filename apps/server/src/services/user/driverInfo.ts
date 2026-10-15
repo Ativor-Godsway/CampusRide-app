@@ -59,8 +59,10 @@ export async function getDriverInfo(
   /**
    * The ride this driver is being looked up for. Omit for a ride that is
    * still running (the claim path), where the number is always visible.
+   * A CANCELLED ride never shows it: no trip happened, and without this a
+   * cancelled ride (which has no completedAt) showed it forever.
    */
-  ride?: { completedAt: Date | null },
+  ride?: { completedAt: Date | null; status?: string },
   now: Date = new Date(),
 ): Promise<DriverInfo | null> {
   const [driver, { _avg }] = await Promise.all([
@@ -72,7 +74,7 @@ export async function getDriverInfo(
   return {
     driverId: driver.id,
     name: driver.name,
-    phone: isDriverContactVisible(ride?.completedAt, now) ? driver.phone : null,
+    phone: ride?.status !== "CANCELLED" && isDriverContactVisible(ride?.completedAt, now) ? driver.phone : null,
     carMake: driver.driver?.carMake ?? null,
     carModel: driver.driver?.carModel ?? null,
     carColor: driver.driver?.carColor ?? null,

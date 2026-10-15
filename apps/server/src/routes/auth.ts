@@ -32,6 +32,7 @@ import {
 import { config } from "../config";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { normalizePhone } from "../lib/phone";
+import { disconnectUser } from "../realtime/rideSocket";
 
 /** Shared window for the per-IP auth rate limits (max counts come from config). */
 const AUTH_RATE_WINDOW = "15 minutes";
@@ -354,6 +355,8 @@ export function registerAuthRoutes(
       throw err;
     }
 
+    // Its open sockets go too: a deleted account must not keep hearing rides.
+    disconnectUser(userId);
     request.log.info({ userId, event: "account_deleted" }, "Account anonymized on user request");
     return reply.code(200).send({ deleted: true });
   });

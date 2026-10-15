@@ -23,6 +23,24 @@ function mintTrackingToken(): string {
   return randomBytes(16).toString("hex");
 }
 
+/** What a tracking token looks like; anything else is answered without a lookup. */
+export const TRACKING_TOKEN_PATTERN = /^[0-9a-f]{32}$/;
+
+/**
+ * This rider's tracking link for this ride: the existing one, so a link
+ * already texted to a contact keeps working, or a new one. One per rider per
+ * ride, because the page is about the rider who raised the SOS.
+ */
+async function trackingTokenFor(prisma: PrismaClient, rideId: string, riderId: string): Promise<string> {
+  const link = await prisma.trackingLink.upsert({
+    where: { rideId_riderId: { rideId, riderId } },
+    update: {},
+    create: { token: mintTrackingToken(), rideId, riderId },
+    select: { token: true },
+  });
+  return link.token;
+}
+
 export interface SosResult {
   trackingUrl: string;
   /** Null when the rider has saved no emergency contact. */
@@ -151,9 +169,9 @@ async function trySendSms(
  * emergency contact is therefore no longer an error; it is reported back so
  * the app can nudge the rider to add one.
  *
- * The tracking token is minted once per ride and REUSED by later SOS calls,
- * so a link already sent to a contact keeps working rather than going dead
- * the moment the rider taps SOS again.
+ * The tracking link is minted once per rider per ride and REUSED by later
+ * SOS calls, so a link already sent to a contact keeps working rather than
+ * going dead the moment the rider taps SOS again.
  *
  * A failed SMS does NOT throw. A half-working SOS is still worth reporting:
  * the tracking URL is returned either way so the rider can share it another
@@ -181,11 +199,7 @@ export async function raiseSos(
 
   const hasEmergencyContact = Boolean(rider.emergencyContactPhone && rider.emergencyContactName);
 
-  let token = ride.trackingToken;
-  if (!token) {
-    token = mintTrackingToken();
-    await prisma.ride.update({ where: { id: rideId }, data: { trackingToken: token } });
-  }
+  const token = await trackingTokenFor(prisma, rideId, riderId);
   const trackingUrl = `${baseUrl.replace(/\/+$/, "")}/track/${token}`;
 
   const driver = ride.driverId

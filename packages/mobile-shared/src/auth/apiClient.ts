@@ -101,6 +101,26 @@ async function refreshAccessToken(): Promise<string> {
   }
 }
 
+/**
+ * A fresh access token, or — when the server refuses the session — the
+ * session ended here, exactly as a refused request ends it. Rejects on any
+ * failure; a network failure leaves the session alone so it can be retried.
+ * Used by the 401 retry below and by the ride socket after the server
+ * refuses its handshake.
+ */
+export async function refreshSessionOrSignOut(): Promise<string> {
+  try {
+    return await refreshAccessToken();
+  } catch (refreshError) {
+    if (isSessionRejection(refreshError)) {
+      setAccessToken(null);
+      await clearStoredRefreshToken();
+      sessionRejectedHandler?.();
+    }
+    throw refreshError;
+  }
+}
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -111,19 +131,9 @@ api.interceptors.response.use(
     }
     originalRequest._retry = true;
 
-    try {
-      const accessToken = await refreshAccessToken();
-
-      originalRequest.headers = originalRequest.headers ?? {};
-      originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-      return api(originalRequest);
-    } catch (refreshError) {
-      if (isSessionRejection(refreshError)) {
-        setAccessToken(null);
-        await clearStoredRefreshToken();
-        sessionRejectedHandler?.();
-      }
-      return Promise.reject(refreshError);
-    }
+    const accessToken = await refreshSessionOrSignOut();
+    originalRequest.headers = originalRequest.headers ?? {};
+    originalRequest.headers.Authorization = `Bearer ${accessToken}`;
+    return api(originalRequest);
   },
 );

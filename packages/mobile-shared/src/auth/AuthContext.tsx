@@ -17,6 +17,7 @@ import {
 import { getAccessToken, setAccessToken } from "./tokenStore";
 import { isSessionRejection, setSessionRejectedHandler } from "./apiClient";
 import { getCurrentPushToken, setCurrentPushToken } from "../push/currentToken";
+import { resetRideSocket } from "../realtime/socket";
 
 interface AuthContextValue {
   user: AuthUser | null;
@@ -52,6 +53,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
 
   const clearLocalSession = useCallback(async () => {
+    // The live connection belongs to the person leaving.
+    resetRideSocket();
     setAccessToken(null);
     await clearStoredRefreshToken();
     setUser(null);
@@ -61,7 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // token, deleted account); drop the user so every screen's auth gate sends
   // them back to the phone-number screen.
   useEffect(() => {
-    setSessionRejectedHandler(() => setUser(null));
+    setSessionRejectedHandler(() => {
+      resetRideSocket();
+      setUser(null);
+    });
     return () => setSessionRejectedHandler(null);
   }, []);
 
@@ -102,6 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const completeSignup = useCallback<AuthContextValue["completeSignup"]>(async (input) => {
     const result = await apiSignup(input);
+    // A new person on this phone: never reuse a connection made for someone else.
+    resetRideSocket();
     setAccessToken(result.accessToken);
     await setStoredRefreshToken(result.refreshToken);
     setUser(result.user);
@@ -109,6 +117,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const completeLogin = useCallback<AuthContextValue["completeLogin"]>(async (input) => {
     const result = await apiLogin(input);
+    // A new person on this phone: never reuse a connection made for someone else.
+    resetRideSocket();
     setAccessToken(result.accessToken);
     await setStoredRefreshToken(result.refreshToken);
     setUser(result.user);

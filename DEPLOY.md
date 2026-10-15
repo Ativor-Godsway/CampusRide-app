@@ -215,6 +215,11 @@ Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each
 offer, so changing it needs no app release.
 
+SOS tracking links: `TRACKING_LINK_TTL_HOURS` (default 24, 1–168) — how long
+a link texted by an SOS keeps working after the ride ends. While the ride is
+going on it always works. See
+[docs/security/route-inventory.md](docs/security/route-inventory.md).
+
 Push notifications ([docs/runbooks/push-notifications.md](docs/runbooks/push-notifications.md))
 need no server variable. `PUSH_DISABLED=true` switches every send off without
 touching the ride flow. `EXPO_ACCESS_TOKEN` is needed only if "Enhanced

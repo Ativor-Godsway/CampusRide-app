@@ -163,6 +163,15 @@ export const config = {
    */
   supportContactPhone: process.env.SUPPORT_CONTACT_PHONE ?? "",
   /**
+   * How long an SOS tracking link (GET /track/:token) keeps working after
+   * the ride ends, in hours (1–168, default 24). While the ride is going on
+   * it always works. 24 h covers a contact who sees the text late or the
+   * next morning, matching how long a rider can still call their driver
+   * after a trip (services/user/driverInfo.ts); the text itself already
+   * carries the driver's name and plate for anyone who needs them later.
+   */
+  trackingLinkTtlHours: Math.min(168, Math.max(1, Number(process.env.TRACKING_LINK_TTL_HOURS ?? 24) || 24)),
+  /**
    * Cloudinary credentials for SIGNED driver-photo uploads. The apiSecret is
    * server-only and must never be exposed to the apps — it is what replaces
    * the old unsigned upload preset that shipped inside the app bundle.

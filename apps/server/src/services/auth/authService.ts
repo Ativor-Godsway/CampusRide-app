@@ -111,7 +111,12 @@ export interface LoginResult extends AuthTokens {
   user: User & { driver: Driver | null };
 }
 
-/** Logs in an existing user. Throws UserNotFoundError if no account exists for the phone. */
+/**
+ * Logs in an existing user. Throws UserNotFoundError if no open account
+ * exists for the phone. A deleted account's phone is rewritten to
+ * "deleted:<id>", so it can't match here anyway; the deletedAt check says so
+ * explicitly rather than relying on that.
+ */
 export async function login(prisma: PrismaClient, input: LoginInput): Promise<LoginResult> {
   verifyVerificationToken(input.verifiedToken, input.phone, "LOGIN");
 
@@ -119,7 +124,7 @@ export async function login(prisma: PrismaClient, input: LoginInput): Promise<Lo
     where: { phone: input.phone },
     include: { driver: true },
   });
-  if (!user) {
+  if (!user || user.deletedAt) {
     throw new UserNotFoundError(input.phone);
   }
 
@@ -170,7 +175,9 @@ export async function refresh(
     throw new RefreshTokenReuseError(stored.userId);
   }
 
-  if (stored.expiresAt < now) {
+  // DELETE /me revokes every refresh token, so a deleted account should never
+  // get here; refuse it anyway rather than mint it a new session.
+  if (stored.expiresAt < now || stored.user.deletedAt) {
     throw new InvalidRefreshTokenError();
   }
 

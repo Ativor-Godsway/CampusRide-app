@@ -424,7 +424,7 @@ describe("DELETE /me", () => {
     expect(row.phone).not.toBe(phone);
   });
 
-  it("returns 404 on a second delete with the same still-valid access token", async () => {
+  it("refuses the deleted account's still-unexpired access token from then on", async () => {
     const phone = newPhone();
     const verifiedToken = await requestAndVerify(phone, "SIGNUP");
     const signupRes = await app.inject({
@@ -437,6 +437,8 @@ describe("DELETE /me", () => {
 
     const auth = { authorization: `Bearer ${accessToken}` };
     expect((await app.inject({ method: "DELETE", url: "/me", headers: auth })).statusCode).toBe(200);
-    expect((await app.inject({ method: "DELETE", url: "/me", headers: auth })).statusCode).toBe(404);
+    // The token is unexpired but its account is closed: 401, like any dead session.
+    expect((await app.inject({ method: "DELETE", url: "/me", headers: auth })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/me", headers: auth })).statusCode).toBe(401);
   });
 });

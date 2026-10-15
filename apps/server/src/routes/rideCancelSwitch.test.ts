@@ -160,7 +160,8 @@ describe("POST /rides/:id/cancel with a reason", () => {
     const res = await cancel(ride.id, token, { reason: "DRIVER_ASKED_TO_CANCEL" });
     expect(res.statusCode).toBe(200);
 
-    const admin = await createTestUser("RIDER");
+    // The role comes from the database, not the token: a real ADMIN account.
+    const admin = await prisma.user.update({ where: { id: (await createTestUser("RIDER")).id }, data: { role: "ADMIN" } });
     userIds.push(admin.id);
     const list = await app.inject({
       method: "GET",
@@ -179,11 +180,73 @@ describe("POST /rides/:id/cancel with a reason", () => {
   it("does not let another rider cancel my ride", async () => {
     const { ride } = await searchingRide("SHARED");
     const res = await cancel(ride.id, await strangerToken(), { reason: "PRICE" });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
 
     const row = await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } });
     expect(row.status).toBe("REQUESTED");
     expect(row.riderCancelReason).toBeNull();
+  });
+});
+
+describe("POST /rides/:id/cancel in a shared car with other riders", () => {
+  /** Ama booked a shared ride; the driver accepted it and added Kwame before any pickup. */
+  async function carWithKwame(status: RideStatus = "MATCHED") {
+    const driver = await assignedDriver();
+    const { ride, rider: ama, token } = await searchingRide("SHARED", { status, driverId: driver.id });
+    const kwame = await createTestUser("RIDER");
+    const kwameSeat = await prisma.ridePassenger.create({
+      data: {
+        rideId: ride.id,
+        riderId: kwame.id,
+        pickupZoneId: ride.pickupZoneId,
+        dropoffZoneId: ride.dropoffZoneId,
+        status: "WAITING",
+        lockedFare: getSharedFarePerRider(2),
+      },
+    });
+    await prisma.ride.update({ where: { id: ride.id }, data: { occupancy: 2 } });
+    return { ride, ama, token, kwame, kwameSeat };
+  }
+
+  it("takes only the booking rider out; the car carries on for the others", async () => {
+    const { ride, ama, token, kwameSeat } = await carWithKwame();
+    const res = await cancel(ride.id, token, { reason: "DRIVER_ASKED_TO_CANCEL" });
+    expect(res.statusCode).toBe(200);
+    // Ama's answer never carries Kwame's seat (or his pins).
+    expect(res.json().ride.passengers).toBeUndefined();
+
+    const row = await prisma.ride.findUniqueOrThrow({ where: { id: ride.id }, include: { passengers: true } });
+    expect(row).toMatchObject({ status: "MATCHED", cancelReason: null, occupancy: 1, riderCancelReason: "DRIVER_ASKED_TO_CANCEL" });
+    expect(row.passengers.find((p) => p.riderId === ama.id)!.status).toBe("CANCELLED");
+    expect(row.passengers.find((p) => p.id === kwameSeat.id)!.status).toBe("WAITING");
+
+    // Ama has no active ride any more, so the app takes her home.
+    const active = await app.inject({ method: "GET", url: "/rides/active", headers: { authorization: `Bearer ${token}` } });
+    expect(active.json().ride).toBeNull();
+  });
+
+  it("also works once the driver is at the pickup", async () => {
+    const { ride, token, kwameSeat } = await carWithKwame("ARRIVED");
+    expect((await cancel(ride.id, token)).statusCode).toBe(200);
+    expect(await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } })).toMatchObject({ status: "ARRIVED" });
+    expect((await prisma.ridePassenger.findUniqueOrThrow({ where: { id: kwameSeat.id } })).status).toBe("WAITING");
+  });
+
+  it("still cancels the whole ride when the booking rider is alone in it", async () => {
+    const driver = await assignedDriver();
+    const { ride, token } = await searchingRide("SHARED", { status: "MATCHED", driverId: driver.id });
+    expect((await cancel(ride.id, token)).statusCode).toBe(200);
+    expect(await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } })).toMatchObject({
+      status: "CANCELLED",
+      cancelReason: "RIDER_CANCELLED",
+    });
+  });
+
+  it("an added rider can't cancel the booking rider's car", async () => {
+    const { ride, kwame } = await carWithKwame();
+    const res = await cancel(ride.id, signAccessToken({ userId: kwame.id, role: "RIDER" }));
+    expect(res.statusCode).toBe(404);
+    expect((await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } })).status).toBe("MATCHED");
   });
 });
 
@@ -283,7 +346,7 @@ describe("POST /rides/:id/switch", () => {
   it("does not let another rider switch my ride", async () => {
     const { ride } = await searchingRide("SHARED");
     const res = await switchTo(ride.id, await strangerToken(), "LONE");
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(404);
     expect((await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } })).type).toBe("SHARED");
   });
 

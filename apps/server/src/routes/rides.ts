@@ -1,14 +1,15 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import type { PaymentMethod, RideStatus, RideType } from "@rida/shared";
+import type { PassengerStatus, PaymentMethod, RideStatus, RideType } from "@rida/shared";
 import { FLAGGED_RIDER_CANCEL_REASONS, parsePickupNote, parseRiderCancelInput } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
-import { applyRideTransition } from "../services/ride/rideService";
+import { applyPassengerTransition, applyRideTransition } from "../services/ride/rideService";
+import { isActivePassengerStatus } from "../services/ride/stateMachine";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
 import { InvalidTransitionError, RideSwitchNotAllowedError } from "../services/ride/errors";
 import { fareForType, switchRideType } from "../services/ride/switchRideType";
 import { findActiveRideForRider } from "../services/ride/activeRide";
-import { emitRideEvent } from "../realtime/rideSocket";
+import { emitRideEvent, emitToRider, removeRiderFromRide } from "../realtime/rideSocket";
 import { broadcastRide, closeOffer } from "../services/ride/dispatch";
 import {
   createRide,
@@ -78,6 +79,14 @@ async function requireRider(request: Parameters<typeof requireAuth>[0], reply: P
     return false;
   }
   return true;
+}
+
+/**
+ * A ride that isn't the caller's gets exactly the answer a ride that doesn't
+ * exist gets, so trying ids confirms nothing about other people's rides.
+ */
+function rideNotFound(reply: Parameters<typeof requireAuth>[1]) {
+  return reply.code(404).send({ error: "Ride not found" });
 }
 
 /**
@@ -318,16 +327,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       select: riderRideDetailSelect,
     });
 
-    if (!ride) {
-      return reply.code(404).send({ error: "Ride not found" });
-    }
-
     const userId = request.user!.userId;
-    const isRider = ride.riderId === userId;
-    const isPassenger = ride.passengers.some((p) => p.riderId === userId);
-
-    if (!isRider && !isPassenger) {
-      return reply.code(403).send({ error: "Forbidden" });
+    if (!ride || (ride.riderId !== userId && !ride.passengers.some((p) => p.riderId === userId))) {
+      return rideNotFound(reply);
     }
 
     // Pass the ride so the driver's phone drops out of the payload once the
@@ -373,11 +375,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     }
 
     const ride = await prisma.ride.findUnique({ where: { id } });
-    if (!ride) {
-      return reply.code(404).send({ error: "Ride not found" });
-    }
-    if (ride.riderId !== request.user!.userId) {
-      return reply.code(403).send({ error: "Forbidden" });
+    if (!ride || ride.riderId !== request.user!.userId) {
+      return rideNotFound(reply);
     }
     if (ride.status !== "AWAITING_RIDER_DECISION") {
       return reply.code(409).send({ error: "Ride is not awaiting a decision" });
@@ -411,6 +410,12 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    * app's cancel sheet (see parseRiderCancelInput): stored in
    * riderCancelReason / riderCancelNote, separate from the system
    * cancelReason, and written in the same update as the status change.
+   *
+   * A shared car the driver has already added other riders to is theirs as
+   * much as this rider's. Cancelling then takes only THIS rider out (their
+   * seat is cancelled, exactly as a driver's seat cancel would) and the car
+   * carries on for the others; it used to cancel the whole ride, stranding
+   * riders who had nothing to do with the decision.
    */
   app.post(
     "/rides/:id/cancel",
@@ -419,13 +424,14 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     if (!(await requireRider(request, reply))) return;
 
     const { id } = request.params as { id: string };
+    const userId = request.user!.userId;
 
-    const ride = await prisma.ride.findUnique({ where: { id } });
-    if (!ride) {
-      return reply.code(404).send({ error: "Ride not found" });
-    }
-    if (ride.riderId !== request.user!.userId) {
-      return reply.code(403).send({ error: "Forbidden" });
+    const ride = await prisma.ride.findUnique({
+      where: { id },
+      include: { passengers: { select: { id: true, riderId: true, status: true } } },
+    });
+    if (!ride || ride.riderId !== userId) {
+      return rideNotFound(reply);
     }
     if (!RIDER_CANCELLABLE_STATUSES.includes(ride.status as RideStatus)) {
       return reply.code(409).send({ error: "Ride can no longer be cancelled" });
@@ -434,6 +440,65 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     const input = parseRiderCancelInput(request.body, { hasDriver: ride.driverId !== null });
     if (!input.ok) {
       return reply.code(400).send({ error: input.error });
+    }
+
+    const flagged = input.reason !== null && FLAGGED_RIDER_CANCEL_REASONS.includes(input.reason);
+    const logCancel = (event: string, message: string) =>
+      request.log[flagged ? "warn" : "info"](
+        {
+          event,
+          rideId: id,
+          driverId: ride.driverId,
+          fromStatus: ride.status,
+          riderCancelReason: input.reason,
+          flagged,
+        },
+        flagged ? "Rider cancelled: driver asked them to cancel" : message,
+      );
+
+    const ownSeat = ride.passengers.find((p) => p.riderId === userId);
+    const othersAboard = ride.passengers.some(
+      (p) => p.riderId !== userId && isActivePassengerStatus(p.status as PassengerStatus),
+    );
+
+    if (ownSeat && othersAboard) {
+      let result;
+      try {
+        result = await applyPassengerTransition(prisma, ownSeat.id, "CANCELLED", new Date(), {
+          expectedRideId: id,
+          onlyFrom: ["WAITING", "ARRIVED"],
+        });
+      } catch (err) {
+        if (err instanceof InvalidTransitionError) {
+          return reply.code(409).send({ error: "Ride can no longer be cancelled" });
+        }
+        throw err;
+      }
+      // Kept on the ride as for a whole-ride cancel: it is this rider's
+      // booking, and "the driver asked me to cancel" must reach the admin
+      // list whether or not the car carried on.
+      await prisma.ride.update({
+        where: { id },
+        data: { riderCancelReason: input.reason, riderCancelNote: input.note },
+      });
+
+      const { passengers: _otherRiders, ...rideRow } = result.ride;
+      reply.code(200).send({ ride: rideRow });
+
+      if (result.changed) {
+        emitToRider(userId, "ride:passenger_status", {
+          rideId: id,
+          ridePassengerId: ownSeat.id,
+          riderId: userId,
+          status: "CANCELLED",
+        });
+        // The driver's trip screen refetches on any status event for its ride.
+        emitRideEvent(id, "ride:status", { rideId: id, status: rideRow.status as RideStatus });
+        notifyRiderCancelled(prisma, ride);
+        removeRiderFromRide(userId, id);
+        logCancel("ride_seat_cancelled_by_rider", "Rider left a shared car; it carries on for the others");
+      }
+      return reply;
     }
 
     try {
@@ -449,18 +514,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         closeOffer(prisma, ride, "CANCELLED");
       }
 
-      const flagged = input.reason !== null && FLAGGED_RIDER_CANCEL_REASONS.includes(input.reason);
-      request.log[flagged ? "warn" : "info"](
-        {
-          event: "ride_cancelled_by_rider",
-          rideId: id,
-          driverId: ride.driverId,
-          fromStatus: ride.status,
-          riderCancelReason: input.reason,
-          flagged,
-        },
-        flagged ? "Rider cancelled: driver asked them to cancel" : "Rider cancelled their ride",
-      );
+      logCancel("ride_cancelled_by_rider", "Rider cancelled their ride");
       return reply.code(200).send({ ride: updated });
     } catch (err) {
       if (err instanceof InvalidTransitionError) {
@@ -491,11 +545,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       const toType: RideType = body.type;
 
       const ride = await prisma.ride.findUnique({ where: { id } });
-      if (!ride) {
-        return reply.code(404).send({ error: "Ride not found" });
-      }
-      if (ride.riderId !== request.user!.userId) {
-        return reply.code(403).send({ error: "Forbidden" });
+      if (!ride || ride.riderId !== request.user!.userId) {
+        return rideNotFound(reply);
       }
 
       try {
@@ -571,11 +622,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       where: { id: rideId },
       include: { passengers: true },
     });
-    if (!ride) return reply.code(404).send({ error: "Ride not found" });
-
-    const isRider = ride.riderId === userId;
-    const passenger = ride.passengers.find((p) => p.riderId === userId);
-    if (!isRider && !passenger) return reply.code(403).send({ error: "Forbidden" });
+    const passenger = ride?.passengers.find((p) => p.riderId === userId);
+    if (!ride || (ride.riderId !== userId && !passenger)) return rideNotFound(reply);
     if (ride.status !== "COMPLETED") {
       return reply.code(409).send({ error: "Ride is not yet completed" });
     }
@@ -626,11 +674,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       where: { id: rideId },
       include: { passengers: true },
     });
-    if (!ride) return reply.code(404).send({ error: "Ride not found" });
-
-    const isRider = ride.riderId === userId;
-    const isPassenger = ride.passengers.some((p) => p.riderId === userId);
-    if (!isRider && !isPassenger) return reply.code(403).send({ error: "Forbidden" });
+    if (!ride || (ride.riderId !== userId && !ride.passengers.some((p) => p.riderId === userId))) {
+      return rideNotFound(reply);
+    }
 
     const summary = await getRidePaymentSummary(prisma, rideId);
     const yours = summary.perPassenger.find((p) => p.riderId === userId);

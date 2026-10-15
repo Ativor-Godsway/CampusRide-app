@@ -115,10 +115,12 @@ describe("passenger actions", () => {
     const cancelOnboard = await act(seats[1]!.id, "cancel");
     expect(cancelOnboard.json().error).toBe("This rider is already in the car. Drop them off instead.");
 
+    const { user: someone } = await createTestDriver({ isOnline: true, isApproved: true });
+    driverIds.push(someone.id);
     const wrongRide = await app.inject({
       method: "POST",
       url: `/rides/not-this-ride/passengers/${seats[0]!.id}/arrived`,
-      headers: { authorization: `Bearer ${signAccessToken({ userId: "someone", role: "DRIVER" })}` },
+      headers: { authorization: `Bearer ${signAccessToken({ userId: someone.id, role: "DRIVER" })}` },
     });
     expect(wrongRide.statusCode).toBe(404);
     expect(wrongRide.json().code).toBe("PASSENGER_NOT_FOUND");
@@ -133,7 +135,9 @@ describe("passenger actions", () => {
       url: `/rides/${ride.id}/passengers/${seats[0]!.id}/arrived`,
       headers: { authorization: `Bearer ${signAccessToken({ userId: other.id, role: "DRIVER" })}` },
     });
-    expect(res.statusCode).toBe(403);
+    // Answered exactly like a seat that doesn't exist.
+    expect(res.statusCode).toBe(404);
+    expect(res.json().code).toBe("PASSENGER_NOT_FOUND");
     expect((await prisma.ridePassenger.findUniqueOrThrow({ where: { id: seats[0]!.id } })).status).toBe("WAITING");
   });
 });
