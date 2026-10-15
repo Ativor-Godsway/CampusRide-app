@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { OtpService } from "../services/otp/OtpService";
@@ -8,6 +8,7 @@ import {
   type DemoOtpLimits,
 } from "../services/demoOtp/demoOtp";
 import { MAX, object, text } from "../http/schemas";
+import { clientIpForLimits } from "../rateLimit/reply";
 
 /**
  * Public, namespaced OTP endpoints for the showcase demo site.
@@ -35,21 +36,6 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-/**
- * Client IP. Render terminates TLS at a proxy, so the socket IP is the proxy;
- * the real client is the LEFTMOST entry of X-Forwarded-For
- * ("client, proxy1, proxy2" → "client"). Falls back to the socket IP locally.
- * Read here (not via global trustProxy) to keep this scoped to the demo routes.
- */
-function clientIp(request: FastifyRequest): string | null {
-  const xff = request.headers["x-forwarded-for"];
-  // Multiple XFF headers arrive as an array; the original client is in the
-  // first header, leftmost position.
-  const raw = Array.isArray(xff) ? xff[0] : xff;
-  const leftmost = raw?.split(",")[0]?.trim();
-  return leftmost || request.ip || null;
-}
-
 export function registerDemoOtpRoutes(
   app: FastifyInstance,
   prisma: PrismaClient,
@@ -65,7 +51,11 @@ export function registerDemoOtpRoutes(
       return reply.code(400).send({ ok: false, reason: "Phone number is required." });
     }
 
-    const ip = clientIp(request);
+    // The real client address, unwound through Cloudflare and Render's proxies
+    // only (lib/security.ts), never the leftmost X-Forwarded-For entry, which
+    // a client can write itself to dodge the per-IP cap. Null when the
+    // address isn't known: the per-IP cap is skipped, the others still apply.
+    const ip = clientIpForLimits(request);
     const result = await requestDemoOtp(deps, { phone: body.phone, ip });
 
     // Log for monitoring — NEVER the code or any secret.
