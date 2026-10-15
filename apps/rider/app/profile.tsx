@@ -11,6 +11,7 @@ import {
   spacing,
   updateProfile,
   useAuth,
+  rateLimitText,
 } from "@rida/mobile-shared";
 
 /**
@@ -43,8 +44,8 @@ export default function EditProfileScreen() {
       // screens) picks up the change without a restart.
       await refreshMe();
       router.back();
-    } catch {
-      Alert.alert("Couldn't save", "Please check your connection and try again.");
+    } catch (err) {
+      Alert.alert("Couldn't save", rateLimitText(err) ?? "Please check your connection and try again.");
     } finally {
       setSaving(false);
     }

@@ -5,12 +5,9 @@ import { config } from "../../config";
 import { requestOtp, verifyOtp } from "./otp";
 import { OTP } from "./constants";
 import { sha256 } from "./hash";
-import {
-  InvalidOtpError,
-  OtpAttemptsExceededError,
-  OtpExpiredError,
-  OtpRateLimitExceededError,
-} from "./errors";
+import { InvalidOtpError, OtpAttemptsExceededError, OtpExpiredError } from "./errors";
+import { RateLimitedError } from "../../rateLimit/limiter";
+import { RULES } from "../../rateLimit/rules";
 import { CapturingOtpService, cleanupOtpCodes, uniqueTestPhone } from "./testFixtures";
 
 const phones: string[] = [];
@@ -49,37 +46,47 @@ describe("requestOtp", () => {
     expect(stored!.attemptCount).toBe(0);
   });
 
-  it("rejects the 4th send within a 15-minute window", async () => {
+  it("refuses a number past its cooldown allowance, without sending, and allows it again after", async () => {
     const phone = newPhone();
     const otpService = new CapturingOtpService();
     const now = new Date("2026-01-01T00:00:00Z");
 
-    for (let i = 0; i < OTP.OTP_MAX_SENDS_PER_15MIN; i++) {
+    for (let i = 0; i < RULES.otpCooldown.max; i++) {
       await requestOtp(prisma, otpService, phone, "LOGIN", now);
     }
+    const before = await prisma.otpCode.count({ where: { phone } });
+    const refused = requestOtp(prisma, otpService, phone, "LOGIN", now);
+    await expect(refused).rejects.toThrow(RateLimitedError);
+    await expect(refused).rejects.toMatchObject({ rule: RULES.otpCooldown });
+    expect(await prisma.otpCode.count({ where: { phone } })).toBe(before);
 
-    await expect(requestOtp(prisma, otpService, phone, "LOGIN", now)).rejects.toThrow(
-      OtpRateLimitExceededError,
-    );
+    const later = new Date(now.getTime() + RULES.otpCooldown.windowMs + 1);
+    await expect(requestOtp(prisma, otpService, phone, "LOGIN", later)).resolves.toBeUndefined();
   });
 
-  it("rejects the 6th send within a 1-hour window even though the 15-min limit never trips", async () => {
-    const phone = newPhone();
+  it("gives an admin's number the stricter 15-minute cap", async () => {
+    const adminPhone = newPhone();
+    const riderPhone = newPhone();
+    const admin = await prisma.user.create({ data: { phone: adminPhone, name: "Admin", role: "ADMIN" } });
     const otpService = new CapturingOtpService();
-    const base = new Date("2026-01-01T00:00:00Z");
+    const t0 = new Date("2026-01-02T00:00:00Z").getTime();
 
-    // 5 sends spaced 12 minutes apart: each 15-min lookback only ever sees
-    // the immediately preceding send (count=1 < 3), but the 1-hour lookback
-    // for the 6th send (at +60min) sees all 5 prior sends (count=5 >= 5).
-    for (let i = 0; i < OTP.OTP_MAX_SENDS_PER_HOUR; i++) {
-      const now = new Date(base.getTime() + i * 12 * 60_000);
-      await requestOtp(prisma, otpService, phone, "LOGIN", now);
+    // Sends at the cooldown's pace until the admin cap is reached.
+    let sent = 0;
+    for (let minute = 0; sent < RULES.adminOtpSend15m.max; minute++) {
+      const at = new Date(t0 + minute * (RULES.otpCooldown.windowMs + 1));
+      for (let i = 0; i < RULES.otpCooldown.max && sent < RULES.adminOtpSend15m.max; i++, sent++) {
+        await requestOtp(prisma, otpService, adminPhone, "LOGIN", at);
+        await requestOtp(prisma, otpService, riderPhone, "LOGIN", at);
+      }
     }
-
-    const sixth = new Date(base.getTime() + OTP.OTP_MAX_SENDS_PER_HOUR * 12 * 60_000);
-    await expect(requestOtp(prisma, otpService, phone, "LOGIN", sixth)).rejects.toThrow(
-      OtpRateLimitExceededError,
-    );
+    const next = new Date(t0 + 10 * (RULES.otpCooldown.windowMs + 1));
+    await expect(requestOtp(prisma, otpService, adminPhone, "LOGIN", next)).rejects.toMatchObject({
+      rule: RULES.adminOtpSend15m,
+    });
+    // The same count on an ordinary number is still allowed.
+    await expect(requestOtp(prisma, otpService, riderPhone, "LOGIN", next)).resolves.toBeUndefined();
+    await prisma.user.delete({ where: { id: admin.id } });
   });
 });
 

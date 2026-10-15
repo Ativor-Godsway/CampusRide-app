@@ -17,7 +17,6 @@ import {
   RefreshTokenReuseError,
   OtpAttemptsExceededError,
   OtpExpiredError,
-  OtpRateLimitExceededError,
   PhoneAlreadyRegisteredError,
   UserNotFoundError,
 } from "../services/auth/errors";
@@ -33,9 +32,9 @@ import { config } from "../config";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { normalizePhone } from "../lib/phone";
 import { disconnectUser } from "../realtime/rideSocket";
-
-/** Shared window for the per-IP auth rate limits (max counts come from config). */
-const AUTH_RATE_WINDOW = "15 minutes";
+import { RateLimitedError, enforce } from "../rateLimit/limiter";
+import { RULES } from "../rateLimit/rules";
+import { clientIpForLimits, sendRateLimited } from "../rateLimit/reply";
 
 const OTP_PURPOSES = ["SIGNUP", "LOGIN"] as const;
 const SIGNUP_ROLES = ["RIDER", "DRIVER"] as const;
@@ -71,10 +70,12 @@ export function registerAuthRoutes(
   prisma: PrismaClient,
   otpService: OtpService,
 ): void {
-  app.post(
-    "/auth/request-otp",
-    { config: { rateLimit: { max: config.rateLimit.otpRequestMax, timeWindow: AUTH_RATE_WINDOW } } },
-    async (request, reply) => {
+  /**
+   * Rate limits on these public routes are per PHONE NUMBER (services/auth/otp.ts,
+   * and login.15m below), never per IP: a hostel on one Wi-Fi is one IP. The
+   * per-IP backstop (rateLimit/http.ts) sits behind them, far higher.
+   */
+  app.post("/auth/request-otp", async (request, reply) => {
     const body = request.body as { phone?: unknown; purpose?: unknown };
 
     if (!isNonEmptyString(body.phone) || !isOtpPurpose(body.purpose)) {
@@ -87,20 +88,15 @@ export function registerAuthRoutes(
     }
 
     try {
-      await requestOtp(prisma, otpService, phone, body.purpose);
+      await requestOtp(prisma, otpService, phone, body.purpose, new Date(), { ip: clientIpForLimits(request) });
       return reply.code(200).send({ ok: true });
     } catch (err) {
-      if (err instanceof OtpRateLimitExceededError) {
-        return reply.code(429).send({ error: err.message });
-      }
+      if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
       throw err;
     }
   });
 
-  app.post(
-    "/auth/verify-otp",
-    { config: { rateLimit: { max: config.rateLimit.otpVerifyMax, timeWindow: AUTH_RATE_WINDOW } } },
-    async (request, reply) => {
+  app.post("/auth/verify-otp", async (request, reply) => {
     const body = request.body as { phone?: unknown; code?: unknown; purpose?: unknown };
 
     if (
@@ -120,6 +116,7 @@ export function registerAuthRoutes(
       const result = await verifyOtp(prisma, phone, body.code, body.purpose);
       return reply.code(200).send(result);
     } catch (err) {
+      if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
       if (
         err instanceof InvalidOtpError ||
         err instanceof OtpExpiredError ||
@@ -131,10 +128,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post(
-    "/auth/signup",
-    { config: { rateLimit: { max: config.rateLimit.signupMax, timeWindow: AUTH_RATE_WINDOW } } },
-    async (request, reply) => {
+  app.post("/auth/signup", async (request, reply) => {
     const body = request.body as {
       phone?: unknown;
       name?: unknown;
@@ -159,6 +153,7 @@ export function registerAuthRoutes(
     }
 
     try {
+      await enforce([{ rule: RULES.login15m, subject: phone }]);
       const result = await signup(prisma, {
         phone,
         name: body.name,
@@ -167,6 +162,7 @@ export function registerAuthRoutes(
       });
       return reply.code(201).send(result);
     } catch (err) {
+      if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
       if (err instanceof InvalidVerificationTokenError) {
         return reply.code(401).send({ error: err.message });
       }
@@ -177,10 +173,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post(
-    "/auth/login",
-    { config: { rateLimit: { max: config.rateLimit.loginMax, timeWindow: AUTH_RATE_WINDOW } } },
-    async (request, reply) => {
+  app.post("/auth/login", async (request, reply) => {
     const body = request.body as { phone?: unknown; verifiedToken?: unknown };
 
     if (!isNonEmptyString(body.phone) || !isNonEmptyString(body.verifiedToken)) {
@@ -193,12 +186,14 @@ export function registerAuthRoutes(
     }
 
     try {
+      await enforce([{ rule: RULES.login15m, subject: phone }]);
       const result = await login(prisma, {
         phone,
         verifiedToken: body.verifiedToken,
       });
       return reply.code(200).send(result);
     } catch (err) {
+      if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
       if (err instanceof InvalidVerificationTokenError) {
         return reply.code(401).send({ error: err.message });
       }
@@ -209,10 +204,7 @@ export function registerAuthRoutes(
     }
   });
 
-  app.post(
-    "/auth/refresh",
-    { config: { rateLimit: { max: config.rateLimit.refreshMax, timeWindow: AUTH_RATE_WINDOW } } },
-    async (request, reply) => {
+  app.post("/auth/refresh", async (request, reply) => {
     const body = request.body as { refreshToken?: unknown };
 
     if (!isNonEmptyString(body.refreshToken)) {
@@ -223,6 +215,9 @@ export function registerAuthRoutes(
       const result = await refresh(prisma, body.refreshToken);
       return reply.code(200).send(result);
     } catch (err) {
+      // Per login and per account (authService.refresh). 429 is never read as
+      // a dead session by the apps, so nobody is signed out by it.
+      if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
       if (err instanceof RefreshTokenReuseError) {
         // Every token in this login's rotation chain has just been revoked.
         // Log it as the security event it is — but answer EXACTLY as for any
@@ -285,7 +280,7 @@ export function registerAuthRoutes(
    * needs a fresh OTP verification of the new number (its own flow, not this
    * one).
    */
-  app.patch("/me", { preHandler: requireAuth }, async (request, reply) => {
+  app.patch("/me", { preHandler: requireAuth, config: { limits: { user: [RULES.profile] } } }, async (request, reply) => {
     const body = (request.body ?? {}) as {
       name?: unknown;
       emergencyContactName?: unknown;
@@ -340,7 +335,7 @@ export function registerAuthRoutes(
    * for why the row has to survive. Idempotent from the client's point of
    * view: a second call with a still-valid access token gets 404, not a 500.
    */
-  app.delete("/me", { preHandler: requireAuth }, async (request, reply) => {
+  app.delete("/me", { preHandler: requireAuth, config: { limits: { user: [RULES.accountDelete] } } }, async (request, reply) => {
     const userId = request.user!.userId;
 
     try {
@@ -361,7 +356,7 @@ export function registerAuthRoutes(
     return reply.code(200).send({ deleted: true });
   });
 
-  app.post("/driver/profile", { preHandler: requireAuth }, async (request, reply) => {
+  app.post("/driver/profile", { preHandler: requireAuth, config: { limits: { user: [RULES.profile] } } }, async (request, reply) => {
     const body = request.body as {
       carMake?: unknown;
       carModel?: unknown;

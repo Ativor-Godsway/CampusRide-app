@@ -1,5 +1,20 @@
+import { rateLimitMessage, retryAfterSecondsOf } from "@rida/shared";
+
+/**
+ * "Too many attempts. Try again in 3 minutes." when the API rate-limited
+ * the request, otherwise null. For screens with their own wording for
+ * failures: check this first, so a 429 is never shown as "check your
+ * connection".
+ */
+export function rateLimitText(err: unknown): string | null {
+  const seconds = retryAfterSecondsOf(err);
+  return seconds === null ? null : rateLimitMessage(seconds);
+}
+
 /** Extracts a user-facing message from an axios error, falling back to a generic message. */
 export function errorMessage(err: unknown): string {
+  const limited = rateLimitText(err);
+  if (limited) return limited;
   if (err && typeof err === "object" && "response" in err) {
     const response = (err as { response?: { data?: { error?: string } } }).response;
     if (response?.data?.error) return response.data.error;

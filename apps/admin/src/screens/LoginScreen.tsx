@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { OTP_RESEND_COOLDOWN_SECONDS, formatCountdown } from "@rida/shared";
 import { ApiError, login, requestOtp, verifyOtp } from "../api";
 import { useAuth } from "../auth";
 
@@ -19,19 +20,37 @@ export function LoginScreen() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // "Resend code" counts down rather than letting the button be hammered: the
+  // server sends a number one code per cooldown (and fewer to an admin's).
+  const [resendAt, setResendAt] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const resendIn = Math.max(0, Math.ceil((resendAt - now) / 1000));
 
-  async function handleSendCode(event: React.FormEvent) {
-    event.preventDefault();
+  useEffect(() => {
+    if (resendIn === 0) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [resendIn]);
+
+  async function sendCode() {
     setError(null);
     setBusy(true);
     try {
       await requestOtp(phone.trim());
+      setResendAt(Date.now() + OTP_RESEND_COOLDOWN_SECONDS * 1000);
       setStep("code");
     } catch (err) {
+      if (err instanceof ApiError && err.retryAfterSeconds) setResendAt(Date.now() + err.retryAfterSeconds * 1000);
       setError(err instanceof ApiError ? err.message : "Could not send the code");
     } finally {
+      setNow(Date.now());
       setBusy(false);
     }
+  }
+
+  async function handleSendCode(event: React.FormEvent) {
+    event.preventDefault();
+    await sendCode();
   }
 
   async function handleVerify(event: React.FormEvent) {
@@ -93,6 +112,9 @@ export function LoginScreen() {
             />
             <button type="submit" disabled={busy || code.trim().length === 0}>
               {busy ? "Signing in…" : "Sign in"}
+            </button>
+            <button type="button" className="link" disabled={busy || resendIn > 0} onClick={() => void sendCode()}>
+              {resendIn > 0 ? `Resend code in ${formatCountdown(resendIn)}` : "Resend code"}
             </button>
             <button
               type="button"

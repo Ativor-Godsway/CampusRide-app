@@ -3,6 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import { handleUssdRequest, type MoolreUssdRequest } from "../services/ussd/ussdHandler";
 import { getSession } from "../services/ussd/session";
 import { config } from "../config";
+import { limiter } from "../rateLimit/limiter";
+import { RULES } from "../rateLimit/rules";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -46,14 +48,10 @@ export function registerUssdRoutes(
   // handler and services/ussd/* below are left untouched and dormant.
   if (!enabled) return;
 
-  // NOTE: this per-IP cap keys on Moolre's USSD gateway IP (all callbacks come
-  // from there), so it is a coarse flood-guard, not per-subscriber throttling.
-  // A future hardening step should add a Moolre gateway IP allowlist here (see
-  // ROADMAP / Phase-1 plan) — deliberately NOT implemented in this commit.
-  app.post(
-    "/ussd/callback",
-    { config: { rateLimit: { max: config.rateLimit.ussdCallbackMax, timeWindow: "1 minute" } } },
-    async (request, reply) => {
+  // Every callback comes from Moolre's gateway, so an IP limit would be one
+  // bucket for every subscriber; the limit is per subscriber (msisdn) instead.
+  // A Moolre gateway IP allowlist is still needed before switching USSD on.
+  app.post("/ussd/callback", async (request, reply) => {
     const body = request.body as {
       sessionId?: unknown;
       new?: unknown;
@@ -70,6 +68,11 @@ export function registerUssdRoutes(
       // something upstream is broken, not a user input we can re-prompt.
       // End cleanly rather than throwing into Moolre's webhook caller.
       return reply.code(200).send({ message: "CampusRide is unavailable right now. Please try again later.", reply: false });
+    }
+
+    const allowed = await limiter.consume([{ rule: RULES.ussd, subject: body.msisdn }]);
+    if (!allowed.ok) {
+      return reply.code(200).send({ message: "Too many requests. Please try again in a minute.", reply: false });
     }
 
     // `new` is the one field with a usable fallback: if it's missing or

@@ -5,35 +5,35 @@ Updated at the end of each stage.
 
 ✅ done · 🔶 done on a branch, waiting for merge · ⬜ not done
 
-## Stage 1 — Permissions 🔶 (branch `security-stage1-authorization`)
+## Stage 1 — Permissions ✅ (PR #36)
 
 | | Item |
 |---|---|
-| 🔶 | Inventory of every HTTP route and Socket.io event: [route-inventory.md](route-inventory.md), checked against the code by a test |
-| 🔶 | Ownership enforced on every route; someone else's ride, seat or rating answers 404, same as one that doesn't exist |
-| 🔶 | OTP verification tokens can no longer be used as a login (they could watch other people's shared rides live) |
-| 🔶 | Roles come from the database, not the token; deleted accounts are refused even with an unexpired token |
-| 🔶 | Socket.io: token checked at the handshake; ride rooms only for the driver and riders still in the car; driver positions only from the ride's own driver; every payload validated |
-| 🔶 | Mass assignment: every write takes only allow-listed fields (role, approval, online status, fares, other people's ids can't be set), proven by tests |
-| 🔶 | A rider cancelling a shared car takes only themselves out; others keep their ride |
-| 🔶 | Ratings only between people who actually took the trip |
-| 🔶 | SOS links are per rider, show only that rider, and expire 24 h after the ride ends (`TRACKING_LINK_TTL_HOURS`) |
-| 🔶 | Contact numbers stop with the trip: no driver number on a cancelled ride; no rider number once they've left the car |
-| 🔶 | Table-driven cross-user tests for every route and socket event (rider vs rider, driver vs driver, rider vs admin) |
+| ✅ | Inventory of every HTTP route and Socket.io event: [route-inventory.md](route-inventory.md), checked against the code by a test |
+| ✅ | Ownership enforced on every route; someone else's ride, seat or rating answers 404, same as one that doesn't exist |
+| ✅ | OTP verification tokens can no longer be used as a login (they could watch other people's shared rides live) |
+| ✅ | Roles come from the database, not the token; deleted accounts are refused even with an unexpired token |
+| ✅ | Socket.io: token checked at the handshake; ride rooms only for the driver and riders still in the car; driver positions only from the ride's own driver; every payload validated |
+| ✅ | Mass assignment: every write takes only allow-listed fields (role, approval, online status, fares, other people's ids can't be set), proven by tests |
+| ✅ | A rider cancelling a shared car takes only themselves out; others keep their ride |
+| ✅ | Ratings only between people who actually took the trip |
+| ✅ | SOS links are per rider, show only that rider, and expire 24 h after the ride ends (`TRACKING_LINK_TTL_HOURS`) |
+| ✅ | Contact numbers stop with the trip: no driver number on a cancelled ride; no rider number once they've left the car |
+| ✅ | Table-driven cross-user tests for every route and socket event (rider vs rider, driver vs driver, rider vs admin) |
 
-## Stage 2 — Per-person rate limiting ⬜
+## Stage 2 — Per-person rate limiting 🔶 (branch `security-stage2-rate-limits`)
 
 | | Item |
 |---|---|
-| ⬜ | Report of the current limits (key, numbers, store) |
-| ⬜ | Limits keyed to the person (phone for OTP, user id when signed in, token for `/track`), IP only as a generous backstop |
-| ⬜ | `trustProxy` proven by a test to give the real client IP behind Render |
-| ⬜ | Limits on every costly route; SOS never blocks a first alert; driver location throttled, not disconnected |
-| ⬜ | 429s carry `Retry-After` and `retryAfterSeconds`; apps show "Try again in X minutes" and a 60 s resend countdown |
-| ⬜ | One store interface (in-memory now, Redis-ready), documented |
-| ⬜ | Admin lookup and reset of a phone's limits, audit-logged |
-| ⬜ | Looser limits in development/test only |
-| ⬜ | Tests: user A hitting a limit never affects user B, even on the same IP; SOS guarantee; `Retry-After` |
+| 🔶 | Report of the limits before this stage (key, numbers, store): [rate-limits.md](rate-limits.md#before-stage-2-2026-10-15) — they were effectively one bucket for the whole app |
+| 🔶 | Limits keyed to the person (phone before login, account after, link for `/track`); IP only as a generous backstop on routes nobody is signed in to |
+| 🔶 | Real client IP behind Render (trust private + Cloudflare ranges, not a hop count), proven by a test; the IP backstop switches itself off rather than ever pooling people |
+| 🔶 | Limits on every costly route (codes, refresh, booking, cancel, accept/decline, ratings, profile, push tokens, uploads, deletion, payments, tracking pages, sockets); SOS never refused, only repeat texts held back; driver GPS throttled, never disconnected |
+| 🔶 | Every 429 has `Retry-After` and `retryAfterSeconds`; rider, driver and admin apps say "Try again in X"; code screens count down 60 s to "Resend code" |
+| 🔶 | One store interface (in memory now, Redis-ready), documented |
+| 🔶 | Admin "Rate limits" screen: look up a number, clear it; both audit-logged |
+| 🔶 | 10x looser in development and tests; production can't be loosened |
+| 🔶 | Tests: A using up any limit never affects B, even on the same IP; SOS guarantee; `Retry-After` |
 
 ## Stage 3 — Admin protection and secrets ⬜
 
@@ -77,18 +77,24 @@ Updated at the end of each stage.
 
 ## Things only you can do by hand
 
-**Now (Stage 1)**
+**Now (Stage 2)**
 
-1. **Before merging the Stage 1 PR,** apply migration
-   `apps/server/prisma/migrations/20261015180000_tracking_links` to production,
-   the same way you apply other migrations. It only adds a table, so it is
-   safe to apply while the current server is running. If the new server
-   starts without it, SOS fails.
-2. **After merging,** if any rider or driver build is installed on phones,
-   publish an over-the-air update for both apps
-   ([releasing.md](../runbooks/releasing.md)): `bash scripts/eas-update.sh rider production "…"`,
-   then the same for `driver`. JavaScript only, so OTA is fine.
-3. Optional: set `TRACKING_LINK_TTL_HOURS` on Render if 24 hours is not right.
+1. **Before or right after merging:** on Render → the server → Environment,
+   **delete `TRUST_PROXY`** if it is there (`render.yaml` used to set it to
+   `1`). Also delete any old `RATE_LIMIT_GLOBAL_MAX`, `RATE_LIMIT_OTP_REQUEST`,
+   `RATE_LIMIT_OTP_VERIFY`, `RATE_LIMIT_LOGIN`, `RATE_LIMIT_SIGNUP`,
+   `RATE_LIMIT_REFRESH`, `RATE_LIMIT_RIDE_CREATE`, `RATE_LIMIT_USSD_CALLBACK`,
+   `RATE_LIMIT_UPLOAD_SIGNATURE`, `RATE_LIMIT_SOS`, `RATE_LIMIT_RIDE_CANCEL` (no longer read).
+2. **After the deploy:** in Render's Logs, find `client_ip_check` and check it
+   says `"resolvedToClient":true` ([rate-limits.md](rate-limits.md#the-real-client-ip-behind-render)).
+3. **After merging,** publish an over-the-air update for both apps (the
+   resend countdown and "Try again in X" messages):
+   `bash scripts/eas-update.sh rider production "…"`, then `driver`.
+   The admin site redeploys by itself.
+
+**Stage 1 (PR #36, merged):** migration `20261015180000_tracking_links` must
+be applied to production, or SOS fails; if it wasn't done before the merge,
+do it now. If no OTA update went out after Stage 1, step 3 covers both stages.
 
 **Later stages** (details come with each stage)
 

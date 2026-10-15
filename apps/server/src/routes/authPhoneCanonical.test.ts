@@ -14,7 +14,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { prisma } from "../db/prisma";
 import { registerAuthRoutes } from "./auth";
 import { CapturingOtpService } from "../services/auth/testFixtures";
-import { OTP } from "../services/auth/constants";
+import { RULES } from "../rateLimit/rules";
 
 let app: FastifyInstance;
 let otpService: CapturingOtpService;
@@ -96,28 +96,25 @@ describe("OTP storage", () => {
     createdPhones.push(canonical);
 
     const spellings = ["0548608162", "+233548608162", "233548608162", "054 860 8162"];
+    const allowance = RULES.otpCooldown.max;
     const statuses: number[] = [];
 
-    for (const form of spellings) {
+    for (let i = 0; i <= allowance; i++) {
       const res = await app.inject({
         method: "POST",
         url: "/auth/request-otp",
-        payload: { phone: form, purpose: "SIGNUP" },
+        payload: { phone: spellings[i % spellings.length], purpose: "SIGNUP" },
       });
       statuses.push(res.statusCode);
     }
 
-    // The first OTP.OTP_MAX_SENDS_PER_15MIN succeed; the next is refused,
-    // even though it is spelled differently from all the others.
-    expect(statuses.slice(0, OTP.OTP_MAX_SENDS_PER_15MIN)).toEqual(
-      new Array(OTP.OTP_MAX_SENDS_PER_15MIN).fill(200),
-    );
-    expect(statuses[OTP.OTP_MAX_SENDS_PER_15MIN]).toBe(429);
+    // The number's allowance is shared by every spelling of it: the next
+    // request is refused, however it is spelled.
+    expect(statuses.slice(0, allowance)).toEqual(new Array(allowance).fill(200));
+    expect(statuses[allowance]).toBe(429);
 
     // And every row that was written is keyed on the canonical spelling.
-    expect(await prisma.otpCode.count({ where: { phone: canonical } })).toBe(
-      OTP.OTP_MAX_SENDS_PER_15MIN,
-    );
+    expect(await prisma.otpCode.count({ where: { phone: canonical } })).toBe(allowance);
   });
 });
 

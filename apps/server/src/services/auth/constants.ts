@@ -7,10 +7,8 @@ export const OTP = {
   OTP_LENGTH: 6,
   /** How long an OTP code is valid for after being sent. */
   OTP_TTL_MINUTES: 5,
-  /** Max OTP sends to a single phone within a rolling 15-minute window. */
-  OTP_MAX_SENDS_PER_15MIN: 3,
-  /** Max OTP sends to a single phone within a rolling 1-hour window. */
-  OTP_MAX_SENDS_PER_HOUR: 5,
+  // How often a number may be sent a code, or check one, is a rate limit:
+  // see src/rateLimit/rules.ts (otp.*).
   /** Max verify attempts per OTP before it is invalidated. */
   OTP_MAX_VERIFY_ATTEMPTS: 5,
 } as const;

@@ -166,12 +166,13 @@ services:
       - key: DEMO_OTP_CORS_ORIGINS
         sync: false
 
-      # Number of trusted proxy hops in front of the app. Render terminates
-      # TLS at exactly one, so 1 is correct. Do NOT set this to "true" — that
-      # trusts the whole X-Forwarded-For chain, letting any client spoof its
-      # IP and bypass every per-IP rate limit. May also be an IP/CIDR list.
-      - key: TRUST_PROXY
-        value: "1"
+      # TRUST_PROXY is deliberately NOT set. Unset, production trusts
+      # private networks and Cloudflare's ranges, which finds the real client
+      # behind Render's chain (client -> Cloudflare -> Render's load balancer
+      # -> us). It used to be "1" here, which made every request look like
+      # the load balancer: every per-IP limit was one bucket for the whole
+      # app. If the dashboard still has TRUST_PROXY, delete it. See
+      # docs/security/rate-limits.md.
 
       # ── Safety (Phase 4) ───────────────────────────────────────────────────
 

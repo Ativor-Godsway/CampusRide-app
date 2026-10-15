@@ -215,6 +215,13 @@ Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each
 offer, so changing it needs no app release.
 
+Rate limits: every limit is a `RATE_LIMIT_*` variable with a sensible default
+(full list: [docs/security/rate-limits.md](docs/security/rate-limits.md)).
+Leave them unset unless a limit needs changing. **Don't set `TRUST_PROXY`**:
+unset, the server finds the real client IP behind Cloudflare and Render's load
+balancer. After each deploy, the log line `client_ip_check` should say
+`"resolvedToClient":true`.
+
 SOS tracking links: `TRACKING_LINK_TTL_HOURS` (default 24, 1–168) — how long
 a link texted by an SOS keeps working after the ride ends. While the ride is
 going on it always works. See

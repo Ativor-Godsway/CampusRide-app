@@ -3,19 +3,6 @@
  * (see routes/auth.ts).
  */
 
-/** Thrown by requestOtp when a phone has hit the 15-min or 1-hour send limit. */
-export class OtpRateLimitExceededError extends Error {
-  readonly phone: string;
-  readonly window: "15min" | "1hour";
-
-  constructor(phone: string, window: "15min" | "1hour") {
-    super(`OTP send rate limit exceeded for ${phone} (${window} window)`);
-    this.name = "OtpRateLimitExceededError";
-    this.phone = phone;
-    this.window = window;
-  }
-}
-
 /**
  * Thrown by verifyOtp when there is no matching unconsumed OTP, the code is
  * wrong, or the OTP has just been invalidated by exceeding max attempts.

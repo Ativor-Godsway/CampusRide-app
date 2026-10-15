@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
+import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
 import {
@@ -7,17 +7,10 @@ import {
   removePushToken,
 } from "../services/push/pushService";
 
-/** Per user, per 15 minutes: an app registers on each launch, rarely more. */
-const PUSH_TOKEN_RATE_MAX = 30;
+import { RULES } from "../rateLimit/rules";
 
-const perUser = {
-  rateLimit: {
-    max: PUSH_TOKEN_RATE_MAX,
-    timeWindow: "15 minutes",
-    hook: "preHandler" as const,
-    keyGenerator: (request: FastifyRequest) => `user:${request.user?.userId ?? request.ip}`,
-  },
-};
+/** Per account: an app registers on each launch, rarely more. */
+const perUser = { limits: { user: [RULES.pushToken] } };
 
 /**
  * Push notification tokens (services/push).

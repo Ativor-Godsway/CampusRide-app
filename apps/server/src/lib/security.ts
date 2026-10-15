@@ -1,3 +1,5 @@
+import { BlockList, isIP } from "node:net";
+
 /**
  * Pure helpers for the transport-level security knobs wired up in index.ts.
  * Kept out of index.ts (and free of process.env reads) so both can be unit
@@ -49,28 +51,107 @@ export function resolveCorsOrigin(allowlist: string[], nodeEnv: string): CorsOri
 }
 
 /**
+ * Addresses that are never a phone on the internet: this machine, private
+ * networks (Render's internal load balancers), link-local, and carrier-grade
+ * NAT space (which is translated before it reaches the internet). In
+ * proxy-addr's keyword form where it has one.
+ */
+export const PRIVATE_PROXY_RANGES = ["loopback", "linklocal", "uniquelocal", "100.64.0.0/10"] as const;
+
+/**
+ * Cloudflare's edge. Every request to a Render service passes through it
+ * (client -> Cloudflare -> Render's load balancer -> us), and each hop
+ * appends to X-Forwarded-For. From https://www.cloudflare.com/ips/, checked
+ * 2026-10-15; the list changes rarely. A missing range only means requests
+ * through it skip the IP backstop (see isProxyAddress) — never a shared bucket.
+ */
+export const CLOUDFLARE_RANGES = [
+  "173.245.48.0/20",
+  "103.21.244.0/22",
+  "103.22.200.0/22",
+  "103.31.4.0/22",
+  "141.101.64.0/18",
+  "108.162.192.0/18",
+  "190.93.240.0/20",
+  "188.114.96.0/20",
+  "197.234.240.0/22",
+  "198.41.128.0/17",
+  "162.158.0.0/15",
+  "104.16.0.0/13",
+  "104.24.0.0/14",
+  "172.64.0.0/13",
+  "131.0.72.0/22",
+  "2400:cb00::/32",
+  "2606:4700::/32",
+  "2803:f800::/32",
+  "2405:b500::/32",
+  "2405:8100::/32",
+  "2a06:98c0::/29",
+  "2c0f:f248::/32",
+] as const;
+
+/** The production default for TRUST_PROXY: the proxies a Render service sits behind. */
+export const RENDER_TRUSTED_PROXIES = [...PRIVATE_PROXY_RANGES, ...CLOUDFLARE_RANGES].join(",");
+
+/**
  * Resolves Fastify's `trustProxy`.
  *
- * `true` (the previous value) trusts the ENTIRE X-Forwarded-For chain, so a
- * client can spoof its own IP by sending the header — which silently defeats
- * every per-IP rate limit in config.rateLimit. A hop count trusts only the
- * proxies we actually run behind (Render terminates TLS at exactly one), so
- * request.ip is the address that proxy observed and cannot be forged.
+ * request.ip must be the CLIENT, because the IP backstop counts by it. Fastify
+ * walks X-Forwarded-For from the right, skipping addresses it trusts, and
+ * stops at the first one it doesn't: that is the client.
+ *
+ * It used to trust ONE hop. Behind Render the chain is client -> Cloudflare
+ * -> Render's internal load balancer -> us, so one hop made request.ip the
+ * load balancer's private address for every request — every "per-IP" limit
+ * was one bucket shared by the whole app. Trusting the proxy RANGES instead
+ * finds the client however many hops there are, and a client who sends its
+ * own X-Forwarded-For only adds entries to the left of the ones the proxies
+ * append, which the walk never reaches.
  *
  * TRUST_PROXY accepts:
- *   - unset     -> 1 in production (Render's single hop), false elsewhere.
+ *   - unset     -> RENDER_TRUSTED_PROXIES in production, false elsewhere.
  *   - a number  -> that many trusted hops.
- *   - anything else -> passed through to Fastify as an IP/CIDR allowlist
- *                      (e.g. "10.0.0.0/8,192.168.0.0/16").
+ *   - anything else -> an IP/CIDR list ("10.0.0.0/8,192.168.0.0/16").
  */
 export function resolveTrustProxy(raw: string | undefined, nodeEnv: string): number | string | boolean {
   if (raw === undefined || raw.trim() === "") {
-    return nodeEnv === "production" ? 1 : false;
+    return nodeEnv === "production" ? RENDER_TRUSTED_PROXIES : false;
   }
   const trimmed = raw.trim();
   const asNumber = Number(trimmed);
   if (Number.isInteger(asNumber) && asNumber >= 0) return asNumber;
   return trimmed;
+}
+
+const proxyBlockList = (() => {
+  const list = new BlockList();
+  const add = (cidr: string) => {
+    const [address, bits] = cidr.split("/") as [string, string];
+    list.addSubnet(address, Number(bits), address.includes(":") ? "ipv6" : "ipv4");
+  };
+  // proxy-addr's keywords, spelled out.
+  for (const cidr of ["127.0.0.0/8", "::1/128", "169.254.0.0/16", "fe80::/10", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"]) {
+    add(cidr);
+  }
+  for (const cidr of [...PRIVATE_PROXY_RANGES, ...CLOUDFLARE_RANGES]) if (cidr.includes("/")) add(cidr);
+  return list;
+})();
+
+/** "::ffff:10.1.2.3" -> "10.1.2.3": an IPv4 address seen through an IPv6 socket. */
+export function plainIp(ip: string): string {
+  return ip.startsWith("::ffff:") && ip.includes(".") ? ip.slice("::ffff:".length) : ip;
+}
+
+/**
+ * True for an address that belongs to a proxy or a private network, not to a
+ * client on the internet. Such an address can't be a person's — it is shared
+ * by everyone behind that proxy — so it is never used as an IP-limit key.
+ */
+export function isProxyAddress(ip: string): boolean {
+  const plain = plainIp(ip);
+  const family = isIP(plain);
+  if (family === 0) return true;
+  return proxyBlockList.check(plain, family === 6 ? "ipv6" : "ipv4");
 }
 
 /**

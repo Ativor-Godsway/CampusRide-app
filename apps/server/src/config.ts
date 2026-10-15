@@ -21,6 +21,25 @@ dotenv.config({ path: path.join(serverRoot, ".env") });
 
 export const APP_NAME = "CampusRide";
 
+/** A positive whole number from the environment, or the default when unset or not valid. */
+function positive(name: string, fallback: number): number {
+  return positiveInt(process.env[name], fallback);
+}
+
+function positiveInt(raw: string | undefined, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+/**
+ * How much looser every rate limit is: 10x by default in development and
+ * test (RATE_LIMIT_MULTIPLIER changes it), and ALWAYS 1 in production — no
+ * setting can loosen production's limits by accident.
+ */
+export function rateLimitMultiplier(nodeEnv: string, raw: string | undefined): number {
+  return nodeEnv === "production" ? 1 : positiveInt(raw, 10);
+}
+
 /**
  * First value that is set AND not blank. `??` alone is wrong for the CORS
  * fallback: a var set to "" in a dashboard is not null/undefined, so it would
@@ -69,44 +88,77 @@ export const config = {
     smsSenderId: process.env.MOOLRE_SMS_SENDER_ID ?? "",
   },
   /**
-   * Rate-limit ceilings (max requests per IP per window). Env-overridable so
-   * they can be tuned on Render without a redeploy — the windows are fixed in
-   * code (see index.ts / route configs), only the max counts are configurable.
-   * All default to the values agreed in the Phase-1 plan.
+   * Rate limits (src/rateLimit). Each one is counted per PERSON — the phone
+   * number before login, the account after — with the client's IP only as a
+   * generous backstop on routes nobody is signed in to. Every number can be
+   * changed on Render without a redeploy of code; the windows are fixed.
+   * docs/security/rate-limits.md explains each one.
    */
   rateLimit: {
-    /** Global fallback: any route without its own override. Per minute. */
-    globalMax: Number(process.env.RATE_LIMIT_GLOBAL_MAX ?? 100),
-    /** POST /auth/request-otp — per 15 min. Layered ON TOP of per-phone caps. */
-    otpRequestMax: Number(process.env.RATE_LIMIT_OTP_REQUEST ?? 5),
-    /** POST /auth/verify-otp — per 15 min. On top of the 5-attempts-per-OTP cap. */
-    otpVerifyMax: Number(process.env.RATE_LIMIT_OTP_VERIFY ?? 10),
-    /** POST /auth/login — per 15 min. */
-    loginMax: Number(process.env.RATE_LIMIT_LOGIN ?? 10),
-    /** POST /auth/signup — per 15 min. */
-    signupMax: Number(process.env.RATE_LIMIT_SIGNUP ?? 10),
-    /** POST /auth/refresh — per 15 min (higher: legitimate silent re-auth). */
-    refreshMax: Number(process.env.RATE_LIMIT_REFRESH ?? 30),
-    /** POST /routes/legs — per user, per 15 min (each may call OSRM). */
-    routeLegsMax: Number(process.env.RATE_LIMIT_ROUTE_LEGS ?? 120),
-    /** POST /rides (create) — per 15 min. */
-    rideCreateMax: Number(process.env.RATE_LIMIT_RIDE_CREATE ?? 20),
-    /** POST /rides/:id/initiate-payment — per 15 min (each hits Moolre). */
-    paymentInitMax: Number(process.env.RATE_LIMIT_PAYMENT_INIT ?? 15),
-    /** POST /ussd/callback — per minute (a USSD session fires many keypresses). */
-    ussdCallbackMax: Number(process.env.RATE_LIMIT_USSD_CALLBACK ?? 60),
-    /** POST /uploads/driver-photo/signature — per 15 min (each authorizes a Cloudinary write). */
-    uploadSignatureMax: Number(process.env.RATE_LIMIT_UPLOAD_SIGNATURE ?? 10),
     /**
-     * POST /rides/:id/sos — per 15 min. Each SOS sends a real SMS, so this is
-     * bounded, but set high enough that a frightened rider tapping the button
-     * repeatedly is never the person it blocks.
+     * Every maximum is multiplied by this outside production (default 10),
+     * so local work and the test suite never trip a limit by accident.
+     * Production always uses the real numbers, whatever this says.
      */
-    sosMax: Number(process.env.RATE_LIMIT_SOS ?? 20),
-    /** POST /rides/:id/cancel — per 15 min, PER USER (not per IP). */
-    rideCancelMax: Number(process.env.RATE_LIMIT_RIDE_CANCEL ?? 20),
-    /** POST /rides/:id/switch — per 15 min, PER USER (not per IP). */
-    rideSwitchMax: Number(process.env.RATE_LIMIT_RIDE_SWITCH ?? 10),
+    multiplier: rateLimitMultiplier(NODE_ENV, process.env.RATE_LIMIT_MULTIPLIER),
+
+    // Login codes, per phone number.
+    /** Seconds between two codes to the same number (the app's "Resend code" countdown). */
+    otpCooldownSeconds: positive("RATE_LIMIT_OTP_COOLDOWN_SECONDS", 60),
+    otpSendPer15Min: positive("RATE_LIMIT_OTP_SEND_15M", 5),
+    otpSendPer24h: positive("RATE_LIMIT_OTP_SEND_24H", 10),
+    /** Code checks per number (on top of 5 wrong tries burning a code). */
+    otpVerifyPer15Min: positive("RATE_LIMIT_OTP_VERIFY_15M", 10),
+    /** The same, stricter, for a number that belongs to an ADMIN account. */
+    adminOtpSendPer15Min: positive("RATE_LIMIT_ADMIN_OTP_SEND_15M", 3),
+    adminOtpSendPer24h: positive("RATE_LIMIT_ADMIN_OTP_SEND_24H", 6),
+    adminOtpVerifyPer15Min: positive("RATE_LIMIT_ADMIN_OTP_VERIFY_15M", 5),
+    /** Sign-ups and log-ins per number. */
+    loginPer15Min: positive("RATE_LIMIT_LOGIN_15M", 10),
+    /** Token refreshes per login (one rotation chain) and per account. */
+    refreshPerSession15Min: positive("RATE_LIMIT_REFRESH_SESSION_15M", 10),
+    refreshPerUser15Min: positive("RATE_LIMIT_REFRESH_USER_15M", 30),
+
+    // Signed-in routes, per account.
+    /** Any signed-in route without a tighter limit of its own. The busiest screen makes ~30 a minute. */
+    userPerMinute: positive("RATE_LIMIT_USER_PER_MINUTE", 120),
+    rideCreatePerHour: positive("RATE_LIMIT_RIDE_CREATE_HOUR", 12),
+    rideCancelPerHour: positive("RATE_LIMIT_RIDE_CANCEL_HOUR", 12),
+    rideSwitchPer15Min: positive("RATE_LIMIT_RIDE_SWITCH", 10),
+    driverAcceptPer15Min: positive("RATE_LIMIT_DRIVER_ACCEPT_15M", 60),
+    driverDeclinePer15Min: positive("RATE_LIMIT_DRIVER_DECLINE_15M", 120),
+    ratingPerHour: positive("RATE_LIMIT_RATING_HOUR", 20),
+    profilePerHour: positive("RATE_LIMIT_PROFILE_HOUR", 20),
+    pushTokenPer15Min: positive("RATE_LIMIT_PUSH_TOKEN_15M", 30),
+    /** Each authorizes a write into our Cloudinary account. */
+    uploadPerHour: positive("RATE_LIMIT_UPLOAD_HOUR", 10),
+    accountDeletePerHour: positive("RATE_LIMIT_ACCOUNT_DELETE_HOUR", 5),
+    /** POST /routes/legs — each may call OSRM. */
+    routeLegsPer15Min: positive("RATE_LIMIT_ROUTE_LEGS", 120),
+    /** POST /rides/:id/initiate-payment — each hits Moolre. */
+    paymentInitPer15Min: positive("RATE_LIMIT_PAYMENT_INIT", 15),
+
+    // Everything else.
+    /** GET /track/:token, per link. The page refreshes itself every 15 s. */
+    trackPerLinkPer15Min: positive("RATE_LIMIT_TRACK_15M", 120),
+    /**
+     * SOS is never refused. A repeat press on the same ride within this many
+     * minutes doesn't text the same people again (SMS costs money); the
+     * first always goes out.
+     */
+    sosRepeatSmsMinutes: positive("RATE_LIMIT_SOS_REPEAT_MINUTES", 2),
+    /** Driver GPS over the socket: at most one relayed per this many seconds per driver; extras are dropped. */
+    driverLocationSeconds: positive("RATE_LIMIT_DRIVER_LOCATION_SECONDS", 2),
+    /** Socket ride subscriptions per account. */
+    socketSubscribePerMinute: positive("RATE_LIMIT_SOCKET_SUBSCRIBE_MINUTE", 60),
+    /** USSD keypresses per subscriber (dormant while ENABLE_USSD is off). */
+    ussdPerSubscriberPerMinute: positive("RATE_LIMIT_USSD_MINUTE", 30),
+
+    // The IP backstop: only on routes nobody is signed in to, high enough
+    // that a whole hostel on one Wi-Fi never meets it.
+    ipPublicPer15Min: positive("RATE_LIMIT_IP_PUBLIC_15M", 1000),
+    /** Login codes sent from one IP to any numbers: stops a bot texting every number in Ghana on our credit. */
+    ipOtpSendPer15Min: positive("RATE_LIMIT_IP_OTP_SEND_15M", 200),
   },
   /**
    * Selects the OTP delivery provider. One of "moolre" | "mnotify" | "dummy".

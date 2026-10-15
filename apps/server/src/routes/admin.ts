@@ -12,6 +12,8 @@ import {
 import { requireAuth, requireAdmin } from "../middleware/auth";
 import { getActiveZones } from "../services/zones/zoneCache";
 import { clearPlaceCache } from "../services/places/placeCache";
+import { normalizePhone } from "../lib/phone";
+import { clearPersonLimits, personLimitStatus } from "../rateLimit/admin";
 
 /**
  * Phase 5 admin surface. Closes the gap where `Driver.isApproved` was enforced
@@ -184,7 +186,61 @@ function describePlaceChange(
   return parts.join("; ");
 }
 
+/** The account behind a number, if any, for the rate-limit routes. */
+async function accountFor(prisma: PrismaClient, phone: string) {
+  return prisma.user.findUnique({ where: { phone }, select: { id: true, name: true, role: true } });
+}
+
 export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient): void {
+  // ─── Rate limits ─────────────────────────────────────────────────────────
+  //
+  // For "I can't log in" calls: what a phone number's limits look like now,
+  // and a way to clear them. Both are audit-logged — even looking shows when
+  // someone has been trying to log in. Limits are per number and per account
+  // (src/rateLimit), so clearing one person never touches anyone else.
+
+  /** `?phone=` in any spelling. Lists only the limits in use, blocked ones first. */
+  app.get("/admin/rate-limits", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const { phone: raw } = (request.query ?? {}) as { phone?: unknown };
+    const phone = typeof raw === "string" ? normalizePhone(raw) : null;
+    if (!phone) return reply.code(400).send({ error: "phone must be a Ghanaian number" });
+
+    const account = await accountFor(prisma, phone);
+    const limits = await personLimitStatus(phone, account?.id ?? null);
+    await prisma.adminAuditLog.create({
+      data: { actor: request.user!.userId, action: "rate_limit.view", target: account?.id ?? phone },
+    });
+    return reply.send({ phone, account, limits });
+  });
+
+  /** Body `{ phone }`. Clears every limit counted against that number and its account. */
+  app.post("/admin/rate-limits/clear", { preHandler: requireAuth }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const { phone: raw } = (request.body ?? {}) as { phone?: unknown };
+    const phone = typeof raw === "string" ? normalizePhone(raw) : null;
+    if (!phone) return reply.code(400).send({ error: "phone must be a Ghanaian number" });
+
+    const account = await accountFor(prisma, phone);
+    const cleared = await clearPersonLimits(phone, account?.id ?? null);
+    const reason = cleared.length
+      ? cleared.map((l) => `${l.name} ${l.used}/${l.max}${l.blocked ? " (blocked)" : ""}`).join(", ")
+      : "nothing in use";
+    await prisma.adminAuditLog.create({
+      data: {
+        actor: request.user!.userId,
+        action: "rate_limit.clear",
+        target: account?.id ?? phone,
+        reason: `${phone}: ${reason}`.slice(0, 1000),
+      },
+    });
+    request.log.info(
+      { event: "rate_limit_cleared", actor: request.user!.userId, target: account?.id ?? "no-account", cleared: cleared.length },
+      "Admin cleared a person's rate limits",
+    );
+    return reply.send({ phone, account, cleared });
+  });
+
   /** Drivers awaiting a decision: everything still sitting at isApproved=false. */
   app.get("/admin/drivers/pending", { preHandler: requireAuth }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;

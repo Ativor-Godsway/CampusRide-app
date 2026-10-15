@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/auth";
 import { config } from "../config";
 import { buildDriverPhotoUploadTicket } from "../services/uploads/cloudinarySignature";
 import { missingCloudinaryVars } from "../services/uploads/cloudinaryConfig";
+import { RULES } from "../rateLimit/rules";
 
 /** Failure kinds the app may report from the Cloudinary leg of an upload. */
 const REPORTABLE_FAILURE_KINDS = [
@@ -39,12 +40,10 @@ export function sanitizeUploadFailureMessage(message: unknown): string | null {
  */
 export function registerUploadRoutes(app: FastifyInstance): void {
   // Signing is cheap but each ticket authorizes a write into our Cloudinary
-  // account, so neither route is left on the global cap.
-  const rateLimit = { max: config.rateLimit.uploadSignatureMax, timeWindow: "15 minutes" };
-
+  // account, so tickets have their own per-driver limit.
   app.post(
     "/uploads/driver-photo/signature",
-    { preHandler: requireAuth, config: { rateLimit } },
+    { preHandler: requireAuth, config: { limits: { user: [RULES.upload] } } },
     async (request, reply) => {
       if (request.user?.role !== "DRIVER") {
         return reply
@@ -77,7 +76,7 @@ export function registerUploadRoutes(app: FastifyInstance): void {
 
   app.post(
     "/uploads/driver-photo/failure",
-    { preHandler: requireAuth, config: { rateLimit } },
+    { preHandler: requireAuth },
     async (request, reply) => {
       if (request.user?.role !== "DRIVER") {
         return reply

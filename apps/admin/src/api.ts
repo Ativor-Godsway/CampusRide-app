@@ -4,12 +4,16 @@
  * more moving parts than the whole screen count justifies.
  */
 
+import { rateLimitMessage } from "@rida/shared";
+
 const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
 export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** On a 429: whole seconds until the API will accept the request again. */
+    readonly retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -32,6 +36,15 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
 
   const text = await res.text();
   const body = text ? (JSON.parse(text) as unknown) : {};
+
+  if (res.status === 429) {
+    // "Too many attempts. Try again in 3 minutes." — from the body, or the
+    // Retry-After header if a proxy answered.
+    const fromBody = (body as { retryAfterSeconds?: unknown }).retryAfterSeconds;
+    const seconds =
+      typeof fromBody === "number" && fromBody > 0 ? fromBody : Number(res.headers.get("retry-after")) || 60;
+    throw new ApiError(rateLimitMessage(seconds), 429, Math.ceil(seconds));
+  }
 
   if (!res.ok) {
     const message =
@@ -201,4 +214,35 @@ export function createPlace(token: string, input: PlaceInput): Promise<{ place: 
 
 export function updatePlace(token: string, id: string, input: PlaceInput): Promise<{ place: AdminPlace }> {
   return request(`/admin/places/${id}`, { method: "PATCH", body: JSON.stringify(input) }, token);
+}
+
+// ── Rate limits ─────────────────────────────────────────────────────────────
+
+export interface PersonLimit {
+  name: string;
+  label: string;
+  /** Counted against the number itself, or its account. */
+  scope: "phone" | "account";
+  used: number;
+  max: number;
+  windowSeconds: number;
+  resetsInSeconds: number;
+  blocked: boolean;
+}
+
+export interface RateLimitLookup {
+  phone: string;
+  account: { id: string; name: string; role: string } | null;
+  limits: PersonLimit[];
+}
+
+export function getRateLimits(token: string, phone: string): Promise<RateLimitLookup> {
+  return request(`/admin/rate-limits?phone=${encodeURIComponent(phone)}`, {}, token);
+}
+
+export function clearRateLimits(
+  token: string,
+  phone: string,
+): Promise<{ phone: string; cleared: PersonLimit[] }> {
+  return request("/admin/rate-limits/clear", { method: "POST", body: JSON.stringify({ phone }) }, token);
 }
