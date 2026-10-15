@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import { OTP_RESEND_COOLDOWN_SECONDS, formatCountdown } from "@rida/shared";
+import {
+  GHANA_PHONE_EXAMPLE,
+  OTP_RESEND_COOLDOWN_SECONDS,
+  formatCountdown,
+  formatGhanaPhone,
+  normalizeGhanaPhone,
+} from "@rida/shared";
 import { ApiError, login, requestOtp, verifyOtp } from "../api";
 import { useAuth } from "../auth";
 
@@ -18,6 +24,9 @@ export function LoginScreen() {
   const { signIn, endedReason } = useAuth();
   const [step, setStep] = useState<"phone" | "code">("phone");
   const [phone, setPhone] = useState("");
+  // The number as the server knows it (+233XXXXXXXXX), from the shared parser:
+  // used for every step after "Send code", whatever was typed or pasted.
+  const [canonicalPhone, setCanonicalPhone] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +46,13 @@ export function LoginScreen() {
     setError(null);
     setBusy(true);
     try {
-      await requestOtp(phone.trim());
+      const canonical = normalizeGhanaPhone(phone);
+      if (!canonical) {
+        setError(GHANA_PHONE_EXAMPLE);
+        return;
+      }
+      setCanonicalPhone(canonical);
+      await requestOtp(canonical);
       setResendAt(Date.now() + OTP_RESEND_COOLDOWN_SECONDS * 1000);
       setStep("code");
     } catch (err) {
@@ -59,8 +74,8 @@ export function LoginScreen() {
     setError(null);
     setBusy(true);
     try {
-      const { verifiedToken } = await verifyOtp(phone.trim(), code.trim());
-      const result = await login(phone.trim(), verifiedToken);
+      const { verifiedToken } = await verifyOtp(canonicalPhone, code.trim());
+      const result = await login(canonicalPhone, verifiedToken);
 
       if (result.user.role !== "ADMIN") {
         setError("This account is not an administrator.");
@@ -106,7 +121,7 @@ export function LoginScreen() {
           </form>
         ) : (
           <form onSubmit={handleVerify}>
-            <label htmlFor="code">6-digit code sent to {phone}</label>
+            <label htmlFor="code">6-digit code sent to {formatGhanaPhone(canonicalPhone)}</label>
             <input
               id="code"
               inputMode="numeric"

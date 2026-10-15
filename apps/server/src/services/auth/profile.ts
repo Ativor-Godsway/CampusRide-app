@@ -1,4 +1,5 @@
 import type { PrismaClient, User } from "@prisma/client";
+import { compactPhoneInput, removeInvisibleCharacters } from "@rida/shared";
 
 /**
  * Thrown when a provided emergency-contact phone isn't a plausible number.
@@ -20,8 +21,9 @@ export class InvalidEmergencyContactError extends Error {
  * would silently cost someone their only safety contact.
  */
 function isPlausiblePhone(value: string): boolean {
-  const digits = value.replace(/[\s()-]/g, "");
-  return /^\+?\d{7,15}$/.test(digits);
+  // The same separators and invisible characters the login parser ignores
+  // (@rida/shared compactPhoneInput), so a pasted contact number works.
+  return /^\+?\d{7,15}$/.test(compactPhoneInput(value));
 }
 
 export interface UpdateRiderProfileInput {
@@ -79,7 +81,9 @@ export async function updateRiderProfile(
         : current.emergencyContactPhone;
 
     const name = rawName?.trim() ?? null;
-    const phone = rawPhone?.trim() ?? null;
+    // Stored as typed, minus characters nobody can see (they'd only confuse
+    // the SMS sender and the app showing it back).
+    const phone = rawPhone ? removeInvisibleCharacters(rawPhone).trim() : null;
 
     const clearing = (name === null || name === "") && (phone === null || phone === "");
 

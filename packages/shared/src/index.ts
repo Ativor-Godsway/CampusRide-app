@@ -40,3 +40,4 @@ export * from "./driver/rideOffers";
 export * from "./rides/tripView";
 export * from "./push/notifications";
 export * from "./api/rateLimit";
+export * from "./phone/ghanaPhone";

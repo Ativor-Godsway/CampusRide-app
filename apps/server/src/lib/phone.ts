@@ -1,3 +1,5 @@
+import { normalizeGhanaPhone } from "@rida/shared";
+
 /**
  * Phone number normalization — the canonical stored/looked-up form is
  * "+233XXXXXXXXX" (a "+" followed by Ghana's country code and a 9-digit
@@ -8,27 +10,16 @@
  */
 
 /**
- * Normalizes a Ghanaian phone number to "+233XXXXXXXXX". Accepts:
- *   - "+233XXXXXXXXX" (already canonical)
- *   - "233XXXXXXXXX"  (Moolre's USSD msisdn format)
- *   - "0XXXXXXXXX"    (local format, 10 digits)
- * Strips spaces and dashes before matching. Returns null if the input
- * doesn't resolve to a 9-digit Ghanaian subscriber number.
+ * Normalizes a Ghanaian phone number to "+233XXXXXXXXX", or null.
+ *
+ * This IS the shared parser in @rida/shared (normalizeGhanaPhone), which the
+ * login screens of every app use too, so the server and the apps can never
+ * disagree about a number: local (0…), international (+233…), 233… and
+ * 00233…, with any spaces, dashes, brackets or dots, and with the invisible
+ * characters phones and browsers add to copied or autofilled numbers.
  */
 export function normalizePhone(input: string): string | null {
-  const cleaned = input.replace(/[\s-]/g, "");
-
-  if (/^\+233\d{9}$/.test(cleaned)) {
-    return cleaned;
-  }
-  if (/^233\d{9}$/.test(cleaned)) {
-    return `+${cleaned}`;
-  }
-  if (/^0\d{9}$/.test(cleaned)) {
-    return `+233${cleaned.slice(1)}`;
-  }
-
-  return null;
+  return normalizeGhanaPhone(input);
 }
 
 /** True if `input` normalizes to a valid Ghanaian phone number. */
