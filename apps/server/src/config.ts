@@ -129,6 +129,8 @@ export const config = {
     vasKey: process.env.MOOLRE_VAS_KEY ?? "",
     /** Sender ID for SMS, must be pre-registered and approved with Moolre. */
     smsSenderId: process.env.MOOLRE_SMS_SENDER_ID ?? "",
+    /** Warn (Sentry + logs) when the SMS balance drops below this (services/sms/moolreBalance.ts). */
+    smsLowBalance: positive("MOOLRE_SMS_LOW_BALANCE", 100),
   },
   /**
    * Rate limits (src/rateLimit). Each one is counted per PERSON — the phone

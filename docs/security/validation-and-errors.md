@@ -107,7 +107,8 @@ An error nothing caught (an unhandled promise rejection or an uncaught
 exception) is logged, scrubbed, as `"event":"fatal"`, and the server shuts
 down as below and exits with code 1. Render then starts a fresh one. A
 process that has hit one can't be trusted to keep running correctly
-(`src/lib/fatal.ts`). Stage 5 also sends these to Sentry.
+(`src/lib/fatal.ts`). Each is also reported to Sentry
+([monitoring.md](monitoring.md)).
 
 A failure during startup (a missing setting, an unreachable database) is
 logged, scrubbed, as "Failed to start server", and exits with code 1.

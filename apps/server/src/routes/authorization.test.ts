@@ -50,6 +50,7 @@ type Access =
 
 const ROUTE_ACCESS: Record<string, Access> = {
   "GET /health": "public",
+  "GET /health/ready": "public",
   "POST /auth/request-otp": "public",
   "POST /auth/verify-otp": "public",
   "POST /auth/signup": "public",

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import { APP_NAME, config } from "../config";
+import { config } from "../config";
 import type { OtpService } from "../services/otp/OtpService";
 import type { PaymentService } from "../services/payment/PaymentService";
 import { registerAuthRoutes } from "./auth";
@@ -16,10 +16,10 @@ import { registerUploadRoutes } from "./uploads";
 import { registerSafetyRoutes } from "./safety";
 import { registerPlaceRoutes } from "./places";
 import { registerPushRoutes } from "./push";
+import { registerHealthRoutes } from "./health";
 import { installRateLimits } from "../rateLimit/http";
 import { installErrorHandling } from "../http/errors";
 import { useRequestValidation } from "../http/validation";
-import { noInput } from "../http/schemas";
 
 export interface RouteDeps {
   otpService: OtpService;
@@ -46,10 +46,8 @@ export function registerAllRoutes(
   installErrorHandling(app);
   installRateLimits(app);
 
-  // Unlimited: Render's health check and UptimeRobot poll it.
-  app.get("/health", { config: { limits: false }, schema: noInput }, async () => {
-    return { status: "ok", app: APP_NAME };
-  });
+  // /health (Render) and /health/ready (UptimeRobot): unlimited, see health.ts.
+  registerHealthRoutes(app, prisma);
 
   registerAuthRoutes(app, prisma, deps.otpService);
   registerDemoOtpRoutes(app, prisma, deps.otpService);

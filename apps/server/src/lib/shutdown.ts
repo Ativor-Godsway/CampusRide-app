@@ -8,6 +8,8 @@ export interface ShutdownDeps {
   /** The server's repeating jobs (the ride timeout sweep, push receipts). */
   timers: Array<ReturnType<typeof setInterval>>;
   disconnectDatabase: () => Promise<void>;
+  /** Sends any error reports still queued (Sentry), before the exit. */
+  flushReports?: () => Promise<void>;
   exit?: (code: number) => void;
   /** Past this, exit anyway (Render kills the process ~30 s after SIGTERM). */
   timeoutMs?: number;
@@ -60,6 +62,7 @@ export function createShutdown(
         setImmediate(() => deps.io?.disconnectSockets(true));
         await closing;
         await deps.disconnectDatabase();
+        await deps.flushReports?.();
         deps.log.info({ event: "shutdown_complete", reason }, "Shut down cleanly");
       } catch (err) {
         deps.log.error({ err, event: "shutdown_error", reason }, "Error while shutting down");

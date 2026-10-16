@@ -16,6 +16,7 @@ import {
 } from "@rida/shared";
 import { config } from "../../config";
 import { logger } from "../../lib/logger";
+import { alerts } from "../../lib/alerts";
 import { PushRateLimiter } from "./rateLimit";
 
 /**
@@ -169,6 +170,10 @@ export async function sendPush(prisma: PrismaClient, input: SendPushInput): Prom
     logger.info("push sent", { kind: input.kind, rideId: input.rideId, devices: tokens.length });
   } catch (err) {
     logger.error("push: send failed", { err, kind: input.kind, rideId: input.rideId });
+    alerts.pushFailures.record({
+      stage: "send",
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -188,11 +193,13 @@ async function handleTickets(
       return;
     }
     if (ticket.details?.error === "DeviceNotRegistered") dead.push(tokenId);
-    else
+    else {
       logger.warn("push: not accepted", {
         tokenId,
         error: ticket.details?.error ?? ticket.message,
       });
+      alerts.pushFailures.record({ stage: "send", error: ticket.details?.error ?? ticket.message });
+    }
   });
   await deleteTokens(prisma, dead, "ticket");
 }
@@ -236,11 +243,16 @@ export async function checkPushReceipts(
       pendingReceipts.delete(id);
       if (receipt.status === "ok") continue;
       if (receipt.details?.error === "DeviceNotRegistered") dead.push(pending.tokenId);
-      else
+      else {
         logger.warn("push: not delivered", {
           tokenId: pending.tokenId,
           error: receipt.details?.error ?? receipt.message,
         });
+        alerts.pushFailures.record({
+          stage: "delivery",
+          error: receipt.details?.error ?? receipt.message,
+        });
+      }
     }
     await deleteTokens(prisma, dead, "receipt");
   } catch (err) {

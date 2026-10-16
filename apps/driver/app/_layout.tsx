@@ -5,14 +5,20 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { DRIVER_DEEP_LINK_POLICY } from "@rida/shared";
 import {
   AuthProvider,
+  initMonitoring,
   installAppStateFocusManager,
   useClearQueryCacheOnAccountChange,
   useDeepLinkGuard,
+  withMonitoring,
 } from "@rida/mobile-shared";
 import { DriverPresenceProvider } from "../lib/presence";
 import { DriverLocationProvider } from "../lib/location";
 import { TripRuntime } from "../lib/tripRuntime";
 import { DriverPushNotifications } from "../lib/push";
+
+// Error and crash reporting (Sentry), when a DSN was built in: before
+// anything renders, so a crash on the first screen is reported too.
+initMonitoring("driver");
 
 const queryClient = new QueryClient();
 
@@ -40,7 +46,7 @@ function DeepLinkGuard() {
   return null;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   return (
     // Required for react-native-gesture-handler gestures (the trip screen's
     // slide-to-confirm) to work at all.
@@ -62,3 +68,5 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+export default withMonitoring(RootLayout);

@@ -181,6 +181,10 @@ export function checkProductionEnv(env: Env): EnvCheck {
       !blank(env.CLOUDINARY_API_SECRET));
   if (!cloudinary)
     warnings.push("Cloudinary is not configured: driver photo uploads will answer 503");
+  if (blank(env.SENTRY_DSN))
+    warnings.push(
+      "SENTRY_DSN is not set: errors and alerts are only logged, not sent to Sentry (DEPLOY.md, Monitoring)",
+    );
 
   return { errors, warnings };
 }

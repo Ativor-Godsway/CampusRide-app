@@ -9,7 +9,7 @@ fails if a route exists that is not in these tables, if a row names a route
 that no longer exists, or if the **Login** column disagrees with the code. Add
 the row in the same change as the route.
 
-Last reviewed: 2026-10-15 (pre-launch hardening, Stages 1–4).
+Last reviewed: 2026-10-16 (pre-launch hardening, Stages 1–5).
 
 ## How to read it
 
@@ -41,7 +41,8 @@ Last reviewed: 2026-10-15 (pre-launch hardening, Stages 1–4).
 
 | Route | Login | Roles | Ownership rule / what protects it | Rate limit |
 |---|---|---|---|---|
-| `GET /health` | No | — | Returns `{status, app}` only. Render's liveness check. | none (Render and UptimeRobot poll it) |
+| `GET /health` | No | — | Returns `{status, app}` only. Render's liveness check; never touches the database. | none (Render polls it) |
+| `GET /health/ready` | No | — | Also checks the database (`SELECT 1`, at most 3 s): `{status, app, database}`, 503 when it can't be reached. No error details. For UptimeRobot. | none (UptimeRobot polls it) |
 | `POST /auth/request-otp` | No | — | Sends a code to the phone given. | per number: 1 per 60 s, 5 / 15 min, 10 / 24 h (an admin's number: 3 / 15 min, 6 / 24 h); per IP: 200 codes / 15 min; IP backstop |
 | `POST /auth/verify-otp` | No | — | Returns a 5-minute verification token for that phone only. 5 wrong tries burns the code. | per number: 10 / 15 min (an admin's: 5); IP backstop |
 | `POST /auth/signup` | No | — | Needs a verification token for the same phone. Role can only be RIDER or DRIVER; a new driver is never approved. | per number: 10 / 15 min (with log-ins); IP backstop |
