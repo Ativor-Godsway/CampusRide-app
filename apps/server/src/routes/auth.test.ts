@@ -5,7 +5,15 @@ import { prisma } from "../db/prisma";
 import { config } from "../config";
 import { registerAuthRoutes } from "./auth";
 import { RULES } from "../rateLimit/rules";
-import { CapturingOtpService, cleanupOtpCodes, cleanupUser, uniqueTestPhone } from "../services/auth/testFixtures";
+import {
+  CapturingOtpService,
+  cleanupOtpCodes,
+  cleanupUser,
+  uniqueTestPhone,
+} from "../services/auth/testFixtures";
+import { setRateLimitStore } from "../rateLimit/limiter";
+import { MemoryRateLimitStore } from "../rateLimit/store";
+import { createTestDriver, createTestRide, cleanupRide } from "../services/ride/testFixtures";
 
 let app: FastifyInstance;
 let otpService: CapturingOtpService;
@@ -95,7 +103,12 @@ describe("auth routes — signup + login round trip", () => {
     const signupRes = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name: "Onboarded Driver", role: "DRIVER", verifiedToken: signupVerifiedToken },
+      payload: {
+        phone,
+        name: "Onboarded Driver",
+        role: "DRIVER",
+        verifiedToken: signupVerifiedToken,
+      },
     });
     expect(signupRes.statusCode).toBe(201);
     const signupBody = JSON.parse(signupRes.body);
@@ -349,7 +362,12 @@ describe("driver profile route", () => {
     const driverSignup = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone: driverPhone, name: "Driver Profile", role: "DRIVER", verifiedToken: driverVerifiedToken },
+      payload: {
+        phone: driverPhone,
+        name: "Driver Profile",
+        role: "DRIVER",
+        verifiedToken: driverVerifiedToken,
+      },
     });
     const driverBody = JSON.parse(driverSignup.body);
     userIds.push(driverBody.user.id);
@@ -373,7 +391,12 @@ describe("driver profile route", () => {
     const riderSignup = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone: riderPhone, name: "Rider Profile", role: "RIDER", verifiedToken: riderVerifiedToken },
+      payload: {
+        phone: riderPhone,
+        name: "Rider Profile",
+        role: "RIDER",
+        verifiedToken: riderVerifiedToken,
+      },
     });
     const riderBody = JSON.parse(riderSignup.body);
     userIds.push(riderBody.user.id);
@@ -395,29 +418,55 @@ describe("driver profile route", () => {
 });
 
 describe("DELETE /me", () => {
-  it("requires auth", async () => {
-    const res = await app.inject({ method: "DELETE", url: "/me" });
-    expect(res.statusCode).toBe(401);
-  });
-
-  it("anonymizes the account and ends the session", async () => {
+  /** A fresh rider, signed in. */
+  async function signedUpRider(name: string) {
     const phone = newPhone();
     const verifiedToken = await requestAndVerify(phone, "SIGNUP");
     const signupRes = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name: "Deleting User", role: "RIDER", verifiedToken },
+      payload: { phone, name, role: "RIDER", verifiedToken },
     });
     const { user, accessToken, refreshToken } = JSON.parse(signupRes.body);
     userIds.push(user.id);
+    return { user, phone, refreshToken, auth: { authorization: `Bearer ${accessToken}` } };
+  }
 
-    const res = await app.inject({
+  /** The app's two steps: ask for a code, then delete with it. */
+  async function deleteWithCode(auth: Record<string, string>, phone: string) {
+    // The sign-up code was sent seconds ago; one code a minute per number.
+    setRateLimitStore(new MemoryRateLimitStore(10_000, 0));
+    const sent = await app.inject({ method: "POST", url: "/me/deletion-code", headers: auth });
+    expect(sent.statusCode).toBe(200);
+    return app.inject({
       method: "DELETE",
       url: "/me",
-      headers: { authorization: `Bearer ${accessToken}` },
+      headers: auth,
+      payload: { code: otpService.codeFor(phone) },
     });
+  }
+
+  it("requires auth", async () => {
+    expect(
+      (await app.inject({ method: "DELETE", url: "/me", payload: { code: "123456" } })).statusCode,
+    ).toBe(401);
+    expect((await app.inject({ method: "POST", url: "/me/deletion-code" })).statusCode).toBe(401);
+  });
+
+  it("texts the code to the account's own phone, and says where (masked)", async () => {
+    const { phone, auth } = await signedUpRider("Code Asker");
+    setRateLimitStore(new MemoryRateLimitStore(10_000, 0));
+    const res = await app.inject({ method: "POST", url: "/me/deletion-code", headers: auth });
+    expect(res.json()).toEqual({ sent: true, phone: `+233*****${phone.slice(-3)}` });
+    expect(await prisma.otpCode.count({ where: { phone, purpose: "ACCOUNT_DELETION" } })).toBe(1);
+  });
+
+  it("closes the account with the right code and ends the session", async () => {
+    const { user, phone, refreshToken, auth } = await signedUpRider("Deleting User");
+
+    const res = await deleteWithCode(auth, phone);
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ deleted: true });
+    expect(res.json()).toEqual({ deleted: true, erasedAfter: expect.any(String) });
 
     // The refresh token is dead, so the session cannot be extended.
     const refreshRes = await app.inject({
@@ -430,23 +479,81 @@ describe("DELETE /me", () => {
     const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
     expect(row.deletedAt).not.toBeNull();
     expect(row.phone).not.toBe(phone);
+    expect(
+      await prisma.adminAuditLog.count({ where: { action: "account.delete", target: user.id } }),
+    ).toBe(1);
+  });
+
+  it("refuses without a code, or with a wrong one, and changes nothing", async () => {
+    const { user, auth } = await signedUpRider("Careful User");
+    const none = await app.inject({ method: "DELETE", url: "/me", headers: auth });
+    expect(none.statusCode).toBe(400);
+    expect(none.json().error).toMatch(/code/);
+
+    setRateLimitStore(new MemoryRateLimitStore(10_000, 0));
+    await app.inject({ method: "POST", url: "/me/deletion-code", headers: auth });
+    const wrong = await app.inject({
+      method: "DELETE",
+      url: "/me",
+      headers: auth,
+      payload: { code: "000000" },
+    });
+    expect(wrong.statusCode).toBe(400);
+    expect(wrong.json().error).toBe("That code isn't right. Check the text message and try again.");
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).deletedAt).toBeNull();
+  });
+
+  it("a login code can't confirm a deletion", async () => {
+    const { phone, auth } = await signedUpRider("Mixed Codes");
+    setRateLimitStore(new MemoryRateLimitStore(10_000, 0));
+    await app.inject({
+      method: "POST",
+      url: "/auth/request-otp",
+      payload: { phone, purpose: "LOGIN" },
+    });
+    const res = await app.inject({
+      method: "DELETE",
+      url: "/me",
+      headers: auth,
+      payload: { code: otpService.codeFor(phone) },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("is blocked while a ride is going on, with a friendly message, before any code is sent", async () => {
+    const { user: driver } = await createTestDriver();
+    const { ride, rider } = await createTestRide({
+      type: "LONE",
+      status: "MATCHED",
+      driverId: driver.id,
+    });
+    try {
+      for (const userId of [rider.id, driver.id]) {
+        const auth = {
+          authorization: `Bearer ${jwt.sign({ userId, role: userId === driver.id ? "DRIVER" : "RIDER", typ: "access" }, config.jwtSecret, { algorithm: "HS256" })}`,
+        };
+        const res = await app.inject({ method: "POST", url: "/me/deletion-code", headers: auth });
+        expect(res.statusCode).toBe(409);
+        expect(res.json()).toMatchObject({
+          error: expect.stringContaining("Finish or cancel it first"),
+          rideId: ride.id,
+        });
+      }
+      expect(
+        await prisma.otpCode.count({ where: { purpose: "ACCOUNT_DELETION", phone: rider.phone } }),
+      ).toBe(0);
+    } finally {
+      await cleanupRide(ride.id);
+    }
   });
 
   it("refuses the deleted account's still-unexpired access token from then on", async () => {
-    const phone = newPhone();
-    const verifiedToken = await requestAndVerify(phone, "SIGNUP");
-    const signupRes = await app.inject({
-      method: "POST",
-      url: "/auth/signup",
-      payload: { phone, name: "Twice Deleting", role: "RIDER", verifiedToken },
-    });
-    const { user, accessToken } = JSON.parse(signupRes.body);
-    userIds.push(user.id);
-
-    const auth = { authorization: `Bearer ${accessToken}` };
-    expect((await app.inject({ method: "DELETE", url: "/me", headers: auth })).statusCode).toBe(200);
+    const { phone, auth } = await signedUpRider("Twice Deleting");
+    expect((await deleteWithCode(auth, phone)).statusCode).toBe(200);
     // The token is unexpired but its account is closed: 401, like any dead session.
-    expect((await app.inject({ method: "DELETE", url: "/me", headers: auth })).statusCode).toBe(401);
+    expect(
+      (await app.inject({ method: "POST", url: "/me/deletion-code", headers: auth })).statusCode,
+    ).toBe(401);
     expect((await app.inject({ method: "GET", url: "/me", headers: auth })).statusCode).toBe(401);
   });
 });

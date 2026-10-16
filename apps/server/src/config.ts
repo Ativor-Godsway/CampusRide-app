@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import path from "node:path";
 import { resolveCloudinaryConfig } from "./services/uploads/cloudinaryConfig";
 import { normalizePhone } from "./lib/phone";
+import { ACCOUNT_DELETION_RETENTION_DAYS } from "@rida/shared";
 
 // Per-environment .env loading (dev/test/prod split — see docs/environments.md).
 // NODE_ENV picks the file: `.env.development` (default), `.env.test` (vitest
@@ -134,6 +135,12 @@ export const config = {
   },
   /** A ride still IN_PROGRESS after this many hours is completed by the sweep (services/ride/staleRides.ts). 1–24. */
   rideAutoCompleteHours: Math.min(24, positive("RIDE_AUTO_COMPLETE_HOURS", 3)),
+  /**
+   * How long a closed account's kept details (name, phone, a driver's plate
+   * and photo — for safety disputes) are held before they are erased, with
+   * the person's notes, exact pins and rating comments. 1–365, default 90.
+   */
+  accountDeletionRetentionDays: Math.min(365, positive("ACCOUNT_DELETION_RETENTION_DAYS", ACCOUNT_DELETION_RETENTION_DAYS)),
   /**
    * Rate limits (src/rateLimit). Each one is counted per PERSON — the phone
    * number before login, the account after — with the client's IP only as a

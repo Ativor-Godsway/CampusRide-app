@@ -92,6 +92,8 @@ enum PaymentRecordStatus {
 enum OtpPurpose {
   SIGNUP
   LOGIN
+  /// Confirms "delete my account" from the app (services/auth/deleteAccount.ts).
+  ACCOUNT_DELETION
 }
 
 enum PaymentMethod {
@@ -138,6 +140,30 @@ model User {
   rideRejections         RideRejection[]    @relation("DriverRejections")
   pushTokens             PushToken[]
   trackingLinks          TrackingLink[]
+  accountDeletion        AccountDeletion?
+}
+
+/// One per closed account. Closing an account hides the person at once (the
+/// User row shows placeholders); what is needed for a safety dispute or a
+/// police request (name, phone, a driver's plate and photo) is moved here,
+/// out of every table the apps or the admin site read, and erased at
+/// `purgeAfter` (ACCOUNT_DELETION_RETENTION_DAYS, default 90), together with
+/// the person's notes, exact pins and rating comments
+/// (services/auth/deleteAccount.ts, purgeDeletedAccounts).
+model AccountDeletion {
+  id           String    @id @default(cuid())
+  userId       String    @unique
+  requestedAt  DateTime  @default(now())
+  purgeAfter   DateTime
+  purgedAt     DateTime?
+  keptName     String?
+  keptPhone    String?
+  keptPlate    String?
+  keptPhotoUrl String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([purgeAfter])
 }
 
 model Driver {

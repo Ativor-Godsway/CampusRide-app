@@ -118,8 +118,8 @@ then: it's your number.
 via WebAuthn). They can't be phished at all, but take more work and need
 care with recovery. Worth doing once there is more than one admin.
 
-**Approved 2026-10-15, not built yet.** The TOTP version is built after
-Stage 6, as its own step.
+**Not built yet.** Decided 2026-10-16: **passkeys** rather than an
+authenticator-app code, built later, before public launch.
 
 ## Secrets in the git history (the repo is public)
 

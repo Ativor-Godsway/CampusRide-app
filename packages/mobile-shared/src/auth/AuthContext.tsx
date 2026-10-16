@@ -42,7 +42,7 @@ interface AuthContextValue {
    * signOut does. Rejects (without signing out) if the server refuses — e.g.
    * 409 while a ride is still in flight — so the caller can surface why.
    */
-  deleteAccount: () => Promise<void>;
+  deleteAccount: (code: string) => Promise<void>;
   refreshMe: () => Promise<void>;
 }
 
@@ -137,11 +137,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [clearLocalSession]);
 
-  const deleteAccount = useCallback(async () => {
+  const deleteAccount = useCallback(async (code: string) => {
     // Server first: if it refuses (409 active ride, network error), we must
     // NOT clear local state — the account still exists and the user is still
     // signed in.
-    await apiDeleteAccount();
+    await apiDeleteAccount(code);
     // The server deleted every push token of the account.
     setCurrentPushToken(null);
     await clearLocalSession();

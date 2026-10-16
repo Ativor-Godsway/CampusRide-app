@@ -42,7 +42,7 @@ Updated at the end of each stage.
 | ✅ | `ADMIN_PHONE_ALLOWLIST`: admin routes, admin login and admin session renewal refuse any number not on it, whatever the database says |
 | ✅ | Short admin sessions: 10-minute access token, signed out after 30 idle minutes, 8-hour hard maximum; no long-lived token |
 | ✅ | Every admin sign-in attempt recorded (time, IP, device), shown on the admin site's "Admin logins" tab |
-| ⬜ | Second factor for admins (authenticator-app code): **approved**, to be built after Stage 6 as its own step — [admin-and-secrets.md](admin-and-secrets.md#proposal-not-built-a-second-factor-for-admins) |
+| ⬜ | Second factor for admins: **passkeys** (Face ID, fingerprint or a security key), to be built later, **before public launch** — [admin-and-secrets.md](admin-and-secrets.md#proposal-not-built-a-second-factor-for-admins) |
 | ✅ | Admin site headers: strict CSP with `frame-ancestors 'none'`, HSTS, noindex and more; tested against the real build in Chrome |
 | ✅ | Full git history scanned (gitleaks, 205 commits, 40 branches + project-specific patterns): no secrets; the old prod `.env` backup is gone and was never committed |
 | ✅ | Production boot refuses a missing/weak `JWT_SECRET` and any missing required setting (names listed, values never logged) |
@@ -73,23 +73,43 @@ Updated at the end of each stage.
 | ✅ | Moolre SMS balance checked every 6 hours with a low-balance warning (undocumented Moolre call, so a manual check is documented too) |
 | ✅ | DEPLOY.md, step by step: Sentry projects and where each DSN goes, UptimeRobot switch, Neon compute-hour check, Moolre balance |
 
-## Stage 6 — Backups, recovery and load 🔶 (branch `security-stage6-recovery`)
+## Stage 6 — Backups, recovery and load ✅ (PR #45)
 
 | | Item |
 |---|---|
-| 🔶 | Backup and restore runbook: weekly `backup-YYYY-MM-DD` branch, rewinding within Neon's 6-hour window, switching to a backup branch, optional encrypted-at-rest `pg_dump` on the Mac — [backup-and-restore.md](../runbooks/backup-and-restore.md) |
-| ⬜ | Automatic off-site backups: proposed (encrypted weekly dump to a private bucket), **waiting for your OK** — it copies user data somewhere new |
-| 🔶 | Incident runbook: server down, database paused or unreachable, SMS or push stopped, bad deploy, bad app update, compromised admin — [incidents.md](../runbooks/incidents.md) |
-| 🔶 | In-memory state documented, with restart and multi-server effects — [in-memory-state.md](../architecture/in-memory-state.md); no restart can leave a ride stuck (all ride timing is in the database), and a startup sweep settles rides that ran out while the server was down |
-| 🔶 | A ride left in progress (driver never tapped "complete") is completed after 3 hours, so its riders can book again (`RIDE_AUTO_COMPLETE_HOURS`) |
-| 🔶 | The apps rejoin their ride's live updates after every reconnect (before, a rider lost the driver's position on the map after each deploy) |
-| 🔶 | Local load test, results in plain English — [load-test.md](../runbooks/load-test.md): one server handled ~750 very busy riders with no slowdown and ~1,250 before answers passed half a second (laptop); CPU gives out first |
-| 🔶 | Found by the load test and fixed: a missing index made every booking and active-ride check read the whole passenger table (10 ms → 0.4 ms); every database query was being logged in production |
-| 🔶 | Recommendations: Render Starter ($7/month) before launch, Standard when CPU passes ~70% at peak; Neon paid plan (compute hours); keep `connection_limit=5` (10 made no difference) |
+| ✅ | Backup and restore runbook: weekly `backup-YYYY-MM-DD` branch, rewinding within Neon's 6-hour window, switching to a backup branch, optional encrypted-at-rest `pg_dump` on the Mac — [backup-and-restore.md](../runbooks/backup-and-restore.md) |
+| ⬜ | Automatic off-site backups: proposed (encrypted weekly dump to a private bucket); **later**, by your decision (2026-10-16) — it copies user data somewhere new |
+| ✅ | Incident runbook: server down, database paused or unreachable, SMS or push stopped, bad deploy, bad app update, compromised admin — [incidents.md](../runbooks/incidents.md) |
+| ✅ | In-memory state documented, with restart and multi-server effects — [in-memory-state.md](../architecture/in-memory-state.md); no restart can leave a ride stuck (all ride timing is in the database), and a startup sweep settles rides that ran out while the server was down |
+| ✅ | A ride left in progress (driver never tapped "complete") is completed after 3 hours, so its riders can book again (`RIDE_AUTO_COMPLETE_HOURS`) |
+| ✅ | The apps rejoin their ride's live updates after every reconnect (before, a rider lost the driver's position on the map after each deploy) |
+| ✅ | Local load test, results in plain English — [load-test.md](../runbooks/load-test.md): one server handled ~750 very busy riders with no slowdown and ~1,250 before answers passed half a second (laptop); CPU gives out first |
+| ✅ | Found by the load test and fixed: a missing index made every booking and active-ride check read the whole passenger table (10 ms → 0.4 ms); every database query was being logged in production |
+| ✅ | Recommendations: Render Starter ($7/month) before launch, Standard when CPU passes ~70% at peak; Neon paid plan (compute hours); keep `connection_limit=5` (10 made no difference) |
+
+## After the hardening pass
+
+| | Item |
+|---|---|
+| 🔶 | In-app account deletion, both apps (store requirement): a screen saying what is deleted and kept, a texted code to confirm, refused during a ride; hidden at once, kept details erased after 90 days, audit-logged — [account-deletion.md](../account-deletion.md) (branch `account-deletion`) |
+| ⬜ | A web link for deletion requests without the app (Google Play asks for one) |
 
 ## Things only you can do by hand
 
-**Now (Stage 6)** — in this order:
+**Now (account deletion)**
+
+1. **Before merging,** apply migration
+   `apps/server/prisma/migrations/20261016150000_account_deletion` to
+   production, the same way as the others (it adds a table and a code type;
+   nothing existing changes).
+2. Phones get the new Delete account screen with the next builds (or any
+   over-the-air update after them). Until then, the old two-question delete
+   in the current builds answers "Enter the code we texted you… update the
+   app": it can't close an account without a code any more.
+3. Google Play's Data safety form asks for a deletion web link: see
+   [account-deletion.md](../account-deletion.md#for-the-app-store-forms).
+
+**Stage 6, if not done yet** — in this order:
 
 1. **Before merging,** apply migration
    `apps/server/prisma/migrations/20261016120000_ride_passenger_rider_index`
@@ -101,8 +121,7 @@ Updated at the end of each stage.
    ([backup-and-restore.md](../runbooks/backup-and-restore.md#every-week-make-a-backup-branch-5-minutes)).
 4. **Read the incident runbook once** ([incidents.md](../runbooks/incidents.md)),
    so you know where it is when you need it.
-5. **Decide** on automatic off-site backups (proposal in
-   backup-and-restore.md): yes or no, and which storage provider.
+5. ~~Decide on automatic off-site backups~~ — later (2026-10-16).
 6. The apps' fix for rejoining live updates after a deploy reaches phones
    with the new builds from Stage 5 (or any over-the-air update after them).
 
@@ -162,4 +181,4 @@ Updated at the end of each stage.
 
 **Next**
 
-- [ ] Set up the admin authenticator app (QR code, recovery codes) — after Stage 6
+- [ ] Admin passkeys (second factor) — built later, before public launch; you then register a passkey on the admin site

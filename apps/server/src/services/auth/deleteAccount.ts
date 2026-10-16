@@ -1,6 +1,30 @@
 import type { PrismaClient } from "@prisma/client";
 import { ACTIVE_RIDE_STATUSES } from "../ride/createRide";
+import { config } from "../../config";
+import { logger } from "../../lib/logger";
+import { driverPhotoPublicId, buildSignature } from "../uploads/cloudinarySignature";
 import { forgetAccount } from "./accountStatus";
+
+/**
+ * Closing an account, in two steps (app stores require in-app deletion):
+ *
+ * 1. **Now** (`deleteAccount`, confirmed with a code texted to the account's
+ *    phone): the person disappears. They can't sign in, every session and
+ *    push token is gone, their name and number are replaced with
+ *    placeholders everywhere the apps and the admin site look, a driver
+ *    leaves dispatch. Their phone number is free for a new account at once.
+ *    What a safety dispute or a police request could need — name, phone, a
+ *    driver's plate and photo — is moved to `AccountDeletion`, which nothing
+ *    in the apps or the admin site reads.
+ * 2. **After the retention period** (`purgeDeletedAccounts`,
+ *    ACCOUNT_DELETION_RETENTION_DAYS, default 90): those kept details are
+ *    erased, with the person's free-text notes, exact pickup and drop-off
+ *    pins, rating comments and a driver's photo on Cloudinary.
+ *
+ * Kept for good, without a name: trip records (when, which zones, the fare)
+ * and drivers' cash commission records — the business's books — and the
+ * audit log entries saying the account was closed and erased.
+ */
 
 /**
  * Thrown when the caller still has a ride in flight. Deleting mid-trip would
@@ -9,7 +33,7 @@ import { forgetAccount } from "./accountStatus";
  */
 export class ActiveRideBlocksDeletionError extends Error {
   constructor(public readonly rideId: string) {
-    super("Finish or cancel your active ride before deleting your account");
+    super("You have a ride going on. Finish or cancel it first, then you can delete your account.");
     this.name = "ActiveRideBlocksDeletionError";
   }
 }
@@ -34,55 +58,79 @@ export function deletedPhonePlaceholder(userId: string): string {
 
 export const DELETED_NAME_PLACEHOLDER = "Deleted user";
 
+const DAY_MS = 24 * 60 * 60_000;
+
+/** The ride (as rider, passenger or driver) that blocks deleting this account, if any. */
+export async function findRideBlockingDeletion(
+  prisma: PrismaClient,
+  userId: string,
+): Promise<{ id: string } | null> {
+  return prisma.ride.findFirst({
+    where: {
+      status: { in: ACTIVE_RIDE_STATUSES },
+      OR: [
+        {
+          riderId: userId,
+          NOT: { passengers: { some: { riderId: userId, status: "CANCELLED" } } },
+        },
+        { driverId: userId },
+        {
+          passengers: {
+            some: { riderId: userId, status: { in: ["WAITING", "ARRIVED", "PICKED_UP"] } },
+          },
+        },
+      ],
+    },
+    select: { id: true },
+  });
+}
+
 /**
- * Anonymizes a user's account in place and ends every session.
+ * Step 1: closes the account now. Throws ActiveRideBlocksDeletionError while
+ * a ride is going on, AccountAlreadyDeletedError for a closed or unknown
+ * account. Returns when the kept details will be erased.
  *
- * NOT a row delete. Ride.riderId is `onDelete: Restrict`, and beyond that
- * constraint the ride history, CommissionLedger debt rows and Payment records
- * are financial record that must survive the person leaving. So the identity
- * columns are overwritten and everything else is left exactly as it stands:
- *
- *   - name/phone  -> placeholders; the phone is unique per user id so the
- *                    unique index still holds and no OTP login can match it.
- *   - deletedAt   -> set, marking the account closed.
- *   - refresh tokens -> all revoked, so no session can be extended.
- *   - driver profile -> plate and photo cleared (both identify a person),
- *                    taken offline and un-approved so dispatch skips them.
- *   - push tokens   -> deleted, so no phone is notified for this account.
- *   - access tokens -> refused from the next request on (requireAuth checks
- *                    deletedAt); the route also closes the account's sockets.
- *
- * Runs in a transaction: a partial deletion that revoked tokens but left the
- * name in place, or vice versa, is worse than either outcome.
+ * NOT a row delete: rides, ratings and commission records point at the user
+ * and are the business's record of what happened. One transaction, so a
+ * half-closed account (sessions revoked but the name still showing, or the
+ * reverse) can't happen.
  */
 export async function deleteAccount(
   prisma: PrismaClient,
   userId: string,
   now: Date = new Date(),
-): Promise<void> {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user || user.deletedAt) {
-    throw new AccountAlreadyDeletedError();
-  }
+): Promise<{ purgeAfter: Date }> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: { driver: true } });
+  if (!user || user.deletedAt) throw new AccountAlreadyDeletedError();
 
-  // A rider's own request, or a driver's assigned ride — either blocks.
-  const activeRide = await prisma.ride.findFirst({
-    where: {
-      status: { in: ACTIVE_RIDE_STATUSES },
-      OR: [{ riderId: userId }, { driverId: userId }, { passengers: { some: { riderId: userId } } }],
-    },
-  });
-  if (activeRide) {
-    throw new ActiveRideBlocksDeletionError(activeRide.id);
-  }
+  const activeRide = await findRideBlockingDeletion(prisma, userId);
+  if (activeRide) throw new ActiveRideBlocksDeletionError(activeRide.id);
+
+  const purgeAfter = new Date(now.getTime() + config.accountDeletionRetentionDays * DAY_MS);
 
   await prisma.$transaction(async (tx) => {
+    // What a safety dispute could need, out of sight until it's erased.
+    await tx.accountDeletion.create({
+      data: {
+        userId,
+        requestedAt: now,
+        purgeAfter,
+        keptName: user.name,
+        keptPhone: user.phone,
+        keptPlate: user.driver?.plate ?? null,
+        keptPhotoUrl: user.driver?.photoUrl ?? null,
+      },
+    });
+
     await tx.user.update({
       where: { id: userId },
       data: {
         name: DELETED_NAME_PLACEHOLDER,
         phone: deletedPhonePlaceholder(userId),
         deletedAt: now,
+        // Someone else's number; nothing needs it once the account is closed.
+        emergencyContactName: null,
+        emergencyContactPhone: null,
       },
     });
 
@@ -91,16 +139,137 @@ export async function deleteAccount(
       data: { revokedAt: now },
     });
 
+    // Out of dispatch and out of the admin's driver lists.
     await tx.driver.updateMany({
       where: { userId },
-      data: { plate: null, photoUrl: null, isOnline: false, isApproved: false, currentZoneId: null },
+      data: {
+        plate: null,
+        photoUrl: null,
+        isOnline: false,
+        isApproved: false,
+        currentZoneId: null,
+      },
     });
 
-    // No more notifications to any of their phones.
     await tx.pushToken.deleteMany({ where: { userId } });
+    await tx.trackingLink.deleteMany({ where: { riderId: userId } });
+    await tx.otpCode.deleteMany({ where: { phone: user.phone } });
+
+    await tx.adminAuditLog.create({
+      data: { actor: userId, action: "account.delete", target: userId, timestamp: now },
+    });
   });
 
   // Access tokens already handed out stop working on the next request,
   // rather than when the cached "account is open" answer runs out.
   forgetAccount(userId);
+  return { purgeAfter };
+}
+
+/** Deletes a driver's photo from Cloudinary. Best effort: false (and logged) if it can't. */
+export async function destroyDriverPhoto(
+  userId: string,
+  cfg: { cloudName: string; apiKey: string; apiSecret: string } = config.cloudinary,
+  fetchFn: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<boolean> {
+  if (!cfg.cloudName || !cfg.apiKey || !cfg.apiSecret) return false;
+  const params = {
+    invalidate: true,
+    public_id: driverPhotoPublicId(userId),
+    timestamp: Math.floor(now.getTime() / 1000),
+  };
+  const body = new URLSearchParams({
+    ...Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
+    api_key: cfg.apiKey,
+    signature: buildSignature(params, cfg.apiSecret),
+  });
+  try {
+    const res = await fetchFn(
+      `https://api.cloudinary.com/v1_1/${encodeURIComponent(cfg.cloudName)}/image/destroy`,
+      {
+        method: "POST",
+        body,
+        signal: AbortSignal.timeout(15_000),
+      },
+    );
+    const data = (await res.json().catch(() => ({}))) as { result?: string };
+    // "not found" means it's already gone, which is what we want.
+    if (res.ok && (data.result === "ok" || data.result === "not found")) return true;
+    logger.warn("Couldn't delete a closed account's driver photo from Cloudinary", {
+      userId,
+      status: res.status,
+    });
+    return false;
+  } catch (err) {
+    logger.warn("Couldn't delete a closed account's driver photo from Cloudinary", { userId, err });
+    return false;
+  }
+}
+
+/**
+ * Step 2: erases what was kept for closed accounts whose retention period has
+ * ended. Run by the server on a timer (index.ts) and at startup; repeating it
+ * is harmless. Returns how many accounts it erased.
+ */
+export async function purgeDeletedAccounts(
+  prisma: PrismaClient,
+  now: Date = new Date(),
+  options: {
+    destroyPhoto?: (userId: string) => Promise<boolean>;
+    userIds?: readonly string[];
+  } = {},
+): Promise<number> {
+  const due = await prisma.accountDeletion.findMany({
+    where: {
+      purgedAt: null,
+      purgeAfter: { lte: now },
+      ...(options.userIds ? { userId: { in: [...options.userIds] } } : {}),
+    },
+    take: 50,
+  });
+  const destroyPhoto = options.destroyPhoto ?? ((userId: string) => destroyDriverPhoto(userId));
+
+  for (const record of due) {
+    const { userId } = record;
+    if (record.keptPhotoUrl) await destroyPhoto(userId);
+    const noPins = {
+      pickupLat: null,
+      pickupLng: null,
+      pickupLabel: null,
+      pickupPlaceId: null,
+      dropoffLat: null,
+      dropoffLng: null,
+      dropoffLabel: null,
+      dropoffPlaceId: null,
+      pickupNote: null,
+    };
+    await prisma.$transaction([
+      prisma.accountDeletion.update({
+        where: { id: record.id },
+        data: {
+          purgedAt: now,
+          keptName: null,
+          keptPhone: null,
+          keptPlate: null,
+          keptPhotoUrl: null,
+        },
+      }),
+      // Where they were picked up and dropped off, and what they wrote. The
+      // trip itself (when, which zones, the fare) stays, without a name.
+      prisma.ride.updateMany({
+        where: { riderId: userId },
+        data: { ...noPins, riderCancelNote: null },
+      }),
+      prisma.ridePassenger.updateMany({ where: { riderId: userId }, data: noPins }),
+      prisma.rating.updateMany({ where: { raterId: userId }, data: { comment: null } }),
+      prisma.refreshToken.deleteMany({ where: { userId } }),
+      prisma.adminAuditLog.create({
+        data: { actor: "system", action: "account.purge", target: userId, timestamp: now },
+      }),
+    ]);
+  }
+  if (due.length > 0)
+    logger.info("Erased the kept details of closed accounts", { count: due.length });
+  return due.length;
 }

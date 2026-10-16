@@ -1,69 +1,19 @@
-import { Alert } from "react-native";
 import { rateLimitText } from "./errorMessage";
 
 /**
- * Two-step confirmation for permanent account deletion, shared by the rider
- * and driver account screens so the wording and the number of taps match.
- *
- * Two prompts, not one: this is irreversible and sits in a list next to
- * ordinary settings rows, so a single mis-tap must not be able to close
- * someone's account. The first prompt explains what is kept and what is
- * lost; the second is the point of no return.
- *
- * `onError` receives anything the server refuses with — most importantly the
- * 409 raised while a ride is still in flight — so the caller can show the
- * real reason rather than a generic failure.
- */
-export function confirmDeleteAccount(options: {
-  deleteAccount: () => Promise<void>;
-  onDeleted?: () => void;
-  onError?: (error: unknown) => void;
-}): void {
-  const { deleteAccount, onDeleted, onError } = options;
-
-  Alert.alert(
-    "Delete account",
-    "This permanently closes your CampusRide account. Your name and phone number are removed and you'll be signed out on every device.\n\nCompleted trips are kept as records, but you won't be able to sign in with this number again.",
-    [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Continue",
-        style: "destructive",
-        onPress: () => {
-          Alert.alert("Are you sure?", "This can't be undone.", [
-            { text: "Keep my account", style: "cancel" },
-            {
-              text: "Delete account",
-              style: "destructive",
-              onPress: () => {
-                void (async () => {
-                  try {
-                    await deleteAccount();
-                    onDeleted?.();
-                  } catch (error) {
-                    onError?.(error);
-                  }
-                })();
-              },
-            },
-          ]);
-        },
-      },
-    ],
-  );
-}
-
-/**
- * Turns a failed deletion into a message worth showing. The server answers
- * 409 with an explanation when a ride is still in flight; anything else is
- * reported generically rather than leaking a raw error string into a dialog.
+ * Turns a refused deletion step into a message worth showing. The server
+ * explains itself in plain words for a wrong or expired code (400) and for a
+ * ride still going on (409); anything else is reported generically rather
+ * than leaking a raw error string onto the screen.
  */
 export function describeDeleteAccountError(error: unknown): string {
-  const status = (error as { response?: { status?: number; data?: { error?: string } } })?.response
-    ?.status;
-  const serverMessage = (error as { response?: { data?: { error?: string } } })?.response?.data
-    ?.error;
+  const response = (error as { response?: { status?: number; data?: { error?: string } } })?.response;
+  const serverMessage = response?.data?.error;
+  if ((response?.status === 400 || response?.status === 409) && serverMessage) return serverMessage;
+  return rateLimitText(error) ?? "We couldn't reach CampusRide. Check your connection and try again.";
+}
 
-  if (status === 409 && serverMessage) return serverMessage;
-  return rateLimitText(error) ?? "We couldn't delete your account. Please check your connection and try again.";
+/** True when the server refused because a ride is still going on. */
+export function isRideBlockingDeletion(error: unknown): boolean {
+  return (error as { response?: { status?: number } })?.response?.status === 409;
 }
