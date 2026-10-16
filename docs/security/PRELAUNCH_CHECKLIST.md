@@ -97,6 +97,13 @@ Updated at the end of each stage.
 | ⬜ | Play Console location and foreground-service declarations, with the screen recording (steps and script in location-store-review.md) |
 | 🔶 | Store builds prepared: production = Android app bundle, remote build numbers counting up, production channel and server, Sentry DSN from EAS; test builds = APK; version 1.0.0; nothing development-only ships (checked, and pinned by a test); long-press the version line for build number and update ID — [releasing.md](../runbooks/releasing.md#7-what-a-production-build-leaves-out) (branch `store-build-prep`) |
 
+## Store review
+
+| | Item |
+|---|---|
+| 🔶 | Review demo for App Store and Play reviewers: two numbers sign in with a fixed code (no SMS), simulated driver and rider, demo rides kept apart from real people and admin figures, kill switch `REVIEW_DEMO_ENABLED` — [review-notes.md](../store/review-notes.md) (branch `review-demo`) |
+| ⬜ | Before each review: set the four `REVIEW_DEMO_*` settings on Render and paste the reviewer notes; after it, `REVIEW_DEMO_ENABLED=false` |
+
 ## Things only you can do by hand
 
 **Now (account deletion)**

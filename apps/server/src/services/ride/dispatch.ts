@@ -7,6 +7,7 @@ import { DriverHasActiveRideError, RideAlreadyClaimedError } from "./errors";
 import { ACTIVE_DRIVER_STATUSES } from "./stateMachine";
 import { requestPlaceNames } from "../../routes/ridePins";
 import { notifyRideRequest } from "../push/notify";
+import { dispatchDemoRide, isServedBySimDriver } from "../reviewDemo/simulation";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -22,8 +23,20 @@ import { notifyRideRequest } from "../push/notify";
  */
 export async function getEligibleDrivers(
   prisma: PrismaClient,
-  ride: { id?: string; pickupZoneId: string },
+  ride: { id?: string; pickupZoneId: string; isReviewDemo?: boolean },
 ) {
+  // Review demo (services/reviewDemo): a demo ride goes to demo drivers only,
+  // wherever they are; a real ride never to a demo driver.
+  if (ride.isReviewDemo) {
+    return prisma.driver.findMany({
+      where: {
+        isOnline: true,
+        isApproved: true,
+        user: { isReviewDemo: true, ...(ride.id ? { rideRejections: { none: { rideId: ride.id } } } : {}) },
+      },
+    });
+  }
+
   // Edges to or from a retired zone don't count: eligibility never flows
   // through a zone that is out of service.
   const adjacencies = await prisma.zoneAdjacency.findMany({
@@ -46,7 +59,7 @@ export async function getEligibleDrivers(
       isApproved: true,
       currentZoneId: { in: Array.from(zoneIds) },
       currentZone: { retiredAt: null },
-      ...(ride.id ? { user: { rideRejections: { none: { rideId: ride.id } } } } : {}),
+      user: { isReviewDemo: false, ...(ride.id ? { rideRejections: { none: { rideId: ride.id } } } : {}) },
     },
   });
 }
@@ -59,10 +72,10 @@ export async function getEligibleDrivers(
  */
 export function closeOffer(
   prisma: PrismaClient,
-  ride: { id: string; pickupZoneId: string },
+  ride: { id: string; pickupZoneId: string; isReviewDemo?: boolean },
   reason: OfferClosedReason,
 ): void {
-  void getEligibleDrivers(prisma, { pickupZoneId: ride.pickupZoneId })
+  void getEligibleDrivers(prisma, { pickupZoneId: ride.pickupZoneId, isReviewDemo: ride.isReviewDemo })
     .then((drivers) => emitOfferClosed(drivers.map((d) => d.userId), { rideId: ride.id, reason }))
     .catch((err) => logger.warn("closeOffer failed", { rideId: ride.id, err }));
 }
@@ -78,7 +91,13 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
     where: { id: rideId },
     include: { pickupZone: true, dropoffZone: true },
   });
-  const eligible = await getEligibleDrivers(prisma, { id: ride.id, pickupZoneId: ride.pickupZoneId });
+  // A review demo rider's request goes to the demo's simulated driver, never
+  // to anyone else (services/reviewDemo).
+  if (await isServedBySimDriver(prisma, ride)) {
+    dispatchDemoRide(prisma, ride.id);
+    return [];
+  }
+  const eligible = await getEligibleDrivers(prisma, { id: ride.id, pickupZoneId: ride.pickupZoneId, isReviewDemo: ride.isReviewDemo });
 
   if (eligible.length > 0) {
     const farePesewas =
@@ -159,9 +178,12 @@ export async function claimRide(prisma: PrismaClient, rideId: string, driverId: 
  * Null when the ride was not open: already claimed, cancelled or timed out.
  */
 export async function claimIfOpen(prisma: PrismaClient, rideId: string, driverId: string): Promise<Ride | null> {
+  // A review demo ride can only be taken by a demo driver, and a real ride
+  // only by a real one (services/reviewDemo): checked in the same statement.
   const rows = await prisma.$queryRaw<Ride[]>`
     UPDATE "Ride" SET "driverId" = ${driverId}, status = 'MATCHED'
     WHERE id = ${rideId} AND status = 'REQUESTED' AND "driverId" IS NULL
+      AND "isReviewDemo" = (SELECT u."isReviewDemo" FROM "User" u WHERE u.id = ${driverId})
     RETURNING *`;
   return rows[0] ?? null;
 }

@@ -113,6 +113,8 @@ export const meSelect = {
   // screen can show and edit what is currently set.
   emergencyContactName: true,
   emergencyContactPhone: true,
+  // The apps treat a review demo account as being on campus (services/reviewDemo).
+  isReviewDemo: true,
   driver: {
     select: {
       id: true,

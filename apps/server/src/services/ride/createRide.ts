@@ -123,10 +123,12 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
   // One-active-ride rule, through the same lookup as GET /rides/active: it
   // also sees a rider who is a passenger in someone else's car (merged), who
   // a riderId-only check let book a second ride mid-trip.
-  const [pickupZone, dropoffZone, existingActive] = await Promise.all([
+  const [pickupZone, dropoffZone, existingActive, rider] = await Promise.all([
     prisma.zone.findUnique({ where: { id: pickupZoneId } }),
     prisma.zone.findUnique({ where: { id: dropoffZoneId } }),
     findActiveRideForRider(prisma, riderId),
+    // A review demo rider's rides are demo rides (services/reviewDemo).
+    prisma.user.findUnique({ where: { id: riderId }, select: { isReviewDemo: true } }),
   ]);
   const existingActiveRide = existingActive?.ride ?? null;
 
@@ -155,6 +157,7 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
       occupancy,
       paymentMethod,
       broadcastStartedAt: new Date(),
+      isReviewDemo: rider?.isReviewDemo ?? false,
       ...pins,
       passengers: {
         create: {
