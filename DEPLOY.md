@@ -124,9 +124,15 @@ The apps are linked to the `campusride-gh` Expo organization
 | **Root Directory** | *(leave blank — repo root)* |
 | **Runtime** | Node |
 | **Build Command** | `npm install && npm run build:server` |
-| **Start Command** | `npm run start --workspace=apps/server` |
+| **Start Command** | `node apps/server/dist/apps/server/src/index.js` |
 | **Node Version** | 20 (set in `.node-version` at repo root, or pin in Render) |
 
+> **Start Command:** `node` directly, not `npm run start …`. On a deploy
+> Render sends the old server a stop signal (SIGTERM); with npm in between,
+> the signal reached the server twice and killed it instantly, so it never
+> finished its in-flight requests or logged `"event":"shutdown"`. The server
+> now copes with that too, but starting it directly is the clean setup.
+>
 > The build command does four things in order:
 > 1. `npm install` — installs all workspace dependencies at repo root.
 > 2. `tsc -p tsconfig.build.json` (builds `packages/shared`) — emits
@@ -305,7 +311,8 @@ do it before launch. About 45 minutes in all.
    issue**. Skip the setup instructions it shows afterwards; the code is
    already in place.
 3. Each project has a **DSN**: Project → Settings → Client Keys (DSN). It
-   looks like `https://3f9a…@o4507….ingest.us.sentry.io/4507…`. A DSN is not
+   looks like `https://3f9a…@o4507….ingest.de.sentry.io/4507…` (the
+   CampusRide organization is in Sentry's EU region, hence `.de.`). A DSN is not
    a password (it ends up inside the apps), but keep it out of public posts.
 
 ### 2. The server
@@ -336,11 +343,13 @@ do it before launch. About 45 minutes in all.
    `Content-Security-Policy` (path `/*`) and replace its value with:
 
    ```
-default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://res.cloudinary.com https://tile.openstreetmap.org; font-src 'self' data:; connect-src 'self' https://api.campusride.app https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://res.cloudinary.com https://tile.openstreetmap.org; font-src 'self' data:; connect-src 'self' https://api.campusride.app https://*.ingest.de.sentry.io; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
    ```
 
-   The only change is the three `https://*.ingest…sentry.io` entries in
-   `connect-src`.
+   The only change from before Stage 5 is `https://*.ingest.de.sentry.io`
+   in `connect-src`: Sentry's EU intake, where this organization's DSNs
+   point. (An organization in Sentry's US region would need
+   `https://*.ingest.us.sentry.io` instead.)
 
 ### 4. The rider and driver apps
 

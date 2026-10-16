@@ -27,7 +27,7 @@ import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
 import { checkDeployEnv, checkProductionEnv } from "./lib/productionEnv";
 import { SOCKET_MAX_PAYLOAD_BYTES, serverOptions } from "./http/serverOptions";
-import { createShutdown } from "./lib/shutdown";
+import { createShutdown, installSignalHandlers } from "./lib/shutdown";
 import { installFatalHandlers, onFatal } from "./lib/fatal";
 import { logger } from "./lib/logger";
 import { flushMonitoring, monitoringEnabled, reportError } from "./lib/monitoring";
@@ -264,10 +264,9 @@ async function bootstrap() {
     disconnectDatabase: () => prisma.$disconnect(),
     flushReports: () => flushMonitoring(),
   });
-  // `once`: a second Ctrl-C while shutting down falls back to Node's default
-  // and stops the process at once.
-  process.once("SIGTERM", () => void shutdown("SIGTERM"));
-  process.once("SIGINT", () => void shutdown("SIGINT"));
+  // For the life of the process, not once: a deploy's SIGTERM can arrive
+  // twice (lib/shutdown.ts#installSignalHandlers).
+  installSignalHandlers({ shutdown, log: app.log });
   onFatal((kind, err) => {
     app.log.fatal({ err, event: "fatal", kind }, `Fatal ${kind}: shutting down`);
     reportError(err, { level: "fatal", tags: { fatal: kind } });

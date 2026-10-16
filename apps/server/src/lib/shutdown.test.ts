@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { AddressInfo } from "node:net";
+import { EventEmitter } from "node:events";
+import { spawn } from "node:child_process";
+import path from "node:path";
 import { Server } from "socket.io";
 import { io as connect, type Socket as ClientSocket } from "socket.io-client";
-import { createShutdown } from "./shutdown";
+import { createShutdown, installSignalHandlers } from "./shutdown";
 
 let app: FastifyInstance;
 let io: Server | null = null;
@@ -112,4 +115,74 @@ describe("graceful shutdown", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(d.exit).toHaveBeenCalledWith(1);
   });
+});
+
+describe("signals", () => {
+  function setup() {
+    let now = 0;
+    const target = new EventEmitter();
+    const shutdown = vi.fn(async () => {});
+    const exit = vi.fn();
+    const log = { info: vi.fn(), warn: vi.fn() };
+    installSignalHandlers({ shutdown, log, exit, now: () => now, target });
+    return { target, shutdown, exit, advance: (ms: number) => (now += ms) };
+  }
+
+  it("starts the shutdown on SIGTERM and ignores repeats", () => {
+    const { target, shutdown, exit, advance } = setup();
+    target.emit("SIGTERM");
+    target.emit("SIGTERM");
+    advance(5000);
+    target.emit("SIGTERM");
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(shutdown).toHaveBeenCalledWith("SIGTERM");
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("ignores a duplicate Ctrl-C, but quits on a deliberate second one", () => {
+    const { target, shutdown, exit, advance } = setup();
+    target.emit("SIGINT");
+    target.emit("SIGINT"); // npm's forwarded copy, microseconds later
+    expect(exit).not.toHaveBeenCalled();
+    advance(1500);
+    target.emit("SIGINT");
+    expect(shutdown).toHaveBeenCalledOnce();
+    expect(exit).toHaveBeenCalledWith(130);
+  });
+
+  /**
+   * Starts test/fixtures/signalChild.ts and sends SIGTERM as a deploy can:
+   * once to the server, and again moments later (npm forwarding its copy).
+   */
+  function doubleSigterm() {
+    const child = spawn(
+      process.execPath,
+      [
+        "-r",
+        "ts-node/register/transpile-only",
+        path.join(__dirname, "../test/fixtures/signalChild.ts"),
+      ],
+      { cwd: path.join(__dirname, "../.."), stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let out = "";
+    return new Promise<{ code: number | null; signal: string | null; out: string }>((resolve) => {
+      child.stdout.on("data", (chunk: Buffer) => {
+        out += chunk.toString();
+        if (out.includes("ready\n") && !out.includes("#sent")) {
+          out += "#sent";
+          child.kill("SIGTERM");
+          setTimeout(() => child.kill("SIGTERM"), 5);
+        }
+      });
+      child.stderr.on("data", (chunk: Buffer) => (out += chunk.toString()));
+      child.on("exit", (code, signal) => resolve({ code, signal, out }));
+    });
+  }
+
+  it("a server finishes its shutdown even when SIGTERM arrives twice", async () => {
+    const { code, out } = await doubleSigterm();
+    expect(out).toContain('"event":"shutdown"');
+    expect(out).toContain('"event":"shutdown_complete"');
+    expect(code).toBe(0);
+  }, 30_000);
 });
