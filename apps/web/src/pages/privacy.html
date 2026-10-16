@@ -1,0 +1,267 @@
+<article class="doc">
+  <h1>Privacy Policy</h1>
+  <p class="meta">Last updated: {{legalLastUpdated}}</p>
+
+  <p>
+    This policy explains what personal data the CampusRide rider app, the CampusRide Driver app
+    and this website collect, why, who receives it, where it is stored, how long it is kept and
+    the rights you have under Ghana's <strong>Data Protection Act, 2012 (Act 843)</strong>.
+  </p>
+
+  <nav class="toc" aria-label="Contents">
+    <strong>Contents</strong>
+    <ol>
+      <li><a href="#who">Who we are</a></li>
+      <li><a href="#summary">The short version</a></li>
+      <li><a href="#collect">What we collect</a></li>
+      <li><a href="#location">Location, including drivers' background location</a></li>
+      <li><a href="#why">Why we use it</a></li>
+      <li><a href="#share">Who receives it</a></li>
+      <li><a href="#where">Where it is stored</a></li>
+      <li><a href="#retention">How long we keep it</a></li>
+      <li><a href="#security">How we protect it</a></li>
+      <li><a href="#rights">Your rights</a></li>
+      <li><a href="#age">Age limit</a></li>
+      <li><a href="#permissions">Phone permissions</a></li>
+      <li><a href="#website">This website</a></li>
+      <li><a href="#changes">Changes to this policy</a></li>
+      <li><a href="#contact">Contact</a></li>
+    </ol>
+  </nav>
+
+  <h2 id="who">1. Who we are</h2>
+  <p>
+    CampusRide is operated by <strong>{{operatorName}}</strong>, an individual, of
+    {{operatorAddress}}, Ghana ("CampusRide", "we", "us"). CampusRide is not yet a registered
+    company. {{operatorName}} is the <strong>data controller</strong> for the personal data
+    described here.
+  </p>
+  <p>Contact for anything about your data: {{supportEmailLink}} or {{supportPhoneLink}}.</p>
+
+  <h2 id="summary">2. The short version</h2>
+  <ul>
+    <li>You sign in with your <strong>phone number</strong> and a texted code. We also ask for your <strong>name</strong>.</li>
+    <li>Drivers add their <strong>car details, number plate and a photo</strong>.</li>
+    <li>Riders' <strong>pickup and drop-off points</strong> are stored with each trip.</li>
+    <li>While a driver is <strong>online</strong>, the Driver app uses their location, <strong>even when the app is closed or not in use</strong>, to match them with nearby requests and show riders on their trip where the car is. It stops when they go offline.</li>
+    <li>The other person on your trip sees your name and phone number so you can find and call each other.</li>
+    <li>We don't sell your data, show ads or use advertising or analytics trackers. Payments are in cash: we collect no card or mobile money details.</li>
+    <li>You can <a href="/delete-account">delete your account</a> in the app at any time.</li>
+  </ul>
+
+  <h2 id="collect">3. What we collect</h2>
+
+  <h3>Your account (riders and drivers)</h3>
+  <ul>
+    <li><strong>Phone number</strong> (required): your login, and how the other person on a trip calls you.</li>
+    <li><strong>Name</strong> (required): shown to the other person on your trip and in trip notifications.</li>
+    <li><strong>Emergency contact</strong> (riders, optional): a name and phone number you choose to receive an alert if you press SOS. Please only add someone who agrees to it.</li>
+  </ul>
+  <p>We do not ask for your email address, date of birth, ID documents, gender or home address.</p>
+
+  <h3>Driver profile (drivers only)</h3>
+  <ul>
+    <li><strong>Car make, model and colour, and number plate</strong> (required to be approved).</li>
+    <li><strong>A profile photo</strong>, taken with your camera or chosen from your photos (required to be approved). It is uploaded to our photo host, Cloudinary.</li>
+    <li>Whether you're approved and online, and which campus zone you're in.</li>
+  </ul>
+
+  <h3>Trips</h3>
+  <ul>
+    <li>Pickup and drop-off points (exact map points and place names), an optional note for the driver, shared or private, number of seats, times, fare and payment method (cash).</li>
+    <li>If you cancel: the reason you choose and any note you type.</li>
+    <li>Ratings (1 to 5 stars) and optional comments, from riders about drivers and drivers about riders.</li>
+    <li>For drivers: requests you declined or let time out, and the commission you owe on cash trips.</li>
+  </ul>
+
+  <h3>Safety (SOS)</h3>
+  <p>
+    If a rider presses <strong>SOS</strong> during a trip, we text their emergency contact (if
+    saved) and CampusRide's support line. The text contains the rider's name, pickup and drop-off
+    areas, the trip status, the driver's name and number plate, and a private tracking link. The
+    link opens a page showing the rider's name, a button to call the rider, their pickup and
+    drop-off places, the trip status and the driver's name, car and plate. It never shows the
+    driver's phone number, exact map coordinates or other passengers. The link stops working
+    24 hours after the trip ends.
+  </p>
+
+  <h3>Sign-in and your phone</h3>
+  <ul>
+    <li>Sign-in codes: we store only a scrambled (hashed) copy, with your phone number and the time. A code works for 5 minutes.</li>
+    <li>Sign-in sessions: stored as hashed tokens, valid up to 30 days.</li>
+    <li>A <strong>push notification token</strong> for your phone, and whether it's Android or iPhone, if you allow notifications.</li>
+  </ul>
+
+  <h3>Diagnostics</h3>
+  <ul>
+    <li><strong>Crash and error reports</strong> (through Sentry): the error, app version, phone model and operating system. We remove phone numbers, codes and tokens before reports are sent, and never send screenshots.</li>
+    <li><strong>Server logs</strong>: the address (IP) a request came from, the page requested and any error. Phone numbers in logs are masked.</li>
+  </ul>
+
+  <h2 id="location">4. Location, including drivers' background location</h2>
+  <h3>Riders</h3>
+  <p>
+    The rider app asks for location <strong>only while you're using it</strong>. It uses your
+    position on your phone to suggest the nearest pickup point. Your position is not tracked and
+    is not sent to us on its own. The pickup and drop-off points you book are sent to us and
+    stored with the trip. The rider app never uses location in the background.
+  </p>
+  <h3>Drivers</h3>
+  <p>
+    The CampusRide Driver app collects location data to share your position with riders and match
+    you with nearby ride requests <strong>while you are online, even when the app is closed or not
+    in use</strong>. Before asking for permission, the app explains this on a full screen.
+  </p>
+  <ul>
+    <li><strong>While you're online:</strong> your phone works out which campus zone you're in and sends us only the zone, so requests near you reach you. We store your current zone, not your position.</li>
+    <li><strong>During a trip</strong> (from accepting a rider until the trip ends): your position is sent to us every few seconds and passed straight on to the riders on that trip, so they can see the car coming. We use it to tell riders you're nearly there. <strong>We don't store these positions.</strong></li>
+    <li><strong>It stops</strong> when you go offline, sign out or close the app. On Android a notification ("You're online") shows the whole time; on iPhone the location indicator shows.</li>
+    <li>If you allow location only "while using the app", you can still drive, but riders won't see you move while the app is in the background.</li>
+  </ul>
+  <h3>Maps and routes (both apps)</h3>
+  <p>
+    Maps are shown by Google Maps (Android) or Apple Maps (iPhone), which load map images to your
+    phone under their own privacy policies. To draw road routes, our server sends trip points,
+    rounded to about 11 metres and without any name or account, to the OSRM routing service
+    (FOSSGIS e.V., Germany).
+  </p>
+
+  <h2 id="why">5. Why we use it</h2>
+  <p>Act 843 allows us to process personal data only for a lawful reason. Ours are:</p>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Purpose</th><th>Data</th><th>Lawful reason</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Creating your account and signing you in</td><td>Phone number, name, sign-in codes and sessions</td><td>Needed to provide the service you asked for (contract)</td></tr>
+        <tr><td>Booking, matching and completing trips; letting rider and driver find and call each other</td><td>Name, phone, trip points, driver location, car details, photo</td><td>Contract</td></tr>
+        <tr><td>Drivers' location in the background</td><td>Driver location</td><td>Your consent (the location permission), which you can withdraw in your phone's settings</td></tr>
+        <tr><td>Approving drivers</td><td>Driver profile and photo</td><td>Contract; our legitimate interest in rider safety</td></tr>
+        <tr><td>SOS alerts</td><td>Rider's and driver's details, emergency contact</td><td>Protecting the vital interests of the rider; consent (you add the contact)</td></tr>
+        <tr><td>Trip notifications</td><td>Push token, names, place names</td><td>Contract; consent (notification permission)</td></tr>
+        <tr><td>Ratings, safety reports and disputes</td><td>Trips, ratings, kept details after deletion</td><td>Legitimate interest in a safe, fair service</td></tr>
+        <tr><td>Drivers' commission and our accounts</td><td>Trip fares, commission records</td><td>Legal obligation (record keeping); contract</td></tr>
+        <tr><td>Fixing crashes, preventing abuse and keeping the service secure</td><td>Crash reports, logs, IP addresses, rate-limit counters</td><td>Legitimate interest</td></tr>
+        <tr><td>Responding to lawful requests from authorities</td><td>What the request covers</td><td>Legal obligation</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>We do not use your data for advertising and we do not make automated decisions that have legal effects on you.</p>
+
+  <h2 id="share">6. Who receives it</h2>
+  <ul>
+    <li><strong>The other person on your trip.</strong> Riders see their driver's name, phone number, photo, car, number plate and live position during the trip. Drivers see each rider's name, phone number, pickup and drop-off points, pickup note and average rating. Riders sharing a car do not see each other's phone numbers or exact points.</li>
+    <li><strong>A rider's emergency contact and our support line</strong>, if the rider presses SOS (see section 3).</li>
+    <li><strong>Service providers</strong> who process data for us, only for what they do for CampusRide:
+      <ul>
+        <li><strong>Moolre</strong> (Ghana): sends text messages (sign-in codes and SOS alerts), so receives phone numbers and the message.</li>
+        <li><strong>Expo</strong> (650 Industries, Inc., USA): relays push notifications and delivers app updates, so receives your push token and the notification text (which may include a first name or a pickup place).</li>
+        <li><strong>Google (Firebase Cloud Messaging)</strong> and <strong>Apple (Push Notification service)</strong>: deliver notifications to Android phones and iPhones.</li>
+        <li><strong>Render</strong>: hosts our server (Frankfurt, Germany), so everything passes through it; it keeps our server logs.</li>
+        <li><strong>Neon</strong>: hosts our database (Frankfurt, Germany).</li>
+        <li><strong>Cloudinary</strong>: stores drivers' profile photos.</li>
+        <li><strong>Sentry</strong> (Functional Software, Inc.): receives crash and error reports, stored in Frankfurt, Germany.</li>
+        <li><strong>FOSSGIS e.V. (OSRM)</strong>: calculates road routes from rounded points without any identity.</li>
+      </ul>
+    </li>
+    <li><strong>Authorities</strong>, such as the Ghana Police Service, when the law requires it or when it's needed to protect someone's life or safety.</li>
+    <li><strong>A future company or buyer.</strong> If CampusRide becomes a company or is transferred, your data would move with it under this policy, and we would tell you first.</li>
+  </ul>
+  <p>We do not sell personal data, share it with advertisers or let others use it for their own marketing.</p>
+  <p><strong>Payments.</strong> All trips are paid in cash. We don't use a payment provider and don't collect card or mobile money details. If we add mobile money payments, we will update this policy first.</p>
+
+  <h2 id="where">7. Where it is stored</h2>
+  <p>
+    Our database and server are in the <strong>European Union (Frankfurt, Germany)</strong>, and
+    crash reports are stored there too. Some providers listed above are in the United States or
+    operate worldwide (Expo, Google, Apple, Cloudinary), and text messages go through Moolre in
+    Ghana. Where data leaves Ghana, we use providers that protect it with security measures at
+    least as strong as those Act 843 requires, and we send them only what their job needs.
+  </p>
+
+  <h2 id="retention">8. How long we keep it</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Data</th><th>How long</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Account: name, phone number, driver profile</td><td>While your account is open. When you delete it, removed from the service at once; see below for what's kept.</td></tr>
+        <tr><td>Name, phone number, and a driver's plate and photo, after you delete your account</td><td>Kept separately for <strong>{{retentionDays}} days</strong>, only for safety reports or police requests about a trip, then erased</td></tr>
+        <tr><td>Exact pickup and drop-off points, pickup notes, cancel notes and rating comments you wrote</td><td>While your account is open, then erased {{retentionDays}} days after you delete it</td></tr>
+        <tr><td>Trip records (time, area, fare, stars) and drivers' commission records</td><td>Kept as our business records, without your name once the {{retentionDays}} days are over</td></tr>
+        <tr><td>Emergency contact</td><td>Until you change or remove it, or delete your account</td></tr>
+        <tr><td>Drivers' live position during a trip</td><td>Not stored: passed on to riders and discarded</td></tr>
+        <tr><td>SOS tracking links</td><td>Stop working 24 hours after the trip ends; deleted with your account</td></tr>
+        <tr><td>Sign-in codes</td><td>Work for 5 minutes. The hashed record is deleted when your account is deleted</td></tr>
+        <tr><td>Push notification tokens</td><td>Until you sign out, delete your account or uninstall the app</td></tr>
+        <tr><td>Server logs and crash reports</td><td>A limited period set by our providers (typically days to a few weeks)</td></tr>
+        <tr><td>Records that an account was deleted</td><td>Kept, without a name, to show the request was completed</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 id="security">9. How we protect it</h2>
+  <ul>
+    <li>All connections between the apps and our server are encrypted (HTTPS).</li>
+    <li>Sign-in codes and session tokens are stored only as hashes.</li>
+    <li>Only the people on a trip can see that trip's exact points and contact details. Admin access is limited to named phone numbers and every admin action is logged.</li>
+    <li>Crash reports and logs are scrubbed of phone numbers, codes and tokens.</li>
+  </ul>
+  <p>No system is perfectly secure. If a breach affects your data, we will tell you and the Data Protection Commission as the law requires.</p>
+
+  <h2 id="rights">10. Your rights</h2>
+  <p>Under the Data Protection Act, 2012 (Act 843) you can:</p>
+  <ul>
+    <li><strong>Ask what data we hold about you</strong> and get a copy.</li>
+    <li><strong>Correct</strong> data that is wrong. Riders can change their name and emergency contact in the app; for anything else, including drivers' details, contact us.</li>
+    <li><strong>Delete</strong> your account and data: see <a href="/delete-account">Delete your account</a>.</li>
+    <li><strong>Object</strong> to our use of your data, or <strong>withdraw consent</strong>. For example, turn off location or notifications in your phone's settings at any time (some features then stop working).</li>
+    <li><strong>Complain</strong> to the Data Protection Commission of Ghana (<a href="https://www.dataprotection.org.gh">dataprotection.org.gh</a>) if you think we've handled your data wrongly. We'd appreciate the chance to fix it first.</li>
+  </ul>
+  <p>To use any of these rights, email {{supportEmailLink}} from anywhere, with the phone number on your account. We may text you a code to confirm it's you, and we reply within 30 days.</p>
+
+  <h2 id="age">11. Age limit</h2>
+  <p>
+    CampusRide is only for people aged <strong>18 or over</strong>, riders and drivers alike. We
+    don't knowingly collect data from anyone younger. If you believe someone under 18 has an
+    account, tell us and we'll delete it.
+  </p>
+
+  <h2 id="permissions">12. Phone permissions</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th>Permission</th><th>App</th><th>Used for</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Location while using the app</td><td>Rider, Driver</td><td>Nearest pickup point (rider); going online and trips (driver)</td></tr>
+        <tr><td>Location all the time (background)</td><td>Driver only</td><td>Sharing your position with riders and getting nearby requests while online, when the app is in the background</td></tr>
+        <tr><td>Camera and photos</td><td>Driver only</td><td>Your profile photo</td></tr>
+        <tr><td>Notifications</td><td>Rider, Driver</td><td>Trip updates and ride requests</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>Neither app uses your microphone, contacts or files.</p>
+
+  <h2 id="website">13. This website</h2>
+  <p>
+    campusride.app sets no cookies, uses no analytics and has no forms. Our web host may keep
+    standard technical logs (such as IP addresses) for security.
+  </p>
+
+  <h2 id="changes">14. Changes to this policy</h2>
+  <p>
+    If we change this policy we'll update the date at the top. For important changes, such as
+    collecting a new kind of data, we'll tell you in the app before they take effect.
+  </p>
+
+  <h2 id="contact">15. Contact</h2>
+  <p>
+    {{operatorName}}, operator of CampusRide<br />
+    {{operatorAddress}}, Ghana<br />
+    Email: {{supportEmailLink}}<br />
+    Phone: {{supportPhoneLink}}
+  </p>
+</article>

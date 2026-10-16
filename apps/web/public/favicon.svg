@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Placeholder browser-tab icon until the final logo exists. -->
+  <rect width="64" height="64" rx="14" fill="#19743C"/>
+  <text x="32" y="45" text-anchor="middle" font-family="-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="38" font-weight="800" fill="#F6F7F6">C</text>
+  <circle cx="49" cy="44" r="5" fill="#FFBB29"/>
+</svg>
