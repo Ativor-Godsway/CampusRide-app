@@ -17,6 +17,15 @@ let authRetry: ReturnType<typeof setTimeout> | null = null;
 let authRetryAttempt = 0;
 
 /**
+ * The ride rooms this app has asked to be in. The server forgets a socket's
+ * rooms when the connection drops — including at every deploy, when all
+ * sockets move to the new server — so they are joined again on each
+ * (re)connect. Without this a rider mid-trip stopped seeing the driver move
+ * on the map after a deploy, until they left the ride screen.
+ */
+const joinedRides = new Set<string>();
+
+/**
  * React Native defines the global `__DEV__` (true in Metro dev builds, false
  * in release bundles). Guarded with a typeof check so this module is still
  * safe to import from a plain Node context, such as a unit test.
@@ -46,6 +55,7 @@ export function getRideSocket(): Socket {
     });
     created.on("connect", () => {
       authRetryAttempt = 0;
+      for (const rideId of joinedRides) created.emit(RIDE_CLIENT_EVENTS.SUBSCRIBE, rideId);
     });
     created.on("connect_error", () => {
       // `active` stays true for network trouble (Socket.io retries by
@@ -112,14 +122,18 @@ export function resetRideSocket(): void {
   if (authRetry) clearTimeout(authRetry);
   authRetry = null;
   authRetryAttempt = 0;
+  joinedRides.clear();
   socket?.disconnect();
   socket = null;
 }
 
+/** Joins the ride's room, and again after every reconnect until unsubscribed. */
 export function subscribeToRide(rideId: string): void {
+  joinedRides.add(rideId);
   getRideSocket().emit(RIDE_CLIENT_EVENTS.SUBSCRIBE, rideId);
 }
 
 export function unsubscribeFromRide(rideId: string): void {
+  joinedRides.delete(rideId);
   getRideSocket().emit(RIDE_CLIENT_EVENTS.UNSUBSCRIBE, rideId);
 }

@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
-import type { PaymentMethod, PassengerStatus, RideSource, RideStatus, RiderPushKind } from "@rida/shared";
+import type { PassengerStatus, RideStatus, RiderPushKind } from "@rida/shared";
 import {
   DISPATCH_WINDOW_MS,
   PRICING,
@@ -32,6 +32,7 @@ import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/a
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
+import { finalizeRideCompletion } from "../services/ride/completion";
 import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
 import {
   DetourTooLongError,
@@ -45,8 +46,7 @@ import {
   RideNotReadyToDepartError,
 } from "../services/ride/errors";
 import { emitRideEvent, emitToRider, removeRiderFromRide } from "../realtime/rideSocket";
-import { getRidePaymentSummary } from "../services/payment/paymentFlow";
-import { notifyUssdRider, notifyUssdRiders } from "../services/sms/notifyUssdRiders";
+import { notifyUssdRider } from "../services/sms/notifyUssdRiders";
 import { notifyRider } from "../services/push/notify";
 import { getActivePlaces } from "../services/places/placeCache";
 import { approximatePins } from "../services/places/approximatePins";
@@ -121,83 +121,6 @@ async function requireDriver(request: Parameters<typeof requireAuth>[0], reply: 
     return false;
   }
   return true;
-}
-
-/**
- * Finalizes a COMPLETED ride's payment side: a CASH CommissionLedger upsert,
- * and a per-rider `ride:completed` fare summary emitted via `emitToRider` to
- * EACH billable passenger individually — not one ride-room broadcast carrying
- * a single fare. Shared by the ride-level `/complete` route (LONE rides) and
- * the per-passenger last-dropoff auto-completion path (SHARED rides, in the
- * new `/passengers/:passengerId/dropoff` route below). Previously `/complete`
- * emitted ONE `ride:completed` event to the whole ride room using only
- * `ride.riderId`'s fare — correct for LONE (single passenger) but wrong for
- * every other SHARED passenger (masked only by the rider app's poll
- * fallback, which computes its own fareSummary per-requester).
- */
-async function finalizeRideCompletion(
-  prisma: PrismaClient,
-  ride: { id: string; type: "LONE" | "SHARED"; occupancy: number; paymentMethod: string; source: RideSource },
-  driverUserId: string,
-  /** The ride's passengers, when the caller already has them (saves reading them again). */
-  passengers?: ReadonlyArray<{ riderId: string; status: string; lockedFare: number | null }>,
-): Promise<void> {
-  const paymentMethod = ride.paymentMethod as PaymentMethod;
-
-  if (paymentMethod === "CASH") {
-    // A shared car's fare is per rider actually carried. occupancy is not
-    // that: it drops as seats are cancelled, and a trip that ends by
-    // cancelling its last waiting rider completes with occupancy 0 (which
-    // getSharedFarePerRider rejects). Same count the ride history uses.
-    const carried = passengers?.filter((p) => p.status === "DROPPED_OFF").length ?? ride.occupancy;
-    const farePesewasForLedger =
-      ride.type === "LONE"
-        ? getLoneFare()
-        : carried > 0
-          ? getSharedFarePerRider(carried) * carried
-          : 0;
-    const { commission } = splitFare(farePesewasForLedger);
-    // createMany + skipDuplicates is a single INSERT … ON CONFLICT DO NOTHING
-    // (an upsert is two round trips); repeating it is harmless.
-    await prisma.commissionLedger.createMany({
-      data: [{ driverUserId, rideId: ride.id, amountPesewas: commission }],
-      skipDuplicates: true,
-    });
-  }
-
-  // A cash ride has no Payment rows, so its per-rider summary is known from
-  // the passengers alone; MoMo needs the payment records.
-  const perPassenger =
-    paymentMethod === "CASH" && passengers
-      ? passengers
-          .filter((p) => p.status !== "CANCELLED" && p.lockedFare != null)
-          .map((p) => ({ riderId: p.riderId, farePesewas: p.lockedFare ?? 0, status: "PENDING" as const }))
-      : (await getRidePaymentSummary(prisma, ride.id)).perPassenger;
-  const totalFarePesewas = perPassenger.reduce((sum, p) => sum + p.farePesewas, 0);
-
-  for (const p of perPassenger) {
-    emitToRider(p.riderId, "ride:completed", {
-      rideId: ride.id,
-      fareSummary: {
-        yourFarePesewas: p.farePesewas,
-        totalFarePesewas,
-        paymentMethod,
-        paymentStatus: p.status,
-      },
-    });
-  }
-
-  // USSD-origin riders have no app to receive ride:completed on, so they get
-  // an SMS instead — covers both this ride-level /complete (LONE) and the
-  // per-passenger last-dropoff auto-completion, since both call this
-  // function. Fire-and-forget, never throws into the transition path.
-  if (ride.source === "USSD") {
-    void notifyUssdRiders(
-      prisma,
-      perPassenger.map((p) => p.riderId),
-      "Trip complete. Thanks for riding CampusRide.",
-    );
-  }
 }
 
 const DETOUR_TOO_LONG_MESSAGE =

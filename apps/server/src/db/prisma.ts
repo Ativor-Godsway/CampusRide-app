@@ -22,10 +22,26 @@ assertDatabaseAllowedForEnv(config.databaseUrl, config.nodeEnv, "prisma client")
 
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
+/**
+ * Every SQL statement printed ("prisma:query …") only on a developer's
+ * machine, or with PRISMA_QUERY_LOG=true. It used to be on everywhere: in
+ * production a log line per query, about a sixth of the server's JavaScript
+ * time under load (docs/runbooks/load-test.md) and most of Render's log
+ * volume. Errors and warnings are always logged.
+ */
+export function prismaLogLevels(
+  env: NodeJS.ProcessEnv = process.env,
+): Array<"query" | "error" | "warn"> {
+  const queries =
+    env.PRISMA_QUERY_LOG === "true" ||
+    (env.NODE_ENV === "development" && env.PRISMA_QUERY_LOG !== "false");
+  return queries ? ["query", "error", "warn"] : ["error", "warn"];
+}
+
 export const prisma =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: ["query", "error", "warn"],
+    log: prismaLogLevels(),
   });
 
 if (process.env.NODE_ENV !== "production") {

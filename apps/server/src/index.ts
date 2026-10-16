@@ -34,6 +34,7 @@ import { flushMonitoring, monitoringEnabled, reportError } from "./lib/monitorin
 import { alerts, noteDatabaseError } from "./lib/alerts";
 import { MoolreOtpService } from "./services/otp/MoolreOtpService";
 import { createBalanceCheck } from "./services/sms/moolreBalance";
+import { loadTestOtpCode } from "./services/auth/loadTestOtp";
 
 // From the very first line: an error nothing caught is logged and ends the
 // process (Render restarts it), never left to run in an unknown state.
@@ -201,6 +202,20 @@ async function bootstrap() {
 
   await prisma.$connect();
   app.log.info("Database connected");
+
+  // One sweep straight away rather than 30 s from now: rides whose waiting
+  // time ran out while the server was down (a deploy, a crash) are settled
+  // at once. Nothing about a ride's timing lives in memory, so this is all a
+  // restart needs (docs/architecture/in-memory-state.md).
+  await processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
+    app.log.error({ err }, "Startup timeout sweep failed");
+  });
+  if (loadTestOtpCode()) {
+    app.log.warn(
+      { event: "load_test_otp" },
+      "LOAD TEST MODE: every login code is the fixed LOAD_TEST_OTP_CODE (local database only, never production)",
+    );
+  }
   app.log.info(
     { sentry: monitoringEnabled() },
     monitoringEnabled() ? "Error reporting to Sentry is on" : "Error reporting is off (no SENTRY_DSN)",

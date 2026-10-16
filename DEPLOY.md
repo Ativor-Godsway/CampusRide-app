@@ -233,6 +233,11 @@ Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each
 offer, so changing it needs no app release.
 
+Stuck rides: `RIDE_AUTO_COMPLETE_HOURS` (default 3, 1–24) — a ride still in
+progress this long after it started (a driver who never tapped "complete")
+is completed automatically, so its riders can book again
+([docs/architecture/in-memory-state.md](docs/architecture/in-memory-state.md)).
+
 **Required in production** — the server refuses to start without these, and
 logs which are missing (names only): `DATABASE_URL`, `DIRECT_URL`,
 `JWT_SECRET` (32+ random bytes), `PUBLIC_BASE_URL` (https), 

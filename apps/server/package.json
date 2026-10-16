@@ -23,6 +23,7 @@
     "sim:driver": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/fakeDriver.ts",
     "sim:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/cleanupCli.ts",
     "sim:approve-driver": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/approveDriverCli.ts",
+    "loadtest": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/loadtest.ts",
     "sentry:test": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/sentryTest.ts",
     "routes:precompute": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/precomputeZoneRoutes.ts",
     "places:fetch": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/places/fetchOsmPlaces.ts",
