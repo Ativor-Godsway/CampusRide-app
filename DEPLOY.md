@@ -233,6 +233,11 @@ Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each
 offer, so changing it needs no app release.
 
+Review demo (App Store / Google Play reviewers): `REVIEW_DEMO_ENABLED`
+(`true` to turn it on, `false` is the kill switch), `REVIEW_DEMO_RIDER_PHONE`,
+`REVIEW_DEMO_DRIVER_PHONE`, `REVIEW_DEMO_OTP`. Set them only for a review and
+switch the demo off afterwards: [docs/store/review-notes.md](docs/store/review-notes.md).
+
 Account deletion: `ACCOUNT_DELETION_RETENTION_DAYS` (default 90, 1–365) —
 how long a closed account's name, phone number and a driver's plate and
 photo are kept, privately, for safety disputes before they are erased

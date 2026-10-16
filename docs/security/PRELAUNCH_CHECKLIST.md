@@ -96,6 +96,13 @@ Updated at the end of each stage.
 | 🔶 | Driver background location to Google Play and Apple rules: full-screen disclosure before any prompt, asked only when going online, Android online notification (foreground service), stops when offline; rider app location only while open — [location-store-review.md](../runbooks/location-store-review.md) (branch `driver-background-location`) |
 | ⬜ | Play Console location and foreground-service declarations, with the screen recording (steps and script in location-store-review.md) |
 
+## Store review
+
+| | Item |
+|---|---|
+| 🔶 | Review demo for App Store and Play reviewers: two numbers sign in with a fixed code (no SMS), simulated driver and rider, demo rides kept apart from real people and admin figures, kill switch `REVIEW_DEMO_ENABLED` — [review-notes.md](../store/review-notes.md) (branch `review-demo`) |
+| ⬜ | Before each review: set the four `REVIEW_DEMO_*` settings on Render and paste the reviewer notes; after it, `REVIEW_DEMO_ENABLED=false` |
+
 ## Things only you can do by hand
 
 **Now (account deletion)**

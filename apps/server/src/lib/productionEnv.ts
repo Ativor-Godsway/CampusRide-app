@@ -168,6 +168,11 @@ export function checkProductionEnv(env: Env): EnvCheck {
       "ENABLE_USSD=true: the USSD callback has no authentication yet (needs a Moolre gateway IP allowlist or secret first)",
     );
   }
+  if (env.REVIEW_DEMO_ENABLED?.trim() === "true") {
+    warnings.push(
+      "The App Store / Google Play review demo is ON (REVIEW_DEMO_ENABLED): switch it off once review is done",
+    );
+  }
   if (!blank(env.LOAD_TEST_OTP_CODE))
     errors.push(
       "LOAD_TEST_OTP_CODE is set: it is for the local load test only and must never be set in production",

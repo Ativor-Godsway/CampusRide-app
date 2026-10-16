@@ -11,7 +11,7 @@ import {
 import { AppState } from "react-native";
 import * as Location from "expo-location";
 import { useQuery } from "@tanstack/react-query";
-import { pathLengthMeters, pointAlongPath, type ArrivalSample, type LatLng } from "@rida/shared";
+import { REVIEW_DEMO_POSITION, pathLengthMeters, pointAlongPath, type ArrivalSample, type LatLng } from "@rida/shared";
 import { getZones, useAuth } from "@rida/mobile-shared";
 import { zonesQueryKey } from "./zones";
 import {
@@ -233,7 +233,15 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
   }, [fakeZoneId, driving]);
 
   const isFake = FAKE_LOCATION_AVAILABLE && fakeZoneId !== null && fakeSample !== null;
-  const sample = isFake ? fakeSample : realSample;
+  // An App Store / Google Play reviewer is "on campus" wherever they are. The
+  // real location permission, background tracking and notification still run
+  // (reviewers need to see them); only the position reported is the campus one.
+  const isReviewDemo = Boolean(user?.isReviewDemo);
+  const reviewDemoSample = useMemo<ArrivalSample | null>(
+    () => (isReviewDemo && realSample ? { ...REVIEW_DEMO_POSITION, speed: 0, at: realSample.at } : null),
+    [isReviewDemo, realSample],
+  );
+  const sample = isFake ? fakeSample : (reviewDemoSample ?? realSample);
   const lat = sample?.latitude;
   const lng = sample?.longitude;
   // Only a moved fix is a new position (a re-reported one isn't), so
@@ -247,13 +255,14 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
   positionRef.current = position;
   const currentOrLastKnown = useCallback(async (): Promise<LatLng | null> => {
     if (positionRef.current) return positionRef.current;
+    if (isReviewDemo) return REVIEW_DEMO_POSITION;
     try {
       const last = await Location.getLastKnownPositionAsync({ maxAge: LAST_KNOWN_MAX_AGE_MS });
       return last ? { latitude: last.coords.latitude, longitude: last.coords.longitude } : null;
     } catch {
       return null;
     }
-  }, []);
+  }, [isReviewDemo]);
 
   const fake = useMemo<FakeLocationControls | null>(
     () => (FAKE_LOCATION_AVAILABLE ? { zoneId: fakeZoneId, setZone, driveAlong, driving } : null),

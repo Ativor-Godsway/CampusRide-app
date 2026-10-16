@@ -24,6 +24,12 @@ export interface AuthUser {
   emergencyContactPhone?: string | null;
   /** Populated for DRIVER accounts (from /me with include: { driver: true }). */
   driver?: AuthDriverProfile | null;
+  /**
+   * An App Store / Google Play review demo account: the apps treat it as on
+   * campus wherever the reviewer is (REVIEW_DEMO_POSITION), and its rides are
+   * served by the server's simulated people.
+   */
+  isReviewDemo?: boolean;
 }
 
 export interface AuthTokens {

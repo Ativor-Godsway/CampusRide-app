@@ -127,6 +127,10 @@ model User {
   /// management UI we are not building.
   emergencyContactName  String?
   emergencyContactPhone String?
+  /// An App Store / Google Play review demo account, or one of the demo's
+  /// simulated people (services/reviewDemo). Their rides are demo rides:
+  /// never matched with real people, never shown to them, not in admin stats.
+  isReviewDemo          Boolean   @default(false)
 
   driver                 Driver?
   ridesAsRider           Ride[]             @relation("RiderRides")
@@ -368,6 +372,9 @@ model Ride {
   dropoffPlaceId     String?
   /// Optional rider note for the driver ("At the main gate, blue shirt").
   pickupNote         String?            @db.VarChar(140)
+  /// A review demo ride (services/reviewDemo): only demo accounts ever see,
+  /// take or are matched to it; left out of admin lists and stats.
+  isReviewDemo       Boolean            @default(false)
 
   rider            User              @relation("RiderRides", fields: [riderId], references: [id], onDelete: Restrict)
   driver           User?             @relation("DriverRides", fields: [driverId], references: [id], onDelete: Restrict)
@@ -383,6 +390,7 @@ model Ride {
   trackingLinks    TrackingLink[]
 
   @@index([status])
+  @@index([isReviewDemo])
   @@index([riderId])
   @@index([driverId])
   @@index([pickupZoneId])

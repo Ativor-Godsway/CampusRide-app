@@ -2,8 +2,8 @@ import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
 import type { CampusPlace, TripEnd, Zone } from "@rida/shared";
-import { gpsEnd, tripEndParams } from "@rida/shared";
-import { getPlaces, getZones, placesQueryKey } from "@rida/mobile-shared";
+import { REVIEW_DEMO_POSITION, gpsEnd, tripEndParams } from "@rida/shared";
+import { getPlaces, getZones, placesQueryKey, useAuth } from "@rida/mobile-shared";
 
 /** Where Choose a ride was opened from, so its "Edit" knows how to go back. */
 export type ChooseRideOrigin = "plan" | "home";
@@ -54,9 +54,11 @@ async function currentCoords(): Promise<{ latitude: number; longitude: number } 
  */
 export function useResolvePickup() {
   const queryClient = useQueryClient();
+  // An App Store / Google Play reviewer is "on campus" wherever they are.
+  const isReviewDemo = Boolean(useAuth().user?.isReviewDemo);
   return useCallback(async (): Promise<TripEnd | null> => {
     const [coords, places] = await Promise.all([
-      currentCoords(),
+      isReviewDemo ? Promise.resolve(REVIEW_DEMO_POSITION) : currentCoords(),
       queryClient
         .fetchQuery<CampusPlace[]>({ queryKey: placesQueryKey, queryFn: getPlaces, staleTime: 60 * 60_000 })
         .catch(() => [] as CampusPlace[]),
@@ -64,5 +66,5 @@ export function useResolvePickup() {
     if (!coords) return null;
     const { atPlaceName: _at, ...end } = gpsEnd({ latitude: coords.latitude, longitude: coords.longitude }, places);
     return end;
-  }, [queryClient]);
+  }, [queryClient, isReviewDemo]);
 }

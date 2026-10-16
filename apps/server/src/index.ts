@@ -36,6 +36,8 @@ import { MoolreOtpService } from "./services/otp/MoolreOtpService";
 import { createBalanceCheck } from "./services/sms/moolreBalance";
 import { loadTestOtpCode } from "./services/auth/loadTestOtp";
 import { purgeDeletedAccounts } from "./services/auth/deleteAccount";
+import { startReviewDemo } from "./services/reviewDemo/simulation";
+import { reviewDemoConfig } from "./services/reviewDemo/config";
 
 // From the very first line: an error nothing caught is logged and ends the
 // process (Render restarts it), never left to run in an unknown state.
@@ -252,6 +254,19 @@ async function bootstrap() {
   const accountPurge = setInterval(() => void purgeClosedAccounts(), ACCOUNT_PURGE_INTERVAL_MS);
 
   const timers = [timeoutSweep, receiptSweep, accountPurge];
+
+  // App Store / Google Play review demo (docs/store/review-notes.md): off
+  // unless REVIEW_DEMO_ENABLED=true and every setting is valid.
+  const demo = reviewDemoConfig();
+  for (const problem of demo.problems) app.log.warn({ event: "review_demo_off" }, `Review demo is off: ${problem}`);
+  const demoLoop = await startReviewDemo(prisma).catch((err) => {
+    app.log.error({ err }, "Review demo failed to start");
+    return null;
+  });
+  if (demoLoop) {
+    timers.push(demoLoop);
+    app.log.warn({ event: "review_demo_on" }, "Review demo is ON: the two review numbers sign in with the fixed code (REVIEW_DEMO_ENABLED=false turns it off)");
+  }
   if (otpService instanceof MoolreOtpService) {
     const checkBalance = createBalanceCheck({
       cfg: { baseUrl: config.moolre.baseUrl, apiUser: config.moolre.apiUser, vasKey: config.moolre.vasKey },

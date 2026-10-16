@@ -330,7 +330,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
     if (!(await requireAdmin(request, reply))) return;
 
     const drivers = await prisma.driver.findMany({
-      where: { isApproved: false, user: { deletedAt: null } },
+      where: { isApproved: false, user: { deletedAt: null, isReviewDemo: false } },
       select: PENDING_DRIVER_SELECT,
       orderBy: { createdAt: "asc" },
     });
@@ -427,7 +427,8 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
       return reply.code(400).send({ error: (err as Error).message });
     }
 
-    const where: Prisma.RideWhereInput = {};
+    // Review demo rides (App Store / Google Play reviewers) aren't real trips.
+    const where: Prisma.RideWhereInput = { isReviewDemo: false };
     if (query.status !== undefined) {
       where.status = String(query.status) as Prisma.RideWhereInput["status"];
     }

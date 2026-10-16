@@ -263,6 +263,14 @@ export async function raiseSos(
     trackingUrl,
   });
 
+  // A review demo rider (App Store / Google Play reviewers, services/reviewDemo)
+  // sees SOS work, but nobody is texted: not a stranger's emergency contact,
+  // not CampusRide support.
+  if (rider.isReviewDemo) {
+    logger.info("Review demo SOS: shown as sent, nothing texted", { rideId, riderId });
+    return { ...base, smsDelivered: hasEmergencyContact, supportNotified: true, alreadyAlerted: false };
+  }
+
   // Both sends are independent and neither can fail the other: a rider whose
   // own contact is unreachable must still reach support, and vice versa.
   const [smsDelivered, supportNotified] = await Promise.all([

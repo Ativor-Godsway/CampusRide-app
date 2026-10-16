@@ -97,6 +97,8 @@ describe("GET /me", () => {
         // account screen to show and edit what is currently set.
         "emergencyContactName",
         "emergencyContactPhone",
+        // The apps treat an App Store / Google Play review demo account as on campus.
+        "isReviewDemo",
       ].sort(),
     );
     // updatedAt is internal bookkeeping and must not be published.
