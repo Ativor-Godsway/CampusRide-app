@@ -124,9 +124,15 @@ The apps are linked to the `campusride-gh` Expo organization
 | **Root Directory** | *(leave blank — repo root)* |
 | **Runtime** | Node |
 | **Build Command** | `npm install && npm run build:server` |
-| **Start Command** | `npm run start --workspace=apps/server` |
+| **Start Command** | `node apps/server/dist/apps/server/src/index.js` |
 | **Node Version** | 20 (set in `.node-version` at repo root, or pin in Render) |
 
+> **Start Command:** `node` directly, not `npm run start …`. On a deploy
+> Render sends the old server a stop signal (SIGTERM); with npm in between,
+> the signal reached the server twice and killed it instantly, so it never
+> finished its in-flight requests or logged `"event":"shutdown"`. The server
+> now copes with that too, but starting it directly is the clean setup.
+>
 > The build command does four things in order:
 > 1. `npm install` — installs all workspace dependencies at repo root.
 > 2. `tsc -p tsconfig.build.json` (builds `packages/shared`) — emits

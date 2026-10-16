@@ -45,7 +45,10 @@ services:
     # Builds packages/shared first (apps/server needs its dist/ at runtime),
     # then builds apps/server (prisma generate + tsc).
     buildCommand: npm install && npm run build:server
-    startCommand: npm run start --workspace=apps/server
+    # node itself, not `npm run start`: Render's SIGTERM on a deploy then
+    # reaches the server directly, which finishes in-flight requests and
+    # logs "shutdown" … "shutdown_complete" (lib/shutdown.ts).
+    startCommand: node apps/server/dist/apps/server/src/index.js
 
     # Render polls this path to confirm the service is healthy.
     healthCheckPath: /health

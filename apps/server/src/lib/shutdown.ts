@@ -75,3 +75,57 @@ export function createShutdown(
     return running;
   };
 }
+
+export interface SignalHandlerOptions {
+  shutdown: (reason: string) => Promise<void>;
+  log: Pick<FastifyBaseLogger, "info" | "warn">;
+  exit?: (code: number) => void;
+  now?: () => number;
+  /** Tests only: where to listen instead of `process`. */
+  target?: Pick<NodeJS.EventEmitter, "on">;
+}
+
+/** A second Ctrl-C at least this long after the first is a person, not a duplicate. */
+const FORCE_QUIT_AFTER_MS = 1000;
+
+/**
+ * Starts the clean stop on SIGTERM (a deploy) or SIGINT (Ctrl-C), and keeps
+ * listening for the life of the process rather than once.
+ *
+ * The same signal often arrives twice within microseconds: Render, like a
+ * terminal's Ctrl-C, can signal the whole process group, and npm (when the
+ * server is started through it) forwards the signal to the server as well.
+ * With a one-time listener the second copy fell through to Node's default
+ * action and killed the server instantly, mid-shutdown and before it logged
+ * a word — which is why deploys showed no "shutdown" lines (2026-10).
+ *
+ * Repeats are ignored (the shutdown's own time limit still ends the process),
+ * except a second Ctrl-C a second or more after the first, which quits at once.
+ */
+export function installSignalHandlers(opts: SignalHandlerOptions): void {
+  const target = opts.target ?? process;
+  const exit = opts.exit ?? ((code: number) => process.exit(code));
+  const now = opts.now ?? Date.now;
+  let firstAt: number | null = null;
+
+  const handle = (signal: "SIGTERM" | "SIGINT") => {
+    const at = now();
+    if (firstAt === null) {
+      firstAt = at;
+      void opts.shutdown(signal);
+      return;
+    }
+    if (signal === "SIGINT" && at - firstAt >= FORCE_QUIT_AFTER_MS) {
+      opts.log.warn(
+        { event: "shutdown_forced", signal },
+        "Second Ctrl-C: quitting without finishing the shutdown",
+      );
+      exit(130);
+      return;
+    }
+    opts.log.info({ event: "shutdown_signal_repeated", signal }, "Already shutting down");
+  };
+
+  target.on("SIGTERM", () => handle("SIGTERM"));
+  target.on("SIGINT", () => handle("SIGINT"));
+}
