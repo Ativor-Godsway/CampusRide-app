@@ -15,6 +15,7 @@
     "@sentry/react-native": "*",
     "@tanstack/react-query": "^5.40.0",
     "axios": "^1.20.0",
+    "expo-application": "*",
     "expo-constants": "*",
     "expo-device": "*",
     "expo-file-system": "*",
@@ -46,6 +47,9 @@
       "optional": true
     },
     "axios": {
+      "optional": true
+    },
+    "expo-application": {
       "optional": true
     },
     "expo-constants": {

@@ -257,16 +257,19 @@ replaces the rollback.
 
 Open the app → **Account** tab → scroll to the bottom. The small grey line says:
 
-| You see                                                      | It means                                                                   |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| `Version 1.0.0 · built-in · production`                      | Running the code that came with the store build. No update applied yet     |
-| `Version 1.0.0 · update 3f9c2a1b · 14 Oct 2026 · production` | Running the update whose ID starts `3f9c2a1b`, published 14 Oct 2026 (UTC) |
-| `Version 1.0.0 · update … · preview`                         | A tester's preview build                                                   |
-| `Version 1.0.0 · dev`                                        | Expo Go or the local dev server, so updates don't apply                    |
+- `Version 1.0.0 (12) · built-in · production` — the store build with
+  build number 12, running the JavaScript it shipped with.
+- `Version 1.0.0 (12) · update 3f9c2a1b · 14 Oct 2026 · production` — the
+  same build, running the over-the-air update whose ID starts `3f9c2a1b`,
+  published on 14 October (UTC). The EAS dashboard shows the same ID under
+  Updates.
+- `… · dev` — a development session (`expo start`), not a real build.
 
-The text can be selected and copied, so testers can paste it into a bug report.
+**Long-press the line** for **About this app**: the version, build number,
+the **full** update ID, the channel and the runtime version. Ask testers to
+send a screenshot of it with any bug report.
 
-To match the ID to a published update:
+To match an update ID to a published update:
 
 ```bash
 cd apps/rider    # or apps/driver
@@ -274,13 +277,29 @@ npx -y eas-cli@24 update:list --branch production       # find the group with th
 npx -y eas-cli@24 update:view <GROUP_ID>                # shows the iOS and Android update IDs
 ```
 
-The phone's 8 characters are the start of the iOS or Android update ID shown by
-`update:view` (each platform gets its own ID inside a group). The same details are
-on [expo.dev](https://expo.dev) → the app → **Updates**.
+Each platform gets its own update ID inside a group. The same details are on
+[expo.dev](https://expo.dev) → the app → **Updates**.
 
 ---
 
-## 7. Troubleshooting
+## 7. What a production build leaves out
+
+Checked 2026-10-16 (`packages/shared/src/config/storeBuildConfig.test.ts`
+fails if the build settings drift):
+
+| Development-only thing | Why it isn't in a store build |
+|---|---|
+| Fake location (driver app, Account → Developer) | Behind React Native's `__DEV__`, which is `false` in a release build, so it is stripped out |
+| Connection and server-address logs | Same: printed only under `__DEV__` |
+| Raw error details on the driver photo card | Same |
+| A laptop or Wi-Fi server address in `.env` | A release build refuses a local address and uses `https://api.campusride.app` (`@rida/shared` serverUrl, tested) |
+| Mock driver, dummy SMS, load-test login code, USSD | Server-side: a production server refuses to start with any of them switched on |
+| Prisma's query log | Development only (`PRISMA_QUERY_LOG`) |
+| Dev client / debug menu libraries | Not installed (tested) |
+
+---
+
+## 8. Troubleshooting
 
 **A phone doesn't get the update.**
 
