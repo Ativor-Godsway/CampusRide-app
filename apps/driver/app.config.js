@@ -10,9 +10,15 @@
  *
  * The update fingerprint hashes the file's CONTENTS, not its path, so the two
  * give the same fingerprint as long as they are the same file.
+ *
+ * Also: the iOS "fetch" background mode that expo-task-manager adds is
+ * removed (plugins/withoutBackgroundFetch.js); background location stays.
  */
+const withoutBackgroundFetch = require("./plugins/withoutBackgroundFetch");
+
 module.exports = ({ config }) => ({
   ...config,
+  plugins: [...(config.plugins ?? []), withoutBackgroundFetch],
   android: {
     ...config.android,
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? "./google-services.json",

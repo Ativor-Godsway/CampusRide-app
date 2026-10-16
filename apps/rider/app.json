@@ -36,7 +36,12 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "CampusRide uses your location to find the nearest pickup zone."
+          "locationWhenInUsePermission": "CampusRide uses your location to find the nearest pickup zone.",
+          "locationAlwaysAndWhenInUsePermission": false,
+          "locationAlwaysPermission": false,
+          "isIosBackgroundLocationEnabled": false,
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
         }
       ],
       "expo-asset",
