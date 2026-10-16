@@ -68,3 +68,17 @@ export EXPO_PUBLIC_API_URL="$api_url"
 
 echo "Publishing $app to channel '$channel' (server: $EXPO_PUBLIC_API_URL)…"
 $EAS update --channel "$channel" --environment production --message "$message"
+
+# Optional: the update's source maps to Sentry, so errors from it show real
+# file names and lines (DEPLOY.md, "Monitoring"). Only when SENTRY_AUTH_TOKEN
+# is set in this shell; without it nothing happens. The Sentry projects are
+# named campusride-rider and campusride-driver.
+if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
+  if [[ -z "${SENTRY_ORG:-}" ]]; then
+    echo "Skipping the Sentry source map upload: set SENTRY_ORG (your Sentry organization's slug) too." >&2
+  else
+    echo "Uploading source maps to Sentry (campusride-$app)…"
+    SENTRY_PROJECT="campusride-$app" npx sentry-expo-upload-sourcemaps dist ||
+      echo "The update is published; only the Sentry source map upload failed." >&2
+  fi
+fi

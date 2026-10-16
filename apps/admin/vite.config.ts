@@ -10,9 +10,17 @@ import react from "@vitejs/plugin-react";
  * VITE_API_URL points it at that API. In development it defaults to
  * http://localhost:3000 (see src/api.ts); in production it MUST be set to the
  * deployed server's origin at BUILD time — Vite inlines it into the bundle.
+ *
+ * VITE_SENTRY_DSN (optional) switches on error reporting (src/monitoring.ts);
+ * the release it reports is the commit Render is building.
  */
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __SENTRY_RELEASE__: JSON.stringify(
+      process.env.VITE_SENTRY_RELEASE ?? process.env.RENDER_GIT_COMMIT ?? "",
+    ),
+  },
   resolve: {
     // @rida/shared is consumed from SOURCE (as the mobile apps and the server
     // tests do), so the admin build doesn't depend on packages/shared having

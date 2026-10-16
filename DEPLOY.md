@@ -143,6 +143,9 @@ The apps are linked to the `campusride-gh` Expo organization
 | **Health Check Path** | `/health` |
 
 Returns `{ "status": "ok", "app": "CampusRide" }` when the server is up.
+Keep Render on `/health`, which never touches the database. The outside
+monitor (UptimeRobot) uses `/health/ready`, which also checks the database:
+see [Monitoring](#monitoring-sentry-uptimerobot-neon).
 
 ---
 
@@ -251,6 +254,10 @@ searching the logs for it finds that request. A deploy shuts the old server
 down cleanly (in-flight requests finish first). See
 [docs/security/validation-and-errors.md](docs/security/validation-and-errors.md).
 
+Monitoring: `SENTRY_DSN` (error reports and alerts; unset = off),
+`SENTRY_TRACES_SAMPLE_RATE` (default 0.02), `MOOLRE_SMS_LOW_BALANCE`
+(default 100). Setting up: [Monitoring](#monitoring-sentry-uptimerobot-neon).
+
 Push notifications ([docs/runbooks/push-notifications.md](docs/runbooks/push-notifications.md))
 need no server variable. `PUSH_DISABLED=true` switches every send off without
 touching the ride flow. `EXPO_ACCESS_TOKEN` is needed only if "Enhanced
@@ -264,6 +271,148 @@ secret, so set it in the dashboard only.
 With `OTP_PROVIDER=dummy` (local development only), no SMS is sent and a
 development server prints each code in its own terminal. Production refuses
 to start with the dummy provider, so codes are never written to Render's logs.
+
+---
+
+## Monitoring (Sentry, UptimeRobot, Neon)
+
+How you find out something is wrong before riders tell you. What each piece
+does, and what it never sends: [docs/security/monitoring.md](docs/security/monitoring.md).
+Everything below is optional in the sense that the app runs without it, but
+do it before launch. About 45 minutes in all.
+
+### 1. Create the Sentry projects (once)
+
+1. Go to [sentry.io](https://sentry.io) and sign up. The free **Developer**
+   plan is enough. Sentry asks for an organization name: use `campusride`.
+   Its **slug** (Settings → General Settings) is needed in step 5.
+2. Create **four projects** (Projects → Create Project). Use exactly these
+   names; the release script relies on the two app names.
+
+   | Project name | Platform to choose |
+   |---|---|
+   | `campusride-server` | Node.js |
+   | `campusride-admin` | React |
+   | `campusride-rider` | React Native |
+   | `campusride-driver` | React Native |
+
+   When Sentry asks how often to alert you, choose **alert me on every new
+   issue**. Skip the setup instructions it shows afterwards; the code is
+   already in place.
+3. Each project has a **DSN**: Project → Settings → Client Keys (DSN). It
+   looks like `https://3f9a…@o4507….ingest.us.sentry.io/4507…`. A DSN is not
+   a password (it ends up inside the apps), but keep it out of public posts.
+
+### 2. The server
+
+1. Render → `campusride-server` → Environment → add `SENTRY_DSN` = the
+   `campusride-server` DSN → Save changes. Render redeploys.
+2. In the deploy's logs, look for `Error reporting to Sentry is on`.
+3. Optional check from this Mac (sends one test message, touches no
+   database):
+
+   ```bash
+   SENTRY_DSN="<the campusride-server DSN>" npm run sentry:test --workspace=apps/server
+   ```
+
+   It appears under **Issues** in `campusride-server` within a minute.
+   Resolve it afterwards.
+
+### 3. The admin site
+
+1. Render → `campusride-admin` → Environment → add `VITE_SENTRY_DSN` = the
+   `campusride-admin` DSN → Save.
+2. **Manual Deploy → Deploy latest commit.** The DSN is built into the site,
+   so it only takes effect after a new build.
+3. The site's Content-Security-Policy must allow Sentry, or the browser
+   blocks the reports (the site itself keeps working). The site isn't
+   managed by `render.yaml`, so change it by hand: Render →
+   `campusride-admin` → Settings → Headers → edit
+   `Content-Security-Policy` (path `/*`) and replace its value with:
+
+   ```
+default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://res.cloudinary.com https://tile.openstreetmap.org; font-src 'self' data:; connect-src 'self' https://api.campusride.app https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+   ```
+
+   The only change is the three `https://*.ingest…sentry.io` entries in
+   `connect-src`.
+
+### 4. The rider and driver apps
+
+1. On [expo.dev](https://expo.dev), open the **rider** project →
+   Environment variables → Add variable:
+   - Name: `EXPO_PUBLIC_SENTRY_DSN`
+   - Value: the `campusride-rider` DSN
+   - Environment: **production** (every build and update uses it)
+   - Visibility: **Plain text**. Not "Secret": over-the-air updates are
+     bundled on this Mac, which can't read secret values.
+2. The same in the **driver** project, with the `campusride-driver` DSN.
+3. Make **new builds** of both apps ([docs/runbooks/releasing.md](docs/runbooks/releasing.md)).
+   Sentry is native code, so only builds made from now on have it, and
+   over-the-air updates published from now on reach only those builds.
+   Publish any update still waiting for the current builds **before**
+   merging the Stage 5 change.
+
+### 5. Readable app errors (optional, recommended)
+
+Without this, errors from the apps show compiled code instead of file names
+and lines. Sentry → Settings → Auth Tokens → **Create New Token**
+(an organization token). Then, in the terminal where you release an update:
+
+```bash
+export SENTRY_AUTH_TOKEN="<the token>" SENTRY_ORG="<your organization slug>"
+bash scripts/eas-update.sh rider production "what changed"
+```
+
+The script uploads the update's source maps after publishing. Never put the
+token in a file in this repository.
+
+### 6. Email alerts
+
+Sentry emails you the first time each new problem appears, if you chose
+"every new issue" in step 1. Check it in each project → Alerts: there should
+be a rule that sends a notification when a new issue is created. Alerts the
+server raises itself (failed SMS, push failures, database trouble, a low
+SMS balance…) arrive the same way, each with an `alert` tag saying which.
+
+### 7. UptimeRobot: watch `/health/ready`
+
+1. [uptimerobot.com](https://uptimerobot.com) → your CampusRide monitor →
+   Edit.
+2. URL: `https://api.campusride.app/health/ready`. Keep the type HTTP(s)
+   and the 5-minute interval. Save.
+3. It should show **Up**. From now on it also goes **Down** (and emails
+   you) when the server is up but can't reach the database, which
+   `/health` never noticed.
+
+Leave Render's own health check on `/health`.
+
+### 8. Neon: check compute hours every week
+
+Neon's free plan includes **100 compute-hours per project per month**. When
+they run out, Neon suspends the database until the next month, and the app
+stops working ([Neon's limits](https://neon.com/faqs/free-plan-limits-and-quotas)).
+
+- **Where:** [console.neon.tech](https://console.neon.tech) → the project →
+  Billing (or Usage) → compute used this month.
+- **Why it matters here:** Neon's database sleeps after 5 idle minutes, but
+  this server never lets it. It checks for timed-out rides every 30 seconds,
+  and UptimeRobot's visits keep Render's free server awake. Awake all month
+  at the smallest size, the database uses about 6 compute-hours a day,
+  around 180 a month, so the free allowance runs out around the 17th.
+  Development branches in the same project count too.
+- **What to do:** check the number weekly. If it's on course to run out,
+  don't wait: a paid Neon plan or a change to how the server uses the
+  database is needed before launch (Stage 6 recommends one).
+
+### 9. Moolre SMS balance
+
+The server warns (Sentry and logs) when the balance drops below 100
+(`MOOLRE_SMS_LOW_BALANCE`). It reads the balance with a call Moolre doesn't
+document publicly, so if you get "Couldn't read the Moolre SMS balance",
+or just to be safe, check it by hand weekly on the Moolre dashboard
+([app.moolre.com](https://app.moolre.com)), which shows the SMS balance.
+Top up well before it runs out: with no SMS, nobody can sign in.
 
 ---
 

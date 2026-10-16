@@ -48,26 +48,30 @@ Updated at the end of each stage.
 | ✅ | Production boot refuses a missing/weak `JWT_SECRET` and any missing required setting (names listed, values never logged) |
 | ✅ | Rotation list: every secret, where it's set, how to rotate ([admin-and-secrets.md](admin-and-secrets.md#secrets-to-rotate-before-launch)) |
 
-## Stage 4 — Input validation and error handling 🔶 (branch `security-stage4-validation`)
+## Stage 4 — Input validation and error handling ✅ (PR #40)
 
 | | Item |
 |---|---|
-| 🔶 | JSON schema on every route: unlisted fields dropped, every string length-limited, ids, coordinates, choices and numbers checked, no type conversion of bodies; a test fails on any route without one — [validation-and-errors.md](validation-and-errors.md) |
-| 🔶 | Sign-in checked before the body is looked at (401/403 first, whatever was sent) |
-| 🔶 | Request body limit 64 KB (413), Socket.io message limit 16 KB |
-| 🔶 | No stack traces, Prisma or SQL errors to clients, in any environment: one error shape with a plain sentence, a code and a request id; `X-Request-Id` on every response |
-| 🔶 | No login codes, tokens, push tokens, credentials or full phone numbers in logs (`+233*****146`), including careless future log lines, URLs and error stacks |
-| 🔶 | Unhandled rejections and exceptions logged (scrubbed), then a clean shutdown and exit 1 |
-| 🔶 | Graceful shutdown on deploy: in-flight requests finish, sockets and database close, 20 s safety limit |
+| ✅ | JSON schema on every route: unlisted fields dropped, every string length-limited, ids, coordinates, choices and numbers checked, no type conversion of bodies; a test fails on any route without one — [validation-and-errors.md](validation-and-errors.md) |
+| ✅ | Sign-in checked before the body is looked at (401/403 first, whatever was sent) |
+| ✅ | Request body limit 64 KB (413), Socket.io message limit 16 KB |
+| ✅ | No stack traces, Prisma or SQL errors to clients, in any environment: one error shape with a plain sentence, a code and a request id; `X-Request-Id` on every response |
+| ✅ | No login codes, tokens, push tokens, credentials or full phone numbers in logs (`+233*****146`), including careless future log lines, URLs and error stacks |
+| ✅ | Unhandled rejections and exceptions logged (scrubbed), then a clean shutdown and exit 1 |
+| ✅ | Graceful shutdown on deploy: in-flight requests finish, sockets and database close, 20 s safety limit |
 
-## Stage 5 — Monitoring ⬜
+## Stage 5 — Monitoring 🔶 (branch `security-stage5-monitoring`)
 
 | | Item |
 |---|---|
-| ⬜ | Sentry in server, rider, driver and admin (silent without a DSN, scrubbed, low sampling, releases tagged) |
-| ⬜ | `/health/ready` with a database check |
-| ⬜ | Alerts for failed SMS, failed pushes, DB connection failures, socket auth failures; Moolre balance check |
-| ⬜ | DEPLOY.md: Sentry setup, UptimeRobot switch, Neon compute-hour check |
+| 🔶 | Sentry in the server, rider app, driver app and admin site; off until a DSN is set (server and admin: Render; apps: EAS environment variables) — [monitoring.md](monitoring.md) |
+| 🔶 | One scrubber for every Sentry client: no phone numbers, codes, tokens, request bodies, IPs, screenshots; checked end to end against a fake Sentry |
+| 🔶 | Performance sampling 2 in 100; releases tagged (deployed commit; app build plus EAS Update id) |
+| 🔶 | Server 500s reported with the request id the user saw; crashes reported before exit |
+| 🔶 | `/health/ready` checks the database (3 s, 503 when down) for UptimeRobot; `/health` stays database-free for Render |
+| 🔶 | Alerts: every failed SMS; push failures, database connection failures, ride sweep failures and bad-token socket refusals above a threshold |
+| 🔶 | Moolre SMS balance checked every 6 hours with a low-balance warning (undocumented Moolre call, so a manual check is documented too) |
+| 🔶 | DEPLOY.md, step by step: Sentry projects and where each DSN goes, UptimeRobot switch, Neon compute-hour check, Moolre balance |
 
 ## Stage 6 — Backups, recovery and load ⬜
 
@@ -81,8 +85,25 @@ Updated at the end of each stage.
 
 ## Things only you can do by hand
 
-**Now (Stage 4)** — nothing is required before merging: no migration, no new
-setting, no app update. After the deploy, in Render → the server → **Logs**:
+**Now (Stage 5)** — the steps are in
+[DEPLOY.md → Monitoring](../../DEPLOY.md#monitoring-sentry-uptimerobot-neon):
+
+1. **Before merging:** publish any over-the-air update still waiting for the
+   current app builds. Updates published after this merge reach only new
+   builds (Sentry adds native code).
+2. Create the four Sentry projects; set `SENTRY_DSN` (server, Render),
+   `VITE_SENTRY_DSN` (admin site, Render, then redeploy) and
+   `EXPO_PUBLIC_SENTRY_DSN` (each app, expo.dev, plain text, production).
+3. Change the admin site's `Content-Security-Policy` header by hand (new
+   value in DEPLOY.md), or its reports are blocked.
+4. Make new builds of both apps.
+5. Switch UptimeRobot to `https://api.campusride.app/health/ready`.
+6. Check Neon compute hours weekly: on the free plan they are likely to run
+   out around the 17th of each month (DEPLOY.md explains why). Decided in
+   Stage 6.
+7. Optional: a Sentry auth token for readable app errors.
+
+**Stage 4, after its deploy, if not done yet** — in Render → the server → **Logs**:
 
 1. Around the deploy, the old server should log `"event":"shutdown"` and then
    `"event":"shutdown_complete"`. If you see `"event":"shutdown_timeout"`
@@ -122,8 +143,6 @@ setting, no app update. After the deploy, in Render → the server → **Logs**:
 
 **Later stages** (details come with each stage)
 
-- [ ] Create the Sentry projects and set each DSN (Render, EAS, admin site) — Stage 5
-- [ ] Switch the UptimeRobot monitor to `/health/ready` — Stage 5
 - [ ] Make a weekly Neon backup branch (`backup-YYYY-MM-DD`) — Stage 6
 - [ ] Choose the Render plan (free vs paid) — Stage 6
 - [ ] Set up the admin authenticator app (QR code, recovery codes) — after Stage 6

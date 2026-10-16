@@ -18,6 +18,7 @@ import { loadActiveAccount } from "../services/auth/accountStatus";
 import { checkDriverArriving } from "../services/push/notify";
 import { limiter } from "../rateLimit/limiter";
 import { RULES } from "../rateLimit/rules";
+import { alerts, noteDatabaseError } from "../lib/alerts";
 
 let ioRef: SocketIOServer | null = null;
 
@@ -52,11 +53,18 @@ export const SOCKET_AUTH_ERROR = "unauthorized";
  * signed with the same secret but is not an access token.
  */
 export async function authenticateSocket(prisma: PrismaClient, token: unknown): Promise<SocketUser | null> {
-  if (typeof token !== "string" || token.length === 0) return null;
+  // A missing, forged or malformed token counts toward the "many bad
+  // tokens" alert (lib/alerts.ts); an expired one is routine (the app
+  // refreshes and reconnects) and doesn't.
+  if (typeof token !== "string" || token.length === 0) {
+    alerts.socketAuthFailures.record({ reason: "missing" });
+    return null;
+  }
   let userId: string;
   try {
     userId = verifyAccessToken(token).userId;
-  } catch {
+  } catch (err) {
+    if ((err as Error).name !== "TokenExpiredError") alerts.socketAuthFailures.record({ reason: "invalid" });
     return null;
   }
   const account = await loadActiveAccount(prisma, userId);
@@ -108,7 +116,10 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
         socket.data.user = user;
         next();
       },
-      () => next(new Error(SOCKET_AUTH_ERROR)),
+      (err: unknown) => {
+        noteDatabaseError(err, "socket_handshake");
+        next(new Error(SOCKET_AUTH_ERROR));
+      },
     );
   });
 

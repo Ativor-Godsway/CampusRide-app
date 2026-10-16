@@ -19,6 +19,7 @@ const GOOD = {
   MOOLRE_VAS_KEY: "vas-key-value",
   MOOLRE_SMS_SENDER_ID: "CampusRide",
   CLOUDINARY_URL: "cloudinary://1234:abcd@campusride",
+  SENTRY_DSN: "https://examplePublicKey@o0.ingest.sentry.io/0",
 };
 
 const without = (name: keyof typeof GOOD) => {
@@ -97,6 +98,12 @@ describe("checkProductionEnv", () => {
     expect(errors).toHaveLength(3);
     const { warnings } = checkProductionEnv({ ...without("CLOUDINARY_URL"), TRUST_PROXY: "1" });
     expect(warnings).toHaveLength(2);
+  });
+
+  it("warns, without refusing, when Sentry isn't set up", () => {
+    const { errors, warnings } = checkProductionEnv(without("SENTRY_DSN"));
+    expect(errors).toEqual([]);
+    expect(warnings).toEqual([expect.stringContaining("SENTRY_DSN is not set")]);
   });
 
   it("never repeats a value in what it says", () => {

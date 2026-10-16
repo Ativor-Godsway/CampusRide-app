@@ -72,7 +72,7 @@ Now (in `render.yaml`):
 
 | Header | What it does |
 |---|---|
-| `Content-Security-Policy` | Only the site's own script runs; it may talk only to `https://api.campusride.app`; images only from itself, Cloudinary (driver photos) and OpenStreetMap's map tiles; `frame-ancestors 'none'` (no framing). |
+| `Content-Security-Policy` | Only the site's own script runs; it may talk only to `https://api.campusride.app` and Sentry's error intake (Stage 5); images only from itself, Cloudinary (driver photos) and OpenStreetMap's map tiles; `frame-ancestors 'none'` (no framing). |
 | `X-Frame-Options: DENY` | No framing, for older browsers. |
 | `X-Robots-Tag: noindex, nofollow` (+ `robots.txt`) | Never in search results. |
 | `Strict-Transport-Security` | HTTPS only, for 180 days. |

@@ -1,4 +1,4 @@
-const { getDefaultConfig } = require("expo/metro-config");
+const { getSentryExpoConfig } = require("@sentry/react-native/metro");
 
 // Expo's metro-config has handled npm-workspaces monorepos natively since
 // SDK 52: it sets watchFolders, resolver.nodeModulesPaths,
@@ -9,4 +9,8 @@ const { getDefaultConfig } = require("expo/metro-config");
 // flagged during the SDK 54 -> 57 upgrade, so they are gone. Sibling
 // workspace sources (@rida/shared, @rida/mobile-shared) still resolve — see
 // the bundle check in the Phase 3B notes.
-module.exports = getDefaultConfig(__dirname);
+//
+// getSentryExpoConfig is Expo's getDefaultConfig plus a debug id stamped into
+// each bundle, so source maps uploaded to Sentry match the code that crashed
+// (docs/security/monitoring.md). It changes nothing else.
+module.exports = getSentryExpoConfig(__dirname);

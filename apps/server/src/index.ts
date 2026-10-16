@@ -1,3 +1,6 @@
+// First: error reporting (Sentry) starts before Fastify and Prisma load, so
+// it can trace them. A no-op without SENTRY_DSN (lib/monitoring.ts).
+import "./instrument";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
 import helmet from "@fastify/helmet";
@@ -27,6 +30,10 @@ import { SOCKET_MAX_PAYLOAD_BYTES, serverOptions } from "./http/serverOptions";
 import { createShutdown } from "./lib/shutdown";
 import { installFatalHandlers, onFatal } from "./lib/fatal";
 import { logger } from "./lib/logger";
+import { flushMonitoring, monitoringEnabled, reportError } from "./lib/monitoring";
+import { alerts, noteDatabaseError } from "./lib/alerts";
+import { MoolreOtpService } from "./services/otp/MoolreOtpService";
+import { createBalanceCheck } from "./services/sms/moolreBalance";
 
 // From the very first line: an error nothing caught is logged and ends the
 // process (Render restarts it), never left to run in an unknown state.
@@ -40,6 +47,10 @@ const TIMEOUT_POLL_INTERVAL_MS = 30_000;
 // Push receipts are only ready ~15 minutes after a send (services/push), so a
 // slow sweep is plenty; it also deletes tokens Expo reports as unregistered.
 const PUSH_RECEIPT_POLL_INTERVAL_MS = 5 * 60_000;
+
+// The Moolre SMS balance is checked a minute after startup, then every 6 hours.
+const SMS_BALANCE_FIRST_CHECK_MS = 60_000;
+const SMS_BALANCE_INTERVAL_MS = 6 * 60 * 60_000;
 
 export { paymentService, routeService, otpService };
 
@@ -190,6 +201,10 @@ async function bootstrap() {
 
   await prisma.$connect();
   app.log.info("Database connected");
+  app.log.info(
+    { sentry: monitoringEnabled() },
+    monitoringEnabled() ? "Error reporting to Sentry is on" : "Error reporting is off (no SENTRY_DSN)",
+  );
 
   // One log line saying whether driver photo uploads can work. Not awaited:
   // it calls out to Cloudinary and must never hold up or crash startup.
@@ -200,12 +215,28 @@ async function bootstrap() {
   const timeoutSweep = setInterval(() => {
     processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
       app.log.error({ err }, "processTimeouts failed");
+      noteDatabaseError(err, "timeout_sweep");
+      alerts.timeoutSweepFailures.record({ error: err instanceof Error ? err.message : String(err) });
     });
   }, TIMEOUT_POLL_INTERVAL_MS);
 
   const receiptSweep = setInterval(() => {
     void checkPushReceipts(prisma);
   }, PUSH_RECEIPT_POLL_INTERVAL_MS);
+
+  // A warning before the SMS balance runs out (login codes go by SMS).
+  // Only when login codes really go through Moolre.
+  const timers = [timeoutSweep, receiptSweep];
+  if (otpService instanceof MoolreOtpService) {
+    const checkBalance = createBalanceCheck({
+      cfg: { baseUrl: config.moolre.baseUrl, apiUser: config.moolre.apiUser, vasKey: config.moolre.vasKey },
+      lowBalance: config.moolre.smsLowBalance,
+    });
+    timers.push(
+      setTimeout(() => void checkBalance(), SMS_BALANCE_FIRST_CHECK_MS),
+      setInterval(() => void checkBalance(), SMS_BALANCE_INTERVAL_MS),
+    );
+  }
 
   // A deploy (SIGTERM from Render) or Ctrl-C finishes in-flight requests,
   // closes sockets and the database, then exits (lib/shutdown.ts). A fatal
@@ -214,8 +245,9 @@ async function bootstrap() {
     app,
     io,
     log: app.log,
-    timers: [timeoutSweep, receiptSweep],
+    timers,
     disconnectDatabase: () => prisma.$disconnect(),
+    flushReports: () => flushMonitoring(),
   });
   // `once`: a second Ctrl-C while shutting down falls back to Node's default
   // and stops the process at once.
@@ -223,6 +255,7 @@ async function bootstrap() {
   process.once("SIGINT", () => void shutdown("SIGINT"));
   onFatal((kind, err) => {
     app.log.fatal({ err, event: "fatal", kind }, `Fatal ${kind}: shutting down`);
+    reportError(err, { level: "fatal", tags: { fatal: kind } });
     void shutdown(kind, 1);
   });
 }
@@ -232,5 +265,6 @@ bootstrap().catch((err) => {
   // have been constructed. lib/logger needs nothing but stdout, and scrubs the
   // error (a database error can carry a connection string) on the way to exit(1).
   logger.error("Failed to start server", { err });
-  process.exit(1);
+  reportError(err, { level: "fatal", tags: { phase: "startup" } });
+  void flushMonitoring().finally(() => process.exit(1));
 });

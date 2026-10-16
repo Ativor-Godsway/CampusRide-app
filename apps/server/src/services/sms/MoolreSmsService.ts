@@ -1,4 +1,6 @@
 import { toMsisdn } from "../../lib/phone";
+import { logger } from "../../lib/logger";
+import { reportError, reportMessage } from "../../lib/monitoring";
 const SMS_SEND_PATH = "/open/sms/send";
 const TYPE_SMS = 1;
 const SMS_STATUS_SUCCESS = 1;
@@ -47,22 +49,54 @@ export async function sendMoolreSms(
     messages: [{ recipient, message, ref }],
   };
 
-  const response = await fetchFn(`${cfg.baseUrl}${SMS_SEND_PATH}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-USER": cfg.apiUser,
-      "X-API-VASKEY": cfg.vasKey,
-    },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetchFn(`${cfg.baseUrl}${SMS_SEND_PATH}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-USER": cfg.apiUser,
+        "X-API-VASKEY": cfg.vasKey,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    // Moolre unreachable. Reported here with what was being sent; the error
+    // still propagates as before (Sentry reports one error object once).
+    logger.error("SMS send failed: Moolre unreachable", { err, alert: "sms_failed", purpose: refPrefix });
+    reportError(err, { tags: { alert: "sms_failed", provider: "moolre", purpose: refPrefix } });
+    throw err;
+  }
 
   if (!response.ok) {
+    reportSmsFailure(refPrefix, { httpStatus: response.status });
     return { success: false };
   }
 
   const data = (await response.json()) as MoolreSmsResponseShape;
-  return { success: data.status === SMS_STATUS_SUCCESS || data.status === String(SMS_STATUS_SUCCESS) };
+  const success = data.status === SMS_STATUS_SUCCESS || data.status === String(SMS_STATUS_SUCCESS);
+  if (!success) {
+    reportSmsFailure(refPrefix, {
+      httpStatus: response.status,
+      moolreStatus: data.status,
+      moolreCode: typeof data.code === "string" ? data.code.slice(0, 40) : undefined,
+      moolreMessage: typeof data.message === "string" ? data.message.slice(0, 200) : undefined,
+    });
+  }
+  return { success };
+}
+
+/**
+ * Every failed send is an error in Sentry and in the logs: one means
+ * someone didn't get their login code or ride update. Never includes the
+ * number or the text (the text of a login SMS is the code).
+ */
+function reportSmsFailure(purpose: string, detail: Record<string, unknown>): void {
+  logger.error("SMS send failed: Moolre refused it", { alert: "sms_failed", purpose, ...detail });
+  reportMessage("SMS send failed (Moolre)", {
+    tags: { alert: "sms_failed", provider: "moolre", purpose },
+    extra: detail,
+  });
 }
 
 /**

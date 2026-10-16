@@ -1,4 +1,6 @@
 import type { FastifyError, FastifyInstance, FastifySchemaValidationError } from "fastify";
+import { noteDatabaseError } from "../lib/alerts";
+import { reportError } from "../lib/monitoring";
 
 /**
  * One shape for every error the API sends, and nothing internal in it
@@ -140,6 +142,11 @@ export function installErrorHandling(app: FastifyInstance): void {
     }
 
     request.log.error({ err: error, requestId }, "Unhandled error");
+    // To Sentry (Stage 5) with the same request id the user was shown.
+    reportError(error, {
+      tags: { requestId, route: request.routeOptions.url ?? "unknown", method: request.method },
+    });
+    noteDatabaseError(error, "request");
     return reply.code(500).send({ error: INTERNAL_MESSAGE, code: "INTERNAL_ERROR", requestId });
   });
 

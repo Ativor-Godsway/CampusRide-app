@@ -3,9 +3,19 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { RIDER_DEEP_LINK_POLICY } from "@rida/shared";
-import { AuthProvider, installAppStateFocusManager, useDeepLinkGuard } from "@rida/mobile-shared";
+import {
+  AuthProvider,
+  initMonitoring,
+  installAppStateFocusManager,
+  useDeepLinkGuard,
+  withMonitoring,
+} from "@rida/mobile-shared";
 import { useResetCacheOnAccountChange } from "../lib/activeRide";
 import { RiderPushNotifications } from "../lib/push";
+
+// Error and crash reporting (Sentry), when a DSN was built in: before
+// anything renders, so a crash on the first screen is reported too.
+initMonitoring("rider");
 
 const queryClient = new QueryClient();
 
@@ -32,7 +42,7 @@ function SessionCacheReset() {
   return null;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>
@@ -46,3 +56,5 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+export default withMonitoring(RootLayout);

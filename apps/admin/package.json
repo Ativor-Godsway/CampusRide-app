@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@rida/shared": "*",
+    "@sentry/react": "10.75.3",
     "leaflet": "1.9.4",
     "react": "19.2.3",
     "react-dom": "19.2.3"
