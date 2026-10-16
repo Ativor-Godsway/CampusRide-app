@@ -272,15 +272,15 @@ services:
     #
     # The Content-Security-Policy names the API (https://api.campusride.app,
     # same as VITE_API_URL below), Cloudinary (driver photos),
-    # OpenStreetMap's tiles (the places map) and Sentry's error intake (any
-    # of its regions; Stage 5). Change VITE_API_URL and you must change
+    # OpenStreetMap's tiles (the places map) and Sentry's error intake in the
+    # EU region, where the CampusRide Sentry organization is (Stage 5). Change VITE_API_URL and you must change
     # connect-src here too, or every request is blocked. Styles may be
     # inline (React and Leaflet set them at runtime; a style can't run code);
     # scripts may not.
     headers:
       - path: /*
         name: Content-Security-Policy
-        value: "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://res.cloudinary.com https://tile.openstreetmap.org; font-src 'self' data:; connect-src 'self' https://api.campusride.app https://*.ingest.sentry.io https://*.ingest.us.sentry.io https://*.ingest.de.sentry.io; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests"
+        value: "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://res.cloudinary.com https://tile.openstreetmap.org; font-src 'self' data:; connect-src 'self' https://api.campusride.app https://*.ingest.de.sentry.io; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests"
       - path: /*
         name: X-Frame-Options
         value: DENY
