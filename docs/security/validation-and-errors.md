@@ -144,10 +144,10 @@ then `"event":"shutdown_complete"`.
 - Call `useRequestValidation(app)` at the top of a new register function.
 - `src/http/schemas.test.ts` fails until the schema is complete.
 
-## Found along the way, not changed here
+## Found along the way
 
-- The demo site's login-code routes (`/demo/otp/*`) count sends per IP from
-  the leftmost `X-Forwarded-For` entry, which a client can set itself. They
-  have their own per-phone and global caps, so the exposure is SMS cost on the
-  demo only. Fix: use `request.ip` (Stage 2's trusted-proxy handling), as
-  every other route does. A separate small change.
+- The demo site's login-code routes (`/demo/otp/*`) used to count sends per
+  IP from the leftmost `X-Forwarded-For` entry, which a client can write
+  itself. Fixed separately (branch `fix-demo-otp-client-ip`): they now use
+  the same trusted client address as every other limit
+  (`clientIpForLimits`, Stage 2).
