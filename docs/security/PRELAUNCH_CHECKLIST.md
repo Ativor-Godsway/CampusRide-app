@@ -94,6 +94,13 @@ Updated at the end of each stage.
 | 🔶 | In-app account deletion, both apps (store requirement): a screen saying what is deleted and kept, a texted code to confirm, refused during a ride; hidden at once, kept details erased after 90 days, audit-logged — [account-deletion.md](../account-deletion.md) (branch `account-deletion`) |
 | ⬜ | A web link for deletion requests without the app (Google Play asks for one) |
 
+## Store review
+
+| | Item |
+|---|---|
+| 🔶 | Review demo for App Store and Play reviewers: two numbers sign in with a fixed code (no SMS), simulated driver and rider, demo rides kept apart from real people and admin figures, kill switch `REVIEW_DEMO_ENABLED` — [review-notes.md](../store/review-notes.md) (branch `review-demo`) |
+| ⬜ | Before each review: set the four `REVIEW_DEMO_*` settings on Render and paste the reviewer notes; after it, `REVIEW_DEMO_ENABLED=false` |
+
 ## Things only you can do by hand
 
 **Now (account deletion)**

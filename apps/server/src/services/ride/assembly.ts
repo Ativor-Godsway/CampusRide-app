@@ -106,6 +106,7 @@ export async function addRiderToCar(
           UPDATE "Ride"
           SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId}
           WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
+            AND "isReviewDemo" = ${anchor.isReviewDemo}
           RETURNING *`
       : [];
 

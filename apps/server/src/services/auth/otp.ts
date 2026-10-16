@@ -3,6 +3,7 @@ import type { OtpService } from "../otp/OtpService";
 import { OTP } from "./constants";
 import { generateOtpCode, sha256 } from "./hash";
 import { loadTestOtpCode } from "./loadTestOtp";
+import { reviewDemoCodeFor } from "../reviewDemo/accounts";
 import { InvalidOtpError, OtpAttemptsExceededError, OtpExpiredError } from "./errors";
 import { signVerificationToken } from "./tokens";
 import { enforce, type LimitCheck } from "../../rateLimit/limiter";
@@ -55,7 +56,11 @@ export async function requestOtp(
   if (options.ip) checks.push({ rule: RULES.ipOtpSend, subject: options.ip });
   await enforce(checks, now.getTime());
 
-  const code = LOAD_TEST_CODE ?? generateOtpCode();
+  // The two App Store / Google Play review numbers get the fixed review code
+  // and no SMS (services/reviewDemo); every other number a random code by SMS.
+  // The limits above apply to them all the same.
+  const demoCode = await reviewDemoCodeFor(prisma, phone);
+  const code = demoCode ?? LOAD_TEST_CODE ?? generateOtpCode();
   const codeHash = sha256(code);
   const expiresAt = new Date(now.getTime() + OTP.OTP_TTL_MINUTES * MINUTE_MS);
 
@@ -63,6 +68,7 @@ export async function requestOtp(
     data: { phone, codeHash, purpose, expiresAt, createdAt: now },
   });
 
+  if (demoCode) return;
   await otpService.sendOtp(phone, code);
 }
 

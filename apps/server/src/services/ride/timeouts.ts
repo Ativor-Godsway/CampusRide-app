@@ -84,6 +84,7 @@ export async function processTimeouts(
     source: RideSource;
     pickupZoneId: string;
     departedAt: Date | null;
+    isReviewDemo: boolean;
   })[];
   try {
     candidates = await prisma.ride.findMany({
@@ -104,6 +105,7 @@ export async function processTimeouts(
         broadcastStartedAt: true,
         decisionStartedAt: true,
         departedAt: true,
+        isReviewDemo: true,
         riderId: true,
         source: true,
         pickupZoneId: true,

@@ -32,6 +32,7 @@ export * from "./driver/autoArrival";
 export * from "./driver/serviceArea";
 export * from "./driver/slideToConfirm";
 export * from "./geo/serviceArea";
+export * from "./geo/reviewDemoPosition";
 export * from "./places/campusPlaces";
 export * from "./rides/ridePins";
 export * from "./places/tripEnd";

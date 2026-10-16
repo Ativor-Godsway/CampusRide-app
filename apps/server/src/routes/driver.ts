@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
-import type { PassengerStatus, RideStatus, RiderPushKind } from "@rida/shared";
+import type { PassengerStatus } from "@rida/shared";
 import {
   DISPATCH_WINDOW_MS,
   PRICING,
@@ -26,13 +26,13 @@ import {
 import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
-import { getDriverInfo } from "../services/user/driverInfo";
 import { claimIfOpen, closeOffer } from "../services/ride/dispatch";
 import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
 import { finalizeRideCompletion } from "../services/ride/completion";
+import { announceClaim, announcePassengerChange } from "../services/ride/driverActionEvents";
 import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
 import {
   DetourTooLongError,
@@ -45,7 +45,7 @@ import {
   RequestRideUnavailableError,
   RideNotReadyToDepartError,
 } from "../services/ride/errors";
-import { emitRideEvent, emitToRider, removeRiderFromRide } from "../realtime/rideSocket";
+import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
 import { notifyUssdRider } from "../services/sms/notifyUssdRiders";
 import { notifyRider } from "../services/push/notify";
 import { getActivePlaces } from "../services/places/placeCache";
@@ -607,17 +607,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     reply.code(200).send({ ride });
 
-    void (async () => {
-      // Every other driver it was offered to drops it from their offers now.
-      closeOffer(prisma, ride, "TAKEN");
-      emitRideEvent(rideId, "ride:status", { rideId, status: ride.status });
-      notifyRider(prisma, ride.riderId, "DRIVER_ASSIGNED", rideId, { driverUserId: userId });
-      const driverInfo = await getDriverInfo(prisma, userId);
-      if (driverInfo) emitRideEvent(rideId, "ride:driver_assigned", { rideId, ...driverInfo });
-      if (ride.source === "USSD") {
-        void notifyUssdRider(prisma, ride.riderId, "Driver matched! They're on the way.");
-      }
-    })().catch((err) => request.log.warn({ err, rideId }, "claim: rider notification failed"));
+    announceClaim(prisma, ride, userId).catch((err) => request.log.warn({ err, rideId }, "claim: rider notification failed"));
     return reply;
   });
 
@@ -766,13 +756,15 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // it); a shared car's free seats are offered on the trip screen
     // (fill-suggestions), within the detour limit.
     const [driver] = await prisma.$queryRaw<
-      Array<{ isApproved: boolean; isOnline: boolean; currentZoneId: string | null; busy: boolean }>
+      Array<{ isApproved: boolean; isOnline: boolean; currentZoneId: string | null; busy: boolean; isReviewDemo: boolean }>
     >`
       SELECT d."isApproved", d."isOnline", d."currentZoneId",
         EXISTS (SELECT 1 FROM "Ride" r
-          WHERE r."driverId" = ${userId} AND r.status IN ('MATCHED', 'ARRIVED', 'IN_PROGRESS')) AS busy
+          WHERE r."driverId" = ${userId} AND r.status IN ('MATCHED', 'ARRIVED', 'IN_PROGRESS')) AS busy,
+        (SELECT u."isReviewDemo" FROM "User" u WHERE u.id = d."userId") AS "isReviewDemo"
       FROM "Driver" d WHERE d."userId" = ${userId}`;
-    if (!driver || !driver.isOnline || !driver.isApproved || !driver.currentZoneId || driver.busy) {
+    // A review demo driver sees demo requests wherever they are (services/reviewDemo).
+    if (!driver || !driver.isOnline || !driver.isApproved || (!driver.currentZoneId && !driver.isReviewDemo) || driver.busy) {
       return reply.code(200).send({ rides: [] });
     }
 
@@ -780,7 +772,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const [allAdjacencies, zoneMap] = await Promise.all([getZoneAdjacency(prisma), getZoneMap(prisma)]);
 
     // Zones where this driver is eligible to pick up.
-    const driverEligibleZones = computeEligibleZoneSet(driver.currentZoneId, allAdjacencies);
+    const driverEligibleZones = driver.currentZoneId ? computeEligibleZoneSet(driver.currentZoneId, allAdjacencies) : new Set<string>();
 
     // All unclaimed REQUESTED rides whose pickup is in those zones and are still within
     // the 90-second broadcast window.
@@ -791,7 +783,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       where: {
         status: "REQUESTED",
         driverId: null,
-        pickupZoneId: { in: Array.from(driverEligibleZones) },
+        // Demo requests for demo drivers only, real ones for real drivers only.
+        isReviewDemo: driver.isReviewDemo,
+        ...(driver.isReviewDemo ? {} : { pickupZoneId: { in: Array.from(driverEligibleZones) } }),
         broadcastStartedAt: { gte: cutoff },
         // Phase 4: hide rides THIS driver explicitly declined. Scoped to the
         // rejecting driver only — the ride stays live for everyone else, which
@@ -931,7 +925,13 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     // suggestFillsForRide's internal areCombinable filter is exactly what
     // makes this the "compatible, ranked" subset — left untouched.
-    const compatibleRanked = suggestFillsForRide(anchor, allCandidates, adjacency, new Date());
+    const compatibleRanked = suggestFillsForRide(
+      anchor,
+      // Demo riders only fill demo cars, real riders real cars.
+      allCandidates.filter((candidate) => candidate.isReviewDemo === anchor.isReviewDemo),
+      adjacency,
+      new Date(),
+    );
     const compatibleIds = new Set(compatibleRanked.map((r) => r.id));
     const byId = new Map(allCandidates.map((r) => [r.id, r]));
     const existingRiderIds = new Set(anchor.passengers.map((p) => p.riderId));
@@ -1033,6 +1033,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     if (seated >= PRICING.MAX_SHARED_OCCUPANCY) return refuse(reply, 409, "CAR_FULL", "Your car is full.");
     if (
       !requestRide ||
+      requestRide.isReviewDemo !== car.isReviewDemo ||
       requestRide.status !== "REQUESTED" ||
       requestRide.driverId !== null ||
       requestRide.type !== "SHARED"
@@ -1305,13 +1306,6 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     "no-show": { to: "CANCELLED", onlyFrom: ["ARRIVED"], noShow: true },
   };
   const NO_SHOW_CANCEL = PASSENGER_ACTIONS["no-show"]!;
-  /** The push notification each per-passenger action sends that rider. */
-  const PASSENGER_PUSH: Partial<Record<PassengerStatus, RiderPushKind>> = {
-    ARRIVED: "DRIVER_ARRIVED",
-    PICKED_UP: "TRIP_STARTED",
-    DROPPED_OFF: "TRIP_COMPLETED",
-    CANCELLED: "DRIVER_CANCELLED",
-  };
 
   for (const [action, baseSpec] of Object.entries(PASSENGER_ACTIONS)) {
     app.post(
@@ -1366,35 +1360,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       if (!changed) return reply;
 
       // After the reply: tell the rider(s). Never blocks or fails the action.
-      void (async () => {
-        emitToRider(passenger.riderId, "ride:passenger_status", {
-          rideId,
-          ridePassengerId: passengerId,
-          riderId: passenger.riderId,
-          status: passenger.status as PassengerStatus,
-        });
-        if (ride.status !== rideStatusBefore) {
-          emitRideEvent(rideId, "ride:status", { rideId, status: ride.status as RideStatus });
-        }
-        const pushKind = PASSENGER_PUSH[spec.to];
-        if (pushKind) {
-          notifyRider(prisma, passenger.riderId, pushKind, rideId, { driverUserId: userId, noShow: spec.noShow });
-        }
-        if (spec.to === "ARRIVED" && ride.source === "USSD") {
-          void notifyUssdRider(prisma, passenger.riderId, "Your driver has arrived.");
-        }
-        if (ride.status === "COMPLETED" && rideStatusBefore !== "COMPLETED") {
-          await finalizeRideCompletion(
-            prisma,
-            { id: ride.id, type: ride.type, occupancy: ride.occupancy, paymentMethod: ride.paymentMethod, source: ride.source },
-            userId,
-            ride.passengers,
-          );
-        }
-        // Out of the car: their phone stops following it (after the events
-        // above, so they still hear how their own trip ended).
-        if (!isActivePassengerStatus(passenger.status)) removeRiderFromRide(passenger.riderId, rideId);
-      })().catch((err) => request.log.error({ err, rideId, passengerId }, `passenger ${action}: follow-up failed`));
+      announcePassengerChange(prisma, { passenger, ride, rideStatusBefore, driverUserId: userId, noShow: spec.noShow }).catch(
+        (err) => request.log.error({ err, rideId, passengerId }, `passenger ${action}: follow-up failed`),
+      );
       return reply;
     });
   }
