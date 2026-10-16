@@ -178,11 +178,11 @@ export default tseslint.config(
     },
   },
 
-  // ── Tooling config files (babel/metro) ─────────────────────────────────────
-  // CommonJS by necessity: Babel and Metro load these with require(), so
+  // ── Tooling config files (babel/metro, Expo config plugins) ────────────────
+  // CommonJS by necessity: Babel, Metro and Expo load these with require(), so
   // `module.exports`, `require` and `__dirname` are correct here, not smells.
   {
-    files: ["**/babel.config.js", "**/metro.config.js", "**/*.config.js"],
+    files: ["**/babel.config.js", "**/metro.config.js", "**/*.config.js", "apps/*/plugins/*.js"],
     languageOptions: {
       globals: { ...globals.node },
       sourceType: "commonjs",

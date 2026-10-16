@@ -36,7 +36,13 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "CampusRide Driver uses your location to show riders where you are and to match you with nearby rides."
+          "locationWhenInUsePermission": "CampusRide Driver uses your location to show riders where you are and to match you with nearby ride requests.",
+          "locationAlwaysAndWhenInUsePermission": "CampusRide Driver uses your location while you are online, even when the app is closed or not in use, to share your position with riders on your trip and match you with nearby ride requests. Location sharing stops when you go offline.",
+          "locationAlwaysPermission": "CampusRide Driver uses your location while you are online, even when the app is closed or not in use, to share your position with riders on your trip and match you with nearby ride requests. Location sharing stops when you go offline.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
+          "androidForegroundServiceIcon": "./assets/notification-icon.png"
         }
       ],
       [

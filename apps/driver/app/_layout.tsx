@@ -13,6 +13,10 @@ import {
 } from "@rida/mobile-shared";
 import { DriverPresenceProvider } from "../lib/presence";
 import { DriverLocationProvider } from "../lib/location";
+import { LocationDisclosureProvider } from "../components/LocationDisclosure";
+// Defines the background location task as the app starts (the OS may deliver
+// positions straight away).
+import "../lib/backgroundLocation";
 import { TripRuntime } from "../lib/tripRuntime";
 import { DriverPushNotifications } from "../lib/push";
 
@@ -54,14 +58,16 @@ function RootLayout() {
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <DriverLocationProvider>
-            <DriverPresenceProvider>
-              <DeepLinkGuard />
-              <SessionCacheReset />
-              <DriverPushNotifications />
-              {/* Live location + automatic arrival on every screen during a trip. */}
-              <TripRuntime />
-              <Stack screenOptions={{ headerShown: false }} />
-            </DriverPresenceProvider>
+            <LocationDisclosureProvider>
+              <DriverPresenceProvider>
+                <DeepLinkGuard />
+                <SessionCacheReset />
+                <DriverPushNotifications />
+                {/* Live location + automatic arrival on every screen during a trip. */}
+                <TripRuntime />
+                <Stack screenOptions={{ headerShown: false }} />
+              </DriverPresenceProvider>
+            </LocationDisclosureProvider>
           </DriverLocationProvider>
         </AuthProvider>
       </QueryClientProvider>
