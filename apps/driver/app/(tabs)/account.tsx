@@ -14,6 +14,7 @@ import {
   describeDriverPhotoError,
   describeProfileSaveError,
   getAppVersionLabel,
+  showAppAbout,
   radii,
   spacing,
   updateDriverProfile,
@@ -298,9 +299,15 @@ export default function AccountTab() {
         </Card>
       )}
 
-      {/* Which build/update this phone runs — docs/runbooks/releasing.md. */}
+      {/* Which build/update this phone runs — docs/runbooks/releasing.md. Long-press: About this app. */}
       {!editing && (
-        <Text variant="caption" color="subtle" style={styles.versionLabel} selectable>
+        <Text
+          variant="caption"
+          color="subtle"
+          style={styles.versionLabel}
+          onLongPress={showAppAbout}
+          accessibilityHint="Long-press for the build number and update ID"
+        >
           {getAppVersionLabel()}
         </Text>
       )}
