@@ -8,11 +8,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { AppState } from "react-native";
 import * as Location from "expo-location";
 import { useQuery } from "@tanstack/react-query";
 import { REVIEW_DEMO_POSITION, pathLengthMeters, pointAlongPath, type ArrivalSample, type LatLng } from "@rida/shared";
 import { getZones, useAuth } from "@rida/mobile-shared";
 import { zonesQueryKey } from "./zones";
+import {
+  hasBackgroundLocationAccess,
+  onDriverLocation,
+  startDriverLocationUpdates,
+  stopDriverLocationUpdates,
+} from "./backgroundLocation";
 
 /**
  * Where the driver is — ONE source for everything that needs it: the zone
@@ -88,14 +95,54 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
   const [demanders, setDemanders] = useState<ReadonlySet<string>>(new Set());
 
   // ─── Real GPS ─────────────────────────────────────────────────────────
+  // While online or on a trip. With "all the time" permission it keeps going
+  // in the background (lib/backgroundLocation: Android's online notification,
+  // iOS's blue indicator); otherwise only while the app is open. Off, and the
+  // notification gone, as soon as nobody needs it: going offline, signing
+  // out, a finished trip.
   const tracking = isDriver && demanders.size > 0;
+  // Re-checked when the app comes back to the front: the driver may have
+  // allowed "all the time" in Settings meanwhile.
+  const [permissionCheck, setPermissionCheck] = useState(0);
+  const backgroundModeRef = useRef(false);
   useEffect(() => {
     if (!tracking) return;
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next !== "active") return;
+      void hasBackgroundLocationAccess().then((allowed) => {
+        // Restart only if the permission changed, so the notification doesn't flicker.
+        if (allowed !== backgroundModeRef.current) setPermissionCheck((n) => n + 1);
+      });
+    });
+    return () => sub.remove();
+  }, [tracking]);
+
+  useEffect(() => {
+    if (!tracking) {
+      void stopDriverLocationUpdates();
+      return;
+    }
     let cancelled = false;
     let sub: Location.LocationSubscription | null = null;
+    let unlisten: (() => void) | null = null;
     void (async () => {
       const perm = await Location.getForegroundPermissionsAsync();
       if (cancelled || perm.status !== "granted") return;
+      backgroundModeRef.current = await hasBackgroundLocationAccess();
+      if (backgroundModeRef.current) {
+        unlisten = onDriverLocation(setRealSample);
+        try {
+          await startDriverLocationUpdates();
+          if (cancelled) void stopDriverLocationUpdates();
+          return;
+        } catch {
+          // Couldn't start in the background: track while the app is open.
+          backgroundModeRef.current = false;
+          unlisten();
+          unlisten = null;
+        }
+      }
+      if (cancelled) return;
       const subscription = await Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, timeInterval: 5_000, distanceInterval: 10 },
         (pos) =>
@@ -112,8 +159,10 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
       sub?.remove();
+      unlisten?.();
+      void stopDriverLocationUpdates();
     };
-  }, [tracking]);
+  }, [tracking, permissionCheck]);
 
   const demand = useCallback((key: string, active: boolean) => {
     setDemanders((prev) => {

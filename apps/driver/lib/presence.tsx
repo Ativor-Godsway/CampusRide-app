@@ -8,11 +8,12 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Alert } from "react-native";
-import * as Location from "expo-location";
+import { Alert, Linking } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DRIVER_OUTSIDE_AREA_MESSAGE,
+  LOCATION_SETTINGS_MESSAGE,
+  WHILE_USING_ONLY_MESSAGE,
   isOutsideServiceArea,
   isTransientRequestFailure,
   planZoneUpdate,
@@ -31,6 +32,8 @@ import { driverActiveRideQueryKey } from "./activeTrip";
 import { useDriverLocation, useLocationDemand } from "./location";
 import { zonesQueryKey } from "./zones";
 import { eligibleRidesQueryKey } from "./requests";
+import { currentLocationAccessPlan, requestDriverLocationAccess } from "./backgroundLocation";
+import { useLocationDisclosure } from "../components/LocationDisclosure";
 
 /**
  * The driver's online status, owned once for the whole app so the toggle,
@@ -93,6 +96,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   const [confirmed, setConfirmed] = useState(true);
   const [waking, setWaking] = useState(false);
   const location = useDriverLocation();
+  const askDisclosure = useLocationDisclosure();
 
   const isOnlineRef = useRef(false);
   const seqRef = useRef(0);
@@ -183,15 +187,32 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     }
 
     void (async () => {
-      // Permission is usually already granted, so this doesn't wait on anything.
-      let perm = await Location.getForegroundPermissionsAsync();
-      if (perm.status !== "granted") perm = await Location.requestForegroundPermissionsAsync();
+      // Location is asked for here, when going online, never at install: the
+      // full-screen disclosure first, then the system prompts. Usually it is
+      // already allowed and nothing is shown.
+      const plan = await currentLocationAccessPlan();
+      let access: "always" | "whileUsing" | "none" = plan === "always" || plan === "whileUsing" ? plan : "none";
+      if (plan === "disclose") {
+        const accepted = await askDisclosure();
+        if (accepted) access = await requestDriverLocationAccess();
+        else access = (await currentLocationAccessPlan()) === "whileUsing" ? "whileUsing" : "none";
+      }
       if (seq !== seqRef.current) return;
-      if (perm.status !== "granted") {
+      if (access === "none") {
         applyOnline(false);
         setConfirmed(true);
-        Alert.alert("Location required", "Enable location so we can match you with nearby riders.");
+        Alert.alert("Location needed to go online", LOCATION_SETTINGS_MESSAGE, [
+          { text: "Not now", style: "cancel" },
+          { text: "Open Settings", onPress: () => void Linking.openSettings() },
+        ]);
         return;
+      }
+      if (access === "whileUsing" && plan === "disclose") {
+        // They allowed "while using" but not "all the time": online, and say what that means once.
+        Alert.alert("Location only while the app is open", WHILE_USING_ONLY_MESSAGE, [
+          { text: "OK", style: "cancel" },
+          { text: "Open Settings", onPress: () => void Linking.openSettings() },
+        ]);
       }
 
       // The current or last known fix is instant; a fresh fix refines the zone later.
@@ -214,7 +235,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
       }
       sendAvailability(seq, true, zoneId);
     })();
-  }, [applyOnline, queryClient, sendAvailability, location]);
+  }, [applyOnline, queryClient, sendAvailability, location, askDisclosure]);
 
   // ─── Keep the zone current while online ─────────────────────────────────
   // The position comes from lib/location (real GPS, or the dev-only fake), so

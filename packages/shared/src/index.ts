@@ -44,3 +44,4 @@ export * from "./api/rateLimit";
 export * from "./phone/ghanaPhone";
 export * from "./redact";
 export * from "./account/deletion";
+export * from "./driver/locationAccess";

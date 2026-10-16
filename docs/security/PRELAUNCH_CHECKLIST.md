@@ -91,8 +91,10 @@ Updated at the end of each stage.
 
 | | Item |
 |---|---|
-| 🔶 | In-app account deletion, both apps (store requirement): a screen saying what is deleted and kept, a texted code to confirm, refused during a ride; hidden at once, kept details erased after 90 days, audit-logged — [account-deletion.md](../account-deletion.md) (branch `account-deletion`) |
+| ✅ | In-app account deletion, both apps (store requirement): a screen saying what is deleted and kept, a texted code to confirm, refused during a ride; hidden at once, kept details erased after 90 days, audit-logged — [account-deletion.md](../account-deletion.md) (PR #46) |
 | ⬜ | A web link for deletion requests without the app (Google Play asks for one) |
+| 🔶 | Driver background location to Google Play and Apple rules: full-screen disclosure before any prompt, asked only when going online, Android online notification (foreground service), stops when offline; rider app location only while open — [location-store-review.md](../runbooks/location-store-review.md) (branch `driver-background-location`) |
+| ⬜ | Play Console location and foreground-service declarations, with the screen recording (steps and script in location-store-review.md) |
 
 ## Store review
 
