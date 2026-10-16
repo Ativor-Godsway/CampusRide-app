@@ -233,6 +233,12 @@ Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each
 offer, so changing it needs no app release.
 
+Account deletion: `ACCOUNT_DELETION_RETENTION_DAYS` (default 90, 1–365) —
+how long a closed account's name, phone number and a driver's plate and
+photo are kept, privately, for safety disputes before they are erased
+([docs/account-deletion.md](docs/account-deletion.md)). The apps' Delete
+account screen says 90 days, so change both together.
+
 Stuck rides: `RIDE_AUTO_COMPLETE_HOURS` (default 3, 1–24) — a ride still in
 progress this long after it started (a driver who never tapped "complete")
 is completed automatically, so its riders can book again

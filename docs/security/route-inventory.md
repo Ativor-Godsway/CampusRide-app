@@ -77,7 +77,8 @@ always the one in the token.
 |---|---|---|---|---|
 | `GET /me` | Yes | any | Own account only. | account default |
 | `PATCH /me` | Yes | any | Own name and emergency contact only. Any other field sent (role, phone, ids) is ignored. | 20 / hour; account default |
-| `DELETE /me` | Yes | any | Own account only. Refused while a ride is active. Closes the account's open sockets at once. | 5 / hour; account default |
+| `POST /me/deletion-code` | Yes | any | Texts a confirmation code to the account's **own** phone (never a number from the request); answers with it masked. Refused while a ride is active, before any text is sent. | 5 / hour; the login-code limits for that number; account default |
+| `DELETE /me` | Yes | any | Own account only, with the code from `/me/deletion-code`. Refused while a ride is active. Hides the account at once (sessions, push tokens, SOS links gone; name and number replaced), keeps what a safety dispute needs out of sight for 90 days, then erases it ([deleteAccount.ts](../../apps/server/src/services/auth/deleteAccount.ts)). Closes the account's open sockets. | 5 / hour; account default |
 | `PUT /me/push-token` | Yes | any | Registers this phone's token to the caller (see "Accepted for now"). Rider tokens only for riders, driver tokens only for drivers. | 30 / 15 min; account default |
 | `DELETE /me/push-token` | Yes | any | Removes the token only if it is the caller's. | 30 / 15 min; account default |
 | `POST /driver/profile` | Yes | DRIVER | Own vehicle details only. A photo must be the driver's own upload. Approval and online status can't be set here. | 20 / hour; account default |

@@ -11,8 +11,6 @@ import {
   Screen,
   Text,
   colors,
-  confirmDeleteAccount,
-  describeDeleteAccountError,
   describeDriverPhotoError,
   describeProfileSaveError,
   getAppVersionLabel,
@@ -29,7 +27,7 @@ import { useDriverPhotoUpload, type DriverPhotoResult, type PhotoSource } from "
 /** Account tab — view profile (name, vehicle, photo, approval) and edit it in place. */
 export default function AccountTab() {
   const router = useRouter();
-  const { user, refreshMe, signOut, deleteAccount } = useAuth();
+  const { user, refreshMe, signOut } = useAuth();
   const driver = user?.driver;
 
   const [editing, setEditing] = useState(false);
@@ -111,13 +109,9 @@ export default function AccountTab() {
     ]);
   };
 
-  // Permanent account closure. The server refuses with 409 while a ride is
-  // still in flight, which describeDeleteAccountError surfaces verbatim.
-  const startDeleteAccount = () =>
-    confirmDeleteAccount({
-      deleteAccount,
-      onError: (error) => Alert.alert("Couldn't delete account", describeDeleteAccountError(error)),
-    });
+  // Settings → Delete account: its own screen (mobile-shared DeleteAccountScreen)
+  // explains what is deleted and kept, and confirms with a texted code.
+  const startDeleteAccount = () => router.push("/delete-account");
 
   const initial = user?.name?.charAt(0).toUpperCase() ?? "?";
   const { state: photoState } = photo;

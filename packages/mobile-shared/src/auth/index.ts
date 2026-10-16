@@ -8,4 +8,5 @@ export * from "./deleteAccountFlow";
 export * from "./screens/PhoneScreen";
 export * from "./screens/OtpScreen";
 export * from "./screens/SignupScreen";
+export * from "./screens/DeleteAccountScreen";
 export * from "./sessionCache";

@@ -73,6 +73,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /me": "self",
   "PATCH /me": "self",
   "DELETE /me": "self",
+  "POST /me/deletion-code": "self",
   "PUT /me/push-token": "self",
   "DELETE /me/push-token": "self",
   "POST /driver/profile": "self",

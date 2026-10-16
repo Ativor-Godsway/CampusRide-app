@@ -42,3 +42,4 @@ export * from "./push/notifications";
 export * from "./api/rateLimit";
 export * from "./phone/ghanaPhone";
 export * from "./redact";
+export * from "./account/deletion";

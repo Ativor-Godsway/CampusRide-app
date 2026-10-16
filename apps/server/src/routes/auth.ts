@@ -31,7 +31,9 @@ import {
   AccountAlreadyDeletedError,
   ActiveRideBlocksDeletionError,
   deleteAccount,
+  findRideBlockingDeletion,
 } from "../services/auth/deleteAccount";
+import { maskPhone } from "../lib/redact";
 import { config } from "../config";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { normalizePhone } from "../lib/phone";
@@ -73,7 +75,8 @@ const SCHEMAS = {
       emergencyContactPhone: text(MAX.phone, { nullable: true }),
     }),
   },
-  deleteMe: { querystring: empty, body: empty },
+  deletionCode: { querystring: empty, body: empty },
+  deleteMe: { querystring: empty, body: object({ code: text(MAX.otpCode) }) },
   driverProfile: {
     body: object(
       {
@@ -433,36 +436,76 @@ export function registerAuthRoutes(
   });
 
   /**
-   * In-app account deletion (app-store requirement, and the only way a user
-   * could previously leave was to ask a human).
+   * In-app account deletion (an app-store requirement), in two calls from the
+   * app's Delete account screen:
    *
-   * Anonymizes rather than row-deletes — see services/auth/deleteAccount.ts
-   * for why the row has to survive. Idempotent from the client's point of
-   * view: a second call with a still-valid access token gets 404, not a 500.
+   *   POST   /me/deletion-code  texts a code to the account's own phone
+   *   DELETE /me { code }       checks it and closes the account
+   *
+   * Both refuse with 409 and a plain sentence while a ride is going on. What
+   * closing does, and what is kept for how long: services/auth/deleteAccount.ts.
    */
+  app.post(
+    "/me/deletion-code",
+    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.deletionCode, config: { limits: { user: [RULES.accountDelete] } } },
+    async (request, reply) => {
+      const userId = request.user!.userId;
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { phone: true, deletedAt: true } });
+      if (!user || user.deletedAt) return reply.code(404).send({ error: "Account not found or already deleted" });
+      const ride = await findRideBlockingDeletion(prisma, userId);
+      if (ride) return reply.code(409).send({ error: new ActiveRideBlocksDeletionError(ride.id).message, rideId: ride.id });
+      try {
+        await requestOtp(prisma, otpService, user.phone, "ACCOUNT_DELETION", new Date(), { ip: clientIpForLimits(request) });
+      } catch (err) {
+        if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
+        throw err;
+      }
+      // Enough of the number to recognise it, as the screen says where the code went.
+      return reply.code(200).send({ sent: true, phone: maskPhone(user.phone) });
+    },
+  );
+
   app.delete(
     "/me",
     { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.deleteMe, config: { limits: { user: [RULES.accountDelete] } } },
     async (request, reply) => {
-    const userId = request.user!.userId;
-
-    try {
-      await deleteAccount(prisma, userId);
-    } catch (err) {
-      if (err instanceof ActiveRideBlocksDeletionError) {
-        return reply.code(409).send({ error: err.message, rideId: err.rideId });
+      const userId = request.user!.userId;
+      const { code } = request.body as { code?: string };
+      if (!code) {
+        // An app from before the confirmation step: it has to be updated first.
+        return reply.code(400).send({ error: "Enter the code we texted you to confirm. If you don't see where, update the app." });
       }
-      if (err instanceof AccountAlreadyDeletedError) {
-        return reply.code(404).send({ error: err.message });
-      }
-      throw err;
-    }
+      const user = await prisma.user.findUnique({ where: { id: userId }, select: { phone: true, deletedAt: true } });
+      if (!user || user.deletedAt) return reply.code(404).send({ error: "Account not found or already deleted" });
 
-    // Its open sockets go too: a deleted account must not keep hearing rides.
-    disconnectUser(userId);
-    request.log.info({ userId, event: "account_deleted" }, "Account anonymized on user request");
-    return reply.code(200).send({ deleted: true });
-  });
+      let purgeAfter: Date;
+      try {
+        await verifyOtp(prisma, user.phone, code, "ACCOUNT_DELETION");
+        ({ purgeAfter } = await deleteAccount(prisma, userId));
+      } catch (err) {
+        if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
+        if (err instanceof InvalidOtpError) {
+          return reply.code(400).send({ error: "That code isn't right. Check the text message and try again." });
+        }
+        if (err instanceof OtpExpiredError) {
+          return reply.code(400).send({ error: "That code has expired. Send a new one." });
+        }
+        if (err instanceof OtpAttemptsExceededError) {
+          return reply.code(400).send({ error: "Too many wrong codes. Send a new one." });
+        }
+        if (err instanceof ActiveRideBlocksDeletionError) {
+          return reply.code(409).send({ error: err.message, rideId: err.rideId });
+        }
+        if (err instanceof AccountAlreadyDeletedError) return reply.code(404).send({ error: err.message });
+        throw err;
+      }
+
+      // Its open sockets go too: a deleted account must not keep hearing rides.
+      disconnectUser(userId);
+      request.log.info({ userId, event: "account_deleted" }, "Account closed on the user's request");
+      return reply.code(200).send({ deleted: true, erasedAfter: purgeAfter.toISOString() });
+    },
+  );
 
   app.post(
     "/driver/profile",

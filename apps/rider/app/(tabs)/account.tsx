@@ -9,8 +9,6 @@ import {
   ServiceIcon,
   Text,
   colors,
-  confirmDeleteAccount,
-  describeDeleteAccountError,
   getAppVersionLabel,
   radii,
   spacing,
@@ -39,7 +37,7 @@ const QUICK_ACTIONS: QuickAction[] = [
 /** Account tab — profile header, Uber-style quick-action grid, settings list, and logout. */
 export default function AccountTab() {
   const router = useRouter();
-  const { user, signOut, deleteAccount } = useAuth();
+  const { user, signOut } = useAuth();
   const hasEmergencyContact = Boolean(user?.emergencyContactName && user?.emergencyContactPhone);
 
   const { data: activeRide } = useActiveRide();
@@ -55,14 +53,9 @@ export default function AccountTab() {
     ]);
   };
 
-  // Permanent account closure, required for app-store compliance and the
-  // only in-app way to leave. Two-step confirmation lives in mobile-shared
-  // so rider and driver ask identically.
-  const startDeleteAccount = () =>
-    confirmDeleteAccount({
-      deleteAccount,
-      onError: (error) => Alert.alert("Couldn't delete account", describeDeleteAccountError(error)),
-    });
+  // Settings → Delete account: its own screen (mobile-shared DeleteAccountScreen)
+  // explains what is deleted and kept, and confirms with a texted code.
+  const startDeleteAccount = () => router.push("/delete-account");
 
   const showComingSoon = (label: string) =>
     Alert.alert(`${label} is coming soon`, "We're working on it — check back in a future update.");

@@ -88,19 +88,25 @@ export async function logout(refreshToken: string, pushToken?: string | null): P
 }
 
 /**
- * Permanently closes the signed-in account (DELETE /me).
- *
- * The server anonymizes the account rather than deleting the row — ride and
- * payment history is preserved — and revokes every refresh token, so the
- * caller MUST clear local credentials afterwards (AuthContext.deleteAccount
- * does this by reusing the sign-out path).
- *
- * Unlike logout this deliberately does NOT swallow errors: the server
- * refuses with 409 while a ride is still in flight, and the user needs to
- * see that instead of being dropped to the welcome screen as if it worked.
+ * Texts a code to the signed-in account's own phone to confirm deleting it
+ * (POST /me/deletion-code). Answers with the number, masked, for the screen
+ * to say where the code went. Refused with 409 while a ride is going on.
  */
-export async function deleteAccount(): Promise<void> {
-  await api.delete("/me");
+export async function requestDeletionCode(): Promise<{ phone: string }> {
+  const res = await api.post<{ sent: boolean; phone: string }>("/me/deletion-code");
+  return { phone: res.data.phone };
+}
+
+/**
+ * Closes the signed-in account with the texted code (DELETE /me). The server
+ * revokes every session, so the caller MUST clear local credentials
+ * afterwards (AuthContext.deleteAccount does).
+ *
+ * Unlike logout this deliberately does NOT swallow errors: a wrong code, or
+ * a ride still going on, must be shown, not treated as done.
+ */
+export async function deleteAccount(code: string): Promise<void> {
+  await api.delete("/me", { data: { code } });
 }
 
 export interface UpdateProfileInput {

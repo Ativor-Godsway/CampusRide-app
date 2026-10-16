@@ -35,6 +35,7 @@ import { alerts, noteDatabaseError } from "./lib/alerts";
 import { MoolreOtpService } from "./services/otp/MoolreOtpService";
 import { createBalanceCheck } from "./services/sms/moolreBalance";
 import { loadTestOtpCode } from "./services/auth/loadTestOtp";
+import { purgeDeletedAccounts } from "./services/auth/deleteAccount";
 
 // From the very first line: an error nothing caught is logged and ends the
 // process (Render restarts it), never left to run in an unknown state.
@@ -52,6 +53,10 @@ const PUSH_RECEIPT_POLL_INTERVAL_MS = 5 * 60_000;
 // The Moolre SMS balance is checked a minute after startup, then every 6 hours.
 const SMS_BALANCE_FIRST_CHECK_MS = 60_000;
 const SMS_BALANCE_INTERVAL_MS = 6 * 60 * 60_000;
+
+// Closed accounts whose retention period has ended are erased hourly
+// (services/auth/deleteAccount.ts); a day late at worst would still be fine.
+const ACCOUNT_PURGE_INTERVAL_MS = 60 * 60_000;
 
 export { paymentService, routeService, otpService };
 
@@ -241,7 +246,12 @@ async function bootstrap() {
 
   // A warning before the SMS balance runs out (login codes go by SMS).
   // Only when login codes really go through Moolre.
-  const timers = [timeoutSweep, receiptSweep];
+  const purgeClosedAccounts = () =>
+    purgeDeletedAccounts(prisma).catch((err) => app.log.error({ err }, "Erasing closed accounts failed"));
+  void purgeClosedAccounts();
+  const accountPurge = setInterval(() => void purgeClosedAccounts(), ACCOUNT_PURGE_INTERVAL_MS);
+
+  const timers = [timeoutSweep, receiptSweep, accountPurge];
   if (otpService instanceof MoolreOtpService) {
     const checkBalance = createBalanceCheck({
       cfg: { baseUrl: config.moolre.baseUrl, apiUser: config.moolre.apiUser, vasKey: config.moolre.vasKey },
