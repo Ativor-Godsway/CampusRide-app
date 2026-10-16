@@ -168,6 +168,10 @@ export function checkProductionEnv(env: Env): EnvCheck {
       "ENABLE_USSD=true: the USSD callback has no authentication yet (needs a Moolre gateway IP allowlist or secret first)",
     );
   }
+  if (!blank(env.LOAD_TEST_OTP_CODE))
+    errors.push(
+      "LOAD_TEST_OTP_CODE is set: it is for the local load test only and must never be set in production",
+    );
   if (env.TRUST_PROXY?.trim() === "true")
     errors.push("TRUST_PROXY=true lets any client choose its own IP");
   else if (!blank(env.TRUST_PROXY))

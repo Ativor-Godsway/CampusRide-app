@@ -58,34 +58,55 @@ Updated at the end of each stage.
 | ✅ | No stack traces, Prisma or SQL errors to clients, in any environment: one error shape with a plain sentence, a code and a request id; `X-Request-Id` on every response |
 | ✅ | No login codes, tokens, push tokens, credentials or full phone numbers in logs (`+233*****146`), including careless future log lines, URLs and error stacks |
 | ✅ | Unhandled rejections and exceptions logged (scrubbed), then a clean shutdown and exit 1 |
-| ✅ | Graceful shutdown on deploy: in-flight requests finish, sockets and database close, 20 s safety limit |
+| 🔶 | Graceful shutdown on deploy: in-flight requests finish, sockets and database close, 20 s safety limit. On Render it never ran (the stop signal arrived twice and the second killed the server); fixed on branch `fix-shutdown-signals`, waiting for merge |
 
-## Stage 5 — Monitoring 🔶 (branch `security-stage5-monitoring`)
-
-| | Item |
-|---|---|
-| 🔶 | Sentry in the server, rider app, driver app and admin site; off until a DSN is set (server and admin: Render; apps: EAS environment variables) — [monitoring.md](monitoring.md) |
-| 🔶 | One scrubber for every Sentry client: no phone numbers, codes, tokens, request bodies, IPs, screenshots; checked end to end against a fake Sentry |
-| 🔶 | Performance sampling 2 in 100; releases tagged (deployed commit; app build plus EAS Update id) |
-| 🔶 | Server 500s reported with the request id the user saw; crashes reported before exit |
-| 🔶 | `/health/ready` checks the database (3 s, 503 when down) for UptimeRobot; `/health` stays database-free for Render |
-| 🔶 | Alerts: every failed SMS; push failures, database connection failures, ride sweep failures and bad-token socket refusals above a threshold |
-| 🔶 | Moolre SMS balance checked every 6 hours with a low-balance warning (undocumented Moolre call, so a manual check is documented too) |
-| 🔶 | DEPLOY.md, step by step: Sentry projects and where each DSN goes, UptimeRobot switch, Neon compute-hour check, Moolre balance |
-
-## Stage 6 — Backups, recovery and load ⬜
+## Stage 5 — Monitoring ✅ (PR #42)
 
 | | Item |
 |---|---|
-| ⬜ | Backup and restore runbook (weekly Neon branch, limits, optional `pg_dump`) |
-| ⬜ | Incident runbook |
-| ⬜ | In-memory state document; startup sweep so no ride is stuck after a restart |
-| ⬜ | Connection-pool and Render-plan recommendation |
-| ⬜ | Local load test with results in plain English |
+| ✅ | Sentry in the server, rider app, driver app and admin site; off until a DSN is set (server and admin: Render; apps: EAS environment variables) — [monitoring.md](monitoring.md) |
+| ✅ | One scrubber for every Sentry client: no phone numbers, codes, tokens, request bodies, IPs, screenshots; checked end to end against a fake Sentry |
+| ✅ | Performance sampling 2 in 100; releases tagged (deployed commit; app build plus EAS Update id) |
+| ✅ | Server 500s reported with the request id the user saw; crashes reported before exit |
+| ✅ | `/health/ready` checks the database (3 s, 503 when down) for UptimeRobot; `/health` stays database-free for Render |
+| ✅ | Alerts: every failed SMS; push failures, database connection failures, ride sweep failures and bad-token socket refusals above a threshold |
+| ✅ | Moolre SMS balance checked every 6 hours with a low-balance warning (undocumented Moolre call, so a manual check is documented too) |
+| ✅ | DEPLOY.md, step by step: Sentry projects and where each DSN goes, UptimeRobot switch, Neon compute-hour check, Moolre balance |
+
+## Stage 6 — Backups, recovery and load 🔶 (branch `security-stage6-recovery`)
+
+| | Item |
+|---|---|
+| 🔶 | Backup and restore runbook: weekly `backup-YYYY-MM-DD` branch, rewinding within Neon's 6-hour window, switching to a backup branch, optional encrypted-at-rest `pg_dump` on the Mac — [backup-and-restore.md](../runbooks/backup-and-restore.md) |
+| ⬜ | Automatic off-site backups: proposed (encrypted weekly dump to a private bucket), **waiting for your OK** — it copies user data somewhere new |
+| 🔶 | Incident runbook: server down, database paused or unreachable, SMS or push stopped, bad deploy, bad app update, compromised admin — [incidents.md](../runbooks/incidents.md) |
+| 🔶 | In-memory state documented, with restart and multi-server effects — [in-memory-state.md](../architecture/in-memory-state.md); no restart can leave a ride stuck (all ride timing is in the database), and a startup sweep settles rides that ran out while the server was down |
+| 🔶 | A ride left in progress (driver never tapped "complete") is completed after 3 hours, so its riders can book again (`RIDE_AUTO_COMPLETE_HOURS`) |
+| 🔶 | The apps rejoin their ride's live updates after every reconnect (before, a rider lost the driver's position on the map after each deploy) |
+| 🔶 | Local load test, results in plain English — [load-test.md](../runbooks/load-test.md): one server handled ~750 very busy riders with no slowdown and ~1,250 before answers passed half a second (laptop); CPU gives out first |
+| 🔶 | Found by the load test and fixed: a missing index made every booking and active-ride check read the whole passenger table (10 ms → 0.4 ms); every database query was being logged in production |
+| 🔶 | Recommendations: Render Starter ($7/month) before launch, Standard when CPU passes ~70% at peak; Neon paid plan (compute hours); keep `connection_limit=5` (10 made no difference) |
 
 ## Things only you can do by hand
 
-**Now (Stage 5)** — the steps are in
+**Now (Stage 6)** — in this order:
+
+1. **Before merging,** apply migration
+   `apps/server/prisma/migrations/20261016120000_ride_passenger_rider_index`
+   to production, the same way as the others. It only adds an index (on a
+   table this size, it takes a moment).
+2. **Before launch:** move `campusride-server` to Render **Starter**, and the
+   Neon project to a **paid plan** ([load-test.md](../runbooks/load-test.md#recommendations)).
+3. **Start the weekly backup branch** this week
+   ([backup-and-restore.md](../runbooks/backup-and-restore.md#every-week-make-a-backup-branch-5-minutes)).
+4. **Read the incident runbook once** ([incidents.md](../runbooks/incidents.md)),
+   so you know where it is when you need it.
+5. **Decide** on automatic off-site backups (proposal in
+   backup-and-restore.md): yes or no, and which storage provider.
+6. The apps' fix for rejoining live updates after a deploy reaches phones
+   with the new builds from Stage 5 (or any over-the-air update after them).
+
+**Stage 5, if not done yet** — the steps are in
 [DEPLOY.md → Monitoring](../../DEPLOY.md#monitoring-sentry-uptimerobot-neon):
 
 1. **Before merging:** publish any over-the-air update still waiting for the
@@ -98,9 +119,7 @@ Updated at the end of each stage.
    value in DEPLOY.md), or its reports are blocked.
 4. Make new builds of both apps.
 5. Switch UptimeRobot to `https://api.campusride.app/health/ready`.
-6. Check Neon compute hours weekly: on the free plan they are likely to run
-   out around the 17th of each month (DEPLOY.md explains why). Decided in
-   Stage 6.
+6. Check Neon compute hours weekly until the paid plan (Stage 6, step 2).
 7. Optional: a Sentry auth token for readable app errors.
 
 **Stage 4, after its deploy, if not done yet** — in Render → the server → **Logs**:
@@ -141,8 +160,6 @@ Updated at the end of each stage.
 `TRUST_PROXY` on Render, check the `client_ip_check` log line says
 `"resolvedToClient":true`, and publish the apps' over-the-air update.
 
-**Later stages** (details come with each stage)
+**Next**
 
-- [ ] Make a weekly Neon backup branch (`backup-YYYY-MM-DD`) — Stage 6
-- [ ] Choose the Render plan (free vs paid) — Stage 6
 - [ ] Set up the admin authenticator app (QR code, recovery codes) — after Stage 6

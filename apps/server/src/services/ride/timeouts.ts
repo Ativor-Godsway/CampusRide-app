@@ -5,6 +5,8 @@ import { emitRideEvent } from "../../realtime/rideSocket";
 import { notifyUssdRider } from "../sms/notifyUssdRiders";
 import { closeOffer } from "./dispatch";
 import { notifyRider } from "../push/notify";
+import { config } from "../../config";
+import { completeStaleRide, isStaleInProgress, staleCutoff } from "./staleRides";
 
 /** Shared with the rider app's countdown, so the two can never disagree. */
 const BROADCAST_TIMEOUT_MS = DISPATCH_WINDOW_MS;
@@ -17,6 +19,7 @@ interface RideTimeoutFields {
   createdAt: Date;
   broadcastStartedAt: Date | null;
   decisionStartedAt: Date | null;
+  departedAt?: Date | null;
 }
 
 /**
@@ -50,6 +53,8 @@ interface TimeoutLogger {
  * them:
  * - REQUESTED rides broadcast >= 90s with no claim -> AWAITING_RIDER_DECISION
  * - AWAITING_RIDER_DECISION rides idle >= 90s -> CANCELLED (NO_DRIVERS_AVAILABLE)
+ * - IN_PROGRESS rides under way >= RIDE_AUTO_COMPLETE_HOURS (3) -> COMPLETED
+ *   (a driver who never tapped "complete": ./staleRides.ts)
  *
  * `now` is injectable so this can be driven by tests with controlled time.
  * An optional `rideIds` filter restricts the scan to a specific set of rides
@@ -66,16 +71,30 @@ interface TimeoutLogger {
 export async function processTimeouts(
   prisma: PrismaClient,
   now: Date = new Date(),
-  options: { rideIds?: readonly string[]; logger?: TimeoutLogger } = {},
+  options: { rideIds?: readonly string[]; logger?: TimeoutLogger; autoCompleteAfterHours?: number } = {},
 ) {
+  const autoCompleteHours = options.autoCompleteAfterHours ?? config.rideAutoCompleteHours;
+  const cutoff = staleCutoff(now, autoCompleteHours);
   const logger = options.logger ?? console;
   const transitioned: { rideId: string; from: string; to: string }[] = [];
 
-  let candidates: (RideTimeoutFields & { id: string; riderId: string; source: RideSource; pickupZoneId: string })[];
+  let candidates: (RideTimeoutFields & {
+    id: string;
+    riderId: string;
+    source: RideSource;
+    pickupZoneId: string;
+    departedAt: Date | null;
+  })[];
   try {
     candidates = await prisma.ride.findMany({
       where: {
-        status: { in: ["REQUESTED", "AWAITING_RIDER_DECISION"] },
+        OR: [
+          { status: { in: ["REQUESTED", "AWAITING_RIDER_DECISION"] } },
+          {
+            status: "IN_PROGRESS",
+            OR: [{ departedAt: { lt: cutoff } }, { departedAt: null, createdAt: { lt: cutoff } }],
+          },
+        ],
         ...(options.rideIds ? { id: { in: [...options.rideIds] } } : {}),
       },
       select: {
@@ -84,6 +103,7 @@ export async function processTimeouts(
         createdAt: true,
         broadcastStartedAt: true,
         decisionStartedAt: true,
+        departedAt: true,
         riderId: true,
         source: true,
         pickupZoneId: true,
@@ -123,6 +143,14 @@ export async function processTimeouts(
         emitRideEvent(ride.id, RIDE_EVENTS.STATUS, { rideId: ride.id, status: "CANCELLED" });
         logger.info({ rideId: ride.id }, "[timeout] AWAITING_RIDER_DECISION → CANCELLED (no rider action)");
         transitioned.push({ rideId: ride.id, from: ride.status, to: "CANCELLED" });
+      } else if (isStaleInProgress(ride, now, autoCompleteHours)) {
+        if (await completeStaleRide(prisma, ride.id, now)) {
+          logger.warn(
+            { rideId: ride.id, alert: "ride_auto_completed" },
+            `[timeout] IN_PROGRESS for ${autoCompleteHours} h → COMPLETED (the driver never completed it)`,
+          );
+          transitioned.push({ rideId: ride.id, from: ride.status, to: "COMPLETED" });
+        }
       }
     } catch (err) {
       logger.warn({ err, rideId: ride.id }, "processTimeouts: failed to transition ride, skipping");

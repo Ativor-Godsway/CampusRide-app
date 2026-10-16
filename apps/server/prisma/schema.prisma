@@ -402,6 +402,10 @@ model RidePassenger {
   dropoffZone Zone @relation("PassengerDropoff", fields: [dropoffZoneId], references: [id], onDelete: Restrict)
 
   @@index([rideId])
+  /// "Does this rider have an active ride?" (services/ride/activeRide.ts) runs
+  /// on every booking and every app's active-ride poll; without this it read
+  /// the whole table each time, slower with every ride ever taken (Stage 6).
+  @@index([riderId])
 }
 
 model Payment {

@@ -132,6 +132,8 @@ export const config = {
     /** Warn (Sentry + logs) when the SMS balance drops below this (services/sms/moolreBalance.ts). */
     smsLowBalance: positive("MOOLRE_SMS_LOW_BALANCE", 100),
   },
+  /** A ride still IN_PROGRESS after this many hours is completed by the sweep (services/ride/staleRides.ts). 1–24. */
+  rideAutoCompleteHours: Math.min(24, positive("RIDE_AUTO_COMPLETE_HOURS", 3)),
   /**
    * Rate limits (src/rateLimit). Each one is counted per PERSON — the phone
    * number before login, the account after — with the client's IP only as a

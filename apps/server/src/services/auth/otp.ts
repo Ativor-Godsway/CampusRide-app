@@ -2,12 +2,16 @@ import type { OtpPurpose, PrismaClient } from "@prisma/client";
 import type { OtpService } from "../otp/OtpService";
 import { OTP } from "./constants";
 import { generateOtpCode, sha256 } from "./hash";
+import { loadTestOtpCode } from "./loadTestOtp";
 import { InvalidOtpError, OtpAttemptsExceededError, OtpExpiredError } from "./errors";
 import { signVerificationToken } from "./tokens";
 import { enforce, type LimitCheck } from "../../rateLimit/limiter";
 import { RULES } from "../../rateLimit/rules";
 
 const MINUTE_MS = 60_000;
+
+/** Null everywhere but a local load test (./loadTestOtp.ts). */
+const LOAD_TEST_CODE = loadTestOtpCode();
 
 /**
  * Whether `phone` belongs to an ADMIN account: its codes get the stricter
@@ -51,7 +55,7 @@ export async function requestOtp(
   if (options.ip) checks.push({ rule: RULES.ipOtpSend, subject: options.ip });
   await enforce(checks, now.getTime());
 
-  const code = generateOtpCode();
+  const code = LOAD_TEST_CODE ?? generateOtpCode();
   const codeHash = sha256(code);
   const expiresAt = new Date(now.getTime() + OTP.OTP_TTL_MINUTES * MINUTE_MS);
 
