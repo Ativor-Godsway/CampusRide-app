@@ -147,6 +147,10 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/audit/logins` | Yes | ADMIN | Every attempt to sign in to the admin site, with time, IP and device (for spotting a stranger). | account default |
 | `GET /admin/rate-limits` | Yes | ADMIN | A phone number's limits in use (and its account's). Audit-logged. | account default |
 | `POST /admin/rate-limits/clear` | Yes | ADMIN | Clears one number's and its account's limits, nobody else's. Audit-logged. | account default |
+| `GET /admin/account-deletion` | Yes | ADMIN | The open account on a number (name, role, joined), for an emailed deletion request, and whether it can be deleted now. Audit-logged. | account default |
+| `POST /admin/account-deletion/code` | Yes | ADMIN | Texts that number an account-deletion code (valid 30 minutes). Refused for admin accounts and during a ride. Audit-logged. | account default; plus the number's code limits (as `POST /auth/request-otp`) and the per-IP code cap |
+| `POST /admin/account-deletion/verify` | Yes | ADMIN | Checks the code the person emailed back; a right one returns a 5-minute token for that account and that admin only. 5 wrong tries burns the code. Audit-logged, never the code. | account default; plus the number's code-check limit |
+| `POST /admin/account-deletion/delete` | Yes | ADMIN | Closes that one account with the token, exactly as in-app deletion does. Refused for admin accounts and during a ride. Audit-logged. | account default |
 
 ## Socket.io
 

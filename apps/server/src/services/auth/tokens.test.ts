@@ -3,8 +3,10 @@ import jwt from "jsonwebtoken";
 import { config } from "../../config";
 import {
   signAccessToken,
+  signDeletionConfirmToken,
   signVerificationToken,
   verifyAccessToken,
+  verifyDeletionConfirmToken,
   verifyVerificationToken,
 } from "./tokens";
 import { InvalidVerificationTokenError } from "./errors";
@@ -63,5 +65,49 @@ describe("verifyAccessToken", () => {
       ].join("."),
     ];
     for (const token of bad) expect(() => verifyAccessToken(token)).toThrow();
+  });
+});
+
+describe("an admin's deletion confirm token", () => {
+  const payload = { userId: "u1", phone: PHONE, actor: "admin1" };
+
+  it("confirms the account it was issued for, to the admin who checked the code", () => {
+    expect(verifyDeletionConfirmToken(signDeletionConfirmToken(payload), { phone: PHONE, actor: "admin1" })).toEqual(
+      payload,
+    );
+  });
+
+  it("is refused for another phone or another admin", () => {
+    const token = signDeletionConfirmToken(payload);
+    expect(() => verifyDeletionConfirmToken(token, { phone: "+233241234568", actor: "admin1" })).toThrow(
+      InvalidVerificationTokenError,
+    );
+    expect(() => verifyDeletionConfirmToken(token, { phone: PHONE, actor: "admin2" })).toThrow(
+      InvalidVerificationTokenError,
+    );
+  });
+
+  it("can't stand in for an access token or an OTP verification token, nor they for it", () => {
+    const token = signDeletionConfirmToken(payload);
+    expect(() => verifyAccessToken(token)).toThrow();
+    expect(() => verifyVerificationToken(token, PHONE, "ACCOUNT_DELETION")).toThrow(InvalidVerificationTokenError);
+    expect(() =>
+      verifyDeletionConfirmToken(signVerificationToken({ phone: PHONE, purpose: "ACCOUNT_DELETION" }), {
+        phone: PHONE,
+        actor: "admin1",
+      }),
+    ).toThrow(InvalidVerificationTokenError);
+    expect(() =>
+      verifyDeletionConfirmToken(signAccessToken({ userId: "u1", role: "ADMIN" }), { phone: PHONE, actor: "admin1" }),
+    ).toThrow(InvalidVerificationTokenError);
+  });
+
+  it("runs out", () => {
+    const expired = jwt.sign({ ...payload, typ: "admin-deletion-confirmed" }, config.jwtSecret, {
+      expiresIn: -1,
+    });
+    expect(() => verifyDeletionConfirmToken(expired, { phone: PHONE, actor: "admin1" })).toThrow(
+      InvalidVerificationTokenError,
+    );
   });
 });

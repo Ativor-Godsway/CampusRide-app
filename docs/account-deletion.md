@@ -18,6 +18,38 @@ what is deleted, what is kept and for how long, then:
 Finish or cancel it first, then you can delete your account." (A driver with
 a trip in progress gets the same.) No code is sent.
 
+## By email (no app)
+
+For someone who has uninstalled the app or can't sign in:
+**https://campusride.app/delete-account** tells them to email
+support@campusride.app with the account's phone number and "Delete my
+account". An admin then uses the admin site's **Delete account** tab:
+
+1. Type the phone number from the email and **Look up**. It shows the
+   account's name, whether it's a rider or a driver, and when it joined — or
+   "No account found".
+2. **Send verification code** texts a 6-digit code to that number. The text
+   says it's for deleting the account and asks them to reply to our email
+   with it. It works for 30 minutes (a login code works for 5), and the
+   number's usual code limits apply (one a minute, a few per day).
+3. Type the code they email back and **Check code**. A wrong code is
+   refused; 5 wrong tries burns it. A right one unlocks **Delete account**
+   for 5 minutes.
+4. **Delete account** (and confirm). It runs the same code as the app's own
+   delete, so everything under "What happens" below applies unchanged.
+5. Email them to say it's done (the website promises this).
+
+Refused, with the reason shown: an admin's account (role ADMIN, or a number
+on `ADMIN_PHONE_ALLOWLIST`), and anyone on a ride right now, rider or driver
+— the same message as the app. Ask them to finish or cancel the trip first.
+
+Every step is in the admin audit log, with which admin did it and when:
+`account_deletion.lookup`, `.code_sent` / `.code_refused`, `.verify`
+(code correct, wrong, expired…), `.delete_refused`, and the deletion itself
+as `account.delete` with the admin as its actor. The phone number appears
+only masked (`+233*****146`) and the code never does, because the audit log
+is kept for good and the number must be erased after 90 days.
+
 ## What happens
 
 **Straight away**
@@ -32,7 +64,8 @@ a trip in progress gets the same.) No code is sent.
   their emergency contact is removed, pending login codes are deleted.
 - A driver leaves dispatch: offline, unapproved, plate and photo removed
   from their profile, and gone from the admin site's pending-driver list.
-- An entry is written to the admin audit log (`account.delete`).
+- An entry is written to the admin audit log (`account.delete`; its actor
+  is the person, or the admin who deleted it on an emailed request).
 
 **Kept for 90 days, then erased** (`ACCOUNT_DELETION_RETENTION_DAYS`)
 
@@ -62,9 +95,8 @@ a trip in progress gets the same.) No code is sent.
   **https://campusride.app/delete-account** (`apps/web`). It describes the
   in-app flow and the no-app route: email support@campusride.app with the
   account's phone number and "Delete my account"; we confirm with a texted
-  code and finish within 30 days. There is still no admin-site button or
-  script for deleting someone else's account, so an emailed request needs a
-  developer to run the deletion by hand until one is built.
+  code and finish within 30 days, from the admin site (see
+  [By email](#by-email-no-app)).
 - **Data kept after deletion:** "Trip records are kept without your name.
   Your name, phone number, and a driver's plate and photo are kept for 90
   days for safety and legal requests, then erased."
@@ -73,7 +105,10 @@ a trip in progress gets the same.) No code is sent.
 
 - Server: `apps/server/src/services/auth/deleteAccount.ts` (`deleteAccount`,
   `purgeDeletedAccounts`, run hourly and at startup), routes
-  `POST /me/deletion-code` and `DELETE /me` in `routes/auth.ts`.
+  `POST /me/deletion-code` and `DELETE /me` in `routes/auth.ts`. Both they
+  and the admin routes in `routes/adminAccountDeletion.ts` close an account
+  with `closeAccount`, so the two can't drift apart.
+- Admin site: `apps/admin/src/screens/DeleteAccountScreen.tsx`.
 - Apps: `packages/mobile-shared/src/auth/screens/DeleteAccountScreen.tsx`,
   shown at `/delete-account` in both apps.
 - The 90 days is `ACCOUNT_DELETION_RETENTION_DAYS` in `@rida/shared`, so the

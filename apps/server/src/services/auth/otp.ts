@@ -27,6 +27,10 @@ async function isAdminPhone(prisma: PrismaClient, phone: string): Promise<boolea
 export interface RequestOtpOptions {
   /** The requester's IP when known: counts toward the per-IP send backstop. */
   ip?: string | null;
+  /** How long the code stays valid; OTP.OTP_TTL_MINUTES unless given. */
+  ttlMinutes?: number;
+  /** The whole text message, built around the code; the provider's usual wording unless given. */
+  message?: (code: string) => string;
 }
 
 /**
@@ -62,14 +66,14 @@ export async function requestOtp(
   const demoCode = await reviewDemoCodeFor(prisma, phone);
   const code = demoCode ?? LOAD_TEST_CODE ?? generateOtpCode();
   const codeHash = sha256(code);
-  const expiresAt = new Date(now.getTime() + OTP.OTP_TTL_MINUTES * MINUTE_MS);
+  const expiresAt = new Date(now.getTime() + (options.ttlMinutes ?? OTP.OTP_TTL_MINUTES) * MINUTE_MS);
 
   await prisma.otpCode.create({
     data: { phone, codeHash, purpose, expiresAt, createdAt: now },
   });
 
   if (demoCode) return;
-  await otpService.sendOtp(phone, code);
+  await otpService.sendOtp(phone, code, options.message?.(code));
 }
 
 export interface VerifyOtpResult {

@@ -100,3 +100,52 @@ export function verifyVerificationToken(
 
   return { phone: expectedPhone, purpose: expectedPurpose };
 }
+
+const DELETION_CONFIRMED_TYP = "admin-deletion-confirmed";
+
+/** What an admin's "the emailed code was right" token is good for: one account, one admin. */
+export interface DeletionConfirmPayload {
+  /** The account whose phone the code was texted to. */
+  userId: string;
+  phone: string;
+  /** User.id of the admin who checked the code. */
+  actor: string;
+}
+
+/**
+ * Signs the token the admin site gets back once an emailed deletion code
+ * checks out (routes/adminAccountDeletion.ts). It unlocks "Delete account"
+ * for that account, by that admin, for VERIFICATION_TOKEN_TTL_MINUTES — and
+ * nothing else: its `typ` is neither an access token's nor an OTP
+ * verification token's, so neither verifier accepts it.
+ */
+export function signDeletionConfirmToken(payload: DeletionConfirmPayload): string {
+  return jwt.sign(
+    { userId: payload.userId, phone: payload.phone, actor: payload.actor, typ: DELETION_CONFIRMED_TYP },
+    config.jwtSecret,
+    { algorithm: "HS256", expiresIn: `${TOKEN.VERIFICATION_TOKEN_TTL_MINUTES}m` },
+  );
+}
+
+/**
+ * Checks a deletion confirm token was issued for this phone to this admin,
+ * and returns the account it confirms. Throws InvalidVerificationTokenError
+ * on anything else (expired, malformed, another kind, another phone or admin).
+ */
+export function verifyDeletionConfirmToken(
+  token: string,
+  expected: { phone: string; actor: string },
+): DeletionConfirmPayload {
+  let decoded: Record<string, unknown>;
+  try {
+    decoded = jwt.verify(token, config.jwtSecret, { algorithms: JWT_ALGORITHMS }) as Record<string, unknown>;
+  } catch {
+    throw new InvalidVerificationTokenError();
+  }
+  const { userId, phone, actor, typ } = decoded;
+  if (typ !== DELETION_CONFIRMED_TYP || typeof userId !== "string" || userId.length === 0) {
+    throw new InvalidVerificationTokenError();
+  }
+  if (phone !== expected.phone || actor !== expected.actor) throw new InvalidVerificationTokenError();
+  return { userId, phone, actor };
+}

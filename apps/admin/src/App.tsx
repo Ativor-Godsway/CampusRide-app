@@ -6,8 +6,9 @@ import { RideList } from "./screens/RideList";
 import { PlacesScreen } from "./screens/PlacesScreen";
 import { RateLimitsScreen } from "./screens/RateLimitsScreen";
 import { AdminLoginsScreen } from "./screens/AdminLoginsScreen";
+import { DeleteAccountScreen } from "./screens/DeleteAccountScreen";
 
-type Tab = "drivers" | "rides" | "places" | "limits" | "logins";
+type Tab = "drivers" | "rides" | "places" | "limits" | "delete" | "logins";
 
 /**
  * A few screens behind one login gate. No router: adding one would buy
@@ -55,6 +56,13 @@ export function App() {
           </button>
           <button
             type="button"
+            className={tab === "delete" ? "tab active" : "tab"}
+            onClick={() => setTab("delete")}
+          >
+            Delete account
+          </button>
+          <button
+            type="button"
             className={tab === "logins" ? "tab active" : "tab"}
             onClick={() => setTab("logins")}
           >
@@ -78,6 +86,8 @@ export function App() {
           <PlacesScreen />
         ) : tab === "limits" ? (
           <RateLimitsScreen />
+        ) : tab === "delete" ? (
+          <DeleteAccountScreen />
         ) : (
           <AdminLoginsScreen />
         )}

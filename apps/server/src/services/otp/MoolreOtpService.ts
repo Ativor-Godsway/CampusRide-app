@@ -23,8 +23,8 @@ export class MoolreOtpService implements OtpService {
     private readonly fetchFn: typeof fetch = fetch,
   ) {}
 
-  async sendOtp(phone: string, code: string): Promise<OtpResult> {
-    const message = `Your CampusRide code is ${code}. Valid for 5 minutes. Do not share this code.`;
+  async sendOtp(phone: string, code: string, text?: string): Promise<OtpResult> {
+    const message = text ?? `Your CampusRide code is ${code}. Valid for 5 minutes. Do not share this code.`;
     return sendMoolreSms(this.cfg, phone, message, { refPrefix: "otp", fetchFn: this.fetchFn });
   }
 }

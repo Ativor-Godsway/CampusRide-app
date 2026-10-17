@@ -4,12 +4,14 @@ import { config } from "../../config";
 import { logger } from "../../lib/logger";
 import { driverPhotoPublicId, buildSignature } from "../uploads/cloudinarySignature";
 import { forgetAccount } from "./accountStatus";
+import { disconnectUser } from "../../realtime/rideSocket";
 
 /**
  * Closing an account, in two steps (app stores require in-app deletion):
  *
- * 1. **Now** (`deleteAccount`, confirmed with a code texted to the account's
- *    phone): the person disappears. They can't sign in, every session and
+ * 1. **Now** (`closeAccount`, confirmed with a code texted to the account's
+ *    phone — asked for in the app, or by email and run by an admin): the
+ *    person disappears. They can't sign in, every session and
  *    push token is gone, their name and number are replaced with
  *    placeholders everywhere the apps and the admin site look, a driver
  *    leaves dispatch. Their phone number is free for a new account at once.
@@ -85,6 +87,14 @@ export async function findRideBlockingDeletion(
   });
 }
 
+/** Who closed the account, for its `account.delete` audit entry. */
+export interface DeleteAccountOptions {
+  /** User.id of the admin who ran it; the person themselves unless given. */
+  actor?: string;
+  /** A note for the audit entry (never a code or a full phone number). */
+  reason?: string;
+}
+
 /**
  * Step 1: closes the account now. Throws ActiveRideBlocksDeletionError while
  * a ride is going on, AccountAlreadyDeletedError for a closed or unknown
@@ -94,11 +104,15 @@ export async function findRideBlockingDeletion(
  * and are the business's record of what happened. One transaction, so a
  * half-closed account (sessions revoked but the name still showing, or the
  * reverse) can't happen.
+ *
+ * The routes call `closeAccount`, which also ends the account's live
+ * connections; this is the database half on its own.
  */
 export async function deleteAccount(
   prisma: PrismaClient,
   userId: string,
   now: Date = new Date(),
+  options: DeleteAccountOptions = {},
 ): Promise<{ purgeAfter: Date }> {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { driver: true } });
   if (!user || user.deletedAt) throw new AccountAlreadyDeletedError();
@@ -156,7 +170,13 @@ export async function deleteAccount(
     await tx.otpCode.deleteMany({ where: { phone: user.phone } });
 
     await tx.adminAuditLog.create({
-      data: { actor: userId, action: "account.delete", target: userId, timestamp: now },
+      data: {
+        actor: options.actor ?? userId,
+        action: "account.delete",
+        target: userId,
+        reason: options.reason ?? null,
+        timestamp: now,
+      },
     });
   });
 
@@ -164,6 +184,23 @@ export async function deleteAccount(
   // rather than when the cached "account is open" answer runs out.
   forgetAccount(userId);
   return { purgeAfter };
+}
+
+/**
+ * Closes an account the one way both routes do it: the in-app DELETE /me and
+ * the admin site's emailed-request flow (routes/adminAccountDeletion.ts). The
+ * same data goes, is kept and is erased whichever asked, which is what
+ * campusride.app/delete-account promises. Throws as `deleteAccount` does.
+ */
+export async function closeAccount(
+  prisma: PrismaClient,
+  userId: string,
+  options: DeleteAccountOptions = {},
+): Promise<{ purgeAfter: Date }> {
+  const result = await deleteAccount(prisma, userId, new Date(), options);
+  // Its open sockets go too: a deleted account must not keep hearing rides.
+  disconnectUser(userId);
+  return result;
 }
 
 /** Deletes a driver's photo from Cloudinary. Best effort: false (and logged) if it can't. */

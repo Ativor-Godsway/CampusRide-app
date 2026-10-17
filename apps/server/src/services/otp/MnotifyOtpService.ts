@@ -16,11 +16,11 @@ export class MnotifyOtpService implements OtpService {
     private readonly senderId: string,
   ) {}
 
-  async sendOtp(phone: string, code: string): Promise<OtpResult> {
+  async sendOtp(phone: string, code: string, text?: string): Promise<OtpResult> {
     const body = {
       recipient: [phone],
       sender: this.senderId,
-      message: `Your CampusRide verification code is ${code}. It expires in 5 minutes.`,
+      message: text ?? `Your CampusRide verification code is ${code}. It expires in 5 minutes.`,
       is_schedule: false,
       schedule_date: "",
       sms_type: "otp",

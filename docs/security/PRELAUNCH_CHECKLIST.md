@@ -92,7 +92,7 @@ Updated at the end of each stage.
 | | Item |
 |---|---|
 | ✅ | In-app account deletion, both apps (store requirement): a screen saying what is deleted and kept, a texted code to confirm, refused during a ride; hidden at once, kept details erased after 90 days, audit-logged — [account-deletion.md](../account-deletion.md) (PR #46) |
-| ⬜ | A web link for deletion requests without the app (Google Play asks for one) |
+| ✅ | Deletion without the app (Google Play asks for a web link): campusride.app/delete-account (PR #50), and the admin site's Delete account tab to carry out an emailed request — look up the number, text a code, the person emails it back, delete exactly as the app does; admins and people on a ride refused; every step audit-logged — [account-deletion.md](../account-deletion.md#by-email-no-app) (branch `admin-email-account-deletion`) |
 | ✅ | Driver background location to Google Play and Apple rules: full-screen disclosure before any prompt, asked only when going online, Android online notification (foreground service), stops when offline; rider app location only while open — [location-store-review.md](../runbooks/location-store-review.md) (PR #47) |
 | ⬜ | Play Console location and foreground-service declarations, with the screen recording (steps and script in location-store-review.md) |
 | 🔶 | Store builds prepared: production = Android app bundle, remote build numbers counting up, production channel and server, Sentry DSN from EAS; test builds = APK; version 1.0.0; nothing development-only ships (checked, and pinned by a test); long-press the version line for build number and update ID — [releasing.md](../runbooks/releasing.md#7-what-a-production-build-leaves-out) (branch `store-build-prep`) |

@@ -46,6 +46,17 @@ describe("MoolreOtpService.sendOtp", () => {
     expect(body.messages[0]!.ref).toContain("otp:");
   });
 
+  it("sends the caller's own wording when one is given", async () => {
+    const fetchFn = mockFetch({ status: 1 });
+    const service = new MoolreOtpService(CFG, fetchFn);
+
+    await service.sendOtp("+233200000004", "123456", "Reply to our email with 123456.");
+
+    const [, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { messages: { message: string }[] };
+    expect(body.messages[0]!.message).toBe("Reply to our email with 123456.");
+  });
+
   it("returns success: false when the response status is not 1", async () => {
     const fetchFn = mockFetch({ status: 0 });
     const service = new MoolreOtpService(CFG, fetchFn);
