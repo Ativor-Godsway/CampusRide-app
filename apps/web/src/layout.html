@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{title}}</title>
+    <meta name="description" content="{{description}}" />
+    <meta name="robots" content="{{robots}}" />
+    <link rel="canonical" href="{{canonical}}" />
+    <meta name="theme-color" content="#19743C" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="{{siteName}}" />
+    <meta property="og:title" content="{{title}}" />
+    <meta property="og:description" content="{{description}}" />
+    <meta property="og:url" content="{{canonical}}" />
+    <meta property="og:image" content="{{ogImage}}" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="CampusRide: rides around the University of Ghana" />
+    <meta property="og:locale" content="en_GH" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{title}}" />
+    <meta name="twitter:description" content="{{description}}" />
+    <meta name="twitter:image" content="{{ogImage}}" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <a class="brand" href="/" aria-label="CampusRide home">
+          <!-- The logo is this one file: replace public/logo.svg to change it everywhere. -->
+          <img src="/logo.svg" alt="CampusRide" width="168" height="32" />
+        </a>
+        <nav class="site-nav" aria-label="Main">
+          {{nav}}
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      {{draftBanner}}
+      {{content}}
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-inner">
+        <p>
+          <img src="/logo.svg" alt="CampusRide" width="126" height="24" class="footer-logo" />
+        </p>
+        <nav aria-label="Footer">
+          <a href="/support">Support</a>
+          <a href="/privacy">Privacy Policy</a>
+          <a href="/terms">Terms of Service</a>
+          <a href="/delete-account">Delete your account</a>
+        </nav>
+        <p class="footer-note">
+          &copy; {{year}} CampusRide, operated by {{operatorName}}, Ghana.
+          {{supportEmailLink}}
+        </p>
+      </div>
+    </footer>
+  </body>
+</html>

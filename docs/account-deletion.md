@@ -58,12 +58,13 @@ a trip in progress gets the same.) No code is sent.
   Nothing else is needed.
 - **Google Play (Data safety → Data deletion):** Google also asks for a
   **web link** where someone can ask for deletion without the app (for
-  example, if they've already uninstalled it). CampusRide has no such page
-  yet. The simplest answer is a short web page, or an email address on the
-  store listing, saying "Email or text us from the number on your account
-  and we'll delete it within 7 days". There is no admin-site button for
-  deleting someone else's account yet; if such requests come in, ask for one
-  (or for the web page).
+  example, if they've already uninstalled it). Use
+  **https://campusride.app/delete-account** (`apps/web`). It describes the
+  in-app flow and the no-app route: email support@campusride.app with the
+  account's phone number and "Delete my account"; we confirm with a texted
+  code and finish within 30 days. There is still no admin-site button or
+  script for deleting someone else's account, so an emailed request needs a
+  developer to run the deletion by hand until one is built.
 - **Data kept after deletion:** "Trip records are kept without your name.
   Your name, phone number, and a driver's plate and photo are kept for 90
   days for safety and legal requests, then erased."

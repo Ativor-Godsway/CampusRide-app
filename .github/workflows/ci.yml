@@ -57,6 +57,13 @@ jobs:
       - name: Test packages/shared (with coverage)
         run: npm run test:coverage --workspace=packages/shared
 
+      # The website (apps/web): builds it and checks links, SEO tags, and that
+      # the privacy and deletion pages still match the code. Node's own test
+      # runner, no dependencies. A step, not a job, so the required check
+      # names above stay the same.
+      - name: Test apps/web (website)
+        run: npm run test --workspace=apps/web
+
   # ── Integration suite against a real Postgres.
   server-tests:
     name: Server tests (Postgres)

@@ -334,3 +334,43 @@ services:
       # Unset, nothing is sent.
       - key: VITE_SENTRY_DSN
         sync: false
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # PUBLIC WEBSITE: https://campusride.app (apps/web). CONFIGURATION ONLY.
+  #
+  # Like the admin block above, this describes the service; it does not
+  # create it. It is added by hand in the Render dashboard
+  # (docs/runbooks/website.md, step 1), and the custom domains are added by
+  # hand once the old v1 site has moved to v1.campusride.app (step 2).
+  #
+  # Plain HTML and CSS built by a dependency-free script: no `npm install`,
+  # no JavaScript on the pages, no cookies, nothing that talks to the API (so
+  # the API's CORS list needs nothing for it). The privacy policy, terms and
+  # account-deletion page live here; Google Play links to the last one.
+  # ───────────────────────────────────────────────────────────────────────────
+  - type: web
+    name: campusride-web
+    runtime: static
+    buildCommand: node apps/web/build.mjs
+    staticPublishPath: apps/web/dist
+
+    # The canonical address is the bare domain; Render redirects www to it.
+    domains:
+      - campusride.app
+      - www.campusride.app
+
+    # A public, script-free site: nothing may run, and it may load only its
+    # own files. Unlike the admin site it IS indexed (no X-Robots-Tag).
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=15552000
