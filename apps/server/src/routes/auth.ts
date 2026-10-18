@@ -30,14 +30,13 @@ import { InvalidEmergencyContactError, updateRiderProfile } from "../services/au
 import {
   AccountAlreadyDeletedError,
   ActiveRideBlocksDeletionError,
-  deleteAccount,
+  closeAccount,
   findRideBlockingDeletion,
 } from "../services/auth/deleteAccount";
 import { maskPhone } from "../lib/redact";
 import { config } from "../config";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { normalizePhone } from "../lib/phone";
-import { disconnectUser } from "../realtime/rideSocket";
 import { RateLimitedError, enforce } from "../rateLimit/limiter";
 import { RULES } from "../rateLimit/rules";
 import { clientIpForLimits, sendRateLimited } from "../rateLimit/reply";
@@ -481,7 +480,7 @@ export function registerAuthRoutes(
       let purgeAfter: Date;
       try {
         await verifyOtp(prisma, user.phone, code, "ACCOUNT_DELETION");
-        ({ purgeAfter } = await deleteAccount(prisma, userId));
+        ({ purgeAfter } = await closeAccount(prisma, userId));
       } catch (err) {
         if (err instanceof RateLimitedError) return sendRateLimited(reply, err.retryAfterMs);
         if (err instanceof InvalidOtpError) {
@@ -500,8 +499,6 @@ export function registerAuthRoutes(
         throw err;
       }
 
-      // Its open sockets go too: a deleted account must not keep hearing rides.
-      disconnectUser(userId);
       request.log.info({ userId, event: "account_deleted" }, "Account closed on the user's request");
       return reply.code(200).send({ deleted: true, erasedAfter: purgeAfter.toISOString() });
     },

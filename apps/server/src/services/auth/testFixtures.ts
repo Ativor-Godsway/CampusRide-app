@@ -16,9 +16,13 @@ export function uniqueTestPhone(): string {
 /** Captures sent OTP codes in-memory so tests can read the real (unhashed) code. */
 export class CapturingOtpService implements OtpService {
   readonly sent = new Map<string, string>();
+  /** The custom text sent with the latest code, when there was one. */
+  readonly messages = new Map<string, string>();
 
-  async sendOtp(phone: string, code: string): Promise<OtpResult> {
+  async sendOtp(phone: string, code: string, message?: string): Promise<OtpResult> {
     this.sent.set(phone, code);
+    if (message === undefined) this.messages.delete(phone);
+    else this.messages.set(phone, message);
     return { success: true };
   }
 

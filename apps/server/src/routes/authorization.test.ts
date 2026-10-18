@@ -123,6 +123,10 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /admin/rate-limits": "admin",
   "GET /admin/audit/logins": "admin",
   "POST /admin/rate-limits/clear": "admin",
+  "GET /admin/account-deletion": "admin",
+  "POST /admin/account-deletion/code": "admin",
+  "POST /admin/account-deletion/verify": "admin",
+  "POST /admin/account-deletion/delete": "admin",
 };
 
 // ─── App, people and rides ─────────────────────────────────────────────────

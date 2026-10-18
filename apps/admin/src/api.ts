@@ -332,3 +332,43 @@ export interface AdminLoginEvent {
 export function getRecentLogins(token: string): Promise<{ logins: AdminLoginEvent[] }> {
   return request("/admin/audit/logins?limit=100", {}, token);
 }
+
+// ── Account deletion by email ───────────────────────────────────────────────
+
+export interface DeletionLookup {
+  phone: string;
+  account: { id: string; name: string; role: "RIDER" | "DRIVER" | "ADMIN"; createdAt: string } | null;
+  /** Why it can't be deleted right now, when it can't. */
+  blocked: { reason: "admin" | "active_ride"; message: string; rideId?: string } | null;
+}
+
+export function lookUpForDeletion(token: string, phone: string): Promise<DeletionLookup> {
+  return request(`/admin/account-deletion?phone=${encodeURIComponent(phone)}`, {}, token);
+}
+
+export function sendDeletionCode(
+  token: string,
+  phone: string,
+): Promise<{ sent: true; phone: string; expiresInMinutes: number }> {
+  return request("/admin/account-deletion/code", { method: "POST", body: JSON.stringify({ phone }) }, token);
+}
+
+export function verifyDeletionCode(
+  token: string,
+  phone: string,
+  code: string,
+): Promise<{ verified: true; confirmToken: string; expiresInMinutes: number }> {
+  return request("/admin/account-deletion/verify", { method: "POST", body: JSON.stringify({ phone, code }) }, token);
+}
+
+export function deleteAccountByEmail(
+  token: string,
+  phone: string,
+  confirmToken: string,
+): Promise<{ deleted: true; role: string; erasedAfter: string }> {
+  return request(
+    "/admin/account-deletion/delete",
+    { method: "POST", body: JSON.stringify({ phone, confirmToken }) },
+    token,
+  );
+}

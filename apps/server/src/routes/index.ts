@@ -11,6 +11,7 @@ import { registerRideRoutes } from "./rides";
 import { registerRatingRoutes } from "./ratings";
 import { registerDriverRoutes } from "./driver";
 import { registerAdminRoutes } from "./admin";
+import { registerAdminAccountDeletionRoutes } from "./adminAccountDeletion";
 import { registerUssdRoutes } from "./ussd";
 import { registerUploadRoutes } from "./uploads";
 import { registerSafetyRoutes } from "./safety";
@@ -63,6 +64,7 @@ export function registerAllRoutes(
   registerRatingRoutes(app, prisma);
   registerDriverRoutes(app, prisma);
   registerAdminRoutes(app, prisma);
+  registerAdminAccountDeletionRoutes(app, prisma, deps.otpService);
   registerUssdRoutes(app, prisma, deps.ussdEnabled ?? config.enableUssd);
   registerUploadRoutes(app);
   registerSafetyRoutes(app, prisma);
