@@ -7,13 +7,13 @@ import {
   Button,
   Card,
   Illustration,
-  LoadingState,
   Screen,
   Text,
   colors,
   radii,
   spacing,
   useAuth,
+  SessionRestoringScreen,
 } from "@rida/mobile-shared";
 import { cloudinaryAvatar } from "@rida/shared";
 import { SignOutLink } from "../components/SignOutLink";
@@ -64,13 +64,7 @@ export default function PendingApprovalScreen() {
     setRefreshing(false);
   }, [check]);
 
-  if (isLoading) {
-    return (
-      <Screen>
-        <LoadingState />
-      </Screen>
-    );
-  }
+  if (isLoading) return <SessionRestoringScreen />;
   if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
   if (user.role !== "DRIVER") return <Redirect href="/" />;
 

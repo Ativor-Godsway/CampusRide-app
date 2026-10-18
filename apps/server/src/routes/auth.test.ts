@@ -15,6 +15,16 @@ import { setRateLimitStore } from "../rateLimit/limiter";
 import { MemoryRateLimitStore } from "../rateLimit/store";
 import { createTestDriver, createTestRide, cleanupRide, createTestUser } from "../services/ride/testFixtures";
 import { TERMS_VERSION, needsTermsConfirmation } from "@rida/shared";
+import { sha256 } from "../services/auth/hash";
+import { TOKEN } from "../services/auth/constants";
+
+/** Moves a used refresh token's revocation `minutes` into the past. */
+async function backdateRevocation(refreshToken: string, minutes: number): Promise<void> {
+  await prisma.refreshToken.updateMany({
+    where: { tokenHash: sha256(refreshToken) },
+    data: { revokedAt: new Date(Date.now() - minutes * 60_000) },
+  });
+}
 
 let app: FastifyInstance;
 let otpService: CapturingOtpService;
@@ -234,6 +244,9 @@ describe("refresh + logout routes", () => {
     expect(refreshRes.statusCode).toBe(200);
     const { refreshToken: newRefreshToken } = JSON.parse(refreshRes.body);
 
+    // Long enough ago that it can't be the phone retrying a lost answer.
+    await backdateRevocation(refreshToken, TOKEN.REFRESH_RETRY_GRACE_MINUTES + 1);
+
     const reuseRes = await app.inject({
       method: "POST",
       url: "/auth/refresh",
@@ -254,6 +267,33 @@ describe("refresh + logout routes", () => {
     // The 401 body is byte-identical to an ordinary invalid-token rejection,
     // so a thief cannot tell that they tripped the detector.
     expect(JSON.parse(reuseRes.body)).toEqual(JSON.parse(afterReuseRes.body));
+  });
+
+  it("a retry of a refresh whose answer was lost keeps the user signed in", async () => {
+    const phone = newPhone();
+    const verifiedToken = await requestAndVerify(phone, "SIGNUP");
+
+    const signupRes = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      payload: { ageAndTermsConfirmed: true, phone, name: "Retry Route User", role: "RIDER", verifiedToken },
+    });
+    const { user, refreshToken } = JSON.parse(signupRes.body);
+    userIds.push(user.id);
+
+    // Served, but the phone never hears back...
+    const lost = await app.inject({ method: "POST", url: "/auth/refresh", payload: { refreshToken } });
+    expect(lost.statusCode).toBe(200);
+
+    // ...so it sends the same token again: still signed in.
+    const retry = await app.inject({ method: "POST", url: "/auth/refresh", payload: { refreshToken } });
+    expect(retry.statusCode).toBe(200);
+    const next = await app.inject({
+      method: "POST",
+      url: "/auth/refresh",
+      payload: { refreshToken: retry.json().refreshToken },
+    });
+    expect(next.statusCode).toBe(200);
   });
 
   it("logout revokes the current token without needing a reuse event", async () => {

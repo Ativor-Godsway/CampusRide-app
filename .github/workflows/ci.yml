@@ -57,6 +57,14 @@ jobs:
       - name: Test packages/shared (with coverage)
         run: npm run test:coverage --workspace=packages/shared
 
+      # The shared mobile code (both apps' sign-in, session and navigation),
+      # on the real expo-router in a simulated React Native (jest-expo):
+      # nobody is signed out by anything but their own Log out or a session
+      # the server has ended. A step, not a job, so the required check names
+      # stay the same.
+      - name: Test packages/mobile-shared (session + navigation)
+        run: npm run test --workspace=packages/mobile-shared
+
       # The website (apps/web): builds it and checks links, SEO tags, and that
       # the privacy and deletion pages still match the code. Node's own test
       # runner, no dependencies. A step, not a job, so the required check

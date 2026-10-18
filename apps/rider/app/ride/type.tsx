@@ -35,6 +35,7 @@ import {
   CampusMapView,
   type CampusMapZone,
   FadeIn,
+  goHome as goToHomeTab,
   LoadingState,
   ServiceIcon,
   Text,
@@ -470,11 +471,8 @@ export default function RideTypeScreen() {
     }
   }
 
-  /** Pops everything above the tabs, so "home" is Home even from Plan → Choose. */
-  const goHome = useCallback(() => {
-    if (router.canDismiss()) router.dismissAll();
-    else router.replace("/");
-  }, [router]);
+  /** Closes everything above the tabs, so "home" is Home even from Plan → Choose. */
+  const goHome = useCallback(() => goToHomeTab(router), [router]);
 
   // ── Never lose an active ride ───────────────────────────────────────────────
   // Back arrow, iOS swipe-back and Android back all try to REMOVE this

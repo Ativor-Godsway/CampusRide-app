@@ -19,6 +19,7 @@ import {
 } from "./errors";
 import { signVerificationToken } from "./tokens";
 import { sha256, generateRefreshTokenValue } from "./hash";
+import { TOKEN } from "./constants";
 import { cleanupUser, uniqueTestPhone } from "./testFixtures";
 
 const userIds: string[] = [];
@@ -39,6 +40,11 @@ function verifiedSignupToken(phone: string): string {
 
 function verifiedLoginToken(phone: string): string {
   return signVerificationToken({ phone, purpose: "LOGIN" });
+}
+
+/** Past the window in which a used refresh token is still accepted as a retry. */
+function afterRetryGrace(): Date {
+  return new Date(Date.now() + (TOKEN.REFRESH_RETRY_GRACE_MINUTES + 1) * 60_000);
 }
 
 describe("signup", () => {
@@ -196,7 +202,9 @@ describe("refresh", () => {
 
     await refresh(prisma, created.refreshToken);
 
-    await expect(refresh(prisma, created.refreshToken)).rejects.toThrow(InvalidRefreshTokenError);
+    await expect(refresh(prisma, created.refreshToken, afterRetryGrace())).rejects.toThrow(
+      InvalidRefreshTokenError,
+    );
   });
 
   it("rejects an expired refresh token", async () => {
@@ -343,8 +351,11 @@ describe("refresh — rotation chains and reuse detection (Phase 2)", () => {
     const second = await refresh(prisma, session.refreshToken);
     const third = await refresh(prisma, second.refreshToken);
 
-    // An attacker replays the first (already consumed) token.
-    await expect(refresh(prisma, session.refreshToken)).rejects.toThrow(RefreshTokenReuseError);
+    // An attacker replays the first (already consumed) token, after the
+    // window in which it could still be the phone retrying.
+    await expect(refresh(prisma, session.refreshToken, afterRetryGrace())).rejects.toThrow(
+      RefreshTokenReuseError,
+    );
 
     // Everything in the chain is now revoked — including token3, which the
     // legitimate client was still holding. Both parties must re-authenticate.
@@ -358,7 +369,7 @@ describe("refresh — rotation chains and reuse detection (Phase 2)", () => {
     const session = await newSession();
     await refresh(prisma, session.refreshToken);
 
-    await expect(refresh(prisma, session.refreshToken)).rejects.toMatchObject({
+    await expect(refresh(prisma, session.refreshToken, afterRetryGrace())).rejects.toMatchObject({
       name: "RefreshTokenReuseError",
       userId: session.user.id,
     });
@@ -368,7 +379,7 @@ describe("refresh — rotation chains and reuse detection (Phase 2)", () => {
     const session = await newSession();
     await refresh(prisma, session.refreshToken);
 
-    const err = await refresh(prisma, session.refreshToken).catch((e: unknown) => e);
+    const err = await refresh(prisma, session.refreshToken, afterRetryGrace()).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(InvalidRefreshTokenError);
     // Identical message to an ordinary invalid token — no oracle for the attacker.
     expect((err as Error).message).toBe("Refresh token is invalid, revoked, or expired");
@@ -379,7 +390,9 @@ describe("refresh — rotation chains and reuse detection (Phase 2)", () => {
     const bystander = await newSession();
 
     await refresh(prisma, victim.refreshToken);
-    await expect(refresh(prisma, victim.refreshToken)).rejects.toThrow(RefreshTokenReuseError);
+    await expect(refresh(prisma, victim.refreshToken, afterRetryGrace())).rejects.toThrow(
+      RefreshTokenReuseError,
+    );
 
     const bystanderRows = await prisma.refreshToken.findMany({
       where: { userId: bystander.user.id },
@@ -407,5 +420,78 @@ describe("refresh — rotation chains and reuse detection (Phase 2)", () => {
     const err = await refresh(prisma, session.refreshToken, future).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(InvalidRefreshTokenError);
     expect(err).not.toBeInstanceOf(RefreshTokenReuseError);
+  });
+});
+
+describe("refresh — a retry after a lost answer keeps the user signed in", () => {
+  async function newSession() {
+    const phone = uniqueTestPhone();
+    const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
+      phone,
+      name: "Retry User",
+      role: "RIDER",
+      verifiedToken: signVerificationToken({ phone, purpose: "SIGNUP" }),
+    });
+    userIds.push(created.user.id);
+    return created;
+  }
+
+  const inMinutes = (minutes: number) => new Date(Date.now() + minutes * 60_000);
+
+  it("honours the old token again when the phone never got the new one", async () => {
+    const session = await newSession();
+    // The server rotates, but the answer is lost on the way to the phone.
+    const lost = await refresh(prisma, session.refreshToken);
+
+    // Back online, the phone sends the token it still has.
+    const retried = await refresh(prisma, session.refreshToken, inMinutes(2));
+    expect(retried.refreshToken).not.toBe(lost.refreshToken);
+
+    // The token the phone never received is retired; the new one works.
+    await expect(refresh(prisma, retried.refreshToken, inMinutes(3))).resolves.toHaveProperty("accessToken");
+    const rows = await prisma.refreshToken.findMany({ where: { userId: session.user.id, revokedAt: null } });
+    expect(rows).toHaveLength(1);
+  });
+
+  it("survives the answer being lost twice in a row", async () => {
+    const session = await newSession();
+    await refresh(prisma, session.refreshToken);
+    await refresh(prisma, session.refreshToken, inMinutes(1));
+    const third = await refresh(prisma, session.refreshToken, inMinutes(2));
+    await expect(refresh(prisma, third.refreshToken, inMinutes(3))).resolves.toHaveProperty("accessToken");
+  });
+
+  it("whoever held the retired token is caught when they next use it", async () => {
+    const session = await newSession();
+    const lost = await refresh(prisma, session.refreshToken);
+    await refresh(prisma, session.refreshToken, inMinutes(1));
+
+    // The token that never reached the phone turning up later is reuse.
+    await expect(refresh(prisma, lost.refreshToken, afterRetryGrace())).rejects.toThrow(RefreshTokenReuseError);
+  });
+
+  it("does not revive a token that was logged out", async () => {
+    const session = await newSession();
+    const second = await refresh(prisma, session.refreshToken);
+    await logout(prisma, second.refreshToken);
+
+    // Presenting the earlier token: its successor is gone, so this is reuse.
+    await expect(refresh(prisma, session.refreshToken, inMinutes(1))).rejects.toThrow(RefreshTokenReuseError);
+  });
+
+  it("does not revive a token after the account's sessions were revoked", async () => {
+    const session = await newSession();
+    await refresh(prisma, session.refreshToken);
+    await revokeAllForUser(prisma, session.user.id);
+
+    await expect(refresh(prisma, session.refreshToken, inMinutes(1))).rejects.toThrow(InvalidRefreshTokenError);
+  });
+
+  it("does not revive the token presented by a logout itself", async () => {
+    const session = await newSession();
+    await logout(prisma, session.refreshToken);
+
+    await expect(refresh(prisma, session.refreshToken, inMinutes(1))).rejects.toThrow(InvalidRefreshTokenError);
   });
 });

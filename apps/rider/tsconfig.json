@@ -15,5 +15,7 @@
     "expo-env.d.ts",
     "../../packages/mobile-shared/src/**/*.ts",
     "../../packages/mobile-shared/src/**/*.tsx"
-  ]
+  ],
+  // The shared package's jest tests are type-checked by its own tsconfig.
+  "exclude": ["node_modules", "../../packages/mobile-shared/src/__tests__/**", "../../packages/mobile-shared/src/**/*.test.tsx"]
 }

@@ -50,16 +50,17 @@ export function setSessionRejectedHandler(handler: (() => void) | null): void {
 }
 
 /**
- * True when the server ANSWERED and refused the session — 400/401 from
- * /auth/refresh, or 404 from /me for an account that no longer exists — as
- * opposed to the request never getting an answer. A phone on a bad
- * connection, or a Render server still waking up, must not be logged out;
- * nor must a 429 rate-limit.
+ * True only when the session is really over: the server ANSWERED a refresh
+ * with 401 (the token is unknown, revoked, expired, or its account deleted),
+ * or there is no refresh token at all. Everything else — no connection, a
+ * timeout, a server restarting or waking up (5xx), a rate limit (429), a 404
+ * from a wrong or half-moved address — leaves the user signed in, to try
+ * again. Signing someone out is only ever this, or their own "Log out".
  */
 export function isSessionRejection(error: unknown): boolean {
   if (error instanceof Error && error.message === NO_STORED_REFRESH_TOKEN) return true;
   const status = (error as { response?: { status?: number } } | null)?.response?.status;
-  return status === 400 || status === 401 || status === 404;
+  return status === 401;
 }
 
 /**
@@ -74,7 +75,12 @@ export function isSessionRejection(error: unknown): boolean {
  */
 let inFlightRefresh: Promise<string> | null = null;
 
-async function refreshAccessToken(): Promise<string> {
+/**
+ * Exchanges the refresh token for a new access token. Every refresh in the
+ * app — at start-up, after a 401, for the live connection — goes through
+ * here, so two of them can never present the same token at once.
+ */
+export async function refreshAccessToken(): Promise<string> {
   if (inFlightRefresh) return inFlightRefresh;
 
   inFlightRefresh = (async () => {

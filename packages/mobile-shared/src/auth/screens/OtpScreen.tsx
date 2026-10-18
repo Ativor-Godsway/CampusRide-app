@@ -46,8 +46,9 @@ export function OtpScreen() {
       if (purpose === "SIGNUP") {
         router.push({ pathname: "/auth/signup", params: { phone, verifiedToken } });
       } else {
+        // Signed in: the auth layout (AuthStackLayout) takes it from here,
+        // replacing these screens with the start screen.
         await completeLogin({ phone, verifiedToken });
-        router.replace("/");
       }
     } catch (err) {
       setError(errorMessage(err));
