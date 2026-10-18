@@ -121,6 +121,7 @@ describe("every spelling, on every login route", () => {
         phone: input,
         name: "Ama",
         role: "RIDER",
+        ageAndTermsConfirmed: true,
         verifiedToken: signVerificationToken({ phone: canonical, purpose: "SIGNUP" }),
       });
       expect(res.statusCode, name).toBe(201);
@@ -165,6 +166,7 @@ describe("every spelling, on every login route", () => {
       name: "Esi",
       role: "RIDER",
       verifiedToken: verify.json().verifiedToken,
+      ageAndTermsConfirmed: true,
     });
     expect(signup.statusCode).toBe(201);
     expect(signup.json().user.phone).toBe(canonical);

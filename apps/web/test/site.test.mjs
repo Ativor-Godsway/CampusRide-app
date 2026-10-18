@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { build, pages, pageUrl, readRetentionDays } from "../build.mjs";
+import { build, pages, pageUrl, readRetentionDays, readTermsDate } from "../build.mjs";
 import { site } from "../site.config.mjs";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
@@ -115,6 +115,29 @@ describe("the website matches the code", () => {
     assert.ok(Number.isInteger(days) && days > 0);
     assert.ok(read("delete-account.html").includes(`Kept for ${days} days, then erased`));
     assert.ok(read("privacy.html").includes(`<strong>${days} days</strong>`));
+  });
+
+  it("dates the privacy policy and terms with TERMS_VERSION, the version the apps record", () => {
+    const version = repoFile("packages/shared/src/account/terms.ts").match(
+      /TERMS_VERSION = "(\d{4}-\d{2}-\d{2})"/,
+    )?.[1];
+    assert.ok(version, "TERMS_VERSION not found");
+    const date = readTermsDate();
+    assert.equal(new Date(`${date} UTC`).toISOString().slice(0, 10), version);
+    for (const page of ["privacy.html", "terms.html"]) {
+      assert.ok(read(page).includes(`Last updated: ${date}`), page);
+    }
+  });
+
+  it("says sign-up asks for the same 18+ and terms confirmation the apps show", () => {
+    const checkbox = repoFile("packages/mobile-shared/src/auth/screens/TermsConfirmation.tsx");
+    assert.ok(checkbox.includes("I&apos;m 18 or older and I agree to the"));
+    assert.ok(checkbox.includes("TERMS_URL") && checkbox.includes("PRIVACY_URL"));
+    const shared = repoFile("packages/shared/src/account/terms.ts");
+    assert.ok(shared.includes(`"${site.url}/terms"`) && shared.includes(`"${site.url}/privacy"`));
+    assert.match(read("terms.html"), /When you sign up, you confirm this/);
+    assert.match(read("privacy.html"), /confirmation that you're 18 or older/);
+    assert.match(read("privacy.html"), /Everyone confirms they're 18 or over when they sign up/);
   });
 
   it("describes the in-app deletion flow with the app's own labels", () => {

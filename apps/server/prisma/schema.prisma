@@ -131,6 +131,14 @@ model User {
   /// simulated people (services/reviewDemo). Their rides are demo rides:
   /// never matched with real people, never shown to them, not in admin stats.
   isReviewDemo          Boolean   @default(false)
+  /// "I'm 18 or older and I agree to the Terms and Privacy Policy": when it
+  /// was ticked (at sign-up, or once in the app for accounts from before it
+  /// existed), and which version of the terms (TERMS_VERSION in
+  /// @rida/shared, the pages' "Last updated" date). Null until confirmed;
+  /// POST /auth/signup refuses to create an account without it.
+  ageConfirmedAt        DateTime?
+  termsAcceptedAt       DateTime?
+  termsVersion          String?
 
   driver                 Driver?
   ridesAsRider           Ride[]             @relation("RiderRides")

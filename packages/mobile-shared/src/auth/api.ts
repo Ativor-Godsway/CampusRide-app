@@ -30,6 +30,14 @@ export interface AuthUser {
    * served by the server's simulated people.
    */
   isReviewDemo?: boolean;
+  /**
+   * When "I'm 18 or older and I agree to the Terms and Privacy Policy" was
+   * confirmed, and which terms version. Null for an account from before
+   * sign-up asked: the app asks once (TermsConfirmationGate).
+   */
+  ageConfirmedAt?: string | null;
+  termsAcceptedAt?: string | null;
+  termsVersion?: string | null;
 }
 
 export interface AuthTokens {
@@ -68,8 +76,16 @@ export async function signup(input: {
   role: Exclude<UserRole, "ADMIN">;
   verifiedToken: string;
 }): Promise<SignupResponse> {
-  const res = await api.post<SignupResponse>("/auth/signup", input);
+  // Only reachable once the sign-up screen's box is ticked; the server
+  // refuses an account without it.
+  const res = await api.post<SignupResponse>("/auth/signup", { ...input, ageAndTermsConfirmed: true });
   return res.data;
+}
+
+/** Records "I'm 18 or older and I agree to the Terms and Privacy Policy" for the signed-in account (POST /me/terms). */
+export async function confirmTerms(): Promise<AuthUser> {
+  const res = await api.post<{ user: AuthUser }>("/me/terms", { ageAndTermsConfirmed: true });
+  return res.data.user;
 }
 
 export async function login(input: {

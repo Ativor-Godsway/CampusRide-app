@@ -93,6 +93,7 @@ Updated at the end of each stage.
 |---|---|
 | ✅ | In-app account deletion, both apps (store requirement): a screen saying what is deleted and kept, a texted code to confirm, refused during a ride; hidden at once, kept details erased after 90 days, audit-logged — [account-deletion.md](../account-deletion.md) (PR #46) |
 | ✅ | Deletion without the app (Google Play asks for a web link): campusride.app/delete-account (PR #50), and the admin site's Delete account tab to carry out an emailed request — look up the number, text a code, the person emails it back, delete exactly as the app does; admins and people on a ride refused; every step audit-logged — [account-deletion.md](../account-deletion.md#by-email-no-app) (branch `admin-email-account-deletion`) |
+| ✅ | 18+ and terms at sign-up, both apps: one required tick ("I'm 18 or older and I agree to the Terms and Privacy Policy", links open in the in-app browser), refused by the server without it, recorded with the terms version; accounts from before asked once (or log out / delete); review demo accounts pre-confirmed — migration `20261018120000_user_terms_confirmation` (branch `signup-age-terms-confirmation`) |
 | ✅ | Driver background location to Google Play and Apple rules: full-screen disclosure before any prompt, asked only when going online, Android online notification (foreground service), stops when offline; rider app location only while open — [location-store-review.md](../runbooks/location-store-review.md) (PR #47) |
 | ⬜ | Play Console location and foreground-service declarations, with the screen recording (steps and script in location-store-review.md) |
 | 🔶 | Store builds prepared: production = Android app bundle, remote build numbers counting up, production channel and server, Sentry DSN from EAS; test builds = APK; version 1.0.0; nothing development-only ships (checked, and pinned by a test); long-press the version line for build number and update ID — [releasing.md](../runbooks/releasing.md#7-what-a-production-build-leaves-out) (branch `store-build-prep`) |
@@ -105,6 +106,19 @@ Updated at the end of each stage.
 | ⬜ | Before each review: set the four `REVIEW_DEMO_*` settings on Render and paste the reviewer notes; after it, `REVIEW_DEMO_ENABLED=false` |
 
 ## Things only you can do by hand
+
+**Now (18+ and terms at sign-up)**
+
+1. **Before merging,** apply migration
+   `apps/server/prisma/migrations/20261018120000_user_terms_confirmation` to
+   production, the same way as the others. It only adds three empty columns
+   to `User` (and pre-confirms the review demo accounts), so it's safe while
+   the current server is running.
+2. New app builds are needed (it adds the in-app browser module); an
+   over-the-air update can't deliver it to the current builds. Until people
+   update, the current builds can't create new accounts (the server asks for
+   the tick they don't show, and says to update the app); signing in keeps
+   working.
 
 **Now (account deletion)**
 

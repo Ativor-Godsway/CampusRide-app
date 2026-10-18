@@ -16,9 +16,6 @@ export const site = {
   supportEmail: "support@campusride.app",
   supportPhone: null, // e.g. "+233 24 123 4567"
 
-  /** Shown at the top of the privacy policy and the terms. */
-  legalLastUpdated: "16 October 2026",
-
   /**
    * Pages marked DRAFT FOR LEGAL REVIEW. Remove a page from this list once a
    * lawyer has reviewed it and the banner disappears from that page.

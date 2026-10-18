@@ -81,6 +81,25 @@ export function readRetentionDays(root = join(here, "..", "..")) {
   return Number(match[1]);
 }
 
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/**
+ * TERMS_VERSION from packages/shared/src/account/terms.ts, as the pages'
+ * "Last updated" date ("18 October 2026"). The apps record this version when
+ * someone ticks "I agree to the Terms and Privacy Policy", so the date on the
+ * pages and the version on the account can't disagree.
+ */
+export function readTermsDate(root = join(here, "..", "..")) {
+  const source = readFileSync(join(root, "packages/shared/src/account/terms.ts"), "utf8");
+  const match = source.match(/export const TERMS_VERSION = "(\d{4})-(\d{2})-(\d{2})";/);
+  if (!match) throw new Error("TERMS_VERSION (YYYY-MM-DD) not found in @rida/shared");
+  const [, year, month, day] = match;
+  return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
+}
+
 export function pageUrl(slug, base = site.url) {
   return slug ? `${base}/${slug}` : `${base}/`;
 }
@@ -164,7 +183,12 @@ export function robots(config = site) {
 
 /** Writes the whole site to `outDir`. Returns the paths written, relative to it. */
 export function build(outDir = join(here, "dist")) {
-  const config = { ...site, retentionDays: readRetentionDays(), year: new Date().getFullYear() };
+  const config = {
+    ...site,
+    legalLastUpdated: readTermsDate(),
+    retentionDays: readRetentionDays(),
+    year: new Date().getFullYear(),
+  };
   const layout = readFileSync(join(here, "src/layout.html"), "utf8");
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });

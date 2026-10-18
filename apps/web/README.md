@@ -29,8 +29,16 @@ Open `dist/index.html` through any static server to preview (the pages use
 ## Removing the draft banner
 
 When a lawyer has reviewed the privacy policy or the terms, take that page out
-of `draftPages` in `site.config.mjs` (and update `legalLastUpdated`). The
-test that pins the list to `["privacy", "terms"]` needs the same change.
+of `draftPages` in `site.config.mjs`. The test that pins the list to
+`["privacy", "terms"]` needs the same change.
+
+## Changing the privacy policy or the terms
+
+The "Last updated" date on both pages is `TERMS_VERSION` in
+`packages/shared/src/account/terms.ts` (as `YYYY-MM-DD`). Change it there
+whenever either page changes: the apps record that version when someone ticks
+"I'm 18 or older and I agree to the Terms and Privacy Policy", so the account
+says which wording they agreed to.
 
 ## Keeping it true
 

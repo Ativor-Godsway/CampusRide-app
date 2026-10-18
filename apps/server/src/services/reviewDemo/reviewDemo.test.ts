@@ -19,6 +19,7 @@ import { createTestDriver, getTestZones } from "../ride/testFixtures";
 import { claimIfOpen, getEligibleDrivers } from "../ride/dispatch";
 import { resolveReviewDemo, setReviewDemoConfigForTests, type ReviewDemoConfig } from "./config";
 import { ensureDemoAccount, SIM_DRIVER_PHONE, SIM_RIDER_PHONE } from "./accounts";
+import { TERMS_VERSION, needsTermsConfirmation } from "@rida/shared";
 import { demoRequestTick, resetDemoRequestClock, setDemoTimingForTests } from "./simulation";
 
 const OTP = "246913";
@@ -160,6 +161,30 @@ describe("signing in", () => {
       isReviewDemo: true,
       driver: { isApproved: true },
     });
+  });
+
+  it("the demo accounts are pre-confirmed (18+ and terms), so reviewers go straight in", async () => {
+    const riderId = (await ensureDemoAccount(prisma, "rider"))!;
+    // One made before sign-up asked is confirmed the next time it's used.
+    await prisma.user.update({
+      where: { id: riderId },
+      data: { ageConfirmedAt: null, termsAcceptedAt: null, termsVersion: null },
+    });
+    const { verified } = await signInWithCode(riderPhone, OTP);
+    const login = await post("/auth/login", {
+      phone: riderPhone,
+      verifiedToken: verified.json().verifiedToken,
+    });
+    expect(login.json().user).toMatchObject({
+      termsAcceptedAt: expect.any(String),
+      ageConfirmedAt: expect.any(String),
+      termsVersion: TERMS_VERSION,
+    });
+    expect(needsTermsConfirmation(login.json().user)).toBe(false);
+
+    const driverId = (await ensureDemoAccount(prisma, "driver"))!;
+    const driver = await prisma.user.findUniqueOrThrow({ where: { id: driverId } });
+    expect(driver.termsAcceptedAt).not.toBeNull();
   });
 
   it("any other number can't use the fixed code, and gets its SMS as usual", async () => {

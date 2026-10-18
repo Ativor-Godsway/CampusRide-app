@@ -14,6 +14,7 @@ import {
   InvalidRefreshTokenError,
   PhoneAlreadyRegisteredError,
   RefreshTokenReuseError,
+  TermsNotConfirmedError,
   UserNotFoundError,
 } from "./errors";
 import { signVerificationToken } from "./tokens";
@@ -41,10 +42,25 @@ function verifiedLoginToken(phone: string): string {
 }
 
 describe("signup", () => {
+  it("won't create an account without the 18+ and terms confirmation", async () => {
+    const phone = uniqueTestPhone();
+    await expect(
+      signup(prisma, {
+        ageAndTermsConfirmed: false as unknown as true,
+        phone,
+        name: "No Tick",
+        role: "RIDER",
+        verifiedToken: verifiedSignupToken(phone),
+      }),
+    ).rejects.toThrow(TermsNotConfirmedError);
+    expect(await prisma.user.findUnique({ where: { phone } })).toBeNull();
+  });
+
   it("creates a RIDER user and issues valid tokens", async () => {
     const phone = uniqueTestPhone();
 
     const result = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Ama Rider",
       role: "RIDER",
@@ -72,6 +88,7 @@ describe("signup", () => {
     const phone = uniqueTestPhone();
 
     const result = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Kofi Driver",
       role: "DRIVER",
@@ -90,6 +107,7 @@ describe("signup", () => {
     const phone = uniqueTestPhone();
 
     const first = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "First",
       role: "RIDER",
@@ -99,6 +117,7 @@ describe("signup", () => {
 
     await expect(
       signup(prisma, {
+        ageAndTermsConfirmed: true,
         phone,
         name: "Second",
         role: "RIDER",
@@ -112,6 +131,7 @@ describe("login", () => {
   it("succeeds for an existing user and issues valid tokens", async () => {
     const phone = uniqueTestPhone();
     const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Existing User",
       role: "RIDER",
@@ -138,6 +158,7 @@ describe("refresh", () => {
   it("rotates a valid refresh token: issues new tokens and revokes the old one", async () => {
     const phone = uniqueTestPhone();
     const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Refresh User",
       role: "RIDER",
@@ -165,6 +186,7 @@ describe("refresh", () => {
   it("rejects reuse of a rotated (revoked) refresh token", async () => {
     const phone = uniqueTestPhone();
     const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Reuse User",
       role: "RIDER",
@@ -180,6 +202,7 @@ describe("refresh", () => {
   it("rejects an expired refresh token", async () => {
     const phone = uniqueTestPhone();
     const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Expired User",
       role: "RIDER",
@@ -213,6 +236,7 @@ describe("logout / revokeAllForUser", () => {
   it("logout revokes the token so it can no longer be refreshed", async () => {
     const phone = uniqueTestPhone();
     const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Logout User",
       role: "RIDER",
@@ -229,6 +253,7 @@ describe("logout / revokeAllForUser", () => {
   it("revokeAllForUser revokes every active refresh token for the user", async () => {
     const phone = uniqueTestPhone();
     const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "RevokeAll User",
       role: "RIDER",
@@ -248,6 +273,7 @@ describe("completeDriverProfile", () => {
   it("fills in the Driver row created at signup", async () => {
     const phone = uniqueTestPhone();
     const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Profile Driver",
       role: "DRIVER",
@@ -274,6 +300,7 @@ describe("refresh — rotation chains and reuse detection (Phase 2)", () => {
   async function newSession() {
     const phone = uniqueTestPhone();
     const created = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Rotation User",
       role: "RIDER",

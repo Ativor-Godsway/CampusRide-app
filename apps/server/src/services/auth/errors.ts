@@ -43,6 +43,16 @@ export class OtpAttemptsExceededError extends Error {
 }
 
 /** Thrown by signup when the phone is already registered. */
+/** Sign-up without "I'm 18 or older and I agree to the Terms and Privacy Policy" ticked. */
+export class TermsNotConfirmedError extends Error {
+  constructor() {
+    super(
+      "Tick \"I'm 18 or older and I agree to the Terms and Privacy Policy\" to sign up. If you don't see it, update the app.",
+    );
+    this.name = "TermsNotConfirmedError";
+  }
+}
+
 export class PhoneAlreadyRegisteredError extends Error {
   readonly phone: string;
 

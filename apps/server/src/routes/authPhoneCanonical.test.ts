@@ -130,7 +130,7 @@ describe("Signup", () => {
     const res = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone: "0548608163", name: "Local Typer", role: "RIDER", verifiedToken: token },
+      payload: { ageAndTermsConfirmed: true, phone: "0548608163", name: "Local Typer", role: "RIDER", verifiedToken: token },
     });
 
     expect(res.statusCode).toBe(201);
@@ -153,7 +153,7 @@ describe("Signup", () => {
     const res = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone: "+233 548 608 164", name: "Format Mixer", role: "RIDER", verifiedToken: token },
+      payload: { ageAndTermsConfirmed: true, phone: "+233 548 608 164", name: "Format Mixer", role: "RIDER", verifiedToken: token },
     });
 
     expect(res.statusCode).toBe(201);
@@ -181,6 +181,7 @@ describe("Login", () => {
       method: "POST",
       url: "/auth/signup",
       payload: {
+        ageAndTermsConfirmed: true,
         phone: "0548608165",
         name: "Returning User",
         role: "RIDER",

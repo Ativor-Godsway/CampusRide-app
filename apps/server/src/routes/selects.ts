@@ -115,6 +115,10 @@ export const meSelect = {
   emergencyContactPhone: true,
   // The apps treat a review demo account as being on campus (services/reviewDemo).
   isReviewDemo: true,
+  // Whether the apps must still ask "I'm 18 or older and I agree to the Terms…".
+  ageConfirmedAt: true,
+  termsAcceptedAt: true,
+  termsVersion: true,
   driver: {
     select: {
       id: true,

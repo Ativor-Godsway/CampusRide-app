@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import { logger } from "../../lib/logger";
 import { reportMessage } from "../../lib/monitoring";
 import { reviewDemoConfig } from "./config";
+import { termsConfirmation } from "../auth/terms";
 
 /**
  * The review demo's four accounts, all flagged isReviewDemo:
@@ -68,12 +69,18 @@ export async function ensureDemoAccount(
     return null;
   }
 
+  // Pre-confirmed (18+ and the terms): a reviewer signs in, never signs up,
+  // and must land straight in the app. Also for a demo account made before
+  // sign-up asked.
   const user =
     existing ??
     (await prisma.user.create({
-      data: { phone, name: person.name, role: person.role, isReviewDemo: true },
+      data: { phone, name: person.name, role: person.role, isReviewDemo: true, ...termsConfirmation() },
       select: { id: true },
     }));
+  if (existing) {
+    await prisma.user.updateMany({ where: { id: existing.id, termsAcceptedAt: null }, data: termsConfirmation() });
+  }
   if (person.role === "DRIVER") {
     await prisma.driver.upsert({
       where: { userId: user.id },

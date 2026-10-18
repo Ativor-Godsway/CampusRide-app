@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { RIDER_DEEP_LINK_POLICY } from "@rida/shared";
 import {
   AuthProvider,
+  TermsConfirmationGate,
   initMonitoring,
   installAppStateFocusManager,
   useDeepLinkGuard,
@@ -51,6 +52,8 @@ function RootLayout() {
           <SessionCacheReset />
           <RiderPushNotifications />
           <Stack screenOptions={{ headerShown: false }} />
+          {/* An account from before sign-up asked 18+ and the terms: asked once, over every screen. */}
+          <TermsConfirmationGate />
         </AuthProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>

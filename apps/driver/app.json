@@ -55,6 +55,7 @@
       "expo-asset",
       "expo-font",
       "expo-status-bar",
+      "expo-web-browser",
       [
         "expo-audio",
         {

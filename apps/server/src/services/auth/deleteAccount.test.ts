@@ -33,6 +33,7 @@ afterAll(async () => {
 async function newRider() {
   const phone = uniqueTestPhone();
   const created = await signup(prisma, {
+    ageAndTermsConfirmed: true,
     phone,
     name: "Deletable Rider",
     role: "RIDER",
@@ -88,6 +89,7 @@ describe("deleteAccount", () => {
     // The unique index is satisfied because the old row now holds a
     // placeholder, so the same person can come back as a NEW account.
     const reborn = await signup(prisma, {
+      ageAndTermsConfirmed: true,
       phone,
       name: "Returning Rider",
       role: "RIDER",
