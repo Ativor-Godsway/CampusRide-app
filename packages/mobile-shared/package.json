@@ -16,7 +16,9 @@
     "typescript": "~6.0.3"
   },
   "peerDependencies": {
+    "@expo-google-fonts/figtree": "*",
     "@expo/vector-icons": "*",
+    "@gorhom/bottom-sheet": "*",
     "@sentry/react-native": "*",
     "@tanstack/react-query": "^5.40.0",
     "axios": "^1.20.0",
@@ -24,6 +26,9 @@
     "expo-constants": "*",
     "expo-device": "*",
     "expo-file-system": "*",
+    "expo-font": "*",
+    "expo-haptics": "*",
+    "expo-image": "*",
     "expo-linking": "*",
     "expo-location": "*",
     "expo-notifications": "*",
@@ -31,10 +36,14 @@
     "expo-secure-store": "*",
     "expo-updates": "*",
     "expo-web-browser": "*",
+    "lottie-react-native": "*",
     "react": "*",
     "react-native": "*",
+    "react-native-gesture-handler": "*",
     "react-native-maps": "*",
+    "react-native-reanimated": "*",
     "react-native-safe-area-context": "*",
+    "react-native-svg": "*",
     "socket.io-client": "^4.7.5"
   },
   "scripts": {
@@ -44,7 +53,13 @@
     "test": "jest"
   },
   "peerDependenciesMeta": {
+    "@expo-google-fonts/figtree": {
+      "optional": true
+    },
     "@expo/vector-icons": {
+      "optional": true
+    },
+    "@gorhom/bottom-sheet": {
       "optional": true
     },
     "@sentry/react-native": {
@@ -68,6 +83,15 @@
     "expo-file-system": {
       "optional": true
     },
+    "expo-font": {
+      "optional": true
+    },
+    "expo-haptics": {
+      "optional": true
+    },
+    "expo-image": {
+      "optional": true
+    },
     "expo-linking": {
       "optional": true
     },
@@ -80,13 +104,16 @@
     "expo-router": {
       "optional": true
     },
-    "expo-web-browser": {
-      "optional": true
-    },
     "expo-secure-store": {
       "optional": true
     },
     "expo-updates": {
+      "optional": true
+    },
+    "expo-web-browser": {
+      "optional": true
+    },
+    "lottie-react-native": {
       "optional": true
     },
     "react": {
@@ -95,10 +122,19 @@
     "react-native": {
       "optional": true
     },
+    "react-native-gesture-handler": {
+      "optional": true
+    },
     "react-native-maps": {
       "optional": true
     },
+    "react-native-reanimated": {
+      "optional": true
+    },
     "react-native-safe-area-context": {
+      "optional": true
+    },
+    "react-native-svg": {
       "optional": true
     },
     "socket.io-client": {

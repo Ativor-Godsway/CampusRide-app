@@ -18,7 +18,7 @@ and duplicate-native-module build errors.
 `peerDependenciesMeta.*.optional = true` keeps the declarations (they still
 document the contract, and a consumer that omits one still gets a warning
 from tooling that checks peers) while telling npm not to materialise them.
-Both apps already declare all 13 packages in their own `dependencies` — that
+Both apps already declare every one of these packages in their own `dependencies` — that
 is verified, not assumed — so the apps remain the single source of truth for
 versions, and `npx expo install --fix` in an app is all that is needed to
 move an SDK forward.

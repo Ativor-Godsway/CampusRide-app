@@ -78,8 +78,15 @@ export async function requestDriverLocationAccess(): Promise<"always" | "whileUs
   let fg = await Location.getForegroundPermissionsAsync();
   if (fg.status !== "granted") fg = await Location.requestForegroundPermissionsAsync();
   if (fg.status !== "granted") return "none";
-  const bg = await Location.requestBackgroundPermissionsAsync();
-  return bg.status === "granted" ? "always" : "whileUsing";
+  try {
+    const bg = await Location.requestBackgroundPermissionsAsync();
+    return bg.status === "granted" ? "always" : "whileUsing";
+  } catch {
+    // ERR_LOCATION_INFO_PLIST: the running app has no "Always" usage
+    // description. Our store builds do (app.json, expo-location plugin);
+    // Expo Go on iPhone doesn't. Go online on "while using" instead of failing.
+    return "whileUsing";
+  }
 }
 
 export async function hasBackgroundLocationAccess(): Promise<boolean> {
