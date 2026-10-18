@@ -19,6 +19,15 @@ export const TOKEN = {
   /** Refresh token lifetime, in days. */
   REFRESH_TOKEN_TTL_DAYS: 30,
   /**
+   * How long a just-rotated refresh token may be presented again as a RETRY
+   * (authService.refresh). A phone on a bad connection can send a refresh
+   * that the server completes but whose answer never arrives; the phone
+   * still holds the old token and sends it again once it is back online.
+   * Inside this window that is honoured, and the user stays signed in;
+   * after it, presenting a used token is treated as theft.
+   */
+  REFRESH_RETRY_GRACE_MINUTES: 10,
+  /**
    * Lifetime of the short-lived "verification token" issued by
    * /auth/verify-otp and consumed by /auth/signup or /auth/login. Matches
    * the OTP TTL so the whole signup/login round trip has one consistent

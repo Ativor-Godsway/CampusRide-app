@@ -10,4 +10,6 @@ export * from "./screens/OtpScreen";
 export * from "./screens/SignupScreen";
 export * from "./screens/DeleteAccountScreen";
 export * from "./screens/TermsConfirmation";
+export * from "./screens/SessionRestoringScreen";
+export * from "./screens/AuthStackLayout";
 export * from "./sessionCache";

@@ -42,8 +42,8 @@ export function SignupScreen({
     setError(null);
     setIsSubmitting(true);
     try {
+      // Signed in: the auth layout (AuthStackLayout) takes it from here.
       await completeSignup({ phone, name: name.trim(), role, verifiedToken });
-      router.replace("/");
     } catch (err) {
       setError(errorMessage(err));
     } finally {

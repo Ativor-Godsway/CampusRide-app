@@ -8,7 +8,6 @@ import {
   DriverPhotoError,
   Illustration,
   Input,
-  LoadingState,
   Screen,
   Text,
   colors,
@@ -18,6 +17,7 @@ import {
   spacing,
   submitDriverProfile,
   useAuth,
+  SessionRestoringScreen,
 } from "@rida/mobile-shared";
 import { cloudinaryAvatar } from "@rida/shared";
 import { DriverPhotoCard } from "../components/DriverPhotoCard";
@@ -60,13 +60,7 @@ export default function OnboardingScreen() {
     }
   }, [submitted, user, router]);
 
-  if (isLoading) {
-    return (
-      <Screen>
-        <LoadingState />
-      </Screen>
-    );
-  }
+  if (isLoading) return <SessionRestoringScreen />;
 
   if (!isAuthenticated || !user) {
     return <Redirect href="/auth/phone" />;

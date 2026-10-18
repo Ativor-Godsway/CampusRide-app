@@ -11,6 +11,9 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
+    // Globals for the jest tests (src/__tests__); TypeScript 6 loads no
+    // @types package unless it is named here.
+    "types": ["jest"],
     "paths": {
       "@rida/shared": ["../shared/src/index.ts"]
     }

@@ -229,14 +229,26 @@ export async function refresh(
     throw new InvalidRefreshTokenError();
   }
 
+  // The row this refresh uses up: normally the presented token itself.
+  let consumed: { id: string } = stored;
+
   if (stored.revokedAt) {
-    // Reuse of a consumed token — burn the whole chain, including whatever
-    // token the other party is currently holding.
-    await prisma.refreshToken.updateMany({
-      where: { familyId: stored.familyId, revokedAt: null },
-      data: { revokedAt: now },
-    });
-    throw new RefreshTokenReuseError(stored.userId);
+    // A token rotated moments ago, presented again: the phone never got the
+    // answer to its last refresh (lost connection, timeout). Honour it by
+    // rotating the chain's live token in its place, so the user stays signed
+    // in. That token is revoked here, so whoever might hold it is caught
+    // the next time they use it.
+    const head = await liveHeadOfRecentRotation(prisma, stored, now);
+    if (!head) {
+      // Reuse of a consumed token — burn the whole chain, including whatever
+      // token the other party is currently holding.
+      await prisma.refreshToken.updateMany({
+        where: { familyId: stored.familyId, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      throw new RefreshTokenReuseError(stored.userId);
+    }
+    consumed = head;
   }
 
   // DELETE /me revokes every refresh token, so a deleted account should never
@@ -279,11 +291,45 @@ export async function refresh(
   );
 
   await prisma.refreshToken.update({
-    where: { id: stored.id },
+    where: { id: consumed.id },
     data: { revokedAt: now },
   });
 
   return issueTokens(prisma, stored.user, now, stored.familyId, sessionStartedAt);
+}
+
+/** Longest rotation chain followed for a retry; a real retry is one or two hops. */
+const MAX_RETRY_HOPS = 5;
+
+/**
+ * When presenting the revoked token `stored` is a retry of a rotation (see
+ * refresh), the chain's live token that the retry should rotate instead;
+ * otherwise null, and it is reuse.
+ *
+ * A rotation revokes the old row and creates the new one with the same
+ * timestamp (refresh passes one `now` to both), so a revoked row's successor
+ * is the family row created at its `revokedAt`. Revoked by a log out, or by
+ * a burned family, there is no such row. Every step of the chain must be
+ * within TOKEN.REFRESH_RETRY_GRACE_MINUTES, and it must end at a live token.
+ */
+async function liveHeadOfRecentRotation(
+  prisma: PrismaClient,
+  stored: { id: string; familyId: string; revokedAt: Date | null },
+  now: Date,
+): Promise<{ id: string } | null> {
+  const oldest = now.getTime() - TOKEN.REFRESH_RETRY_GRACE_MINUTES * MINUTE_MS;
+  let current = stored;
+  for (let hop = 0; hop < MAX_RETRY_HOPS; hop += 1) {
+    if (!current.revokedAt) return current;
+    if (current.revokedAt.getTime() < oldest) return null;
+    const successor = await prisma.refreshToken.findFirst({
+      where: { familyId: current.familyId, createdAt: current.revokedAt, id: { not: current.id } },
+      select: { id: true, familyId: true, revokedAt: true },
+    });
+    if (!successor) return null;
+    current = successor;
+  }
+  return null;
 }
 
 /** Revokes a single refresh token (e.g. on logout). Throws InvalidRefreshTokenError if unknown/already revoked. */

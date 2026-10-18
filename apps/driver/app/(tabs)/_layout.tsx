@@ -2,13 +2,12 @@ import { View } from "react-native";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
-  LoadingState,
   RoleMismatchScreen,
-  Screen,
   colors,
   shadows,
   useAuth,
   usePushPermissionPrompt,
+  SessionRestoringScreen,
 } from "@rida/mobile-shared";
 import { driverSetupRoute } from "../../lib/driverGate";
 import { ActiveTripBanner } from "../../components/ActiveTripBanner";
@@ -30,13 +29,7 @@ export default function TabsLayout() {
     () => router.push("/notifications"),
   );
 
-  if (isLoading) {
-    return (
-      <Screen>
-        <LoadingState />
-      </Screen>
-    );
-  }
+  if (isLoading) return <SessionRestoringScreen />;
 
   if (!isAuthenticated || !user) {
     return <Redirect href="/auth/phone" />;

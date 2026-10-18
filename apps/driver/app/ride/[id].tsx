@@ -44,6 +44,7 @@ import {
   Illustration,
   LoadingState,
   Screen,
+  SessionRestoringScreen,
   Text,
   callPhone,
   colors,
@@ -52,6 +53,7 @@ import {
   getFillSuggestions,
   serverReason,
   getRideSocket,
+  goHome as goToHomeTab,
   openDirections,
   radii,
   shadows,
@@ -134,7 +136,7 @@ export default function TripScreen() {
   const navigation = useNavigation();
   const queryClient = useQueryClient();
   const insets = useSafeAreaInsets();
-  const { isAuthenticated, user } = useAuth();
+  const { isLoading: sessionLoading, isAuthenticated, user } = useAuth();
 
   const { data: activeRide, isLoading } = useDriverActiveTrip(TRIP_POLL_MS, { includeFinished: true });
   const actions = useTripActions();
@@ -530,8 +532,7 @@ export default function TripScreen() {
 
   const goHome = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
-    if (router.canDismiss()) router.dismissAll();
-    else router.replace("/");
+    goToHomeTab(router);
   }, [router, queryClient]);
 
   // iOS swipe-back is off while a trip is running: the slide-to-confirm knob
@@ -556,6 +557,9 @@ export default function TripScreen() {
     return () => clearTimeout(t);
   }, [refused, goHome]);
 
+  // Opened straight into a trip (a notification, a relaunch): wait for the
+  // session to be restored rather than sending the driver to sign in.
+  if (sessionLoading) return <SessionRestoringScreen />;
   if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
 
   // ─── Done ────────────────────────────────────────────────────────────────
