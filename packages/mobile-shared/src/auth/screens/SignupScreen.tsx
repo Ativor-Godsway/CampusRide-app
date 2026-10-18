@@ -5,6 +5,7 @@ import { useAuth } from "../AuthContext";
 import { Button, Screen, Text, Input, colors, radii, spacing, touchTarget } from "../../design";
 import { errorMessage } from "../errorMessage";
 import { AuthHero } from "./AuthHero";
+import { AgeAndTermsCheckbox } from "./TermsConfirmation";
 
 type SignupRole = "RIDER" | "DRIVER";
 
@@ -24,12 +25,17 @@ export function SignupScreen({
   const { phone, verifiedToken } = useLocalSearchParams<{ phone: string; verifiedToken: string }>();
   const [name, setName] = useState("");
   const [role, setRole] = useState<SignupRole>(allowedRoles[0] ?? "RIDER");
+  const [confirmed, setConfirmed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit() {
     if (!name.trim()) {
       setError("Enter your name");
+      return;
+    }
+    if (!confirmed) {
+      setError("Tick the box to confirm you're 18 or older and agree to the terms");
       return;
     }
 
@@ -83,7 +89,14 @@ export function SignupScreen({
           </Text>
         ) : null}
 
-        <Button label="Finish" loading={isSubmitting} onPress={() => void handleSubmit()} />
+        <AgeAndTermsCheckbox checked={confirmed} onChange={setConfirmed} />
+
+        <Button
+          label="Finish"
+          disabled={!confirmed}
+          loading={isSubmitting}
+          onPress={() => void handleSubmit()}
+        />
       </View>
     </Screen>
   );

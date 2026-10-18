@@ -244,7 +244,7 @@ describe("no log line holds a phone number, code or token", () => {
     const signup = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name: "Kojo", role: "RIDER", verifiedToken },
+      payload: { ageAndTermsConfirmed: true, phone, name: "Kojo", role: "RIDER", verifiedToken },
     });
     expect(signup.statusCode).toBe(201);
     const { accessToken, refreshToken, user } = signup.json();

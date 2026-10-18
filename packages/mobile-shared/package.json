@@ -25,6 +25,7 @@
     "expo-router": "*",
     "expo-secure-store": "*",
     "expo-updates": "*",
+    "expo-web-browser": "*",
     "react": "*",
     "react-native": "*",
     "react-native-maps": "*",
@@ -71,6 +72,9 @@
       "optional": true
     },
     "expo-router": {
+      "optional": true
+    },
+    "expo-web-browser": {
       "optional": true
     },
     "expo-secure-store": {

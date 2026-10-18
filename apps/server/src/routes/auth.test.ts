@@ -13,7 +13,8 @@ import {
 } from "../services/auth/testFixtures";
 import { setRateLimitStore } from "../rateLimit/limiter";
 import { MemoryRateLimitStore } from "../rateLimit/store";
-import { createTestDriver, createTestRide, cleanupRide } from "../services/ride/testFixtures";
+import { createTestDriver, createTestRide, cleanupRide, createTestUser } from "../services/ride/testFixtures";
+import { TERMS_VERSION, needsTermsConfirmation } from "@rida/shared";
 
 let app: FastifyInstance;
 let otpService: CapturingOtpService;
@@ -76,7 +77,7 @@ describe("auth routes — signup + login round trip", () => {
     const signupRes = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name: "Test Rider", role: "RIDER", verifiedToken },
+      payload: { ageAndTermsConfirmed: true, phone, name: "Test Rider", role: "RIDER", verifiedToken },
     });
     expect(signupRes.statusCode).toBe(201);
     const signupBody = JSON.parse(signupRes.body);
@@ -104,6 +105,7 @@ describe("auth routes — signup + login round trip", () => {
       method: "POST",
       url: "/auth/signup",
       payload: {
+        ageAndTermsConfirmed: true,
         phone,
         name: "Onboarded Driver",
         role: "DRIVER",
@@ -149,7 +151,7 @@ describe("auth routes — signup + login round trip", () => {
     const signupRes = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name: "Bad Token", role: "RIDER", verifiedToken: loginVerifiedToken },
+      payload: { ageAndTermsConfirmed: true, phone, name: "Bad Token", role: "RIDER", verifiedToken: loginVerifiedToken },
     });
     expect(signupRes.statusCode).toBe(401);
   });
@@ -219,7 +221,7 @@ describe("refresh + logout routes", () => {
     const signupRes = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name: "Refresh Route User", role: "RIDER", verifiedToken },
+      payload: { ageAndTermsConfirmed: true, phone, name: "Refresh Route User", role: "RIDER", verifiedToken },
     });
     const { user, refreshToken } = JSON.parse(signupRes.body);
     userIds.push(user.id);
@@ -261,7 +263,7 @@ describe("refresh + logout routes", () => {
     const signupRes = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name: "Logout Route User", role: "RIDER", verifiedToken },
+      payload: { ageAndTermsConfirmed: true, phone, name: "Logout Route User", role: "RIDER", verifiedToken },
     });
     const { user, refreshToken } = JSON.parse(signupRes.body);
     userIds.push(user.id);
@@ -307,7 +309,7 @@ describe("auth middleware + /me", () => {
     const signupRes = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name: "Middleware User", role, verifiedToken },
+      payload: { ageAndTermsConfirmed: true, phone, name: "Middleware User", role, verifiedToken },
     });
     const body = JSON.parse(signupRes.body);
     userIds.push(body.user.id);
@@ -363,6 +365,7 @@ describe("driver profile route", () => {
       method: "POST",
       url: "/auth/signup",
       payload: {
+        ageAndTermsConfirmed: true,
         phone: driverPhone,
         name: "Driver Profile",
         role: "DRIVER",
@@ -392,6 +395,7 @@ describe("driver profile route", () => {
       method: "POST",
       url: "/auth/signup",
       payload: {
+        ageAndTermsConfirmed: true,
         phone: riderPhone,
         name: "Rider Profile",
         role: "RIDER",
@@ -425,7 +429,7 @@ describe("DELETE /me", () => {
     const signupRes = await app.inject({
       method: "POST",
       url: "/auth/signup",
-      payload: { phone, name, role: "RIDER", verifiedToken },
+      payload: { ageAndTermsConfirmed: true, phone, name, role: "RIDER", verifiedToken },
     });
     const { user, accessToken, refreshToken } = JSON.parse(signupRes.body);
     userIds.push(user.id);
@@ -555,5 +559,70 @@ describe("DELETE /me", () => {
       (await app.inject({ method: "POST", url: "/me/deletion-code", headers: auth })).statusCode,
     ).toBe(401);
     expect((await app.inject({ method: "GET", url: "/me", headers: auth })).statusCode).toBe(401);
+  });
+});
+
+describe("18+ and terms confirmation", () => {
+  async function signupWith(extra: Record<string, unknown>) {
+    const phone = newPhone();
+    const verifiedToken = await requestAndVerify(phone, "SIGNUP");
+    const res = await app.inject({
+      method: "POST",
+      url: "/auth/signup",
+      payload: { phone, name: "Terms Person", role: "RIDER", verifiedToken, ...extra },
+    });
+    if (res.statusCode === 201) userIds.push(res.json().user.id);
+    return { res, phone };
+  }
+
+  it("refuses a sign-up without it (an old app, or a skipped tick), creating nothing", async () => {
+    for (const extra of [{}, { ageAndTermsConfirmed: false }]) {
+      setRateLimitStore(new MemoryRateLimitStore(10_000, 0));
+      const { res, phone } = await signupWith(extra);
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ code: "TERMS_NOT_CONFIRMED", error: expect.stringContaining("18 or older") });
+      expect(await prisma.user.findUnique({ where: { phone } })).toBeNull();
+    }
+  });
+
+  it("records when, and which version of the terms, and says so to the app", async () => {
+    const before = Date.now();
+    const { res } = await signupWith({ ageAndTermsConfirmed: true });
+    expect(res.statusCode).toBe(201);
+    const { user, accessToken } = res.json();
+    expect(user).toMatchObject({ termsVersion: TERMS_VERSION });
+    expect(needsTermsConfirmation(user)).toBe(false);
+
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(row.termsAcceptedAt!.getTime()).toBeGreaterThanOrEqual(before - 1000);
+    expect(row.ageConfirmedAt).toEqual(row.termsAcceptedAt);
+
+    const me = await app.inject({ method: "GET", url: "/me", headers: { authorization: `Bearer ${accessToken}` } });
+    expect(me.json().user).toMatchObject({ termsVersion: TERMS_VERSION, termsAcceptedAt: expect.any(String) });
+  });
+
+  it("an account from before sign-up asked confirms once with POST /me/terms", async () => {
+    const old = await createTestUser("RIDER");
+    userIds.push(old.id);
+    const auth = { authorization: `Bearer ${jwt.sign({ userId: old.id, role: "RIDER", typ: "access" }, config.jwtSecret, { algorithm: "HS256" })}` };
+
+    const me = await app.inject({ method: "GET", url: "/me", headers: auth });
+    expect(me.json().user).toMatchObject({ termsAcceptedAt: null, ageConfirmedAt: null, termsVersion: null });
+    expect(needsTermsConfirmation(me.json().user)).toBe(true);
+
+    const refused = await app.inject({ method: "POST", url: "/me/terms", headers: auth, payload: { ageAndTermsConfirmed: false } });
+    expect(refused.statusCode).toBe(400);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: old.id } })).termsAcceptedAt).toBeNull();
+
+    const ok = await app.inject({ method: "POST", url: "/me/terms", headers: auth, payload: { ageAndTermsConfirmed: true } });
+    expect(ok.statusCode).toBe(200);
+    expect(ok.json().user).toMatchObject({ id: old.id, termsVersion: TERMS_VERSION });
+    expect(needsTermsConfirmation(ok.json().user)).toBe(false);
+  });
+
+  it("POST /me/terms needs a signed-in account", async () => {
+    expect(
+      (await app.inject({ method: "POST", url: "/me/terms", payload: { ageAndTermsConfirmed: true } })).statusCode,
+    ).toBe(401);
   });
 });

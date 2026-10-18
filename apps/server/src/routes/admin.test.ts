@@ -311,6 +311,7 @@ describe("ADMIN is not self-assignable", () => {
       method: "POST",
       url: "/auth/signup",
       payload: {
+        ageAndTermsConfirmed: true,
         phone: "+233594826399",
         name: "Would-be admin",
         role: "ADMIN",

@@ -253,7 +253,7 @@ async function startRider(zones: string[]): Promise<void> {
   if (typeof verifiedToken !== "string") return;
   const signup = await call("login: sign up", "POST", "/auth/signup", {
     ip,
-    body: { phone, name: `Load Rider ${n}`, role: "RIDER", verifiedToken },
+    body: { phone, name: `Load Rider ${n}`, role: "RIDER", verifiedToken, ageAndTermsConfirmed: true },
   });
   const token = signup.json?.accessToken;
   if (typeof token !== "string") return;

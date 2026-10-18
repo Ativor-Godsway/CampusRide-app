@@ -8,9 +8,11 @@ import {
   NotAnAdminError,
   RefreshTokenReuseError,
   PhoneAlreadyRegisteredError,
+  TermsNotConfirmedError,
   UserNotFoundError,
 } from "./errors";
 import { config } from "../../config";
+import { termsConfirmation } from "./terms";
 import { adminPhoneAllowed } from "./adminAccess";
 import { signAccessToken, verifyVerificationToken } from "./tokens";
 import { enforce } from "../../rateLimit/limiter";
@@ -107,6 +109,11 @@ export interface SignupInput {
   role: SignupRole;
   /** Verification token returned by /auth/verify-otp for purpose=SIGNUP. */
   verifiedToken: string;
+  /**
+   * The person ticked "I'm 18 or older and I agree to the Terms and Privacy
+   * Policy". There is no account without it (routes/auth.ts refuses first).
+   */
+  ageAndTermsConfirmed: true;
 }
 
 export interface SignupResult extends AuthTokens {
@@ -120,6 +127,7 @@ export interface SignupResult extends AuthTokens {
  */
 export async function signup(prisma: PrismaClient, input: SignupInput): Promise<SignupResult> {
   verifyVerificationToken(input.verifiedToken, input.phone, "SIGNUP");
+  if (input.ageAndTermsConfirmed !== true) throw new TermsNotConfirmedError();
 
   const existing = await prisma.user.findUnique({ where: { phone: input.phone } });
   if (existing) {
@@ -131,6 +139,7 @@ export async function signup(prisma: PrismaClient, input: SignupInput): Promise<
       phone: input.phone,
       name: input.name,
       role: input.role,
+      ...termsConfirmation(),
       // For DRIVER, create the pending Driver row (empty profile, isApproved=false)
       // in the same write and include it below, so the signup response carries the
       // same `user.driver` shape as /me and login. carMake stays null, so the

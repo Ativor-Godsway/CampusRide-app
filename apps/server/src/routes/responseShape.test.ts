@@ -99,6 +99,10 @@ describe("GET /me", () => {
         "emergencyContactPhone",
         // The apps treat an App Store / Google Play review demo account as on campus.
         "isReviewDemo",
+        // Whether the apps must still ask "I'm 18 or older and I agree to the Terms…".
+        "ageConfirmedAt",
+        "termsAcceptedAt",
+        "termsVersion",
       ].sort(),
     );
     // updatedAt is internal bookkeeping and must not be published.

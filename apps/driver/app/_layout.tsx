@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { DRIVER_DEEP_LINK_POLICY } from "@rida/shared";
 import {
   AuthProvider,
+  TermsConfirmationGate,
   initMonitoring,
   installAppStateFocusManager,
   useClearQueryCacheOnAccountChange,
@@ -66,6 +67,8 @@ function RootLayout() {
                 {/* Live location + automatic arrival on every screen during a trip. */}
                 <TripRuntime />
                 <Stack screenOptions={{ headerShown: false }} />
+                {/* An account from before sign-up asked 18+ and the terms: asked once, over every screen. */}
+                <TermsConfirmationGate />
               </DriverPresenceProvider>
             </LocationDisclosureProvider>
           </DriverLocationProvider>

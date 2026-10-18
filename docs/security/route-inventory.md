@@ -45,7 +45,7 @@ Last reviewed: 2026-10-16 (pre-launch hardening, Stages 1–5).
 | `GET /health/ready` | No | — | Also checks the database (`SELECT 1`, at most 3 s): `{status, app, database}`, 503 when it can't be reached. No error details. For UptimeRobot. | none (UptimeRobot polls it) |
 | `POST /auth/request-otp` | No | — | Sends a code to the phone given. | per number: 1 per 60 s, 5 / 15 min, 10 / 24 h (an admin's number: 3 / 15 min, 6 / 24 h); per IP: 200 codes / 15 min; IP backstop |
 | `POST /auth/verify-otp` | No | — | Returns a 5-minute verification token for that phone only. 5 wrong tries burns the code. | per number: 10 / 15 min (an admin's: 5); IP backstop |
-| `POST /auth/signup` | No | — | Needs a verification token for the same phone. Role can only be RIDER or DRIVER; a new driver is never approved. | per number: 10 / 15 min (with log-ins); IP backstop |
+| `POST /auth/signup` | No | — | Needs a verification token for the same phone, and `ageAndTermsConfirmed: true` ("I'm 18 or older and I agree to the Terms and Privacy Policy"), recorded on the account with the terms version. Role can only be RIDER or DRIVER; a new driver is never approved. | per number: 10 / 15 min (with log-ins); IP backstop |
 | `POST /auth/login` | No | — | Needs a verification token for the same phone. Refuses deleted accounts, and ADMIN accounts not on `ADMIN_PHONE_ALLOWLIST`. From the admin site (`X-CampusRide-Client: admin`), only an allowed ADMIN account gets a session. Attempts from the admin site, or about an admin's number, are recorded. | per number: 10 / 15 min (with sign-ups); IP backstop |
 | `POST /auth/refresh` | No | — | The refresh token is the credential. One-time use; re-using one revokes that whole login. Refuses deleted accounts. | per login: 10 / 15 min; per account: 30 / 15 min; IP backstop |
 | `POST /auth/logout` | No | — | The refresh token is the credential; only that token's own push token is removed. | IP backstop |
@@ -77,6 +77,7 @@ always the one in the token.
 |---|---|---|---|---|
 | `GET /me` | Yes | any | Own account only. | account default |
 | `PATCH /me` | Yes | any | Own name and emergency contact only. Any other field sent (role, phone, ids) is ignored. | 20 / hour; account default |
+| `POST /me/terms` | Yes | any | Own account only: records "I'm 18 or older and I agree to the Terms and Privacy Policy" (time and terms version) for an account from before sign-up asked. | 20 / hour; account default |
 | `POST /me/deletion-code` | Yes | any | Texts a confirmation code to the account's **own** phone (never a number from the request); answers with it masked. Refused while a ride is active, before any text is sent. | 5 / hour; the login-code limits for that number; account default |
 | `DELETE /me` | Yes | any | Own account only, with the code from `/me/deletion-code`. Refused while a ride is active. Hides the account at once (sessions, push tokens, SOS links gone; name and number replaced), keeps what a safety dispute needs out of sight for 90 days, then erases it ([deleteAccount.ts](../../apps/server/src/services/auth/deleteAccount.ts)). Closes the account's open sockets. | 5 / hour; account default |
 | `PUT /me/push-token` | Yes | any | Registers this phone's token to the caller (see "Accepted for now"). Rider tokens only for riders, driver tokens only for drivers. | 30 / 15 min; account default |

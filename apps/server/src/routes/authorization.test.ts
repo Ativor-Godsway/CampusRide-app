@@ -72,6 +72,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
 
   "GET /me": "self",
   "PATCH /me": "self",
+  "POST /me/terms": "self",
   "DELETE /me": "self",
   "POST /me/deletion-code": "self",
   "PUT /me/push-token": "self",
@@ -860,6 +861,7 @@ describe("mass assignment: protected fields in a request body are ignored", () =
           phone,
           name: "X",
           role: "ADMIN",
+          ageAndTermsConfirmed: true,
           verifiedToken,
         })
       ).statusCode,
@@ -868,6 +870,7 @@ describe("mass assignment: protected fields in a request body are ignored", () =
       phone,
       name: "Kofi",
       role: "DRIVER",
+      ageAndTermsConfirmed: true,
       verifiedToken,
       isApproved: true,
       driver: { isApproved: true },

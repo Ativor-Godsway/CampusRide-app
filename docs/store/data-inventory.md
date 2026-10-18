@@ -31,11 +31,13 @@ file, then the privacy policy.
 | **Name** | `User.name` | Yes | Shown to the other side of a trip; push messages ("Kofi is at your pickup") | Same as above |
 | **Role** (rider / driver / admin) | `User.role` | Set by the app used | Which app and features apply | Admins |
 | **Emergency contact name and phone** (another person's data, entered by the rider) | `User.emergencyContactName`, `User.emergencyContactPhone` | No | Texted a tracking link when the rider presses SOS | The rider; Moolre (SMS); admins |
+| **18+ and terms confirmation**: when "I'm 18 or older and I agree to the Terms and Privacy Policy" was ticked, and which terms version (`TERMS_VERSION` in `@rida/shared`, the pages' "Last updated" date) | `User.ageConfirmedAt`, `termsAcceptedAt`, `termsVersion` (added 2026-10-18) | Yes: `POST /auth/signup` refuses without it; accounts from before are asked once in the app (`POST /me/terms`); review demo accounts are pre-confirmed | A record that the person said they're an adult and agreed to the terms | The person (in `/me`); admins (database) |
 | Account created / updated / deleted times | `User.createdAt`, `updatedAt`, `deletedAt` | Automatic | Records | Admins |
 
 No email address, date of birth, ID document, gender or address is collected.
-**There is no age check in the apps** although the terms require 18+ (see
-"Gaps").
+Age is **self-declared** with the sign-up tick (18 or older); no date of birth
+or ID is asked for. The confirmation stays on the account row after deletion,
+which by then carries no name or number.
 
 ### Driver profile (drivers only)
 
@@ -142,8 +144,10 @@ and rating comments **other people** wrote about the person.
 
 Not fixed on this branch (each would be its own change):
 
-1. **No age check.** The terms say riders and drivers must be 18+, but sign-up
-   doesn't ask. Consider an "I'm 18 or older" confirmation at sign-up.
+1. ~~**No age check.**~~ Done 2026-10-18: sign-up requires "I'm 18 or older
+   and I agree to the Terms and Privacy Policy" (recorded with the terms
+   version), and accounts from before are asked once. It's a self-declaration,
+   not a verified age.
 2. **Login code rows are never swept.** `OtpCode` keeps the phone number and
    code hash after the 5-minute validity, indefinitely, unless the account is
    deleted, including for people who never finished signing up. A daily job

@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import type { UserRole } from "@rida/shared";
 import {
+  confirmTerms as apiConfirmTerms,
   deleteAccount as apiDeleteAccount,
   getMe,
   login as apiLogin,
@@ -43,6 +44,8 @@ interface AuthContextValue {
    * 409 while a ride is still in flight — so the caller can surface why.
    */
   deleteAccount: (code: string) => Promise<void>;
+  /** "I'm 18 or older and I agree to the Terms and Privacy Policy", for an account from before sign-up asked. */
+  confirmTerms: () => Promise<void>;
   refreshMe: () => Promise<void>;
 }
 
@@ -147,6 +150,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await clearLocalSession();
   }, [clearLocalSession]);
 
+  const confirmTerms = useCallback(async () => {
+    setUser(await apiConfirmTerms());
+  }, []);
+
   const value: AuthContextValue = {
     user,
     isLoading,
@@ -155,6 +162,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     completeLogin,
     signOut,
     deleteAccount,
+    confirmTerms,
     refreshMe,
   };
 

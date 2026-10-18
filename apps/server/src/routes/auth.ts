@@ -22,10 +22,12 @@ import {
   OtpAttemptsExceededError,
   OtpExpiredError,
   PhoneAlreadyRegisteredError,
+  TermsNotConfirmedError,
   UserNotFoundError,
 } from "../services/auth/errors";
 import { requireAuth } from "../middleware/auth";
 import { meSelect } from "./selects";
+import { termsConfirmation } from "../services/auth/terms";
 import { InvalidEmergencyContactError, updateRiderProfile } from "../services/auth/profile";
 import {
   AccountAlreadyDeletedError,
@@ -41,7 +43,7 @@ import { RateLimitedError, enforce } from "../rateLimit/limiter";
 import { RULES } from "../rateLimit/rules";
 import { clientIpForLimits, sendRateLimited } from "../rateLimit/reply";
 import { isAdminSiteRequest, recordAdminLogin, type AdminLoginFailure } from "../services/admin/loginAudit";
-import { MAX, bodyOptional, empty, noInput, object, oneOf, phone as phoneField, text } from "../http/schemas";
+import { MAX, boolean, bodyOptional, empty, noInput, object, oneOf, phone as phoneField, text } from "../http/schemas";
 
 
 const OTP_PURPOSES = ["SIGNUP", "LOGIN"] as const;
@@ -59,7 +61,14 @@ const SCHEMAS = {
   },
   signup: {
     body: object(
-      { phone: phoneField, name: text(MAX.name, { nonEmpty: true }), role: oneOf(SIGNUP_ROLES), verifiedToken },
+      {
+        phone: phoneField,
+        name: text(MAX.name, { nonEmpty: true }),
+        role: oneOf(SIGNUP_ROLES),
+        verifiedToken,
+        // Required, but checked in the handler so the refusal reads as a sentence.
+        ageAndTermsConfirmed: boolean,
+      },
       ["phone", "name", "role", "verifiedToken"],
     ),
   },
@@ -74,6 +83,7 @@ const SCHEMAS = {
       emergencyContactPhone: text(MAX.phone, { nullable: true }),
     }),
   },
+  confirmTerms: { querystring: empty, body: object({ ageAndTermsConfirmed: boolean }) },
   deletionCode: { querystring: empty, body: empty },
   deleteMe: { querystring: empty, body: object({ code: text(MAX.otpCode) }) },
   driverProfile: {
@@ -214,6 +224,7 @@ export function registerAuthRoutes(
       name?: unknown;
       role?: unknown;
       verifiedToken?: unknown;
+      ageAndTermsConfirmed?: unknown;
     };
 
     if (
@@ -225,6 +236,13 @@ export function registerAuthRoutes(
       return reply
         .code(400)
         .send({ error: "phone, name, role (RIDER|DRIVER), and verifiedToken are required" });
+    }
+
+    // "I'm 18 or older and I agree to the Terms and Privacy Policy": no
+    // account without it, whatever the app did or didn't show (an old build
+    // that never asks gets told to update).
+    if (body.ageAndTermsConfirmed !== true) {
+      return reply.code(400).send({ error: new TermsNotConfirmedError().message, code: "TERMS_NOT_CONFIRMED" });
     }
 
     const phone = normalizePhone(body.phone);
@@ -239,6 +257,7 @@ export function registerAuthRoutes(
         name: body.name,
         role: body.role,
         verifiedToken: body.verifiedToken,
+        ageAndTermsConfirmed: true,
       });
       return reply.code(201).send(result);
     } catch (err) {
@@ -433,6 +452,30 @@ export function registerAuthRoutes(
     });
     return reply.code(200).send({ user });
   });
+
+  /**
+   * "I'm 18 or older and I agree to the Terms and Privacy Policy", for an
+   * account from before sign-up asked: the apps show it once, and won't go on
+   * until it's confirmed here (or the person logs out or deletes the
+   * account). Confirming again just records the current terms version.
+   * Answers with the same shape as GET /me.
+   */
+  app.post(
+    "/me/terms",
+    { onRequest: requireAuth, schema: SCHEMAS.confirmTerms, config: { limits: { user: [RULES.profile] } } },
+    async (request, reply) => {
+      const { ageAndTermsConfirmed } = (request.body ?? {}) as { ageAndTermsConfirmed?: unknown };
+      if (ageAndTermsConfirmed !== true) {
+        return reply.code(400).send({ error: "ageAndTermsConfirmed must be true", code: "TERMS_NOT_CONFIRMED" });
+      }
+      const user = await prisma.user.update({
+        where: { id: request.user!.userId },
+        data: termsConfirmation(),
+        select: meSelect,
+      });
+      return reply.code(200).send({ user });
+    },
+  );
 
   /**
    * In-app account deletion (an app-store requirement), in two calls from the
