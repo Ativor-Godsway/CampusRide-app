@@ -90,21 +90,31 @@ describe("website build", () => {
     assert.ok(existsSync(join(out, "og-image.png")));
   });
 
-  it("marks exactly the pages in site.draftPages as DRAFT FOR LEGAL REVIEW", () => {
-    assert.deepEqual(site.draftPages, ["privacy", "terms"]);
+  it("shows no DRAFT FOR LEGAL REVIEW banner (the owner turned them off)", () => {
+    assert.deepEqual(site.draftPages, []);
     for (const { slug } of pages) {
-      const hasBanner = read(pageFile(slug)).includes("DRAFT FOR LEGAL REVIEW");
-      assert.equal(hasBanner, site.draftPages.includes(slug), slug || "home");
+      assert.ok(!read(pageFile(slug)).includes("DRAFT FOR LEGAL REVIEW"), slug || "home");
     }
   });
 
-  it("shows operator details that aren't filled in yet as visible placeholders", () => {
-    const privacy = read("privacy.html");
-    if (site.operatorName == null) {
-      assert.ok(privacy.includes(`<span class="placeholder">[OPERATOR'S FULL LEGAL NAME]</span>`));
+  it("has every operator detail filled in: no [PLACEHOLDER] on any page", () => {
+    for (const key of ["operatorName", "operatorAddress", "supportPhone"]) {
+      assert.ok(typeof site[key] === "string" && site[key].trim(), `site.${key} is empty`);
     }
-    if (site.operatorAddress == null) {
-      assert.ok(privacy.includes(`<span class="placeholder">[OPERATOR'S POSTAL ADDRESS]</span>`));
+    for (const { slug } of pages) {
+      const html = read(pageFile(slug));
+      assert.ok(!html.includes('class="placeholder"'), `${slug || "home"} still shows a placeholder`);
+    }
+    assert.ok(!read("404.html").includes('class="placeholder"'), "404 still shows a placeholder");
+  });
+
+  it("names the operator and how to reach them on the legal pages", () => {
+    const privacy = read("privacy.html");
+    const terms = read("terms.html");
+    for (const html of [privacy, terms]) {
+      assert.ok(html.includes(site.operatorName));
+      assert.ok(html.includes(`${site.operatorAddress}, Ghana`));
+      assert.ok(html.includes(`<a href="tel:+233548608146">${site.supportPhone}</a>`));
     }
   });
 });

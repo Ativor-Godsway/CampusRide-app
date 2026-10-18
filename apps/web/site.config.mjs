@@ -1,8 +1,8 @@
 /**
  * Everything about the website that is a fact rather than page copy, in one
- * place. Fill in the `null`s before launch: until then each one shows on the
- * page as a highlighted [PLACEHOLDER], so a missing detail is visible rather
- * than silently blank.
+ * place. A detail set to `null` shows on the page as a highlighted
+ * [PLACEHOLDER], so a missing one is visible rather than silently blank; the
+ * tests fail while any is left.
  */
 export const site = {
   /** The public address. Canonical links, Open Graph and the sitemap use it. */
@@ -10,17 +10,18 @@ export const site = {
   name: "CampusRide",
 
   /** The person who runs CampusRide and is the data controller (no company yet). */
-  operatorName: null, // e.g. "Ama Kwarteng Mensah", your full legal name
-  operatorAddress: null, // a postal address where you can receive letters
+  operatorName: "Ativor Godsway Kwabla",
+  /** A postal address where letters reach the operator (a GhanaPost digital address). */
+  operatorAddress: "GA-382-5351",
 
   supportEmail: "support@campusride.app",
-  supportPhone: null, // e.g. "+233 24 123 4567"
+  supportPhone: "+233 54 860 8146",
 
   /**
-   * Pages marked DRAFT FOR LEGAL REVIEW. Remove a page from this list once a
-   * lawyer has reviewed it and the banner disappears from that page.
+   * Pages marked DRAFT FOR LEGAL REVIEW: add a page's slug to show the banner
+   * on it. None at the moment (the owner turned them off on 2026-10-18).
    */
-  draftPages: ["privacy", "terms"],
+  draftPages: [],
 
   /** How soon an emailed deletion request is completed. */
   emailDeletionDays: 30,
