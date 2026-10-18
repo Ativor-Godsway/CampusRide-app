@@ -17,7 +17,7 @@ Open `dist/index.html` through any static server to preview (the pages use
 
 | File | What |
 |---|---|
-| `site.config.mjs` | Operator's name and address, support phone and email, the "last updated" date, which pages show **DRAFT FOR LEGAL REVIEW**, the email-deletion time limit. A `null` shows on the page as a highlighted `[PLACEHOLDER]`. |
+| `site.config.mjs` | Operator's name and address, support phone and email, which pages show **DRAFT FOR LEGAL REVIEW**, the email-deletion time limit. A `null` shows on the page as a highlighted `[PLACEHOLDER]` (and fails the tests). The "last updated" date is `TERMS_VERSION` in `@rida/shared`. |
 | `src/pages/*.html` | Each page's content. `{{name}}` is filled in from the config (an unknown name fails the build). |
 | `src/layout.html` | The shared `<head>` (title, description, canonical, Open Graph), header and footer. |
 | `build.mjs` | The page list (titles and descriptions for SEO), sitemap and robots.txt. |
@@ -26,11 +26,11 @@ Open `dist/index.html` through any static server to preview (the pages use
 | `public/og-image.png` | 1200×630 picture shown when a link is shared on WhatsApp, Facebook, X. Replace it with a designed one when the logo exists. |
 | `public/styles.css` | All styling. Brand colours at the top. |
 
-## Removing the draft banner
+## The draft banner
 
-When a lawyer has reviewed the privacy policy or the terms, take that page out
-of `draftPages` in `site.config.mjs`. The test that pins the list to
-`["privacy", "terms"]` needs the same change.
+`draftPages` in `site.config.mjs` lists the pages that show **DRAFT FOR LEGAL
+REVIEW**. It's empty (turned off 2026-10-18); add `"privacy"` or `"terms"` to
+show it again. The test that pins the list to `[]` needs the same change.
 
 ## Changing the privacy policy or the terms
 
