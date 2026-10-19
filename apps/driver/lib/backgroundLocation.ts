@@ -1,7 +1,10 @@
+import Constants, { ExecutionEnvironment } from "expo-constants";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import {
   DRIVER_ONLINE_NOTIFICATION,
+  accessFromAlwaysAnswer,
+  isExpoGoMissingAlwaysKey,
   planLocationAccess,
   type ArrivalSample,
   type LocationAccessPlan,
@@ -78,15 +81,16 @@ export async function requestDriverLocationAccess(): Promise<"always" | "whileUs
   let fg = await Location.getForegroundPermissionsAsync();
   if (fg.status !== "granted") fg = await Location.requestForegroundPermissionsAsync();
   if (fg.status !== "granted") return "none";
+  let bg: Location.LocationPermissionResponse;
   try {
-    const bg = await Location.requestBackgroundPermissionsAsync();
-    return bg.status === "granted" ? "always" : "whileUsing";
-  } catch {
-    // ERR_LOCATION_INFO_PLIST: the running app has no "Always" usage
-    // description. Our store builds do (app.json, expo-location plugin);
-    // Expo Go on iPhone doesn't. Go online on "while using" instead of failing.
-    return "whileUsing";
+    bg = await Location.requestBackgroundPermissionsAsync();
+  } catch (error) {
+    // Expo Go on iPhone can't ask for "all the time" (see isExpoGoMissingAlwaysKey).
+    const inExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+    if (isExpoGoMissingAlwaysKey(error, inExpoGo)) return "whileUsing";
+    throw error;
   }
+  return accessFromAlwaysAnswer(bg.status);
 }
 
 export async function hasBackgroundLocationAccess(): Promise<boolean> {

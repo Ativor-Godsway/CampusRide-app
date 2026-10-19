@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   DRIVER_LOCATION_DISCLOSURE,
   DRIVER_ONLINE_NOTIFICATION,
+  accessFromAlwaysAnswer,
+  isExpoGoMissingAlwaysKey,
   planLocationAccess,
   type LocationPermissions,
 } from "./locationAccess";
@@ -66,5 +68,38 @@ describe("the wording Google and Apple look for", () => {
     expect(`${DRIVER_ONLINE_NOTIFICATION.title}. ${DRIVER_ONLINE_NOTIFICATION.body}`).toBe(
       "You're online. CampusRide Driver is sharing your location.",
     );
+  });
+});
+
+describe("the answer to the 'all the time' prompt", () => {
+  const infoPlistError = Object.assign(new Error("NSLocation*UsageDescription missing"), {
+    code: "ERR_LOCATION_INFO_PLIST",
+  });
+
+  it("goes online in the background when the driver allows it", () => {
+    expect(accessFromAlwaysAnswer("granted")).toBe("always");
+  });
+
+  it("store build, driver says no: 'while using', as before (the go-online flow explains it)", () => {
+    expect(accessFromAlwaysAnswer("denied")).toBe("whileUsing");
+    expect(accessFromAlwaysAnswer("undetermined")).toBe("whileUsing");
+  });
+
+  it("Expo Go's missing Info.plist key counts as 'while using'", () => {
+    expect(isExpoGoMissingAlwaysKey(infoPlistError, true)).toBe(true);
+  });
+
+  it("the same error in a store build does not", () => {
+    expect(isExpoGoMissingAlwaysKey(infoPlistError, false)).toBe(false);
+  });
+
+  it("any other failure in Expo Go does not", () => {
+    const other = Object.assign(new Error("location services off"), {
+      code: "E_LOCATION_SERVICES_DISABLED",
+    });
+    expect(isExpoGoMissingAlwaysKey(other, true)).toBe(false);
+    expect(isExpoGoMissingAlwaysKey(new Error("no code"), true)).toBe(false);
+    expect(isExpoGoMissingAlwaysKey(null, true)).toBe(false);
+    expect(isExpoGoMissingAlwaysKey("ERR_LOCATION_INFO_PLIST", true)).toBe(false);
   });
 });

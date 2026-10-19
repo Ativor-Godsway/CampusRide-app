@@ -1,6 +1,8 @@
 # CampusRide design spec (source: Claude design system, 2026-10-18)
 
-Copy this file into the repo as `docs/design-system.md`. Mockups: `docs/mockups/*.png` (390×844 @2x). Live versions: design system https://claude.ai/artifact/NbWb6HoFfLjUn9WtHyDpfP · mockups https://claude.ai/artifact/F67QHM5sq5d17yJtAt5RhJ (private to Ativor).
+Source: CampusRide design system and mockups (Claude).
+
+Mockups: `docs/mockups/*.png` (390×844 @2x).
 
 ## Brand book
 
