@@ -1,40 +1,48 @@
 import { View, StyleSheet, type ViewProps } from "react-native";
 import { colors, radii, shadows, spacing, withAlpha } from "../tokens";
 
+/**
+ * docs/design-system.md, "Card": cards group facts with a fill, not a shadow.
+ * - `filled`: surface-2 on a white page.
+ * - `float`: white with shadow-float, only when floating on the map.
+ * - `dark`: surface-dark, once per screen, for a hero number.
+ */
+export type CardVariant = "filled" | "float" | "dark";
+
 export interface CardProps extends ViewProps {
+  /** Pick one in new code. Without it the card is the older white card with a hairline border. */
+  variant?: CardVariant;
   /** Removes padding for cards that manage their own inner layout. */
   noPadding?: boolean;
+  /** @deprecated Cards don't take a shadow on white; use variant="float" on the map. Ignored. */
   elevated?: boolean;
-  /** Deep near-black "feature card" treatment for selective emphasis — use sparingly. */
+  /** @deprecated Use variant="dark". */
   dark?: boolean;
   /**
-   * Decorative radial-green glow bleeding from the top-right corner — the
-   * "signature dark card" treatment. Defaults to `true` whenever `dark` is
-   * set; pass `glow={false}` to opt a specific dark card out. No-op when
-   * `dark` is false. Implemented as a clipped translucent circle (no
-   * gradient library in the tree) — purely decorative, no layout impact.
+   * @deprecated The older dark card's green corner glow; on by default for
+   * `dark`, off for `variant="dark"`. Purely decorative.
    */
   glow?: boolean;
 }
 
-/** Surface container — the basic building block for tiles, list rows, and grouped content. */
-export function Card({ noPadding, elevated = true, dark = false, glow, style, children, ...rest }: CardProps) {
-  const showGlow = dark && (glow ?? true);
+export function Card({
+  variant,
+  noPadding,
+  elevated: _elevated,
+  dark = false,
+  glow,
+  style,
+  children,
+  ...rest
+}: CardProps) {
+  const look = variant ?? (dark ? "legacyDark" : "legacy");
+  const showGlow = look === "legacyDark" && (glow ?? true);
   return (
-    <View
-      style={[
-        styles.base,
-        dark ? styles.dark : styles.light,
-        elevated && shadows.md,
-        !noPadding && styles.padded,
-        style,
-      ]}
-      {...rest}
-    >
+    <View style={[styles.base, styles[look], !noPadding && styles.padded, style]} {...rest}>
       {/* Absolutely-positioned clipping layer, sibling to children (not wrapping
-          them) — overflow:hidden on the shadow-bearing outer view itself would
-          clip the shadow on iOS, and wrapping children would break any `gap`/
-          `flexDirection` a caller passes via `style` for arranging them. */}
+          them) — overflow:hidden on the outer view would clip a float shadow
+          on iOS, and wrapping children would break any `gap`/`flexDirection`
+          a caller passes via `style`. */}
       {showGlow && (
         <View pointerEvents="none" style={styles.clip}>
           <View style={styles.glow} />
@@ -49,18 +57,26 @@ const styles = StyleSheet.create({
   base: {
     borderRadius: radii.lg,
   },
-  light: {
-    backgroundColor: colors.white,
-    borderWidth: 1,
-    borderColor: colors.border,
+  filled: {
+    backgroundColor: colors.surface2,
+  },
+  float: {
+    backgroundColor: colors.surface,
+    ...shadows.float,
   },
   dark: {
     backgroundColor: colors.surfaceDark,
+  },
+  legacy: {
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.borderDark,
+    borderColor: colors.line,
+  },
+  legacyDark: {
+    backgroundColor: colors.surfaceDark,
   },
   padded: {
-    padding: spacing.lg,
+    padding: spacing[4],
   },
   clip: {
     position: "absolute",
@@ -78,6 +94,6 @@ const styles = StyleSheet.create({
     width: 180,
     height: 180,
     borderRadius: 90,
-    backgroundColor: withAlpha(colors.primary[500], 0.35),
+    backgroundColor: withAlpha(colors.green500, 0.35),
   },
 });

@@ -197,7 +197,7 @@ export default function PlanRideScreen() {
   return (
     <Screen scroll>
       <Pressable onPress={goBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={8} style={styles.back}>
-        <Ionicons name="arrow-back" size={24} color={colors.ink[900]} />
+        <Ionicons name="arrow-back" size={24} color={colors.ink} />
       </Pressable>
 
       <Text variant="h2" accessibilityRole="header" style={styles.title}>
@@ -217,7 +217,7 @@ export default function PlanRideScreen() {
               }}
               onFocus={() => setActive("pickup")}
               placeholder={locating ? "Finding where you are…" : "Pickup"}
-              placeholderTextColor={colors.ink[300]}
+              placeholderTextColor={colors.ink3}
               style={styles.input}
               autoCorrect={false}
               autoCapitalize="words"
@@ -256,7 +256,7 @@ export default function PlanRideScreen() {
             }}
             onFocus={() => setActive("dropoff")}
             placeholder="Where to?"
-            placeholderTextColor={colors.ink[300]}
+            placeholderTextColor={colors.ink3}
             style={[styles.input, styles.inputStrong]}
             autoCorrect={false}
             autoCapitalize="words"
@@ -315,7 +315,7 @@ export default function PlanRideScreen() {
         <ListRow
           title="Choose on map"
           subtitle={active === "pickup" ? "Drop a pin where you'll be" : "Drop a pin where you're going"}
-          leading={<ListRow.Icon name="map-outline" color={colors.ink[700]} background={colors.surfaceMuted} />}
+          leading={<ListRow.Icon name="map-outline" color={colors.ink} background={colors.surfaceMuted} />}
           onPress={chooseOnMap}
           accessibilityLabel={`Choose the ${active === "pickup" ? "pickup" : "drop-off"} on a map`}
         />
@@ -384,7 +384,7 @@ export default function PlanRideScreen() {
 function ClearButton({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <Pressable onPress={onPress} accessibilityRole="button" accessibilityLabel={label} hitSlop={8}>
-      <Ionicons name="close-circle" size={20} color={colors.ink[300]} />
+      <Ionicons name="close-circle" size={20} color={colors.ink3} />
     </Pressable>
   );
 }
@@ -409,7 +409,7 @@ function EndSection({
           <View key={`${end.placeId ?? ""}:${end.latitude.toFixed(5)},${end.longitude.toFixed(5)}`}>
             <ListRow
               title={end.label}
-              leading={<ListRow.Icon name={icon} color={colors.ink[500]} background={colors.surfaceMuted} />}
+              leading={<ListRow.Icon name={icon} color={colors.ink2} background={colors.surfaceMuted} />}
               showChevron={false}
               onPress={() => onChoose(end)}
               accessibilityLabel={end.label}
@@ -446,7 +446,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     borderRadius: radii.md,
   },
-  fieldRowActive: { backgroundColor: colors.surface },
+  fieldRowActive: { backgroundColor: colors.surface2 },
   inputColumn: { flex: 1 },
   subtitle: { marginTop: -spacing.xs, marginBottom: spacing.xs },
   pickupDot: {
@@ -459,12 +459,12 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 2,
-    backgroundColor: colors.ink[900],
+    backgroundColor: colors.ink,
   },
   input: {
     flex: 1,
     fontSize: typography.size.md,
-    color: colors.ink[900],
+    color: colors.ink,
     paddingVertical: spacing.sm,
   },
   inputStrong: { fontWeight: typography.weight.semibold },

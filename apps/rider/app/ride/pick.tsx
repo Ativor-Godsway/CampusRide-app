@@ -93,7 +93,7 @@ export default function PickOnMapScreen() {
         hitSlop={8}
         style={[styles.back, { top: insets.top + spacing.sm }]}
       >
-        <Ionicons name="arrow-back" size={22} color={colors.ink[900]} />
+        <Ionicons name="arrow-back" size={22} color={colors.ink} />
       </Pressable>
 
       <View style={[styles.card, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
@@ -127,7 +127,7 @@ export default function PickOnMapScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.surface },
+  root: { flex: 1, backgroundColor: colors.surface2 },
   pinWrap: { position: "absolute", left: 0, right: 0, alignItems: "center" },
   pin: { width: PIN_SIZE, height: PIN_SIZE },
   pinLifted: { transform: [{ translateY: -8 }] },

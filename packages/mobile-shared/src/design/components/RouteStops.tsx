@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: radii.sm,
-    backgroundColor: colors.ink[900],
+    backgroundColor: colors.ink,
   },
   destSquareDark: {
     backgroundColor: colors.white,

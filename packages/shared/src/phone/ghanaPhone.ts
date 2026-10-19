@@ -72,3 +72,26 @@ export function formatGhanaPhone(phone: string): string {
 
 /** What to tell someone whose number didn't parse. */
 export const GHANA_PHONE_EXAMPLE = "Enter a Ghana number, like 054 861 7924 or +233 54 861 7924.";
+
+/**
+ * The 9-digit subscriber number (no +233, no leading 0) from whatever is in
+ * a phone field whose "+233" is fixed: typed digits, or a pasted
+ * "054 861 7924" / "+233 54 861 7924". Partial input stays partial ("054" ->
+ * "54"); more than nine digits are cut off. Used by the apps' PhoneInput.
+ */
+export function ghanaSubscriberDigits(input: string): string {
+  const canonical = normalizeGhanaPhone(input);
+  if (canonical) return canonical.slice(4);
+  let digits = compactPhoneInput(input).replace(/\D/g, "");
+  // A pasted country code: only when there are more digits than a subscriber
+  // number has, since a typed subscriber number can itself start with 233.
+  if (digits.length > 9) digits = digits.replace(/^(?:00)?233/, "");
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  return digits.slice(0, 9);
+}
+
+/** Subscriber digits grouped as they're typed: "548608146" -> "54 860 8146". */
+export function formatGhanaSubscriber(digits: string): string {
+  const d = digits.replace(/\D/g, "").slice(0, 9);
+  return [d.slice(0, 2), d.slice(2, 5), d.slice(5)].filter(Boolean).join(" ");
+}

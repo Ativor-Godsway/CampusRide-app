@@ -24,5 +24,5 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: radii.full },
   onboard: { backgroundColor: colors.primary[500] },
   coming: { backgroundColor: withAlpha(colors.primary[500], 0.35) },
-  empty: { borderWidth: 1.5, borderColor: colors.ink[200] },
+  empty: { borderWidth: 1.5, borderColor: colors.ink4 },
 });

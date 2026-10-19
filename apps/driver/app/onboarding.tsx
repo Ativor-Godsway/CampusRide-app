@@ -125,7 +125,7 @@ export default function OnboardingScreen() {
             hitSlop={8}
             style={styles.back}
           >
-            <Ionicons name="arrow-back" size={20} color={colors.ink[800]} />
+            <Ionicons name="arrow-back" size={20} color={colors.ink} />
             <Text variant="bodyMedium">Back</Text>
           </Pressable>
         ) : (

@@ -78,6 +78,6 @@ export function CountdownRing({
 
 const styles = StyleSheet.create({
   center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  seconds: { fontWeight: typography.weight.extrabold, color: colors.ink[900], fontVariant: ["tabular-nums"] },
+  seconds: { fontWeight: typography.weight.extrabold, color: colors.ink, fontVariant: ["tabular-nums"] },
   urgent: { color: colors.warning },
 });

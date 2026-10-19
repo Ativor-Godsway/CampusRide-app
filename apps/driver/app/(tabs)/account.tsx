@@ -277,6 +277,18 @@ export default function AccountTab() {
 
       {!editing && <FakeLocationCard />}
 
+      {/* Dev builds only: every design-system component, to compare with docs/design-system.md. */}
+      {__DEV__ && !editing ? (
+        <Card style={styles.logoutCard}>
+          <ListRow
+            title="Design gallery"
+            subtitle="Dev only: components and text styles"
+            leading={<ListRow.Icon name="color-palette-outline" />}
+            onPress={() => router.push("/dev/design-gallery")}
+          />
+        </Card>
+      ) : null}
+
       {!editing && (
         <Card style={styles.logoutCard}>
           <ListRow

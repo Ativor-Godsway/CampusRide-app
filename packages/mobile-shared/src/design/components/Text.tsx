@@ -1,98 +1,164 @@
-import { Text as RNText, type TextProps as RNTextProps, StyleSheet } from "react-native";
-import { colors, typography } from "../tokens";
+import {
+  Text as RNText,
+  type TextProps as RNTextProps,
+  type TextStyle,
+  StyleSheet,
+} from "react-native";
+import { fonts } from "../fonts";
+import { colors, textStyles, type TextStyleName } from "../tokens";
 
+/**
+ * The spec's type scale (docs/design-system.md, "Type"), plus the older
+ * names screens still use. Each old name renders as the closest spec style.
+ */
 export type TextVariant =
-  | "display"
+  | TextStyleName
+  /** @deprecated Use title1. */
   | "h1"
+  /** @deprecated Use title2. */
   | "h2"
+  /** @deprecated Use title3. */
   | "h3"
-  | "body"
+  /** @deprecated Use bodyStrong. */
   | "bodyMedium"
+  /** @deprecated Use subhead. */
   | "bodySmall"
-  | "caption"
+  /** @deprecated Use subhead (semibold labels) or eyebrow (uppercase section labels). */
   | "label"
+  /** @deprecated Use plate, or `tabular` for numbers. */
   | "mono";
 
-export type TextColor = "default" | "muted" | "subtle" | "inverse" | "primary" | "accent" | "error" | "success" | "glow";
+export type TextColor =
+  | "default"
+  | "secondary"
+  | "tertiary"
+  | "brand"
+  | "onBrand"
+  | "onDark"
+  | "onDark2"
+  | "greenOnDark"
+  | "danger"
+  | "warning"
+  /** @deprecated Use secondary. */
+  | "muted"
+  /** @deprecated Use tertiary. */
+  | "subtle"
+  /** @deprecated Use onBrand or onDark. */
+  | "inverse"
+  /** @deprecated Use brand. */
+  | "primary"
+  /** @deprecated Use warning. */
+  | "accent"
+  /** @deprecated Use danger. */
+  | "error"
+  /** @deprecated Use brand. */
+  | "success"
+  /** @deprecated Use greenOnDark. */
+  | "glow";
 
 export interface TextComponentProps extends RNTextProps {
   variant?: TextVariant;
   color?: TextColor;
+  /** Same-width digits, for money, ETAs, countdowns and codes. */
+  tabular?: boolean;
 }
 
 const variantStyles = StyleSheet.create({
-  display: {
-    fontSize: typography.size["5xl"],
-    fontWeight: typography.weight.extrabold,
-    lineHeight: typography.size["5xl"] * typography.lineHeight.tight,
-    letterSpacing: typography.letterSpacing.tighter,
-  },
-  h1: {
-    fontSize: typography.size["3xl"],
-    fontWeight: typography.weight.bold,
-    lineHeight: typography.size["3xl"] * typography.lineHeight.tight,
-    letterSpacing: typography.letterSpacing.tight,
-  },
-  h2: {
-    fontSize: typography.size["2xl"],
-    fontWeight: typography.weight.bold,
-    lineHeight: typography.size["2xl"] * typography.lineHeight.tight,
-    letterSpacing: typography.letterSpacing.tight,
-  },
-  h3: {
-    fontSize: typography.size.xl,
-    fontWeight: typography.weight.semibold,
-    lineHeight: typography.size.xl * typography.lineHeight.normal,
-  },
-  body: {
-    fontSize: typography.size.md,
-    fontWeight: typography.weight.regular,
-    lineHeight: typography.size.md * typography.lineHeight.normal,
-  },
-  bodyMedium: {
-    fontSize: typography.size.md,
-    fontWeight: typography.weight.medium,
-    lineHeight: typography.size.md * typography.lineHeight.normal,
-  },
-  bodySmall: {
-    fontSize: typography.size.sm,
-    fontWeight: typography.weight.regular,
-    lineHeight: typography.size.sm * typography.lineHeight.normal,
-  },
-  caption: {
-    fontSize: typography.size.xs,
-    fontWeight: typography.weight.medium,
-    lineHeight: typography.size.xs * typography.lineHeight.normal,
-  },
-  label: {
-    fontSize: typography.size.sm,
-    fontWeight: typography.weight.semibold,
-    lineHeight: typography.size.sm * typography.lineHeight.normal,
-    letterSpacing: typography.letterSpacing.wide,
-  },
-  /** Plates, OTP/codes, timers, fares-as-figures only — never for prose. */
-  mono: {
-    fontFamily: typography.fontFamily.mono,
-    fontSize: typography.size.md,
-    fontWeight: typography.weight.bold,
-    letterSpacing: 0.6,
-  },
+  ...textStyles,
+  h1: textStyles.title1,
+  h2: textStyles.title2,
+  h3: textStyles.title3,
+  bodyMedium: textStyles.bodyStrong,
+  bodySmall: textStyles.subhead,
+  label: { ...textStyles.subhead, fontFamily: fonts.semibold },
+  mono: { fontFamily: fonts.extrabold, fontSize: 16, lineHeight: 22, letterSpacing: 0.6 },
 });
 
-const colorStyles: Record<TextColor, { color: string }> = {
-  default: { color: colors.ink[900] },
-  muted: { color: colors.ink[400] },
-  subtle: { color: colors.ink[300] },
-  inverse: { color: colors.white },
-  primary: { color: colors.primary[500] },
-  accent: { color: colors.accent[600] },
-  error: { color: colors.error },
-  success: { color: colors.success },
-  /** Accent text/dots on dark surfaces. */
-  glow: { color: colors.glowGreen },
+/** Big numbers grow with Dynamic Type only up to 1.3x, so they don't break layouts. */
+const CAPPED: ReadonlySet<TextVariant> = new Set(["display", "title1", "plate", "h1", "mono"]);
+const DISPLAY_FONT_SCALE_CAP = 1.3;
+
+const colorValues: Record<TextColor, string> = {
+  default: colors.ink,
+  secondary: colors.ink2,
+  tertiary: colors.ink3,
+  brand: colors.green700,
+  onBrand: colors.onBrand,
+  onDark: colors.onDark,
+  onDark2: colors.onDark2,
+  greenOnDark: colors.greenOnDark,
+  danger: colors.red600,
+  warning: colors.amber700,
+  muted: colors.ink2,
+  subtle: colors.ink3,
+  inverse: colors.onDark,
+  primary: colors.green500,
+  accent: colors.amber700,
+  error: colors.red600,
+  success: colors.green500,
+  glow: colors.greenOnDark,
 };
 
-/** Type-scale-bound text component. Use `variant` for size/weight and `color` for the semantic palette — avoid ad-hoc font sizes elsewhere. */
-export function Text({ variant = "body", color = "default", style, ...rest }: TextComponentProps) {
-  return <RNText style={[variantStyles[variant], colorStyles[color], style]} {...rest} />;
+const FAMILY_BY_WEIGHT: Record<string, string> = {
+  "100": fonts.regular,
+  "200": fonts.regular,
+  "300": fonts.regular,
+  "400": fonts.regular,
+  normal: fonts.regular,
+  "500": fonts.medium,
+  "600": fonts.semibold,
+  "700": fonts.bold,
+  bold: fonts.bold,
+  "800": fonts.extrabold,
+  "900": fonts.extrabold,
+};
+
+const FIGTREE: ReadonlySet<string> = new Set(Object.values(fonts));
+
+/**
+ * Figtree has one family per weight. A `fontWeight` (a variant's, or one a
+ * screen still sets) becomes that weight's family and is dropped, since a
+ * fontWeight on a custom font makes Android fake-bold it. A non-Figtree
+ * fontFamily (system monospace, say) is left as it is.
+ */
+export function resolveFigtree(style: TextStyle): TextStyle {
+  const family = style.fontFamily;
+  if (family && !FIGTREE.has(family)) return style;
+  const weight = style.fontWeight != null ? String(style.fontWeight) : undefined;
+  const resolved = (weight && FAMILY_BY_WEIGHT[weight]) || family || fonts.regular;
+  if (resolved === family && style.fontWeight == null) return style;
+  return { ...style, fontFamily: resolved, fontWeight: undefined };
 }
+
+/**
+ * Type-scale-bound text. Use `variant` for the style and `color` for the
+ * palette; avoid ad-hoc font sizes elsewhere.
+ */
+export function Text({
+  variant = "body",
+  color = "default",
+  tabular = false,
+  maxFontSizeMultiplier,
+  style,
+  ...rest
+}: TextComponentProps) {
+  const flat = StyleSheet.flatten([
+    variantStyles[variant],
+    { color: colorValues[color] },
+    tabular && styles.tabular,
+    style,
+  ]);
+  return (
+    <RNText
+      maxFontSizeMultiplier={
+        maxFontSizeMultiplier ?? (CAPPED.has(variant) ? DISPLAY_FONT_SCALE_CAP : undefined)
+      }
+      style={resolveFigtree(flat)}
+      {...rest}
+    />
+  );
+}
+
+const styles = StyleSheet.create({
+  tabular: { fontVariant: ["tabular-nums"] },
+});

@@ -732,7 +732,7 @@ export default function TripScreen() {
               hitSlop={10}
               style={styles.previewClose}
             >
-              <Ionicons name="close" size={20} color={colors.ink[500]} />
+              <Ionicons name="close" size={20} color={colors.ink2} />
             </Pressable>
             <View
               style={styles.previewRoute}
@@ -767,7 +767,9 @@ export default function TripScreen() {
                 !previewData && styles.previewAddWaiting,
               ]}
             >
-              <Text style={styles.previewAddText}>{previewData ? "Add" : "Checking the route…"}</Text>
+              <Text style={[styles.previewAddText, !previewData && styles.previewAddWaitingText]}>
+                {previewData ? "Add" : "Checking the route…"}
+              </Text>
             </Pressable>
           </View>
         ) : null}
@@ -793,7 +795,7 @@ export default function TripScreen() {
               accessibilityRole="button"
               accessibilityLabel={`${plan.upcoming.length - 1} more stops. Show all stops.`}
             >
-              <Ionicons name="list" size={16} color={colors.ink[700]} />
+              <Ionicons name="list" size={16} color={colors.ink} />
               <Text variant="bodySmall" style={styles.moreStopsText}>
                 {plan.upcoming.length - 1} more stop{plan.upcoming.length - 1 === 1 ? "" : "s"}
               </Text>
@@ -895,7 +897,7 @@ function NextStopCard({
 
       {stop.note ? (
         <View style={styles.noteRow} accessible accessibilityLabel={`Note from ${name}: ${stop.note}`}>
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.ink[500]} />
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.ink2} />
           <Text variant="bodySmall" style={styles.noteText} numberOfLines={3}>
             “{stop.note}”
           </Text>
@@ -1024,12 +1026,12 @@ function TopBar({
     <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]} onLayout={onLayout} pointerEvents="box-none">
       {/* Minimise: the trip carries on; the banner on every tab brings the driver back. */}
       <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Go to Home. Your trip continues." hitSlop={6} style={styles.roundButton}>
-        <Ionicons name="arrow-back" size={22} color={colors.ink[900]} />
+        <Ionicons name="arrow-back" size={22} color={colors.ink} />
       </Pressable>
       <View style={styles.chips}>{children}</View>
       {syncing ? (
         <View style={styles.syncing} accessibilityLiveRegion="polite" accessibilityLabel="Sending. Waiting for a connection.">
-          <Ionicons name="cloud-upload-outline" size={16} color={colors.ink[600]} />
+          <Ionicons name="cloud-upload-outline" size={16} color={colors.ink2} />
           <Text variant="caption" color="muted">Sending…</Text>
         </View>
       ) : null}
@@ -1099,7 +1101,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     backgroundColor: colors.surfaceMuted,
   },
-  noteText: { flex: 1, color: colors.ink[700], fontStyle: "italic" },
+  noteText: { flex: 1, color: colors.ink, fontStyle: "italic" },
   root: { flex: 1, backgroundColor: colors.background },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, paddingHorizontal: spacing.xl },
   centerText: { textAlign: "center" },
@@ -1134,7 +1136,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     ...shadows.sm,
   },
-  chipText: { fontWeight: typography.weight.bold, color: colors.ink[900] },
+  chipText: { fontWeight: typography.weight.bold, color: colors.ink },
   seatChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -1180,7 +1182,7 @@ const styles = StyleSheet.create({
     zIndex: 4,
     ...shadows.md,
   },
-  legendText: { color: colors.ink[700], fontWeight: typography.weight.semibold },
+  legendText: { color: colors.ink, fontWeight: typography.weight.semibold },
   previewCard: {
     gap: spacing.md,
     backgroundColor: colors.primary[50],
@@ -1206,9 +1208,9 @@ const styles = StyleSheet.create({
   previewMarkers: { alignItems: "center", paddingTop: 7, width: 12 },
   previewPickupDot: { width: 11, height: 11, borderRadius: radii.full, backgroundColor: colors.primary[500] },
   previewConnector: { width: 2, flex: 1, minHeight: 14, backgroundColor: colors.primary[200], marginVertical: 3 },
-  previewDropoffSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.ink[900], marginBottom: 7 },
+  previewDropoffSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.ink, marginBottom: 7 },
   previewPlaces: { flex: 1, gap: spacing.sm },
-  previewPlace: { fontSize: 18, lineHeight: 23, fontWeight: typography.weight.bold, color: colors.ink[900] },
+  previewPlace: { fontSize: 18, lineHeight: 23, fontWeight: typography.weight.bold, color: colors.ink },
   previewAdd: {
     height: 52,
     borderRadius: radii.lg,
@@ -1217,7 +1219,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary[500],
   },
   previewAddPressed: { backgroundColor: colors.primary[600] },
-  previewAddWaiting: { backgroundColor: colors.primary[300] },
+  // Still checking: the disabled look (surface-3, ink-3), so its label stays readable.
+  previewAddWaiting: { backgroundColor: colors.surface3 },
+  previewAddWaitingText: { color: colors.ink3 },
   previewAddText: { color: colors.white, fontSize: 18, fontWeight: typography.weight.extrabold },
   refusal: {
     flexDirection: "row",
@@ -1240,18 +1244,18 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     alignItems: "center",
   },
-  cashLabel: { color: colors.ink[600], fontWeight: typography.weight.semibold },
+  cashLabel: { color: colors.ink2, fontWeight: typography.weight.semibold },
   cashAmount: { fontWeight: typography.weight.extrabold, fontSize: 40, lineHeight: 46 },
   actionRow: { flexDirection: "row", gap: spacing.sm },
   actionCell: { flex: 1, minWidth: 0 },
   smallLinks: { flexDirection: "row", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.sm },
   smallLink: { paddingVertical: spacing.xs, minHeight: 32, justifyContent: "center" },
-  smallLinkText: { color: colors.ink[700], fontWeight: typography.weight.semibold },
+  smallLinkText: { color: colors.ink, fontWeight: typography.weight.semibold },
   smallLinkDanger: { color: colors.danger },
-  smallLinkDisabled: { color: colors.ink[300] },
+  smallLinkDisabled: { color: colors.ink3 },
   footerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   moreStops: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingVertical: spacing.xs, minHeight: 36 },
-  moreStopsText: { fontWeight: typography.weight.semibold, color: colors.ink[700] },
+  moreStopsText: { fontWeight: typography.weight.semibold, color: colors.ink },
   seatsAndAdd: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   addChip: {
     flexDirection: "row",

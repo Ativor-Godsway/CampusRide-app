@@ -31,7 +31,7 @@ export function Sheet({ visible, onClose, children }: SheetProps) {
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: colors.overlay,
+    backgroundColor: colors.scrim,
   },
   sheetWrapper: {
     position: "absolute",
@@ -40,20 +40,20 @@ const styles = StyleSheet.create({
     bottom: 0,
   },
   sheet: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.xl,
-    ...shadows.lg,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    paddingHorizontal: spacing.gutter,
+    paddingTop: spacing[3],
+    paddingBottom: spacing[5],
+    ...shadows.sheet,
   },
   handle: {
-    width: 40,
+    width: 36,
     height: 5,
     borderRadius: radii.full,
-    backgroundColor: colors.borderStrong,
+    backgroundColor: colors.surface3,
     alignSelf: "center",
-    marginBottom: spacing.lg,
+    marginBottom: spacing[4],
   },
 });

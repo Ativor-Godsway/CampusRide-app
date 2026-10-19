@@ -110,7 +110,7 @@ export function SearchingPanel({
           <View style={styles.summaryText}>
             <Text variant="bodyMedium">{rideType === "SHARED" ? "Shared" : "Ride alone"}</Text>
             <View style={styles.cashRow}>
-              <Ionicons name="cash-outline" size={13} color={colors.ink[400]} />
+              <Ionicons name="cash-outline" size={13} color={colors.ink3} />
               <Text variant="caption" color="muted">
                 Cash
               </Text>

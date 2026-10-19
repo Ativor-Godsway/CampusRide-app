@@ -116,7 +116,7 @@ export function DeleteAccountScreen({ app }: { app: "rider" | "driver" }) {
         accessibilityLabel="Back"
         style={styles.back}
       >
-        <Ionicons name="chevron-back" size={22} color={colors.ink[900]} />
+        <Ionicons name="chevron-back" size={22} color={colors.ink} />
         <Text variant="body">Back</Text>
       </Pressable>
       <Text variant="h2">Delete account</Text>
@@ -224,7 +224,7 @@ function Section({
   return (
     <Card style={styles.card}>
       <View style={styles.row}>
-        <Ionicons name={icon} size={18} color={colors.ink[500]} />
+        <Ionicons name={icon} size={18} color={colors.ink2} />
         <Text variant="label">{title}</Text>
       </View>
       {items.map((item) => (

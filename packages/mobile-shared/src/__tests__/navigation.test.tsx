@@ -46,7 +46,7 @@ describe("signing in", () => {
   it("rider sign-up leaves no sign-in screen in the history either", async () => {
     await renderApp("rider");
     await screen.findByText("Create an account");
-    await fireEvent.changeText(screen.getByPlaceholderText("+233 ..."), "0241234567");
+    await fireEvent.changeText(screen.getByLabelText("Phone number"), "0241234567");
     await fireEvent.press(screen.getByText("Create an account"));
     await fireEvent.changeText(await screen.findByPlaceholderText("000000"), "123456");
     await fireEvent.press(screen.getByText("Continue"));

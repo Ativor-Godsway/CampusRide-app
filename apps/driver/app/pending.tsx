@@ -123,7 +123,7 @@ export default function PendingApprovalScreen() {
           <Ionicons
             name={checkFailed ? "cloud-offline-outline" : "time-outline"}
             size={16}
-            color={checkFailed ? colors.error : colors.ink[400]}
+            color={checkFailed ? colors.error : colors.ink3}
           />
           <Text variant="caption" color={checkFailed ? "error" : "muted"}>
             {checkFailed

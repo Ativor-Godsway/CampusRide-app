@@ -76,11 +76,11 @@ export function Screen({
 const styles = StyleSheet.create({
   flex: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface,
   },
   content: {
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
+    paddingHorizontal: spacing.gutter,
+    paddingTop: spacing[4],
   },
   grow: {
     flexGrow: 1,

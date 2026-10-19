@@ -177,7 +177,7 @@ export default function RidesTab() {
                     <View style={styles.markers}>
                       <View style={styles.dot} />
                       <View style={styles.connector} />
-                      <Ionicons name="location" size={10} color={colors.ink[400]} />
+                      <Ionicons name="location" size={10} color={colors.ink3} />
                     </View>
                     <View style={styles.routeLabels}>
                       <Text variant="bodyMedium" numberOfLines={1}>
