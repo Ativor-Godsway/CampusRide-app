@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, useRouter } from "expo-router";
+import { SplashScreen, Stack, useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { RIDER_DEEP_LINK_POLICY } from "@rida/shared";
 import {
@@ -8,6 +8,7 @@ import {
   TermsConfirmationGate,
   initMonitoring,
   installAppStateFocusManager,
+  useAppFonts,
   useDeepLinkGuard,
   withMonitoring,
 } from "@rida/mobile-shared";
@@ -17,6 +18,9 @@ import { RiderPushNotifications } from "../lib/push";
 // Error and crash reporting (Sentry), when a DSN was built in: before
 // anything renders, so a crash on the first screen is reported too.
 initMonitoring("rider");
+
+// The splash stays up until Figtree has loaded (useAppFonts hides it).
+void SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
@@ -44,6 +48,9 @@ function SessionCacheReset() {
 }
 
 function RootLayout() {
+  const fontsReady = useAppFonts();
+  if (!fontsReady) return null;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <QueryClientProvider client={queryClient}>

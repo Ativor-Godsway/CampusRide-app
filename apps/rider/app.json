@@ -45,8 +45,20 @@
         }
       ],
       "expo-asset",
-      "expo-font",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "@expo-google-fonts/figtree/400Regular/Figtree_400Regular.ttf",
+            "@expo-google-fonts/figtree/500Medium/Figtree_500Medium.ttf",
+            "@expo-google-fonts/figtree/600SemiBold/Figtree_600SemiBold.ttf",
+            "@expo-google-fonts/figtree/700Bold/Figtree_700Bold.ttf",
+            "@expo-google-fonts/figtree/800ExtraBold/Figtree_800ExtraBold.ttf"
+          ]
+        }
+      ],
       "expo-image",
+      "expo-splash-screen",
       "expo-status-bar",
       "expo-web-browser"
     ],

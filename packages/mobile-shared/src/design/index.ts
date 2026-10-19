@@ -1,5 +1,6 @@
 export * from "./tokens";
 export * from "./illustrations";
+export * from "./fonts";
 export * from "./components/Text";
 export * from "./components/Button";
 export * from "./components/Card";

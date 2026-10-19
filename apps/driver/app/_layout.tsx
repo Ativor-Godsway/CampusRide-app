@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, useRouter } from "expo-router";
+import { SplashScreen, Stack, useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { DRIVER_DEEP_LINK_POLICY } from "@rida/shared";
 import {
@@ -8,6 +8,7 @@ import {
   TermsConfirmationGate,
   initMonitoring,
   installAppStateFocusManager,
+  useAppFonts,
   useClearQueryCacheOnAccountChange,
   useDeepLinkGuard,
   withMonitoring,
@@ -24,6 +25,9 @@ import { DriverPushNotifications } from "../lib/push";
 // Error and crash reporting (Sentry), when a DSN was built in: before
 // anything renders, so a crash on the first screen is reported too.
 initMonitoring("driver");
+
+// The splash stays up until Figtree has loaded (useAppFonts hides it).
+void SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient();
 
@@ -52,6 +56,9 @@ function DeepLinkGuard() {
 }
 
 function RootLayout() {
+  const fontsReady = useAppFonts();
+  if (!fontsReady) return null;
+
   return (
     // Required for react-native-gesture-handler gestures (the trip screen's
     // slide-to-confirm) to work at all.

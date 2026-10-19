@@ -63,3 +63,25 @@ export const LOCATION_SETTINGS_MESSAGE =
 
 export const WHILE_USING_ONLY_MESSAGE =
   "You're online. While CampusRide Driver is in the background, riders won't see you move. To keep sharing your location, allow location “All the time” in Settings.";
+
+/**
+ * What the driver's answer to the "all the time" prompt means for going
+ * online. Saying no still goes online on "while using", and the go-online
+ * flow shows WHILE_USING_ONLY_MESSAGE first.
+ */
+export function accessFromAlwaysAnswer(status: PermissionState | string): "always" | "whileUsing" {
+  return status === "granted" ? "always" : "whileUsing";
+}
+
+/**
+ * Expo Go on iPhone has no "Always" location usage description, so asking
+ * for "all the time" there is rejected with ERR_LOCATION_INFO_PLIST (the
+ * store builds have it: apps/driver/app.json, expo-location plugin). True
+ * only for that error AND in Expo Go: the one failure the driver app treats
+ * as a "while using" answer. Anything else is passed on.
+ */
+export function isExpoGoMissingAlwaysKey(error: unknown, inExpoGo: boolean): boolean {
+  const code =
+    typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+  return inExpoGo && code === "ERR_LOCATION_INFO_PLIST";
+}
