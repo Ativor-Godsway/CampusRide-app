@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   compactPhoneInput,
   formatGhanaPhone,
+  formatGhanaSubscriber,
+  ghanaSubscriberDigits,
   normalizeGhanaPhone,
   removeInvisibleCharacters,
 } from "./ghanaPhone";
@@ -60,5 +62,48 @@ describe("helpers", () => {
   it("removeInvisibleCharacters and compactPhoneInput keep only what matters", () => {
     expect(removeInvisibleCharacters("\u202A054\u200B861\u202C")).toBe("054861");
     expect(compactPhoneInput(" (054) 861-7924 ")).toBe("0548617924");
+  });
+});
+
+describe("the phone field with a fixed +233", () => {
+  it.each([
+    ["548617924", "548617924"],
+    ["0548617924", "548617924"],
+    ["054 861 7924", "548617924"],
+    ["+233 54 861 7924", "548617924"],
+    ["+233 (0) 54 861 7924", "548617924"],
+    ["233548617924", "548617924"],
+    ["00233548617924", "548617924"],
+    ["\u202A0548617924\u202C", "548617924"],
+  ])("reads a typed or pasted %j as %j", (input, digits) => {
+    expect(ghanaSubscriberDigits(input)).toBe(digits);
+  });
+
+  it("keeps partial input as typed, dropping only the local 0", () => {
+    expect(ghanaSubscriberDigits("")).toBe("");
+    expect(ghanaSubscriberDigits("0")).toBe("");
+    expect(ghanaSubscriberDigits("054")).toBe("54");
+    expect(ghanaSubscriberDigits("54 86")).toBe("5486");
+  });
+
+  it("keeps a subscriber number that starts with 233, as long as it is being typed", () => {
+    expect(ghanaSubscriberDigits("233")).toBe("233");
+    expect(ghanaSubscriberDigits("23 312 3456")).toBe("233123456");
+  });
+
+  it("ignores digits past nine", () => {
+    expect(ghanaSubscriberDigits("54 861 79241")).toBe("548617924");
+  });
+
+  it("groups the digits 2-3-4 as they are typed", () => {
+    expect(formatGhanaSubscriber("")).toBe("");
+    expect(formatGhanaSubscriber("54")).toBe("54");
+    expect(formatGhanaSubscriber("548")).toBe("54 8");
+    expect(formatGhanaSubscriber("54860")).toBe("54 860");
+    expect(formatGhanaSubscriber("548608146")).toBe("54 860 8146");
+  });
+
+  it("round-trips to the canonical number", () => {
+    expect(normalizeGhanaPhone(`+233${ghanaSubscriberDigits("054 861 7924")}`)).toBe(CANONICAL);
   });
 });

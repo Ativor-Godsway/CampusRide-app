@@ -179,7 +179,7 @@ export async function onDisk(): Promise<string | null> {
 /** Signs in through the real phone and code screens. */
 export async function signInThroughScreens(fireEvent: typeof import("expo-router/testing-library").fireEvent) {
   await screen.findByText("Log in");
-  await fireEvent.changeText(screen.getByPlaceholderText("+233 ..."), "0241234567");
+  await fireEvent.changeText(screen.getByLabelText("Phone number"), "0241234567");
   await fireEvent.press(screen.getByText("Log in"));
   await screen.findByPlaceholderText("000000");
   await fireEvent.changeText(screen.getByPlaceholderText("000000"), "123456");

@@ -115,7 +115,7 @@ const styles = StyleSheet.create({
   body: { gap: spacing.xs },
   top: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
   spacer: { flex: 1 },
-  price: { fontWeight: typography.weight.extrabold, color: colors.ink[900] },
+  price: { fontWeight: typography.weight.extrabold, color: colors.ink },
   route: { fontWeight: typography.weight.semibold },
   bottom: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
   meta: { flex: 1, minWidth: 120 },

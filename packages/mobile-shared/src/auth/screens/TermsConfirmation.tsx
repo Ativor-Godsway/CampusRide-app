@@ -142,7 +142,8 @@ const styles = StyleSheet.create({
     height: 26,
     borderRadius: radii.sm,
     borderWidth: 2,
-    borderColor: colors.borderStrong,
+    // A border that carries meaning (an unticked box): line-strong, 3:1.
+    borderColor: colors.lineStrong,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 1,

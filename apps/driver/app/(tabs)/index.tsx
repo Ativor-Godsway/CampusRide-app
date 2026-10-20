@@ -205,8 +205,8 @@ export default function DriverHomeScreen() {
           <Switch
             value={isOnline}
             onValueChange={toggle}
-            trackColor={{ false: colors.ink[100], true: colors.primary[200] }}
-            thumbColor={isOnline ? colors.primary[500] : colors.ink[300]}
+            trackColor={{ false: colors.surface3, true: colors.primary[200] }}
+            thumbColor={isOnline ? colors.primary[500] : colors.ink3}
             accessibilityLabel="Online"
             accessibilityHint={isOnline ? "Go offline and stop receiving requests" : "Go online to receive requests"}
           />
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
     borderRadius: radii.lg,
-    backgroundColor: colors.ink[900],
+    backgroundColor: colors.ink,
     alignItems: "center",
   },
   offerNoticeText: { color: colors.white, fontWeight: typography.weight.semibold },
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
   onlineLabel: { fontWeight: typography.weight.semibold },
   statusDot: { width: 10, height: 10, borderRadius: radii.full },
   dotOnline: { backgroundColor: colors.primary[500] },
-  dotOffline: { backgroundColor: colors.ink[300] },
+  dotOffline: { backgroundColor: colors.ink3 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
   chip: {
     paddingHorizontal: spacing.lg,
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   chipActive: { backgroundColor: colors.primary[500] },
-  chipText: { color: colors.ink[600], fontWeight: typography.weight.semibold },
+  chipText: { color: colors.ink2, fontWeight: typography.weight.semibold },
   chipTextActive: { color: colors.white, fontWeight: typography.weight.semibold },
   separator: { height: spacing.md },
   // Fills the space under the header so the illustration sits centred in it.

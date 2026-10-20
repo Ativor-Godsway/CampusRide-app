@@ -45,7 +45,7 @@ export function SignOutLink({ variant = "full" }: SignOutLinkProps) {
       hitSlop={8}
       style={({ pressed }) => [styles.row, compact && styles.compact, pressed && styles.pressed]}
     >
-      <Ionicons name="log-out-outline" size={compact ? 16 : 18} color={colors.ink[600]} />
+      <Ionicons name="log-out-outline" size={compact ? 16 : 18} color={colors.ink2} />
       <Text variant={compact ? "caption" : "bodySmall"} style={styles.label}>
         {compact ? "Log out" : "Use a different number / Log out"}
       </Text>
@@ -68,5 +68,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
   },
   pressed: { opacity: 0.6 },
-  label: { color: colors.ink[600], fontWeight: "600" },
+  label: { color: colors.ink2, fontWeight: "600" },
 });

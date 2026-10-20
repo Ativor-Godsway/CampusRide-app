@@ -29,7 +29,8 @@
     "test": "npm run test --workspaces --if-present",
     "test:coverage": "npm run test:coverage --workspaces --if-present",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "screens": "node scripts/screens/run.mjs"
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.3"

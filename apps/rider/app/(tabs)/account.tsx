@@ -147,6 +147,18 @@ export default function AccountTab() {
         />
       </Card>
 
+      {/* Dev builds only: every design-system component, to compare with docs/design-system.md. */}
+      {__DEV__ ? (
+        <Card style={styles.logoutCard}>
+          <ListRow
+            title="Design gallery"
+            subtitle="Dev only: components and text styles"
+            leading={<ListRow.Icon name="color-palette-outline" />}
+            onPress={() => router.push("/dev/design-gallery")}
+          />
+        </Card>
+      ) : null}
+
       {/* Which build/update this phone runs — docs/runbooks/releasing.md. Long-press: About this app. */}
       <Text
         variant="caption"

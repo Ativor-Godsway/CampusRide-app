@@ -49,7 +49,7 @@ export default function TabsLayout() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary[500],
-        tabBarInactiveTintColor: colors.ink[300],
+        tabBarInactiveTintColor: colors.ink3,
         // No fixed height/paddingBottom: the tab bar then adds the phone's
         // bottom safe-area inset itself. A hard-coded height of 64 used to
         // override it, pushing labels into the home-indicator / gesture area.

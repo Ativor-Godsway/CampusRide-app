@@ -184,7 +184,7 @@ export function CampusMapView({
           }}
           style={[styles.recenterButton, { bottom: 12 + controlsBottomInset }]}
         >
-          <Ionicons name="locate" size={20} color={colors.ink[700]} />
+          <Ionicons name="locate" size={20} color={colors.ink} />
         </Pressable>
       ) : null}
     </View>
@@ -323,11 +323,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 1,
   },
-  attributionText: { fontSize: 9, color: colors.ink[600] },
+  attributionText: { fontSize: 9, color: colors.ink2 },
   container: {
     overflow: "hidden",
     borderRadius: radii.lg,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface2,
   },
   unrounded: {
     borderRadius: 0,

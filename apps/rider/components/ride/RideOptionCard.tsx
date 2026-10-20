@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     fontSize: typography.size["2xl"],
     fontWeight: typography.weight.extrabold,
     letterSpacing: typography.letterSpacing.tight,
-    color: colors.ink[900],
+    color: colors.ink,
     fontVariant: ["tabular-nums"],
   },
   priceSelected: { color: colors.primary[500] },

@@ -1,7 +1,9 @@
-import { View, StyleSheet, type ViewProps } from "react-native";
+import { StyleSheet, View, type ViewProps } from "react-native";
 import { colors, radii, spacing } from "../tokens";
+import { StatusChip, type StatusTone } from "./Chip";
 import { Text } from "./Text";
 
+/** @deprecated Use StatusChip tones: brand / neutral / warn / danger / amber. */
 export type BadgeVariant = "default" | "soon" | "success" | "error" | "warning" | "accent" | "live";
 
 export interface BadgeProps extends ViewProps {
@@ -9,55 +11,40 @@ export interface BadgeProps extends ViewProps {
   variant?: BadgeVariant;
 }
 
-/** Small status pill — used for "Soon" tags on upcoming services and payment/ride status. */
+const TONE: Record<Exclude<BadgeVariant, "live">, StatusTone> = {
+  default: "neutral",
+  soon: "neutral",
+  success: "brand",
+  error: "danger",
+  warning: "warn",
+  accent: "warn",
+};
+
+/** @deprecated Use StatusChip. Each old variant renders as the closest tone. */
 export function Badge({ label, variant = "default", style, ...rest }: BadgeProps) {
-  const variantStyle = variantStyles[variant];
-  return (
-    <View style={[styles.base, variantStyle.container, style]} {...rest}>
-      <Text variant="caption" style={variantStyle.text}>
-        {label}
-      </Text>
-    </View>
-  );
+  if (variant === "live") {
+    // White on ink, for a status chip on a photo or the map.
+    return (
+      <View style={[styles.live, style]} {...rest}>
+        <Text variant="caption" color="onDark" style={styles.liveLabel}>
+          {label}
+        </Text>
+      </View>
+    );
+  }
+  return <StatusChip label={label} tone={TONE[variant]} style={style} {...rest} />;
 }
 
 const styles = StyleSheet.create({
-  base: {
-    borderRadius: radii.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+  live: {
     alignSelf: "flex-start",
+    justifyContent: "center",
+    minHeight: 24,
+    paddingHorizontal: spacing[2],
+    borderRadius: radii.sm,
+    backgroundColor: colors.surfaceDark,
+  },
+  liveLabel: {
+    fontWeight: "700",
   },
 });
-
-const variantStyles: Record<BadgeVariant, { container: object; text: object }> = {
-  default: {
-    container: { backgroundColor: colors.surfaceMuted },
-    text: { color: colors.ink[600] },
-  },
-  soon: {
-    container: { backgroundColor: colors.ink[50] },
-    text: { color: colors.ink[400] },
-  },
-  success: {
-    container: { backgroundColor: colors.successSurface },
-    text: { color: colors.success },
-  },
-  error: {
-    container: { backgroundColor: colors.errorSurface },
-    text: { color: colors.error },
-  },
-  warning: {
-    container: { backgroundColor: colors.warningSurface },
-    text: { color: colors.warning },
-  },
-  accent: {
-    container: { backgroundColor: colors.accent[50] },
-    text: { color: colors.accent[600] },
-  },
-  /** White text on ink — status/"Live" chip on photos, maps, and dark surfaces. */
-  live: {
-    container: { backgroundColor: colors.surfaceDark },
-    text: { color: colors.white },
-  },
-};

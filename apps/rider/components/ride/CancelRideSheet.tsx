@@ -200,7 +200,7 @@ export function CancelRideSheet({
                   value={note}
                   onChangeText={setNote}
                   placeholder="Tell us more (optional)"
-                  placeholderTextColor={colors.ink[300]}
+                  placeholderTextColor={colors.ink3}
                   maxLength={RIDER_CANCEL_NOTE_MAX}
                   multiline
                   editable={!busy}
@@ -281,7 +281,7 @@ const styles = StyleSheet.create({
   chipText: {
     fontSize: typography.size.sm,
     fontWeight: typography.weight.medium,
-    color: colors.ink[900],
+    color: colors.ink,
   },
   chipTextSelected: { color: colors.primary[500], fontWeight: typography.weight.bold },
   noteWrap: { gap: spacing.xs },
@@ -293,7 +293,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
     fontSize: typography.size.md,
-    color: colors.ink[900],
+    color: colors.ink,
     textAlignVertical: "top",
   },
   counter: { textAlign: "right" },

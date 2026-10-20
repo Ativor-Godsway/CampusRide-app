@@ -16,15 +16,34 @@ export interface PressableScaleProps extends Omit<PressableProps, "style" | "chi
   pressedScale?: number;
 }
 
+/** The spec's press: scale to 0.97 on a spring (damping 18), about 120 ms. */
+export const PRESS_SCALE = 0.97;
+const PRESS_SPRING = { damping: 18, stiffness: 420, mass: 1 } as const;
+
 /**
- * A Pressable that dips slightly while pressed — the tactile "give" of a
- * premium card. Native-driver animation; no scaling with Reduce Motion on
- * (a small opacity dip still confirms the touch).
+ * Drives a press scale on an Animated value: call `pressIn` / `pressOut`
+ * from a Pressable and put `transform: [{ scale }]` on what should dip.
+ * With Reduce Motion on it doesn't move.
+ */
+export function usePressScale(pressedScale: number = PRESS_SCALE) {
+  const reduceMotion = useReduceMotion();
+  const scale = useRef(new Animated.Value(1)).current;
+  const to = (value: number) => {
+    if (reduceMotion) return;
+    Animated.spring(scale, { toValue: value, ...PRESS_SPRING, useNativeDriver: true }).start();
+  };
+  return { scale, pressIn: () => to(pressedScale), pressOut: () => to(1) };
+}
+
+/**
+ * A Pressable that dips slightly while pressed (the spec's 0.97 press).
+ * Native-driver animation; no scaling with Reduce Motion on (a small
+ * opacity dip still confirms the touch).
  */
 export function PressableScale({
   children,
   style,
-  pressedScale = 0.98,
+  pressedScale = PRESS_SCALE,
   onPressIn,
   onPressOut,
   ...rest
@@ -40,8 +59,7 @@ export function PressableScale({
     }
     Animated.spring(scale, {
       toValue: pressed ? pressedScale : 1,
-      speed: 40,
-      bounciness: pressed ? 0 : 6,
+      ...PRESS_SPRING,
       useNativeDriver: true,
     }).start();
   };

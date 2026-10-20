@@ -899,7 +899,7 @@ function PickupDetails({
             value={note}
             onChangeText={(t) => onNoteChange(t.slice(0, PICKUP_NOTE_MAX_LENGTH))}
             placeholder="Note for driver, e.g. At the main gate, blue shirt"
-            placeholderTextColor={colors.ink[300]}
+            placeholderTextColor={colors.ink3}
             maxLength={PICKUP_NOTE_MAX_LENGTH}
             style={styles.noteInput}
             accessibilityLabel="Note for driver"
@@ -944,7 +944,7 @@ function RoutePill({
   return (
     <View style={[styles.pill, { top }]}>
       <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={6} style={styles.pillBack}>
-        <Ionicons name="arrow-back" size={22} color={colors.ink[900]} />
+        <Ionicons name="arrow-back" size={22} color={colors.ink} />
       </Pressable>
       <Text
         variant="bodyMedium"
@@ -1121,7 +1121,7 @@ function RideSafetyActions({ rideId, driver }: { rideId: string; driver: RideDri
         disabled={sending}
         style={[styles.sosButton, sending && styles.sosButtonBusy]}
       >
-        <Ionicons name="alert-circle" size={18} color={colors.surface} />
+        <Ionicons name="alert-circle" size={18} color={colors.surface2} />
         <Text variant="bodySmall" color="inverse">
           {sending ? "Sending…" : "SOS"}
         </Text>
@@ -1286,7 +1286,7 @@ function RatingPanel({
               <Ionicons
                 name={value <= stars ? "star" : "star-outline"}
                 size={36}
-                color={value <= stars ? colors.accent[500] : colors.ink[200]}
+                color={value <= stars ? colors.accent[500] : colors.ink4}
               />
             </Pressable>
           ))}
@@ -1389,7 +1389,7 @@ function CompletedContent({
       {savingsPesewas > 0 && <SharedSavingsNote amountPesewas={savingsPesewas} />}
       <Card style={styles.infoCard}>
         <View style={styles.infoRow}>
-          <Ionicons name="cash-outline" size={16} color={colors.ink[400]} />
+          <Ionicons name="cash-outline" size={16} color={colors.ink3} />
           <Text variant="bodySmall" style={styles.infoLabel}>
             Please pay {formatCedis(yourFarePesewas)} to your driver in cash.
           </Text>
@@ -1452,7 +1452,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     fontSize: typography.size.md,
-    color: colors.ink[900],
+    color: colors.ink,
   },
   noteCount: { textAlign: "right", marginTop: 2 },
   carNotice: {

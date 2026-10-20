@@ -119,7 +119,7 @@ export default function HomeTab() {
         <Text variant="bodyMedium" style={styles.searchLabel}>
           Where to?
         </Text>
-        <Ionicons name="search" size={20} color={colors.ink[400]} />
+        <Ionicons name="search" size={20} color={colors.ink3} />
       </PressableScale>
 
       {/* Rides is THE service: a full-width hero with the car running off
@@ -219,7 +219,7 @@ export default function HomeTab() {
             <View key={endKey(end)}>
               <ListRow
                 title={end.label}
-                leading={<ListRow.Icon name="time-outline" color={colors.ink[500]} background={colors.surfaceMuted} />}
+                leading={<ListRow.Icon name="time-outline" color={colors.ink2} background={colors.surfaceMuted} />}
                 trailing={
                   openingKey === endKey(end) ? <ActivityIndicator color={colors.primary[500]} /> : undefined
                 }
@@ -309,7 +309,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   tileSubtitleDark: {
-    color: colors.ink[200],
+    color: colors.ink4,
   },
   gridRow: {
     flexDirection: "row",

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { View, StyleSheet } from "react-native";
 import { GHANA_PHONE_EXAMPLE, normalizeGhanaPhone } from "@rida/shared";
 import { requestOtp } from "../api";
-import { Button, Screen, Text, Input, colors, radii, spacing } from "../../design";
+import { Button, PhoneInput, Screen, Text, colors, radii, spacing } from "../../design";
 import { errorMessage } from "../errorMessage";
 import { AuthHero } from "./AuthHero";
 
@@ -23,19 +23,19 @@ export function PhoneScreen({
   signupLabel = "Create an account",
 }: PhoneScreenProps = {}) {
   const router = useRouter();
-  const [phone, setPhone] = useState("");
+  // The 9 digits after the fixed +233 (PhoneInput reads typed and pasted numbers).
+  const [digits, setDigits] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function handleContinue(purpose: "SIGNUP" | "LOGIN") {
-    if (!phone.trim()) {
+    if (!digits) {
       setError("Enter your phone number");
       return;
     }
-    // The shared parser (the server's too): any normal way of typing a Ghana
-    // number, including invisible characters from paste or autofill, becomes
-    // +233XXXXXXXXX before it leaves the phone.
-    const canonical = normalizeGhanaPhone(phone);
+    // The shared parser (the server's too) checks the whole number, so a
+    // short one is refused here, before it leaves the phone.
+    const canonical = normalizeGhanaPhone(`+233${digits}`);
     if (!canonical) {
       setError(GHANA_PHONE_EXAMPLE);
       return;
@@ -57,16 +57,7 @@ export function PhoneScreen({
     <Screen scroll noPadding edges={["top"]}>
       <AuthHero badge={badge} title={title} subtitle={subtitle} />
       <View style={styles.panel}>
-        <Input
-          label="Phone number"
-          placeholder="+233 ..."
-          keyboardType="phone-pad"
-          autoComplete="tel"
-          doneAccessory
-          value={phone}
-          onChangeText={setPhone}
-          error={error ?? undefined}
-        />
+        <PhoneInput digits={digits} onChangeDigits={setDigits} error={error ?? undefined} />
 
         <View style={styles.actions}>
           <Button label="Log in" loading={isSubmitting} onPress={() => void handleContinue("LOGIN")} />

@@ -106,7 +106,7 @@ export function OfferCard({
 
       {item.riderFirstName ? (
         <View style={styles.rider}>
-          <Ionicons name="person-circle-outline" size={18} color={colors.ink[500]} />
+          <Ionicons name="person-circle-outline" size={18} color={colors.ink2} />
           <Text variant="bodySmall" style={styles.riderName}>
             {item.riderFirstName}
           </Text>
@@ -157,7 +157,7 @@ export function OfferCard({
 function Metric({ icon, label, value }: { icon: "navigate-outline" | "flag-outline"; label: string; value: string }) {
   return (
     <View style={styles.metric} accessible accessibilityLabel={`${label}: ${value}`}>
-      <Ionicons name={icon} size={15} color={colors.ink[500]} />
+      <Ionicons name={icon} size={15} color={colors.ink2} />
       <View>
         <Text variant="caption" color="muted">
           {label}
@@ -199,14 +199,14 @@ const styles = StyleSheet.create({
   kindPillShared: { backgroundColor: colors.primary[50] },
   kindText: { color: colors.primary[600], fontWeight: typography.weight.bold },
   fareBlock: { alignItems: "flex-end" },
-  fare: { fontSize: 34, lineHeight: 38, fontWeight: typography.weight.extrabold, color: colors.ink[900], fontVariant: ["tabular-nums"] },
+  fare: { fontSize: 34, lineHeight: 38, fontWeight: typography.weight.extrabold, color: colors.ink, fontVariant: ["tabular-nums"] },
   route: { flexDirection: "row", gap: spacing.md },
   markers: { alignItems: "center", paddingTop: 8, width: 12 },
   pickupDot: { width: 11, height: 11, borderRadius: radii.full, backgroundColor: colors.primary[500] },
   connector: { width: 2, flex: 1, minHeight: 18, backgroundColor: colors.border, marginVertical: 3 },
-  dropoffSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.ink[900], marginBottom: 8 },
+  dropoffSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.ink, marginBottom: 8 },
   places: { flex: 1, gap: spacing.md },
-  place: { fontSize: 19, lineHeight: 24, fontWeight: typography.weight.bold, color: colors.ink[900] },
+  place: { fontSize: 19, lineHeight: 24, fontWeight: typography.weight.bold, color: colors.ink },
   metrics: { flexDirection: "row", gap: spacing.sm },
   metric: {
     flex: 1,
@@ -215,7 +215,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.sm,
     borderRadius: radii.md,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface2,
   },
   metricValue: { fontWeight: typography.weight.semibold },
   rider: { flexDirection: "row", alignItems: "center", gap: 6 },

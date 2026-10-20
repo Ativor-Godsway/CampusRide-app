@@ -54,6 +54,6 @@ const styles = StyleSheet.create({
   chips: { gap: spacing.xs, paddingRight: spacing.md },
   chip: { paddingHorizontal: spacing.md, paddingVertical: spacing.xs, borderRadius: radii.full, backgroundColor: colors.surfaceMuted },
   chipActive: { backgroundColor: colors.accent[500] },
-  chipText: { color: colors.ink[600] },
-  chipTextActive: { color: colors.white, fontWeight: typography.weight.semibold },
+  chipText: { color: colors.ink2 },
+  chipTextActive: { color: colors.ink, fontWeight: typography.weight.semibold },
 });

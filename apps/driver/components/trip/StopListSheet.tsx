@@ -70,7 +70,7 @@ export function StopListSheet({
                 {word}
                 {eta}
               </Text>
-              {stop.riderPhone ? <Ionicons name="call-outline" size={18} color={colors.ink[400]} /> : null}
+              {stop.riderPhone ? <Ionicons name="call-outline" size={18} color={colors.ink3} /> : null}
             </Pressable>
           );
         })}
@@ -114,13 +114,13 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.sm, minHeight: 52 },
   number: { width: 28, height: 28, borderRadius: radii.full, alignItems: "center", justifyContent: "center" },
   pickup: { backgroundColor: colors.primary[500] },
-  dropoff: { backgroundColor: colors.ink[900] },
-  doneDot: { backgroundColor: colors.ink[300] },
+  dropoff: { backgroundColor: colors.ink },
+  doneDot: { backgroundColor: colors.ink3 },
   numberText: { color: colors.white, fontWeight: typography.weight.extrabold },
   text: { flex: 1, gap: 1, minWidth: 0 },
   title: { fontWeight: typography.weight.bold },
-  doneTitle: { color: colors.ink[500] },
-  word: { color: colors.ink[700], fontWeight: typography.weight.semibold },
+  doneTitle: { color: colors.ink2 },
+  word: { color: colors.ink, fontWeight: typography.weight.semibold },
   doneHeader: { marginTop: spacing.md },
   footnote: { marginTop: spacing.md },
 });

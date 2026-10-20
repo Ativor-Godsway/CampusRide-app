@@ -172,7 +172,7 @@ export function TripMap({ driver, stops, path, insets, attribution, preview }: T
         hitSlop={6}
         style={[styles.recenter, { bottom: insets.bottom + spacing.md }]}
       >
-        <Ionicons name="scan-outline" size={20} color={colors.ink[700]} />
+        <Ionicons name="scan-outline" size={20} color={colors.ink} />
       </Pressable>
     </View>
   );
@@ -189,7 +189,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 1,
   },
-  attributionText: { fontSize: 9, color: colors.ink[600] },
+  attributionText: { fontSize: 9, color: colors.ink2 },
   stopPin: {
     width: PIN,
     height: PIN,
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
   },
   pickupPin: { backgroundColor: colors.primary[500] },
   // Drop-offs are squares, as on the rider app and the offer cards.
-  dropoffPin: { backgroundColor: colors.ink[900], borderRadius: 8 },
+  dropoffPin: { backgroundColor: colors.ink, borderRadius: 8 },
   nextPin: { transform: [{ scale: 1.2 }] },
   pinColumn: { alignItems: "center" },
   // A previewed rider's stops keep their pickup/drop-off look, with an orange ring.
@@ -215,7 +215,8 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
     marginBottom: 2,
   },
-  newTagText: { color: colors.white, fontWeight: typography.weight.extrabold, fontSize: 10 },
+  // Text on amber is ink (docs/design-system.md, Colour).
+  newTagText: { color: colors.ink, fontWeight: typography.weight.extrabold, fontSize: 10 },
   stopNumber: { color: colors.white, fontWeight: typography.weight.extrabold },
   driverOuter: {
     width: 26,
