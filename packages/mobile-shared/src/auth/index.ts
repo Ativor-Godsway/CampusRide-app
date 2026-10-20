@@ -5,6 +5,7 @@ export * from "./storage";
 export * from "./tokenStore";
 export * from "./errorMessage";
 export * from "./deleteAccountFlow";
+export * from "./screens/WelcomeScreen";
 export * from "./screens/PhoneScreen";
 export * from "./screens/OtpScreen";
 export * from "./screens/SignupScreen";

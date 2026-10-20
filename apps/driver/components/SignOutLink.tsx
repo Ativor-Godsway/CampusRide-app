@@ -21,7 +21,7 @@ export function useSignOutToPhone() {
           text: "Log out",
           style: "destructive",
           onPress: () => {
-            void signOut().then(() => router.replace("/auth/phone"));
+            void signOut().then(() => router.replace("/auth/welcome"));
           },
         },
       ],

@@ -53,6 +53,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /health/ready": "public",
   "POST /auth/request-otp": "public",
   "POST /auth/verify-otp": "public",
+  "POST /auth/verify-code": "public",
   "POST /auth/signup": "public",
   "POST /auth/login": "public",
   "POST /auth/refresh": "public",

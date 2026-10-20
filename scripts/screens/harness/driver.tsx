@@ -1,5 +1,8 @@
 /** The driver app's scenes. Each chain is the real route files, root layout first. */
 import RootLayout from "../../../apps/driver/app/_layout";
+import AuthLayout from "../../../apps/driver/app/auth/_layout";
+import WelcomeRoute from "../../../apps/driver/app/auth/welcome";
+import SignupRoute from "../../../apps/driver/app/auth/signup";
 import TabsLayout from "../../../apps/driver/app/(tabs)/_layout";
 import DriverHome from "../../../apps/driver/app/(tabs)/index";
 import TripScreen from "../../../apps/driver/app/ride/[id]";
@@ -33,6 +36,19 @@ const scenes: Scene[] = [
     routes: signedIn(),
     chain: [RootLayout, DesignGallery],
     pathname: "/dev/design-gallery",
+  },
+  {
+    name: "welcome",
+    user: null,
+    chain: [RootLayout, AuthLayout, WelcomeRoute],
+    pathname: "/auth/welcome",
+  },
+  {
+    name: "name-step",
+    user: null,
+    chain: [RootLayout, AuthLayout, SignupRoute],
+    pathname: "/auth/signup",
+    params: { phone: "+233201234567", verifiedToken: "verified" },
   },
   {
     name: "home-offline",

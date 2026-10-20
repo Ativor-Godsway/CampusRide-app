@@ -65,7 +65,7 @@ export default function PendingApprovalScreen() {
   }, [check]);
 
   if (isLoading) return <SessionRestoringScreen />;
-  if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
+  if (!isAuthenticated || !user) return <Redirect href="/auth/welcome" />;
   if (user.role !== "DRIVER") return <Redirect href="/" />;
 
   // Approved (→ into the app) or somehow incomplete (→ onboarding): the start

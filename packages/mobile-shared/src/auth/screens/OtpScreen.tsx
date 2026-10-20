@@ -1,18 +1,29 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { View, StyleSheet } from "react-native";
-import { OTP_RESEND_COOLDOWN_SECONDS, formatCountdown, formatGhanaPhone, retryAfterSecondsOf } from "@rida/shared";
+import { StyleSheet, View } from "react-native";
+import {
+  OTP_RESEND_COOLDOWN_SECONDS,
+  formatCountdown,
+  formatGhanaPhone,
+  retryAfterSecondsOf,
+} from "@rida/shared";
 import { useAuth } from "../AuthContext";
-import { requestOtp, verifyOtp, type OtpPurpose } from "../api";
-import { Button, Notice, OTP_VERIFIED_MS, OtpInput, Screen, Text, colors, radii, spacing } from "../../design";
+import { requestOtp, verifyCode } from "../api";
+import { Button, Notice, OTP_VERIFIED_MS, OtpInput, Text, spacing } from "../../design";
 import { errorMessage, wrongCodeMessage } from "../errorMessage";
-import { AuthHero } from "./AuthHero";
+import { AuthPage } from "./AuthPage";
 
-/** OTP entry — second step of the auth flow, shared by both apps. */
+/**
+ * "Enter the code" (docs/mockups/03-rider-code.png), both apps. The 6th
+ * digit checks it; only then does the server say whether the number has an
+ * account (POST /auth/verify-code): an account is signed straight in (the
+ * auth layout takes it from there), a new number goes on to the name + 18+
+ * step.
+ */
 export function OtpScreen() {
   const router = useRouter();
-  const { completeLogin } = useAuth();
-  const { phone, purpose } = useLocalSearchParams<{ phone: string; purpose: OtpPurpose }>();
+  const { completeSignIn } = useAuth();
+  const { phone } = useLocalSearchParams<{ phone: string }>();
   const [code, setCode] = useState("");
   const [verifying, setVerifying] = useState(false);
   const [verified, setVerified] = useState(false);
@@ -22,8 +33,8 @@ export function OtpScreen() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  // "Resend code" counts down instead of letting people tap into a refusal:
-  // the server sends a number one code per cooldown. A code was just sent to
+  // "Resend" counts down instead of letting people tap into a refusal: the
+  // server sends a number one code per cooldown. A code was just sent to
   // reach this screen, so the countdown starts full.
   const [resendAt, setResendAt] = useState(() => Date.now() + OTP_RESEND_COOLDOWN_SECONDS * 1000);
   const [now, setNow] = useState(() => Date.now());
@@ -42,17 +53,14 @@ export function OtpScreen() {
     setCodeError(null);
     setVerifying(true);
     try {
-      const { verifiedToken } = await verifyOtp(phone, entered, purpose);
-      // Green for a moment, so the rider sees it worked before the screen changes.
+      const result = await verifyCode(phone, entered);
+      // Green for a moment, so they see it worked before the screen changes.
       setVerified(true);
       await new Promise<void>((resolve) => setTimeout(resolve, OTP_VERIFIED_MS));
-
-      if (purpose === "SIGNUP") {
-        router.push({ pathname: "/auth/signup", params: { phone, verifiedToken } });
+      if (result.status === "newAccount") {
+        router.push({ pathname: "/auth/signup", params: { phone, verifiedToken: result.verifiedToken } });
       } else {
-        // Signed in: the auth layout (AuthStackLayout) takes it from here,
-        // replacing these screens with the start screen.
-        await completeLogin({ phone, verifiedToken });
+        await completeSignIn(result);
       }
     } catch (err) {
       setVerified(false);
@@ -64,13 +72,13 @@ export function OtpScreen() {
     }
   }
 
-  async function handleResend() {
+  async function resend() {
     setError(null);
     setCodeError(null);
     setNotice(null);
     setIsResending(true);
     try {
-      await requestOtp(phone, purpose);
+      await requestOtp(phone, "LOGIN");
       setResendAt(Date.now() + OTP_RESEND_COOLDOWN_SECONDS * 1000);
       setNotice("We sent you a new code.");
     } catch (err) {
@@ -85,62 +93,74 @@ export function OtpScreen() {
     }
   }
 
+  const back = () => (router.canGoBack() ? router.back() : router.replace("/auth/phone"));
+
   return (
-    <Screen scroll noPadding edges={["top"]}>
-      <AuthHero compact title="Verify your number" subtitle={`We sent a 6-digit code to ${formatGhanaPhone(phone)}`} onBack={() => router.back()} />
-      <View style={styles.panel}>
-        <OtpInput
-          value={code}
-          onChange={(next) => {
-            setCode(next);
-            // The wrong-code message stays until they start typing again.
-            if (next) setCodeError(null);
-          }}
-          onComplete={(entered) => void verify(entered)}
-          error={codeError}
-          verifying={verifying}
-          verified={verified}
-        />
-
-        {error ? <Notice tone="error" message={error} style={styles.notice} /> : null}
-
-        <View style={styles.resend}>
-          <Text variant="subhead" color="secondary">
-            {notice ?? "Didn't get it?"}
+    <AuthPage
+      title="Enter the code"
+      onBack={back}
+      body={
+        <Text variant="body" color="secondary">
+          Sent by SMS to{" "}
+          <Text variant="bodyStrong" tabular>
+            {formatGhanaPhone(phone)}
           </Text>
-          <Button
-            label={secondsLeft > 0 ? `Resend in ${formatCountdown(secondsLeft)}` : "Resend code"}
-            variant="text"
-            size="md"
-            fullWidth={false}
-            disabled={secondsLeft > 0 || verifying}
-            loading={isResending}
-            onPress={() => void handleResend()}
-          />
-        </View>
+          .{" "}
+          <Text
+            variant="bodyStrong"
+            color="brand"
+            accessibilityRole="link"
+            accessibilityLabel="Change the number"
+            onPress={back}
+          >
+            Change
+          </Text>
+        </Text>
+      }
+    >
+      <OtpInput
+        value={code}
+        onChange={(next) => {
+          setCode(next);
+          // The wrong-code message stays until they start typing again.
+          if (next) setCodeError(null);
+        }}
+        onComplete={(entered) => void verify(entered)}
+        error={codeError}
+        verifying={verifying}
+        verified={verified}
+      />
+
+      {error ? <Notice tone="error" message={error} style={styles.notice} /> : null}
+
+      <View style={styles.resend}>
+        <Text variant="subhead" color="secondary">
+          {notice ?? "Didn't get it?"}
+        </Text>
+        <Button
+          label={secondsLeft > 0 ? `Resend in ${formatCountdown(secondsLeft)}` : "Resend code"}
+          variant="text"
+          size="md"
+          fullWidth={false}
+          disabled={secondsLeft > 0 || verifying}
+          loading={isResending}
+          onPress={() => void resend()}
+        />
       </View>
-    </Screen>
+    </AuthPage>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-    marginTop: -radii["2xl"],
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing["2xl"],
-    paddingBottom: spacing.xl,
+  notice: {
+    marginTop: spacing[4],
   },
   resend: {
     marginTop: spacing[4],
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-  },
-  notice: {
-    marginTop: spacing[4],
+    // The text button's own 8px padding: its label ends flush with the boxes.
+    marginRight: -spacing[2],
   },
 });

@@ -109,11 +109,23 @@ export function isAllowedDeepLink(url: string, policy: DeepLinkPolicy): boolean 
  */
 export const RIDER_DEEP_LINK_POLICY: DeepLinkPolicy = {
   scheme: "campusride-rider",
-  allowedPaths: ["", "auth/phone", "auth/otp", "auth/signup", "rides"],
+  allowedPaths: ["", "auth/welcome", "auth/phone", "auth/otp", "auth/signup", "rides"],
 };
 
 /** Routes the driver app accepts from outside, including one ride detail screen. */
 export const DRIVER_DEEP_LINK_POLICY: DeepLinkPolicy = {
   scheme: "campusride-driver",
-  allowedPaths: ["", "auth/phone", "auth/otp", "auth/signup", "rides", "ride/:id"],
+  allowedPaths: ["", "auth/welcome", "auth/phone", "auth/otp", "auth/signup", "rides", "ride/:id"],
 };
+
+/** CampusRide's website: where an app that isn't installed is found (store links when they exist). */
+export const WEBSITE_URL = "https://campusride.app";
+
+/**
+ * Opening the OTHER app ("This number is registered as a driver"): its own
+ * scheme, and the page to fall back to when it isn't installed.
+ */
+export const OTHER_APP = {
+  RIDER: { name: "rider app", url: `${RIDER_DEEP_LINK_POLICY.scheme}://`, fallbackUrl: WEBSITE_URL },
+  DRIVER: { name: "driver app", url: `${DRIVER_DEEP_LINK_POLICY.scheme}://`, fallbackUrl: WEBSITE_URL },
+} as const;

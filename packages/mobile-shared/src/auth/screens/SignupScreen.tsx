@@ -1,48 +1,49 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
-import { Pressable, View, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { useAuth } from "../AuthContext";
-import { Button, Screen, Text, Input, colors, radii, spacing, touchTarget } from "../../design";
+import { Button, Input, Text, spacing } from "../../design";
 import { errorMessage } from "../errorMessage";
-import { AuthHero } from "./AuthHero";
+import { AuthPage } from "./AuthPage";
 import { AgeAndTermsCheckbox } from "./TermsConfirmation";
 
-type SignupRole = "RIDER" | "DRIVER";
-
 export interface SignupScreenProps {
-  /** Restrict the role picker — e.g. the driver app only ever signs up drivers. */
-  allowedRoles?: SignupRole[];
+  /** The account this app makes: the rider app riders, the driver app drivers. */
+  role: "RIDER" | "DRIVER";
+  /** The line under the title. */
   subtitle?: string;
 }
 
-/** Name + role entry — final step of signup, shared by both apps. */
+/**
+ * "What's your name?": the one step a new number takes after its code
+ * (POST /auth/verify-code said "newAccount"). Name, the 18+ and terms tick,
+ * Continue. Signed in, the auth layout (AuthStackLayout) moves on: a rider
+ * to Home, a driver to onboarding.
+ */
 export function SignupScreen({
-  allowedRoles = ["RIDER", "DRIVER"],
-  subtitle = "One more step before you're ready to ride",
+  role,
+  subtitle = "So your driver knows who to look for.",
 }: SignupScreenProps) {
   const router = useRouter();
   const { completeSignup } = useAuth();
   const { phone, verifiedToken } = useLocalSearchParams<{ phone: string; verifiedToken: string }>();
   const [name, setName] = useState("");
-  const [role, setRole] = useState<SignupRole>(allowedRoles[0] ?? "RIDER");
   const [confirmed, setConfirmed] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit() {
-    if (!name.trim()) {
-      setError("Enter your name");
-      return;
-    }
-    if (!confirmed) {
-      setError("Tick the box to confirm you're 18 or older and agree to the terms");
-      return;
-    }
+  // Continue stays off until both are done, and says which is missing.
+  const reason = !name.trim()
+    ? "Enter your name to continue."
+    : !confirmed
+      ? "Tick the box to continue."
+      : null;
 
+  async function handleSubmit() {
+    if (reason) return;
     setError(null);
     setIsSubmitting(true);
     try {
-      // Signed in: the auth layout (AuthStackLayout) takes it from here.
       await completeSignup({ phone, name: name.trim(), role, verifiedToken });
     } catch (err) {
       setError(errorMessage(err));
@@ -52,92 +53,46 @@ export function SignupScreen({
   }
 
   return (
-    <Screen scroll noPadding edges={["top"]}>
-      <AuthHero compact title="Tell us about you" subtitle={subtitle} onBack={() => router.back()} />
-      <View style={styles.panel}>
-        <Input label="Full name" placeholder="Full name" autoComplete="name" value={name} onChangeText={setName} />
-
-        {allowedRoles.length > 1 ? (
-          <View style={styles.roleSection}>
-            <Text variant="label" color="muted" style={styles.roleLabel}>
-              I am a...
+    <AuthPage
+      title="What's your name?"
+      body={subtitle}
+      onBack={() => (router.canGoBack() ? router.back() : router.replace("/auth/welcome"))}
+      footer={
+        <>
+          <Button
+            label="Continue"
+            disabled={reason !== null}
+            loading={isSubmitting}
+            onPress={() => void handleSubmit()}
+          />
+          {reason ? (
+            <Text variant="subhead" color="tertiary" style={styles.reason}>
+              {reason}
             </Text>
-            <View style={styles.roleRow}>
-              {allowedRoles.map((option) => {
-                const selected = role === option;
-                return (
-                  <Pressable
-                    key={option}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected }}
-                    style={[styles.roleButton, selected && styles.roleButtonSelected]}
-                    onPress={() => setRole(option)}
-                  >
-                    <Text variant="bodyMedium" color={selected ? "inverse" : "default"}>
-                      {option === "RIDER" ? "Rider" : "Driver"}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </View>
-        ) : null}
-
-        {error ? (
-          <Text variant="bodySmall" color="error" style={styles.error}>
-            {error}
-          </Text>
-        ) : null}
-
-        <AgeAndTermsCheckbox checked={confirmed} onChange={setConfirmed} />
-
-        <Button
-          label="Finish"
-          disabled={!confirmed}
-          loading={isSubmitting}
-          onPress={() => void handleSubmit()}
-        />
-      </View>
-    </Screen>
+          ) : null}
+        </>
+      }
+    >
+      <Input
+        label="Your name"
+        placeholder="First and last name"
+        autoComplete="name"
+        textContentType="name"
+        autoCapitalize="words"
+        autoFocus
+        returnKeyType="done"
+        value={name}
+        onChangeText={setName}
+        error={error ?? undefined}
+      />
+      <AgeAndTermsCheckbox checked={confirmed} onChange={setConfirmed} />
+    </AuthPage>
   );
 }
 
 const styles = StyleSheet.create({
-  panel: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-    marginTop: -radii["2xl"],
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing["2xl"],
-    paddingBottom: spacing.xl,
-  },
-  roleSection: {
-    marginBottom: spacing.lg,
-  },
-  roleLabel: {
-    marginBottom: spacing.sm,
-  },
-  roleRow: {
-    flexDirection: "row",
-    gap: spacing.md,
-  },
-  roleButton: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: colors.border,
-    borderRadius: radii.md,
-    minHeight: touchTarget.minHeight,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  roleButtonSelected: {
-    backgroundColor: colors.primary[500],
-    borderColor: colors.primary[500],
-  },
-  error: {
-    marginBottom: spacing.md,
+  reason: {
     textAlign: "center",
+    marginTop: spacing[1],
   },
 });

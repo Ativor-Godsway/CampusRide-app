@@ -13,10 +13,13 @@ import RiderStart from "../../../../apps/rider/app/index";
 import DriverStart from "../../../../apps/driver/app/index";
 import RiderAuthLayout from "../../../../apps/rider/app/auth/_layout";
 import DriverAuthLayout from "../../../../apps/driver/app/auth/_layout";
+import RiderWelcome from "../../../../apps/rider/app/auth/welcome";
+import DriverWelcome from "../../../../apps/driver/app/auth/welcome";
 import RiderPhone from "../../../../apps/rider/app/auth/phone";
 import DriverPhone from "../../../../apps/driver/app/auth/phone";
 import Otp from "../../../../apps/rider/app/auth/otp";
-import Signup from "../../../../apps/rider/app/auth/signup";
+import RiderSignup from "../../../../apps/rider/app/auth/signup";
+import DriverSignup from "../../../../apps/driver/app/auth/signup";
 
 /**
  * Route trees for the navigation tests, shaped like the two apps: the real
@@ -30,7 +33,7 @@ function TabsGate({ role }: { role: "RIDER" | "DRIVER" }) {
   // As apps/*/app/(tabs)/_layout.tsx.
   const { isLoading, isAuthenticated, user } = useAuth();
   if (isLoading) return <SessionRestoringScreen />;
-  if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
+  if (!isAuthenticated || !user) return <Redirect href="/auth/welcome" />;
   if (user.role !== role) return <Text>Wrong app</Text>;
   return <Tabs screenOptions={{ headerShown: false }} />;
 }
@@ -104,7 +107,7 @@ function DriverTrip() {
     return () => clearTimeout(t);
   }, [cancelled, router]);
   if (isLoading) return <SessionRestoringScreen />;
-  if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
+  if (!isAuthenticated || !user) return <Redirect href="/auth/welcome" />;
   return (
     <View>
       <Text>Driver trip</Text>
@@ -128,9 +131,10 @@ export function renderApp(app: "rider" | "driver", initialUrl = "/") {
     _layout: Root,
     index: app === "rider" ? RiderStart : DriverStart,
     "auth/_layout": app === "rider" ? RiderAuthLayout : DriverAuthLayout,
+    "auth/welcome": app === "rider" ? RiderWelcome : DriverWelcome,
     "auth/phone": app === "rider" ? RiderPhone : DriverPhone,
     "auth/otp": Otp,
-    "auth/signup": Signup,
+    "auth/signup": app === "rider" ? RiderSignup : DriverSignup,
     "(tabs)/_layout": () => <TabsGate role={app === "rider" ? "RIDER" : "DRIVER"} />,
     "(tabs)/index": Home,
     "(tabs)/rides": History,
@@ -176,12 +180,21 @@ export async function onDisk(): Promise<string | null> {
   return SecureStore.getItemAsync("rida.session.refreshToken");
 }
 
-/** Signs in through the real phone and code screens. */
-export async function signInThroughScreens(fireEvent: typeof import("expo-router/testing-library").fireEvent) {
-  await screen.findByText("Log in");
-  await fireEvent.changeText(screen.getByLabelText("Phone number"), "0241234567");
-  await fireEvent.press(screen.getByText("Log in"));
+/**
+ * Welcome → phone → code, through the real screens: one way in for
+ * everyone. The code says whether the number has an account (the fake
+ * server's `registered`); a new one goes on to the name step.
+ */
+export async function enterPhoneAndCode(fireEvent: typeof import("expo-router/testing-library").fireEvent) {
+  await fireEvent.press(await screen.findByText("Continue with phone number"));
+  await fireEvent.changeText(await screen.findByLabelText("Phone number"), "0241234567");
+  await fireEvent.press(screen.getByText("Send code"));
   // The 6th digit checks the code: there is no Continue button.
   await fireEvent.changeText(await screen.findByLabelText("Verification code, 6 digits"), "123456");
+}
+
+/** Signs an existing account in through the real screens. */
+export async function signInThroughScreens(fireEvent: typeof import("expo-router/testing-library").fireEvent) {
+  await enterPhoneAndCode(fireEvent);
   await screen.findByText("Home screen");
 }

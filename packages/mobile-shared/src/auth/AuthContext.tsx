@@ -9,6 +9,7 @@ import {
   logout as apiLogout,
   signup as apiSignup,
   type AuthUser,
+  type LoginResponse,
 } from "./api";
 import {
   clearStoredRefreshToken,
@@ -44,6 +45,8 @@ interface AuthContextValue {
     verifiedToken: string;
   }) => Promise<void>;
   completeLogin: (input: { phone: string; verifiedToken: string }) => Promise<void>;
+  /** Signs in with a session the server already gave (verifyCode's "signedIn"). */
+  completeSignIn: (session: LoginResponse) => Promise<void>;
   /**
    * Ends the session on this device: clears the stored credentials and the
    * signed-in user immediately, then revokes the refresh token on the server
@@ -166,14 +169,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(result.user);
   }, []);
 
-  const completeLogin = useCallback<AuthContextValue["completeLogin"]>(async (input) => {
-    const result = await apiLogin(input);
+  const completeSignIn = useCallback<AuthContextValue["completeSignIn"]>(async (session) => {
     // A new person on this phone: never reuse a connection made for someone else.
     resetRideSocket();
-    setAccessToken(result.accessToken);
-    await setStoredRefreshToken(result.refreshToken);
-    setUser(result.user);
+    setAccessToken(session.accessToken);
+    await setStoredRefreshToken(session.refreshToken);
+    setUser(session.user);
   }, []);
+
+  const completeLogin = useCallback<AuthContextValue["completeLogin"]>(
+    async (input) => completeSignIn(await apiLogin(input)),
+    [completeSignIn],
+  );
 
   const signOut = useCallback(async () => {
     const storedRefreshToken = await getStoredRefreshToken();
@@ -210,6 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     retrySession,
     completeSignup,
     completeLogin,
+    completeSignIn,
     signOut,
     deleteAccount,
     confirmTerms,

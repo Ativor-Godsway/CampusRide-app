@@ -560,7 +560,7 @@ export default function TripScreen() {
   // Opened straight into a trip (a notification, a relaunch): wait for the
   // session to be restored rather than sending the driver to sign in.
   if (sessionLoading) return <SessionRestoringScreen />;
-  if (!isAuthenticated || !user) return <Redirect href="/auth/phone" />;
+  if (!isAuthenticated || !user) return <Redirect href="/auth/welcome" />;
 
   // ─── Done ────────────────────────────────────────────────────────────────
   if (done && done.rideId === rideId) {

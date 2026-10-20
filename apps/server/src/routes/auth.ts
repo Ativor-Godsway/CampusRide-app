@@ -3,6 +3,7 @@ import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { OtpService } from "../services/otp/OtpService";
 import { requestOtp, verifyOtp } from "../services/auth/otp";
+import { signVerificationToken } from "../services/auth/tokens";
 import {
   completeDriverProfile,
   login,
@@ -58,6 +59,9 @@ const SCHEMAS = {
   requestOtp: { body: object({ phone: phoneField, purpose }, ["phone", "purpose"]) },
   verifyOtp: {
     body: object({ phone: phoneField, code: text(MAX.otpCode, { nonEmpty: true }), purpose }, ["phone", "code", "purpose"]),
+  },
+  verifyCode: {
+    body: object({ phone: phoneField, code: text(MAX.otpCode, { nonEmpty: true }) }, ["phone", "code"]),
   },
   signup: {
     body: object(
@@ -213,6 +217,84 @@ export function registerAuthRoutes(
         err instanceof OtpAttemptsExceededError
       ) {
         return reply.code(400).send({ error: err.message });
+      }
+      throw err;
+    }
+  });
+
+  /**
+   * ONE PHONE ENTRY (the apps from 2026-10): the person types their number,
+   * gets a code, and only then learns whether they have an account.
+   *
+   * The code is asked for with /auth/request-otp, purpose LOGIN, which never
+   * looks the number up: its answer, timing and limits are the same for a
+   * registered number and a new one. So nothing before the right code says
+   * whether a number is registered. Then this route checks the code (the
+   * same limits and attempt counting as /auth/verify-otp) and:
+   *
+   * - an open account: signs in, answering as /auth/login does, plus
+   *   `status: "signedIn"`;
+   * - no account (or a deleted one): `status: "newAccount"` and a SIGNUP
+   *   verifiedToken, which /auth/signup takes for the name + 18+ step.
+   *
+   * /auth/verify-otp, /auth/login and /auth/signup stay as they are for older
+   * app versions and the admin site.
+   */
+  app.post("/auth/verify-code", { schema: SCHEMAS.verifyCode }, async (request, reply) => {
+    const body = request.body as { phone?: unknown; code?: unknown };
+    if (!isNonEmptyString(body.phone) || !isNonEmptyString(body.code)) {
+      return reply.code(400).send({ error: "phone and code are required" });
+    }
+    const phone = normalizePhone(body.phone);
+    if (!phone) {
+      return reply.code(400).send({ error: PHONE_NOT_GHANAIAN });
+    }
+    const watch = await adminLoginWatch(request, phone);
+
+    try {
+      const { verifiedToken: loginToken } = await verifyOtp(prisma, phone, body.code, "LOGIN");
+      try {
+        await enforce([{ rule: RULES.login15m, subject: phone }]);
+        const result = await login(prisma, {
+          phone,
+          verifiedToken: loginToken,
+          adminSite: isAdminSiteRequest(request),
+        });
+        await watch.record("success");
+        return reply.code(200).send({ status: "signedIn", ...result });
+      } catch (err) {
+        if (err instanceof UserNotFoundError) {
+          // The code proved the number; the account doesn't exist yet.
+          return reply.code(200).send({
+            status: "newAccount",
+            verifiedToken: signVerificationToken({ phone, purpose: "SIGNUP" }),
+          });
+        }
+        throw err;
+      }
+    } catch (err) {
+      if (err instanceof RateLimitedError) {
+        await watch.record("failure", "rate_limited");
+        return sendRateLimited(reply, err.retryAfterMs);
+      }
+      if (err instanceof InvalidOtpError) await watch.record("failure", "bad_code");
+      if (err instanceof OtpExpiredError) await watch.record("failure", "code_expired");
+      if (err instanceof OtpAttemptsExceededError) await watch.record("failure", "too_many_attempts");
+      if (
+        err instanceof InvalidOtpError ||
+        err instanceof OtpExpiredError ||
+        err instanceof OtpAttemptsExceededError
+      ) {
+        return reply.code(400).send({ error: err.message });
+      }
+      if (err instanceof AdminNotAllowedError) {
+        await watch.record("failure", "not_allowlisted");
+        request.log.warn({ event: "admin_login_not_allowlisted", userId: err.userId }, "ADMIN login refused: not on ADMIN_PHONE_ALLOWLIST");
+        return reply.code(403).send({ error: err.message, code: "ADMIN_NOT_ALLOWED" });
+      }
+      if (err instanceof NotAnAdminError) {
+        await watch.record("failure", "not_admin");
+        return reply.code(403).send({ error: err.message, code: "NOT_AN_ADMIN" });
       }
       throw err;
     }

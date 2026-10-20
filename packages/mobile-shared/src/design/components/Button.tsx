@@ -136,6 +136,8 @@ export function Button({
           { backgroundColor: pressed && !isDisabled ? FILL[look].pressed : FILL[look].rest },
           isDisabled && filled && !loading && styles.disabledFill,
           size === "go" && styles.float,
+          // A text-only button sitting in a row: its label lines up with what's beside it.
+          !filled && !stretch && styles.inlinePadding,
         ]}
         {...rest}
       >
@@ -177,6 +179,9 @@ const styles = StyleSheet.create({
   },
   pillPadding: {
     paddingHorizontal: spacing[4],
+  },
+  inlinePadding: {
+    paddingHorizontal: spacing[2],
   },
   goPadding: {
     paddingHorizontal: spacing[8],

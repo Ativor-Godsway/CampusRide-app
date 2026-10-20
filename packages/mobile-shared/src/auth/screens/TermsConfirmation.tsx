@@ -6,7 +6,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { PRIVACY_URL, TERMS_URL, needsTermsConfirmation } from "@rida/shared";
 import { useAuth } from "../AuthContext";
 import { errorMessage } from "../errorMessage";
-import { Button, Screen, Text, colors, radii, spacing } from "../../design";
+import { Button, Text, colors, spacing } from "../../design";
+import { AuthPage } from "./AuthPage";
 
 /** Opens one of the website's pages in the in-app browser (the phone's browser if that fails). */
 export async function openLegalPage(url: string): Promise<void> {
@@ -39,15 +40,15 @@ export function AgeAndTermsCheckbox({ checked, onChange }: AgeAndTermsCheckboxPr
       hitSlop={4}
     >
       <View style={[styles.box, checked && styles.boxChecked]}>
-        {checked ? <Ionicons name="checkmark" size={18} color={colors.white} /> : null}
+        {checked ? <Ionicons name="checkmark" size={18} color={colors.onBrand} /> : null}
       </View>
       <Text variant="body" style={styles.label}>
         I&apos;m 18 or older and I agree to the{" "}
-        <Text variant="bodyMedium" color="primary" accessibilityRole="link" onPress={() => void openLegalPage(TERMS_URL)}>
+        <Text variant="bodyStrong" color="brand" accessibilityRole="link" onPress={() => void openLegalPage(TERMS_URL)}>
           Terms
         </Text>{" "}
         and{" "}
-        <Text variant="bodyMedium" color="primary" accessibilityRole="link" onPress={() => void openLegalPage(PRIVACY_URL)}>
+        <Text variant="bodyStrong" color="brand" accessibilityRole="link" onPress={() => void openLegalPage(PRIVACY_URL)}>
           Privacy Policy
         </Text>
       </Text>
@@ -93,40 +94,37 @@ function TermsConfirmationScreen() {
   }
 
   return (
-    <Screen scroll>
-      <View style={styles.content}>
-        <Text variant="h2" style={styles.title}>
-          Before you continue
-        </Text>
-        <Text variant="body" color="muted" style={styles.intro}>
-          CampusRide is for people aged 18 or over. Please confirm this, and that you agree to our
-          Terms and Privacy Policy, to keep using the app.
-        </Text>
-
-        <AgeAndTermsCheckbox checked={checked} onChange={setChecked} />
-
-        {error ? (
-          <Text variant="bodySmall" color="error" style={styles.error}>
-            {error}
+    <AuthPage
+      title="Before you continue"
+      body="CampusRide is for people aged 18 or over. Please confirm this, and that you agree to our Terms and Privacy Policy, to keep using the app."
+      footer={
+        <>
+          <Button label="Continue" disabled={!checked} loading={busy} onPress={() => void handleContinue()} />
+          {!checked ? (
+            <Text variant="subhead" color="tertiary" style={styles.centered}>
+              Tick the box to continue.
+            </Text>
+          ) : null}
+          <Text variant="subhead" color="secondary" style={styles.otherwise}>
+            Don&apos;t agree? You can log out, or delete your account.
           </Text>
-        ) : null}
-
-        <Button label="Continue" disabled={!checked} loading={busy} onPress={() => void handleContinue()} />
-
-        <Text variant="bodySmall" color="muted" style={styles.otherwise}>
-          Don&apos;t agree? You can log out, or delete your account.
-        </Text>
-        <View style={styles.secondary}>
-          <Button label="Log out" variant="secondary" disabled={busy} onPress={() => void signOut()} />
+          <Button label="Log out" variant="text" disabled={busy} onPress={() => void signOut()} />
           <Button
             label="Delete my account"
-            variant="dangerSecondary"
+            variant="danger"
             disabled={busy}
             onPress={() => router.push("/delete-account")}
           />
-        </View>
-      </View>
-    </Screen>
+        </>
+      }
+    >
+      <AgeAndTermsCheckbox checked={checked} onChange={setChecked} />
+      {error ? (
+        <Text variant="subhead" color="danger">
+          {error}
+        </Text>
+      ) : null}
+    </AuthPage>
   );
 }
 
@@ -138,9 +136,9 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   box: {
-    width: 26,
-    height: 26,
-    borderRadius: radii.sm,
+    width: 24,
+    height: 24,
+    borderRadius: 6,
     borderWidth: 2,
     // A border that carries meaning (an unticked box): line-strong, 3:1.
     borderColor: colors.lineStrong,
@@ -149,8 +147,8 @@ const styles = StyleSheet.create({
     marginTop: 1,
   },
   boxChecked: {
-    backgroundColor: colors.primary[500],
-    borderColor: colors.primary[500],
+    backgroundColor: colors.green500,
+    borderColor: colors.green500,
   },
   label: {
     flex: 1,
@@ -163,27 +161,13 @@ const styles = StyleSheet.create({
     left: 0,
     zIndex: 1000,
     elevation: 1000,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface,
   },
-  content: {
-    paddingTop: spacing["2xl"],
-  },
-  title: {
-    marginBottom: spacing.md,
-  },
-  intro: {
-    marginBottom: spacing.xl,
-  },
-  error: {
-    marginBottom: spacing.md,
+  centered: {
     textAlign: "center",
   },
   otherwise: {
-    marginTop: spacing.xl,
-    marginBottom: spacing.md,
+    marginTop: spacing[4],
     textAlign: "center",
-  },
-  secondary: {
-    gap: spacing.md,
   },
 });
