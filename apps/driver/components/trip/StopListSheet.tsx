@@ -1,8 +1,8 @@
-import { Pressable, ScrollView, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { firstName, formatCedis, riderName, riderStatusWord, type TripStop } from "@rida/shared";
 import {
-  Sheet,
+  BottomSheet,
   Text,
   callPhone,
   colors,
@@ -34,15 +34,25 @@ export function StopListSheet({
 }) {
   const done = passengers.filter((p) => p.status === "DROPPED_OFF");
   return (
-    <Sheet visible={visible} onClose={onClose}>
+    <BottomSheet
+      modal
+      scrollable
+      visible={visible}
+      onDismiss={onClose}
+      maxHeightRatio={0.8}
+      accessibilityLabel="Your stops"
+    >
       <Text variant="h3" accessibilityRole="header">
         Your stops
       </Text>
-      <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+      <View style={styles.list}>
         {stops.map((stop, i) => {
           const name = riderName(stop);
           const word = riderStatusWord(stop.passengerStatus);
-          const eta = i === 0 && nextEtaMinutes !== null && stop.passengerStatus !== "ARRIVED" ? ` · ${nextEtaMinutes} min` : "";
+          const eta =
+            i === 0 && nextEtaMinutes !== null && stop.passengerStatus !== "ARRIVED"
+              ? ` · ${nextEtaMinutes} min`
+              : "";
           return (
             <Pressable
               key={stop.key}
@@ -52,7 +62,9 @@ export function StopListSheet({
               accessibilityLabel={`Stop ${i + 1}: ${stop.kind === "PICKUP" ? "pick up" : "drop off"} ${name} at ${stop.label}. ${word}.${stop.riderPhone ? " Double-tap to call." : ""}`}
               style={styles.row}
             >
-              <View style={[styles.number, stop.kind === "PICKUP" ? styles.pickup : styles.dropoff]}>
+              <View
+                style={[styles.number, stop.kind === "PICKUP" ? styles.pickup : styles.dropoff]}
+              >
                 <Text variant="caption" style={styles.numberText}>
                   {i + 1}
                 </Text>
@@ -63,14 +75,18 @@ export function StopListSheet({
                 </Text>
                 <Text variant="caption" color="muted" numberOfLines={2}>
                   {stop.label}
-                  {stop.kind === "DROPOFF" && stop.farePesewas !== null ? ` · ${formatCedis(stop.farePesewas)}` : ""}
+                  {stop.kind === "DROPOFF" && stop.farePesewas !== null
+                    ? ` · ${formatCedis(stop.farePesewas)}`
+                    : ""}
                 </Text>
               </View>
               <Text variant="caption" style={styles.word}>
                 {word}
                 {eta}
               </Text>
-              {stop.riderPhone ? <Ionicons name="call-outline" size={18} color={colors.ink3} /> : null}
+              {stop.riderPhone ? (
+                <Ionicons name="call-outline" size={18} color={colors.ink3} />
+              ) : null}
             </Pressable>
           );
         })}
@@ -81,7 +97,12 @@ export function StopListSheet({
               DONE
             </Text>
             {done.map((p) => (
-              <View key={p.id} style={styles.row} accessible accessibilityLabel={`${firstName(p.riderName) || "Rider"}: dropped off at ${p.dropoffLabel ?? p.dropoffZoneName}`}>
+              <View
+                key={p.id}
+                style={styles.row}
+                accessible
+                accessibilityLabel={`${firstName(p.riderName) || "Rider"}: dropped off at ${p.dropoffLabel ?? p.dropoffZoneName}`}
+              >
                 <View style={[styles.number, styles.doneDot]}>
                   <Ionicons name="checkmark" size={14} color={colors.white} />
                 </View>
@@ -100,19 +121,30 @@ export function StopListSheet({
             ))}
           </>
         ) : null}
-      </ScrollView>
+      </View>
       <Text variant="caption" color="muted" style={styles.footnote}>
         Order follows the route. Tap a rider to call them.
       </Text>
-    </Sheet>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { maxHeight: 440, marginTop: spacing.md },
-  listContent: { gap: spacing.xs },
-  row: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.sm, minHeight: 52 },
-  number: { width: 28, height: 28, borderRadius: radii.full, alignItems: "center", justifyContent: "center" },
+  list: { marginTop: spacing.md, gap: spacing.xs },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+    minHeight: 52,
+  },
+  number: {
+    width: 28,
+    height: 28,
+    borderRadius: radii.full,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   pickup: { backgroundColor: colors.primary[500] },
   dropoff: { backgroundColor: colors.ink },
   doneDot: { backgroundColor: colors.ink3 },

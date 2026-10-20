@@ -45,6 +45,7 @@ import {
   LoadingState,
   Screen,
   SessionRestoringScreen,
+  SlideToConfirm,
   Text,
   callPhone,
   colors,
@@ -83,7 +84,6 @@ import {
   useTripActions,
 } from "../../lib/tripActions";
 import { TripMap, type TripPreviewOverlay } from "../../components/trip/TripMap";
-import { SlideToConfirm } from "../../components/trip/SlideToConfirm";
 import { StopListSheet } from "../../components/trip/StopListSheet";
 import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
 import { SeatDots } from "../../components/trip/SeatDots";
@@ -950,6 +950,7 @@ function NextStopCard({
           <SlideToConfirm
             key={stop.key}
             label={`${name} picked up`}
+            doneLabel="Picked up"
             onConfirm={() => {
               if (stop.passengerStatus === "WAITING") act("arrived");
               act("pickup");
@@ -997,6 +998,7 @@ function NextStopCard({
         <SlideToConfirm
           key={stop.key}
           label={cash ? `Cash collected from ${name}` : `${name} dropped off`}
+          doneLabel={cash ? "Cash collected" : "Dropped off"}
           tone="dark"
           onConfirm={() => {
             act("dropoff");

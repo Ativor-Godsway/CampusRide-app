@@ -18,6 +18,7 @@ const STAND_INS = {
   "react-native-gesture-handler": "gesture-handler.tsx",
   "@gorhom/bottom-sheet": "bottom-sheet.tsx",
   "react-native-svg": "svg.tsx",
+  "react-native-reanimated": "reanimated.tsx",
   "@expo/vector-icons": "vector-icons.tsx",
   "expo-router": "expo-router.tsx",
   "expo-image": "expo-image.tsx",

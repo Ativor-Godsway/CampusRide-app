@@ -9,8 +9,8 @@ import HomeTab from "../../../apps/rider/app/(tabs)/index";
 import PlanYourRide from "../../../apps/rider/app/ride/location";
 import ChooseRide from "../../../apps/rider/app/ride/type";
 import DesignGallery from "../../../apps/rider/app/dev/design-gallery";
-import { boot, type Routes, type Scene } from "./core";
-import { place, places, rider, riderRides, roadRoute, zones } from "./data";
+import { boot, refuse, type Routes, type Scene } from "./core";
+import { place, places, rider, riderRides, riderSearching, roadRoute, zones } from "./data";
 
 /** What every signed-in rider screen asks for. */
 const signedIn: Routes = {
@@ -27,6 +27,38 @@ const signedIn: Routes = {
 const here = place("Akuafo Hall");
 const pickup = gpsEnd({ latitude: here.latitude, longitude: here.longitude }, places);
 const dropoff = place("Balme Library");
+const routeParams = {
+  ...tripEndParams("pickup", pickup),
+  ...tripEndParams("dropoff", {
+    kind: "place",
+    latitude: dropoff.latitude,
+    longitude: dropoff.longitude,
+    label: dropoff.name,
+    placeId: dropoff.id,
+  }),
+};
+const CODE_FIELD = "Verification code, 6 digits";
+const otp = (extra: Partial<Scene>): Scene => ({
+  name: "otp",
+  user: null,
+  routes: { "POST /auth/request-otp": { ok: true } },
+  chain: [RootLayout, AuthLayout, OtpRoute],
+  pathname: "/auth/otp",
+  params: { phone: rider.phone, purpose: "LOGIN" },
+  ...extra,
+});
+/** Choose a ride reopened on Ama's request, still searching, with its cancel sheet open. */
+const searching = (extra: Partial<Scene>): Scene => ({
+  name: "cancel",
+  note: "map: grey box",
+  user: rider,
+  routes: { ...signedIn, [`GET /rides/${riderSearching.ride.id}`]: riderSearching },
+  chain: [RootLayout, ChooseRide],
+  pathname: "/ride/type",
+  params: { ...routeParams, rideId: riderSearching.ride.id, openCancel: "1" },
+  position: here,
+  ...extra,
+});
 
 const scenes: Scene[] = [
   {
@@ -44,14 +76,16 @@ const scenes: Scene[] = [
     chain: [RootLayout, AuthLayout, PhoneRoute],
     pathname: "/auth/phone",
   },
-  {
-    name: "otp",
-    user: null,
-    routes: { "POST /auth/request-otp": { ok: true } },
-    chain: [RootLayout, AuthLayout, OtpRoute],
-    pathname: "/auth/otp",
-    params: { phone: rider.phone, purpose: "LOGIN" },
-  },
+  otp({ name: "otp" }),
+  otp({ name: "otp-typing", steps: [{ type: CODE_FIELD, text: "4166" }] }),
+  otp({
+    name: "otp-error",
+    routes: {
+      "POST /auth/request-otp": { ok: true },
+      "POST /auth/verify-otp": refuse(400, `Invalid or missing OTP for ${rider.phone}`),
+    },
+    steps: [{ type: CODE_FIELD, text: "416641" }],
+  }),
   {
     name: "home",
     user: rider,
@@ -75,19 +109,25 @@ const scenes: Scene[] = [
     routes: signedIn,
     chain: [RootLayout, ChooseRide],
     pathname: "/ride/type",
-    params: {
-      ...tripEndParams("pickup", { ...pickup, label: pickup.label }),
-      ...tripEndParams("dropoff", {
-        kind: "place",
-        latitude: dropoff.latitude,
-        longitude: dropoff.longitude,
-        label: dropoff.name,
-        placeId: dropoff.id,
-      }),
-      from: "plan",
-    },
+    params: { ...routeParams, from: "plan" },
     position: here,
   },
+  {
+    name: "choose-a-ride-note",
+    note: "map: grey box; no keyboard on the web",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, ChooseRide],
+    pathname: "/ride/type",
+    params: { ...routeParams, from: "plan" },
+    position: here,
+    steps: [
+      { press: "Add a note for your driver" },
+      { type: "Note for driver", text: "At the main gate, blue shirt" },
+    ],
+  },
+  searching({ name: "cancel-confirm" }),
+  searching({ name: "cancel-reason", steps: [{ press: "Cancel ride" }] }),
 ];
 
 boot(scenes);

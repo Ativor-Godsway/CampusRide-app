@@ -1,15 +1,20 @@
 import { useState, type ReactNode } from "react";
 import { StyleSheet, View } from "react-native";
 import { useRouter } from "expo-router";
+import { BottomSheet } from "./components/BottomSheet";
 import { Button } from "./components/Button";
 import { Card } from "./components/Card";
 import { Chip, StatusChip } from "./components/Chip";
 import { IconButton } from "./components/IconButton";
 import { Input } from "./components/Input";
+import { Illustration } from "./components/Illustration";
 import { ListRow } from "./components/ListRow";
+import { OtpInput } from "./components/OtpInput";
 import { PhoneInput } from "./components/PhoneInput";
+import { PulseRings } from "./components/PulseRings";
 import { RideOptionCard } from "./components/RideOptionCard";
 import { Screen } from "./components/Screen";
+import { SlideToConfirm } from "./components/SlideToConfirm";
 import { Text, type TextVariant } from "./components/Text";
 import { Notice, useToast } from "./components/Toast";
 import { illustrations } from "./illustrations";
@@ -28,6 +33,9 @@ export function DesignGalleryScreen() {
   const [ride, setRide] = useState<"shared" | "alone">("shared");
   const [digits, setDigits] = useState("548608146");
   const [name, setName] = useState("");
+  const [code, setCode] = useState("4166");
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [slides, setSlides] = useState(0);
 
   return (
     <View style={styles.root}>
@@ -295,6 +303,60 @@ export function DesignGalleryScreen() {
           />
         </Section>
 
+        <Section title="OtpInput">
+          <Text variant="subhead" color="secondary">
+            Typing (tap to edit; six digits check at once)
+          </Text>
+          <OtpInput value={code} onChange={setCode} autoFocus={false} />
+          <Text variant="subhead" color="secondary">
+            Wrong code
+          </Text>
+          <OtpInput
+            value=""
+            onChange={() => undefined}
+            error="That code didn't match. Check the SMS and try again."
+            autoFocus={false}
+          />
+          <Text variant="subhead" color="secondary">
+            Verified
+          </Text>
+          <OtpInput value="416641" onChange={() => undefined} verified autoFocus={false} />
+        </Section>
+
+        <Section title="SlideToConfirm">
+          <SlideToConfirm
+            label="Slide when Kwame is in"
+            doneLabel="Picked up"
+            onConfirm={() => setSlides((n) => n + 1)}
+          />
+          <SlideToConfirm
+            label="Cash collected from Ama"
+            doneLabel="Cash collected"
+            tone="dark"
+            onConfirm={() => setSlides((n) => n + 1)}
+          />
+          <Text variant="caption" color="tertiary">
+            Completed {slides} time{slides === 1 ? "" : "s"}. Slide, hold 600 ms, or use the screen
+            reader&apos;s activate action.
+          </Text>
+        </Section>
+
+        <Section title="PulseRings">
+          <View style={[styles.mapLand, styles.pulse]}>
+            <PulseRings size={180}>
+              <Illustration name="pinPickup" size={56} />
+            </PulseRings>
+          </View>
+        </Section>
+
+        <Section title="BottomSheet">
+          <Button label="Open a modal sheet" variant="neutral" onPress={() => setSheetOpen(true)} />
+          <Text variant="caption" color="tertiary">
+            Dims the screen; tap outside or pull down to close. Map sheets use the same component
+            without `modal`.
+          </Text>
+        </Section>
+
         <Section title="Radius and shadow">
           <View style={[styles.mapLand, styles.wrapRow]}>
             {(["sm", "md", "lg", "xl", "full"] as const).map((r) => (
@@ -313,6 +375,21 @@ export function DesignGalleryScreen() {
           </View>
         </Section>
       </Screen>
+      <BottomSheet
+        modal
+        visible={sheetOpen}
+        onDismiss={() => setSheetOpen(false)}
+        accessibilityLabel="Example sheet"
+        footer={<Button label="Done" onPress={() => setSheetOpen(false)} />}
+      >
+        <Text variant="eyebrow" color="secondary">
+          Modal sheet
+        </Text>
+        <Text variant="title2">Cancel this ride?</Text>
+        <Text variant="body" color="secondary">
+          Handle, eyebrow, title, content, then one action pinned above the safe area.
+        </Text>
+      </BottomSheet>
       {toast}
     </View>
   );
@@ -431,6 +508,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.mapLand,
     borderRadius: radii.lg,
     padding: spacing[4],
+  },
+  pulse: {
+    alignItems: "center",
   },
   darkCard: {
     gap: spacing[1],

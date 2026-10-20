@@ -11,8 +11,19 @@ import { api, rawApi, type AuthUser } from "@rida/mobile-shared";
 import { RouterScene } from "../stubs/expo-router";
 import { scenePosition, secureStoreData } from "../stubs/expo-modules";
 
-/** "GET /zones" → the response body (or a function of the request body). */
+/**
+ * "GET /zones" → the response body (or a function of the request body).
+ * `refuse(400, "…")` answers with that error instead.
+ */
 export type Routes = Record<string, unknown | ((body: Record<string, unknown>) => unknown)>;
+
+const REFUSAL = Symbol("refusal");
+export function refuse(status: number, error: string) {
+  return { [REFUSAL]: true, status, error };
+}
+
+/** Done in the browser before the screenshot, in order (run.mjs carries them out). */
+export type Step = { press: string } | { type: string; text: string } | { wait: number };
 
 export interface Scene {
   /** File name: <app>-<name>.png. */
@@ -32,13 +43,15 @@ export interface Scene {
   pathname: string;
   params?: Record<string, string>;
   position?: { latitude: number; longitude: number };
-  /** How long to let it settle before the screenshot (ms). */
+  /** How long to let it settle before the steps and the screenshot (ms). */
   settleMs?: number;
+  /** Taps and typing (by accessibility label, or visible text) before the screenshot. */
+  steps?: Step[];
 }
 
 declare global {
   interface Window {
-    __screens: { list: () => Pick<Scene, "name" | "note" | "full">[]; ready: boolean };
+    __screens: { list: () => Pick<Scene, "name" | "note" | "full" | "steps">[]; ready: boolean };
   }
 }
 
@@ -66,17 +79,22 @@ function installServer(user: AuthUser | null, routes: Routes) {
     }
     if (key === "GET /me" && user) return ok({ user });
     if (key in routes) {
-      const answer = routes[key];
-      return ok(typeof answer === "function" ? answer(body) : answer);
+      const raw = routes[key];
+      const answer = typeof raw === "function" ? raw(body) : raw;
+      if (answer && typeof answer === "object" && REFUSAL in answer) {
+        const { status, error } = answer as unknown as { status: number; error: string };
+        return fail(status, error);
+      }
+      return ok(answer);
     }
     console.log(`[screens] no fake answer for ${key} (404)`);
     return fail(404);
 
-    function fail(status: number): never {
+    function fail(status: number, error = "screens"): never {
       throw Object.assign(new Error(`Request failed with status code ${status}`), {
         isAxiosError: true,
         config,
-        response: { status, data: { error: "screens" }, headers: {}, config, statusText: "" },
+        response: { status, data: { error }, headers: {}, config, statusText: "" },
       });
     }
   };
@@ -86,7 +104,7 @@ function installServer(user: AuthUser | null, routes: Routes) {
 
 export function boot(scenes: Scene[]) {
   window.__screens = {
-    list: () => scenes.map(({ name, note, full }) => ({ name, note, full })),
+    list: () => scenes.map(({ name, note, full, steps }) => ({ name, note, full, steps })),
     ready: false,
   };
   const scene = scenes.find((s) => s.name === decodeURIComponent(location.hash.slice(1)));

@@ -2,8 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { usePreventRemove } from "expo-router/react-navigation";
-import { Alert, Pressable, StyleSheet, TextInput, View, useWindowDimensions } from "react-native";
-import BottomSheet, { BottomSheetScrollView, BottomSheetView } from "@gorhom/bottom-sheet";
+import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
@@ -67,6 +66,8 @@ import {
   getRoadRoute,
   useLiveRoute,
   rateLimitText,
+  BottomSheet,
+  BottomSheetTextInput,
 } from "@rida/mobile-shared";
 import { CancelRideSheet, type SwitchOffer } from "../../components/ride/CancelRideSheet";
 import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
@@ -635,14 +636,38 @@ export default function RideTypeScreen() {
         // bar is always the last thing in view and nothing sits behind it.
         <BottomSheet
           key="options"
-          index={0}
-          enableDynamicSizing
-          maxDynamicContentSize={windowHeight * 0.85}
+          maxHeightRatio={0.85}
           onChange={onSheetChange}
-          backgroundStyle={styles.sheetBackground}
-          handleIndicatorStyle={styles.sheetHandle}
+          contentStyle={styles.optionsSheet}
+          // The Cash + Request bar stays pinned at the bottom, above the
+          // keyboard while the note is being typed.
+          footer={
+        <View style={styles.requestBar}>
+          {/* Cash-only launch (Phase 1): MoMo is intentionally not
+              offered — a MOMO ride couldn't be settled while digital
+              payment is off server-side. A statement, not a picker. */}
+          <View
+            style={styles.cash}
+            accessible
+            accessibilityLabel="Payment: cash. Pay your driver at the end of the trip."
+          >
+            <Ionicons name="cash-outline" size={20} color={colors.primary[500]} />
+            <Text variant="bodyMedium" style={styles.cashText}>
+              Cash
+            </Text>
+          </View>
+          <View style={styles.requestButton}>
+            <Button
+              label={`Request ${selectedOption.title}`}
+              size="lg"
+              onPress={() => void handleSubmit()}
+              loading={submitting}
+              accessibilityHint={`${spokenCedis(selectedOption.farePesewas)}, paid in cash`}
+            />
+          </View>
+        </View>
+          }
         >
-          <BottomSheetView style={[styles.optionsSheet, { paddingBottom: Math.max(insets.bottom, spacing.lg) }]}>
             <Text variant="h3" accessibilityRole="header" style={styles.optionsTitle}>
               Choose a ride
             </Text>
@@ -674,31 +699,6 @@ export default function RideTypeScreen() {
               onNoteChange={setNote}
             />
 
-            <View style={styles.requestBar}>
-              {/* Cash-only launch (Phase 1): MoMo is intentionally not
-                  offered — a MOMO ride couldn't be settled while digital
-                  payment is off server-side. A statement, not a picker. */}
-              <View
-                style={styles.cash}
-                accessible
-                accessibilityLabel="Payment: cash. Pay your driver at the end of the trip."
-              >
-                <Ionicons name="cash-outline" size={20} color={colors.primary[500]} />
-                <Text variant="bodyMedium" style={styles.cashText}>
-                  Cash
-                </Text>
-              </View>
-              <View style={styles.requestButton}>
-                <Button
-                  label={`Request ${selectedOption.title}`}
-                  size="lg"
-                  onPress={() => void handleSubmit()}
-                  loading={submitting}
-                  accessibilityHint={`${spokenCedis(selectedOption.farePesewas)}, paid in cash`}
-                />
-              </View>
-            </View>
-          </BottomSheetView>
         </BottomSheet>
       ) : (
       <BottomSheet
@@ -706,13 +706,9 @@ export default function RideTypeScreen() {
         snapPoints={["55%", "90%"]}
         index={0}
         onChange={onSheetChange}
-        backgroundStyle={styles.sheetBackground}
-        handleIndicatorStyle={styles.sheetHandle}
-        keyboardBehavior="interactive"
-        keyboardBlurBehavior="restore"
-        android_keyboardInputMode="adjustResize"
+        scrollable
+        contentStyle={styles.sheetContent}
       >
-        <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
           {resumingUnloaded ? (
             <SkeletonGroup label="Loading your ride" style={styles.resumeSkeleton}>
               <Skeleton width={120} height={120} radius={radii.full} style={styles.centerSelf} />
@@ -806,7 +802,6 @@ export default function RideTypeScreen() {
               )}
             </>
             ))}
-        </BottomSheetScrollView>
       </BottomSheet>
       )}
 
@@ -895,7 +890,8 @@ function PickupDetails({
 
       {noteOpen ? (
         <View>
-          <TextInput
+          {/* The sheet's own input: typing moves the sheet above the keyboard. */}
+          <BottomSheetTextInput
             value={note}
             onChangeText={(t) => onNoteChange(t.slice(0, PICKUP_NOTE_MAX_LENGTH))}
             placeholder="Note for driver, e.g. At the main gate, blue shirt"
@@ -1176,7 +1172,7 @@ function DriverFoundContent({
 
       <RideSafetyActions rideId={rideId} driver={driver} />
 
-      <Button label="Cancel ride" variant="secondary" onPress={onCancel} />
+      <Button label="Cancel ride" variant="danger" onPress={onCancel} />
     </View>
   );
 }
@@ -1496,19 +1492,9 @@ const styles = StyleSheet.create({
   },
   sosButtonBusy: { opacity: 0.6 },
   container: { flex: 1 },
-  sheetBackground: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-  },
-  sheetHandle: { backgroundColor: colors.borderStrong, width: 40, height: 5 },
-  sheetContent: {
-    paddingHorizontal: spacing.xl,
-    paddingBottom: spacing.xl,
-    gap: spacing.lg,
-  },
+  sheetContent: { gap: spacing.lg },
   // ── Options
-  optionsSheet: { paddingHorizontal: spacing.lg, paddingTop: spacing.xs, gap: spacing.md },
+  optionsSheet: { gap: spacing.md },
   optionsTitle: { paddingHorizontal: spacing.xs, marginBottom: -spacing.xs },
   optionList: { gap: spacing.xs },
   requestBar: { flexDirection: "row", alignItems: "center", gap: spacing.md },

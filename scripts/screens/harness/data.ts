@@ -226,3 +226,37 @@ export const driverTrip: RideWithZones = {
     },
   ],
 };
+
+/** The rider's request, still looking for a driver (Choose a ride's searching state). */
+export const riderSearching = (() => {
+  const base = ride("ride-search", "Akuafo Hall", "Balme Library", {
+    status: "REQUESTED",
+    driverId: null,
+    fareTotal: null,
+    driverShare: null,
+    paymentStatus: "PENDING",
+    createdAt: new Date(Date.now() - 40_000),
+    broadcastStartedAt: new Date(Date.now() - 40_000),
+    departedAt: null,
+    completedAt: null,
+  });
+  return {
+    ride: {
+      ...base,
+      passengers: [
+        {
+          id: "passenger-ama",
+          rideId: base.id,
+          riderId: rider.id,
+          pickupZoneId: base.pickupZoneId,
+          dropoffZoneId: base.dropoffZoneId,
+          fareCharged: null,
+          lockedFare: 500,
+          status: "WAITING" as const,
+          ...pins("Akuafo Hall", "Balme Library"),
+        },
+      ],
+    },
+    driver: null,
+  };
+})();

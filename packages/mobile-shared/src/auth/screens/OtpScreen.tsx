@@ -4,8 +4,8 @@ import { View, StyleSheet } from "react-native";
 import { OTP_RESEND_COOLDOWN_SECONDS, formatCountdown, formatGhanaPhone, retryAfterSecondsOf } from "@rida/shared";
 import { useAuth } from "../AuthContext";
 import { requestOtp, verifyOtp, type OtpPurpose } from "../api";
-import { Button, Screen, Input, Text, colors, radii, spacing, typography } from "../../design";
-import { errorMessage } from "../errorMessage";
+import { Button, Notice, OTP_VERIFIED_MS, OtpInput, Screen, Text, colors, radii, spacing } from "../../design";
+import { errorMessage, wrongCodeMessage } from "../errorMessage";
 import { AuthHero } from "./AuthHero";
 
 /** OTP entry — second step of the auth flow, shared by both apps. */
@@ -14,7 +14,11 @@ export function OtpScreen() {
   const { completeLogin } = useAuth();
   const { phone, purpose } = useLocalSearchParams<{ phone: string; purpose: OtpPurpose }>();
   const [code, setCode] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [verifying, setVerifying] = useState(false);
+  const [verified, setVerified] = useState(false);
+  /** The server refused the code: the boxes shake and clear. */
+  const [codeError, setCodeError] = useState<string | null>(null);
+  /** Anything else (offline, too many requests): said below, the code kept. */
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -32,16 +36,16 @@ export function OtpScreen() {
     return () => clearInterval(timer);
   }, [secondsLeft]);
 
-  async function handleVerify() {
-    if (code.length !== 6) {
-      setError("Enter the 6-digit code");
-      return;
-    }
-
+  /** Called the moment the 6th digit is in: there is no Continue button. */
+  async function verify(entered: string) {
     setError(null);
-    setIsSubmitting(true);
+    setCodeError(null);
+    setVerifying(true);
     try {
-      const { verifiedToken } = await verifyOtp(phone, code, purpose);
+      const { verifiedToken } = await verifyOtp(phone, entered, purpose);
+      // Green for a moment, so the rider sees it worked before the screen changes.
+      setVerified(true);
+      await new Promise<void>((resolve) => setTimeout(resolve, OTP_VERIFIED_MS));
 
       if (purpose === "SIGNUP") {
         router.push({ pathname: "/auth/signup", params: { phone, verifiedToken } });
@@ -51,14 +55,18 @@ export function OtpScreen() {
         await completeLogin({ phone, verifiedToken });
       }
     } catch (err) {
-      setError(errorMessage(err));
+      setVerified(false);
+      const wrong = wrongCodeMessage(err);
+      if (wrong) setCodeError(wrong);
+      else setError(errorMessage(err));
     } finally {
-      setIsSubmitting(false);
+      setVerifying(false);
     }
   }
 
   async function handleResend() {
     setError(null);
+    setCodeError(null);
     setNotice(null);
     setIsResending(true);
     try {
@@ -81,30 +89,31 @@ export function OtpScreen() {
     <Screen scroll noPadding edges={["top"]}>
       <AuthHero compact title="Verify your number" subtitle={`We sent a 6-digit code to ${formatGhanaPhone(phone)}`} onBack={() => router.back()} />
       <View style={styles.panel}>
-        <Input
-          label="Verification code"
-          placeholder="000000"
-          keyboardType="number-pad"
-          maxLength={6}
-          doneAccessory
+        <OtpInput
           value={code}
-          onChangeText={setCode}
-          error={error ?? undefined}
-          style={styles.codeInput}
+          onChange={(next) => {
+            setCode(next);
+            // The wrong-code message stays until they start typing again.
+            if (next) setCodeError(null);
+          }}
+          onComplete={(entered) => void verify(entered)}
+          error={codeError}
+          verifying={verifying}
+          verified={verified}
         />
 
-        <Button label="Continue" loading={isSubmitting} onPress={() => void handleVerify()} />
+        {error ? <Notice tone="error" message={error} style={styles.notice} /> : null}
 
         <View style={styles.resend}>
-          {notice ? (
-            <Text variant="caption" color="muted" style={styles.notice}>
-              {notice}
-            </Text>
-          ) : null}
+          <Text variant="subhead" color="secondary">
+            {notice ?? "Didn't get it?"}
+          </Text>
           <Button
-            label={secondsLeft > 0 ? `Resend code in ${formatCountdown(secondsLeft)}` : "Resend code"}
-            variant="ghost"
-            disabled={secondsLeft > 0}
+            label={secondsLeft > 0 ? `Resend in ${formatCountdown(secondsLeft)}` : "Resend code"}
+            variant="text"
+            size="md"
+            fullWidth={false}
+            disabled={secondsLeft > 0 || verifying}
             loading={isResending}
             onPress={() => void handleResend()}
           />
@@ -125,18 +134,13 @@ const styles = StyleSheet.create({
     paddingTop: spacing["2xl"],
     paddingBottom: spacing.xl,
   },
-  codeInput: {
-    fontFamily: typography.fontFamily.mono,
-    fontSize: 24,
-    fontWeight: typography.weight.bold,
-    textAlign: "center",
-    letterSpacing: 8,
-  },
   resend: {
-    marginTop: spacing.md,
-    gap: spacing.xs,
+    marginTop: spacing[4],
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   notice: {
-    textAlign: "center",
+    marginTop: spacing[4],
   },
 });

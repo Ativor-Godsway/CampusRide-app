@@ -11,7 +11,8 @@ import {
 import { useAuth } from "../AuthContext";
 import { requestDeletionCode } from "../api";
 import { describeDeleteAccountError, isRideBlockingDeletion } from "../deleteAccountFlow";
-import { Button, Card, Input, Screen, Text, colors, spacing, typography } from "../../design";
+import { Button, Card, OtpInput, Screen, Text, colors, spacing } from "../../design";
+import { errorStatus } from "../errorMessage";
 
 type Step = "explain" | "code" | "blocked";
 
@@ -29,6 +30,8 @@ export function DeleteAccountScreen({ app }: { app: "rider" | "driver" }) {
   const [maskedPhone, setMaskedPhone] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  /** The server refused the code: the boxes shake and clear. */
+  const [codeError, setCodeError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [blockedMessage, setBlockedMessage] = useState("");
   const [resendAt, setResendAt] = useState(0);
@@ -70,6 +73,7 @@ export function DeleteAccountScreen({ app }: { app: "rider" | "driver" }) {
       return;
     }
     setError(null);
+    setCodeError(null);
     setBusy(true);
     try {
       await deleteAccount(code);
@@ -82,6 +86,8 @@ export function DeleteAccountScreen({ app }: { app: "rider" | "driver" }) {
       if (isRideBlockingDeletion(err)) {
         setBlockedMessage(describeDeleteAccountError(err));
         setStep("blocked");
+      } else if (errorStatus(err) === 400) {
+        setCodeError(describeDeleteAccountError(err));
       } else {
         setError(describeDeleteAccountError(err));
       }
@@ -174,19 +180,21 @@ export function DeleteAccountScreen({ app }: { app: "rider" | "driver" }) {
                 We sent a 6-digit code to {maskedPhone}. Enter it to delete your account. This can't
                 be undone.
               </Text>
-              <Input
-                label="Code"
-                placeholder="000000"
-                keyboardType="number-pad"
-                textContentType="oneTimeCode"
-                autoComplete="sms-otp"
-                maxLength={6}
-                doneAccessory
+              {/* No auto-submit here: deleting is final, so it takes the button below. */}
+              <OtpInput
                 value={code}
-                onChangeText={setCode}
-                error={error ?? undefined}
-                style={styles.codeInput}
+                onChange={(next) => {
+                  setCode(next);
+                  if (next) setCodeError(null);
+                }}
+                error={codeError}
+                verifying={busy}
               />
+              {error ? (
+                <Text variant="bodySmall" color="error">
+                  {error}
+                </Text>
+              ) : null}
               <Button
                 label="Delete my account"
                 variant="danger"
@@ -248,11 +256,4 @@ const styles = StyleSheet.create({
   row: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
   flex: { flex: 1 },
   actions: { gap: spacing.sm, marginTop: spacing.sm },
-  codeInput: {
-    fontFamily: typography.fontFamily.mono,
-    fontSize: 24,
-    fontWeight: typography.weight.bold,
-    textAlign: "center",
-    letterSpacing: 8,
-  },
 });

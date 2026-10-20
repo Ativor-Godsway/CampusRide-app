@@ -1,18 +1,10 @@
-import { useCallback, useEffect, useRef } from "react";
 import { StyleSheet, View } from "react-native";
-import BottomSheet, {
-  BottomSheetBackdrop,
-  BottomSheetView,
-  type BottomSheetBackdropProps,
-} from "@gorhom/bottom-sheet";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { activeRideStatusLine, stopLabel } from "@rida/shared";
 import {
+  BottomSheet,
   Button,
   Illustration,
   Text,
-  colors,
-  radii,
   spacing,
   type ActiveRideSummary,
 } from "@rida/mobile-shared";
@@ -39,26 +31,6 @@ export function RideInProgressSheet({
   onCancelIt: () => void;
   onDismiss: () => void;
 }) {
-  const sheetRef = useRef<BottomSheet>(null);
-  const insets = useSafeAreaInsets();
-
-  useEffect(() => {
-    if (visible) sheetRef.current?.expand();
-    else sheetRef.current?.close();
-  }, [visible]);
-
-  const renderBackdrop = useCallback(
-    (props: BottomSheetBackdropProps) => (
-      <BottomSheetBackdrop
-        {...props}
-        appearsOnIndex={0}
-        disappearsOnIndex={-1}
-        pressBehavior="close"
-      />
-    ),
-    [],
-  );
-
   const status = ride
     ? activeRideStatusLine({
         status: ride.status,
@@ -70,53 +42,31 @@ export function RideInProgressSheet({
 
   return (
     <BottomSheet
-      ref={sheetRef}
-      index={-1}
-      enablePanDownToClose
-      enableDynamicSizing
-      onClose={onDismiss}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={styles.background}
-      handleIndicatorStyle={styles.handle}
+      modal
+      visible={visible}
+      onDismiss={onDismiss}
+      accessibilityLabel="You already have a ride in progress"
+      contentStyle={styles.content}
     >
-      <BottomSheetView
-        style={[
-          styles.content,
-          { paddingBottom: Math.max(insets.bottom, spacing.lg) + spacing.sm },
-        ]}
-        accessibilityViewIsModal
-      >
-        <Illustration name="carStandard" width={112} style={styles.art} />
-        <Text variant="h2" accessibilityRole="header" style={styles.centered}>
-          You already have a ride in progress
+      <Illustration name="carStandard" width={112} style={styles.art} />
+      <Text variant="h2" accessibilityRole="header" style={styles.centered}>
+        You already have a ride in progress
+      </Text>
+      {ride ? (
+        <Text variant="bodySmall" color="muted" style={styles.centered}>
+          {status} · to {stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}
         </Text>
-        {ride ? (
-          <Text variant="bodySmall" color="muted" style={styles.centered}>
-            {status} · to {stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}
-          </Text>
-        ) : null}
-        <View style={styles.actions}>
-          <Button label="Go to my ride" size="lg" onPress={onGoToRide} loading={busy} />
-          <Button
-            label="Cancel it"
-            variant="dangerSecondary"
-            onPress={onCancelIt}
-            disabled={busy}
-          />
-        </View>
-      </BottomSheetView>
+      ) : null}
+      <View style={styles.actions}>
+        <Button label="Go to my ride" size="lg" onPress={onGoToRide} loading={busy} />
+        <Button label="Cancel it" variant="dangerSecondary" onPress={onCancelIt} disabled={busy} />
+      </View>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  background: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-  },
-  handle: { backgroundColor: colors.borderStrong, width: 40, height: 5 },
-  content: { paddingHorizontal: spacing.xl, paddingTop: spacing.xs, gap: spacing.md },
+  content: { gap: spacing.md },
   art: { alignSelf: "center" },
   centered: { textAlign: "center" },
   actions: { gap: spacing.md, marginTop: spacing.sm },

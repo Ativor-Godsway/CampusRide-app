@@ -1,6 +1,15 @@
-import { ScrollView, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { requestedAgo } from "@rida/shared";
-import { Badge, Button, Sheet, Text, colors, spacing, typography, type FillSuggestion } from "@rida/mobile-shared";
+import {
+  Badge,
+  BottomSheet,
+  Button,
+  Text,
+  colors,
+  spacing,
+  typography,
+  type FillSuggestion,
+} from "@rida/mobile-shared";
 
 /**
  * "Add a rider": the waiting Shared requests the driver can add to the car —
@@ -23,7 +32,14 @@ export function AddRiderSheet({
   onAdd: (suggestion: FillSuggestion) => void;
 }) {
   return (
-    <Sheet visible={visible} onClose={onClose}>
+    <BottomSheet
+      modal
+      scrollable
+      visible={visible}
+      onDismiss={onClose}
+      maxHeightRatio={0.8}
+      accessibilityLabel="Add a rider"
+    >
       <Text variant="h3" accessibilityRole="header">
         Add a rider
       </Text>
@@ -32,7 +48,7 @@ export function AddRiderSheet({
           ? "Your car is full."
           : `${freeSeats} free seat${freeSeats === 1 ? "" : "s"} · Shared riders waiting near you`}
       </Text>
-      <ScrollView style={styles.list} contentContainerStyle={styles.listContent}>
+      <View style={styles.list}>
         {freeSeats > 0 && suggestions.length === 0 ? (
           <Text variant="bodySmall" color="muted" style={styles.empty}>
             Nobody else is waiting right now. New requests appear here as they come in.
@@ -43,7 +59,8 @@ export function AddRiderSheet({
               <View key={s.requestRideId} style={styles.row}>
                 <View style={styles.text}>
                   <Text variant="bodyMedium" style={styles.route} numberOfLines={1}>
-                    {s.pickupPlaceName ?? s.pickupZoneName} → {s.dropoffPlaceName ?? s.dropoffZoneName}
+                    {s.pickupPlaceName ?? s.pickupZoneName} →{" "}
+                    {s.dropoffPlaceName ?? s.dropoffZoneName}
                   </Text>
                   <View style={styles.meta}>
                     {s.compatible ? <Badge variant="accent" label="On your way" /> : null}
@@ -62,14 +79,13 @@ export function AddRiderSheet({
               </View>
             ))
           : null}
-      </ScrollView>
-    </Sheet>
+      </View>
+    </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { maxHeight: 400, marginTop: spacing.md },
-  listContent: { gap: spacing.sm },
+  list: { marginTop: spacing.md, gap: spacing.sm },
   empty: { paddingVertical: spacing.lg, textAlign: "center" },
   row: {
     flexDirection: "row",

@@ -32,3 +32,16 @@ export function serverReason(err: unknown): string | null {
   const data = (err as { response?: { data?: { error?: unknown } } } | null)?.response?.data;
   return typeof data?.error === "string" ? data.error : null;
 }
+
+/**
+ * A texted code the server refused (400: wrong, expired, too many tries),
+ * in plain words, or null for any other failure (offline, rate limit), which
+ * must not clear what was typed. The server's own messages are for its logs.
+ */
+export function wrongCodeMessage(err: unknown): string | null {
+  if (errorStatus(err) !== 400 || rateLimitText(err)) return null;
+  const reason = serverReason(err) ?? "";
+  if (/expired/i.test(reason)) return "That code has expired. Ask for a new one below.";
+  if (/too many/i.test(reason)) return "Too many tries with that code. Ask for a new one below.";
+  return "That code didn't match. Check the SMS and try again.";
+}

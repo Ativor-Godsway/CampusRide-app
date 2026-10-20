@@ -73,7 +73,14 @@ export function RideOptionCard({
             <Text variant="title3" numberOfLines={1} style={styles.title}>
               {title}
             </Text>
-            {badge ? <StatusChip label={badge} tone={badgeTone} /> : null}
+            {badge ? (
+              <StatusChip
+                label={badge}
+                tone={badgeTone}
+                // On the selected card's green-50 fill, a green-50 chip would vanish.
+                style={selected ? styles.badgeOnSelected : undefined}
+              />
+            ) : null}
           </View>
           {subtitle ? (
             <Text variant="subhead" color="secondary" numberOfLines={1}>
@@ -132,5 +139,8 @@ const styles = StyleSheet.create({
   },
   priceSelected: {
     color: colors.green700,
+  },
+  badgeOnSelected: {
+    backgroundColor: colors.surface,
   },
 });
