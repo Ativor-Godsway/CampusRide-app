@@ -70,6 +70,21 @@ export async function verifyOtp(
   return res.data;
 }
 
+/**
+ * One phone entry: checks the code (asked for with requestOtp(phone,
+ * "LOGIN")) and only then says whether the number has an account. An account:
+ * a session, as login gives. A new number: a token for signup's name + 18+
+ * step. POST /auth/verify-code.
+ */
+export type VerifyCodeResponse =
+  | ({ status: "signedIn" } & LoginResponse)
+  | { status: "newAccount"; verifiedToken: string };
+
+export async function verifyCode(phone: string, code: string): Promise<VerifyCodeResponse> {
+  const res = await api.post<VerifyCodeResponse>("/auth/verify-code", { phone, code });
+  return res.data;
+}
+
 export async function signup(input: {
   phone: string;
   name: string;

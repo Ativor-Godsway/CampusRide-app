@@ -1,99 +1,67 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { View, StyleSheet } from "react-native";
 import { GHANA_PHONE_EXAMPLE, normalizeGhanaPhone } from "@rida/shared";
 import { requestOtp } from "../api";
-import { Button, PhoneInput, Screen, Text, colors, radii, spacing } from "../../design";
+import { Button, PhoneInput } from "../../design";
 import { errorMessage } from "../errorMessage";
-import { AuthHero } from "./AuthHero";
+import { AuthPage } from "./AuthPage";
 
-export interface PhoneScreenProps {
-  /** Tag beside the wordmark — the driver app passes "DRIVER". */
-  badge?: string;
-  title?: string;
-  subtitle?: string;
-  signupLabel?: string;
-}
-
-/** Phone entry — start of the auth flow for both rider and driver apps. */
-export function PhoneScreen({
-  badge,
-  title = "Campus rides, on demand",
-  subtitle = "Fast, affordable trips around campus — book in seconds.",
-  signupLabel = "Create an account",
-}: PhoneScreenProps = {}) {
+/**
+ * "What's your number?" (docs/mockups/02-rider-phone.png), both apps. One
+ * entry for everyone: the code is asked for the same way whether or not the
+ * number has an account (purpose LOGIN, which the server never looks up), so
+ * nothing here says whether a number is registered. The code screen finds
+ * out, after the code is right.
+ */
+export function PhoneScreen() {
   const router = useRouter();
   // The 9 digits after the fixed +233 (PhoneInput reads typed and pasted numbers).
   const [digits, setDigits] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleContinue(purpose: "SIGNUP" | "LOGIN") {
+  async function sendCode() {
     if (!digits) {
-      setError("Enter your phone number");
+      setError("Enter your phone number.");
       return;
     }
     // The shared parser (the server's too) checks the whole number, so a
     // short one is refused here, before it leaves the phone.
-    const canonical = normalizeGhanaPhone(`+233${digits}`);
-    if (!canonical) {
+    const phone = normalizeGhanaPhone(`+233${digits}`);
+    if (!phone) {
       setError(GHANA_PHONE_EXAMPLE);
       return;
     }
-
     setError(null);
-    setIsSubmitting(true);
+    setSending(true);
     try {
-      await requestOtp(canonical, purpose);
-      router.push({ pathname: "/auth/otp", params: { phone: canonical, purpose } });
+      await requestOtp(phone, "LOGIN");
+      router.push({ pathname: "/auth/otp", params: { phone } });
     } catch (err) {
       setError(errorMessage(err));
     } finally {
-      setIsSubmitting(false);
+      setSending(false);
     }
   }
 
   return (
-    <Screen scroll noPadding edges={["top"]}>
-      <AuthHero badge={badge} title={title} subtitle={subtitle} />
-      <View style={styles.panel}>
-        <PhoneInput digits={digits} onChangeDigits={setDigits} error={error ?? undefined} />
-
-        <View style={styles.actions}>
-          <Button label="Log in" loading={isSubmitting} onPress={() => void handleContinue("LOGIN")} />
-          <Button
-            label={signupLabel}
-            variant="secondary"
-            loading={isSubmitting}
-            onPress={() => void handleContinue("SIGNUP")}
-          />
-        </View>
-
-        <Text variant="caption" color="muted" style={styles.disclaimer}>
-          By continuing you agree to CampusRide's terms and privacy policy.
-        </Text>
-      </View>
-    </Screen>
+    <AuthPage
+      title="What's your number?"
+      body="We'll text you a code. New here? We'll set up your account next."
+      onBack={() => (router.canGoBack() ? router.back() : router.replace("/auth/welcome"))}
+      footer={<Button label="Send code" loading={sending} onPress={() => void sendCode()} />}
+    >
+      <PhoneInput
+        digits={digits}
+        onChangeDigits={(next) => {
+          setDigits(next);
+          setError(null);
+        }}
+        autoFocus
+        helper="You can paste 054… or +233… too."
+        error={error ?? undefined}
+        onSubmitEditing={() => void sendCode()}
+      />
+    </AuthPage>
   );
 }
-
-const styles = StyleSheet.create({
-  panel: {
-    flex: 1,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-    marginTop: -radii["2xl"],
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing["2xl"],
-    paddingBottom: spacing.xl,
-  },
-  actions: {
-    gap: spacing.md,
-    marginTop: spacing.sm,
-  },
-  disclaimer: {
-    marginTop: spacing.xl,
-    textAlign: "center",
-  },
-});

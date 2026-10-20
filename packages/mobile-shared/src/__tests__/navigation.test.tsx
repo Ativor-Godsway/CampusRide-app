@@ -3,7 +3,16 @@ import * as SecureStore from "expo-secure-store";
 import { router } from "expo-router";
 import { getMe } from "../auth/api";
 import { installFakeServer, type FakeServer } from "./fakeServer";
-import { freshLaunch, history, onDisk, pathname, renderApp, signInThroughScreens, storeRefreshToken } from "./routes";
+import {
+  enterPhoneAndCode,
+  freshLaunch,
+  history,
+  onDisk,
+  pathname,
+  renderApp,
+  signInThroughScreens,
+  storeRefreshToken,
+} from "./routes";
 
 /**
  * Every way around the apps keeps a signed-in person signed in — and on the
@@ -43,17 +52,18 @@ describe("signing in", () => {
     expect(router.canGoBack()).toBe(false);
   });
 
-  it("rider sign-up leaves no sign-in screen in the history either", async () => {
+  it("a new number: the same way in, then the name step, and no sign-in screen left in the history", async () => {
+    server.registered = false;
     await renderApp("rider");
-    await screen.findByText("Create an account");
-    await fireEvent.changeText(screen.getByLabelText("Phone number"), "0241234567");
-    await fireEvent.press(screen.getByText("Create an account"));
-    await fireEvent.changeText(await screen.findByLabelText("Verification code, 6 digits"), "123456");
-    await fireEvent.changeText(await screen.findByPlaceholderText("Full name"), "Ama Test");
+    await enterPhoneAndCode(fireEvent);
+    await fireEvent.changeText(await screen.findByLabelText("Your name"), "Ama Test");
+    // Continue stays off, and says why, until the box is ticked.
+    expect(screen.getByText("Tick the box to continue.")).toBeOnTheScreen();
     await fireEvent.press(screen.getByRole("checkbox"));
-    await fireEvent.press(screen.getByText("Finish"));
+    await fireEvent.press(screen.getByText("Continue"));
     await screen.findByText("Home screen");
     expect(history()).toEqual(["(tabs)"]);
+    expect(server.calls).toContain("POST /auth/signup");
   });
 
   it("a signed-in person sent to the sign-in screen is brought straight back", async () => {
@@ -92,7 +102,7 @@ describe("rider: Back to Home after a trip", () => {
     await fireEvent.press(await screen.findByText("Open past rider trip"));
     await fireEvent.press(await screen.findByText("Back to home"));
     await waitFor(() => expect(history()).toEqual(["(tabs)"]));
-    expect(screen.queryByText("Log in")).toBeNull();
+    expect(screen.queryByText("Continue with phone number")).toBeNull();
   });
 
   it("the trip's back arrow returns to the screen before it", async () => {
@@ -134,7 +144,7 @@ describe("driver: ← during a trip", () => {
     server.outage = "network";
     await renderApp("driver", "/ride/abc123");
     await screen.findByText("Can't reach CampusRide");
-    expect(screen.queryByText("Log in")).toBeNull();
+    expect(screen.queryByText("Continue with phone number")).toBeNull();
     server.outage = null;
     await fireEvent.press(screen.getByText("Try again"));
     await screen.findByText("Driver trip");
@@ -159,8 +169,8 @@ describe("signing out", () => {
     await screen.findByText("Home screen");
     await act(() => router.navigate("/account"));
     await fireEvent.press(await screen.findByText("Log out"));
-    await screen.findByText("Log in");
-    expect(pathname()).toBe("/auth/phone");
+    await screen.findByText("Continue with phone number");
+    expect(pathname()).toBe("/auth/welcome");
     expect(await onDisk()).toBeNull();
     expect(server.calls).toContain("POST /auth/logout");
   });
@@ -176,7 +186,7 @@ describe("signing out", () => {
     await act(async () => {
       await getMe().catch(() => {});
     });
-    await waitFor(() => expect(pathname()).toBe("/auth/phone"));
+    await waitFor(() => expect(pathname()).toBe("/auth/welcome"));
     expect(await onDisk()).toBeNull();
   });
 });

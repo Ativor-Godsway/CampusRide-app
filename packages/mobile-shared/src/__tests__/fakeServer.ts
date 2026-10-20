@@ -24,6 +24,8 @@ interface StoredToken {
 
 export interface FakeServer {
   user: AuthUser;
+  /** Whether the number has an account: POST /auth/verify-code signs in, or says "newAccount". */
+  registered: boolean;
   /** Simulated time, in ms, for the grace window. */
   now: number;
   /** Every request path, in order ("POST /auth/refresh"). */
@@ -108,6 +110,7 @@ export function installFakeServer(role: AuthUser["role"] = "RIDER"): FakeServer 
 
   const server: FakeServer = {
     user: makeUser(role),
+    registered: true,
     now: 1_000_000,
     calls: [],
     outage: null,
@@ -145,6 +148,10 @@ export function installFakeServer(role: AuthUser["role"] = "RIDER"): FakeServer 
         return [200, { ok: true }];
       case "POST /auth/verify-otp":
         return [200, { verifiedToken: "verified" }];
+      case "POST /auth/verify-code":
+        return server.registered
+          ? [200, { status: "signedIn", ...issueTokens(), user: server.user }]
+          : [200, { status: "newAccount", verifiedToken: "verified" }];
       case "POST /auth/login":
       case "POST /auth/signup":
         return [200, { ...issueTokens(), user: server.user }];

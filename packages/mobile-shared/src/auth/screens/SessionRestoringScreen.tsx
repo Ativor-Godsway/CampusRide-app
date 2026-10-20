@@ -3,9 +3,9 @@ import { useAuth } from "../AuthContext";
 
 /**
  * What a screen shows while the app works out whether this phone is signed
- * in (useAuth().isLoading). Normally a moment's spinner; if the server can't
- * be reached it says so and keeps trying — the person stays signed in, and
- * is never shown the sign-in screen for a connection problem.
+ * in (useAuth().isLoading): white, the logo, a small spinner. If the server
+ * can't be reached it says so and keeps trying — the person stays signed in,
+ * and is never shown the sign-in screen for a connection problem.
  */
 export function SessionRestoringScreen() {
   const { sessionProblem, retrySession } = useAuth();
@@ -18,7 +18,7 @@ export function SessionRestoringScreen() {
           action={<Button label="Try again" variant="secondary" onPress={retrySession} />}
         />
       ) : (
-        <LoadingState />
+        <LoadingState logo />
       )}
     </Screen>
   );

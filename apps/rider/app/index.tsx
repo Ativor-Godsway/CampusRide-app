@@ -8,7 +8,7 @@ export default function Index() {
   if (isLoading) return <SessionRestoringScreen />;
 
   if (!isAuthenticated || !user) {
-    return <Redirect href="/auth/phone" />;
+    return <Redirect href="/auth/welcome" />;
   }
 
   if (user.role !== "RIDER") {

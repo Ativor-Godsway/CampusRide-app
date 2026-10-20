@@ -2,15 +2,17 @@
 import { gpsEnd, tripEndParams } from "@rida/shared";
 import RootLayout from "../../../apps/rider/app/_layout";
 import AuthLayout from "../../../apps/rider/app/auth/_layout";
+import WelcomeRoute from "../../../apps/rider/app/auth/welcome";
 import PhoneRoute from "../../../apps/rider/app/auth/phone";
 import OtpRoute from "../../../apps/rider/app/auth/otp";
+import SignupRoute from "../../../apps/rider/app/auth/signup";
 import TabsLayout from "../../../apps/rider/app/(tabs)/_layout";
 import HomeTab from "../../../apps/rider/app/(tabs)/index";
 import PlanYourRide from "../../../apps/rider/app/ride/location";
 import ChooseRide from "../../../apps/rider/app/ride/type";
 import DesignGallery from "../../../apps/rider/app/dev/design-gallery";
 import { boot, refuse, type Routes, type Scene } from "./core";
-import { place, places, rider, riderRides, riderSearching, roadRoute, zones } from "./data";
+import { driver, place, places, rider, riderRides, riderSearching, roadRoute, zones } from "./data";
 
 /** What every signed-in rider screen asks for. */
 const signedIn: Routes = {
@@ -44,7 +46,7 @@ const otp = (extra: Partial<Scene>): Scene => ({
   routes: { "POST /auth/request-otp": { ok: true } },
   chain: [RootLayout, AuthLayout, OtpRoute],
   pathname: "/auth/otp",
-  params: { phone: rider.phone, purpose: "LOGIN" },
+  params: { phone: rider.phone },
   ...extra,
 });
 /** Choose a ride reopened on Ama's request, still searching, with its cancel sheet open. */
@@ -71,10 +73,23 @@ const scenes: Scene[] = [
     pathname: "/dev/design-gallery",
   },
   {
+    name: "welcome",
+    user: null,
+    chain: [RootLayout, AuthLayout, WelcomeRoute],
+    pathname: "/auth/welcome",
+  },
+  {
     name: "phone",
     user: null,
     chain: [RootLayout, AuthLayout, PhoneRoute],
     pathname: "/auth/phone",
+  },
+  {
+    name: "phone-typed",
+    user: null,
+    chain: [RootLayout, AuthLayout, PhoneRoute],
+    pathname: "/auth/phone",
+    steps: [{ type: "Phone number", text: "548608146" }],
   },
   otp({ name: "otp" }),
   otp({ name: "otp-typing", steps: [{ type: CODE_FIELD, text: "4166" }] }),
@@ -82,10 +97,34 @@ const scenes: Scene[] = [
     name: "otp-error",
     routes: {
       "POST /auth/request-otp": { ok: true },
-      "POST /auth/verify-otp": refuse(400, `Invalid or missing OTP for ${rider.phone}`),
+      "POST /auth/verify-code": refuse(400, `Invalid or missing OTP for ${rider.phone}`),
     },
     steps: [{ type: CODE_FIELD, text: "416641" }],
   }),
+  {
+    name: "name-step",
+    user: null,
+    chain: [RootLayout, AuthLayout, SignupRoute],
+    pathname: "/auth/signup",
+    params: { phone: rider.phone, verifiedToken: "verified" },
+  },
+  {
+    name: "terms-confirmation",
+    note: "an account from before sign-up asked: over every screen until confirmed",
+    user: { ...rider, ageConfirmedAt: null, termsAcceptedAt: null, termsVersion: null },
+    routes: signedIn,
+    chain: [RootLayout, TabsLayout, HomeTab],
+    pathname: "/",
+    position: here,
+  },
+  {
+    name: "role-mismatch",
+    note: "a driver's number signed in to the rider app",
+    user: driver(false),
+    routes: signedIn,
+    chain: [RootLayout, TabsLayout, HomeTab],
+    pathname: "/",
+  },
   {
     name: "home",
     user: rider,
