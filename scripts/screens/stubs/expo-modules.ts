@@ -11,6 +11,11 @@ const granted = { status: "granted", granted: true, canAskAgain: true, expires: 
 
 export const device = { isDevice: false, osName: "iOS", modelName: "iPhone", brand: "Apple" };
 
+/** Whether the scene's rider allowed location (the harness sets it). */
+export const sceneLocation = { allowed: true };
+const refused = { status: "denied", granted: false, canAskAgain: false, expires: "never" };
+const foregroundPermission = () => (sceneLocation.allowed ? granted : refused);
+
 /** Where the phone is: the harness sets it per scene. */
 export const scenePosition = { latitude: 5.6505, longitude: -0.1866 };
 
@@ -87,8 +92,8 @@ const fix = () => ({
 export const location = {
   Accuracy: { Lowest: 1, Low: 2, Balanced: 3, High: 4, Highest: 5, BestForNavigation: 6 },
   ActivityType: { Other: 1, AutomotiveNavigation: 2, Fitness: 3, OtherNavigation: 4 },
-  getForegroundPermissionsAsync: () => resolved(granted),
-  requestForegroundPermissionsAsync: () => resolved(granted),
+  getForegroundPermissionsAsync: () => resolved(foregroundPermission()),
+  requestForegroundPermissionsAsync: () => resolved(foregroundPermission()),
   getBackgroundPermissionsAsync: () => resolved(granted),
   requestBackgroundPermissionsAsync: () => resolved(granted),
   hasServicesEnabledAsync: () => resolved(true),

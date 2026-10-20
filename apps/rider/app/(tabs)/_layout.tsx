@@ -1,11 +1,11 @@
 import { useEffect } from "react";
-import { View } from "react-native";
-import { Redirect, Tabs, useRouter } from "expo-router";
+import { StyleSheet, View } from "react-native";
+import { Redirect, Tabs, usePathname, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
   RoleMismatchScreen,
   colors,
-  shadows,
+  fonts,
   useAuth,
   usePushPermissionPrompt,
   SessionRestoringScreen,
@@ -17,6 +17,7 @@ import { activeRideParams, claimLaunchRideCheck, useActiveRide } from "../../lib
 export default function TabsLayout() {
   const { isLoading, isAuthenticated, user, signOut } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { data: activeRide, isFetched: activeRideChecked } = useActiveRide();
 
   // App launched (or reopened after being killed) mid-ride: go straight to it.
@@ -42,27 +43,29 @@ export default function TabsLayout() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
-      {/* Above the tabs, so it shows on Home, Rides and Account alike. */}
-      {activeRide ? <ActiveRideBanner ride={activeRide} /> : null}
+    <View style={{ flex: 1, backgroundColor: colors.surface }}>
+      {/* Above Rides and Account. Home shows the ride as the first row of its sheet. */}
+      {activeRide && pathname !== "/" ? <ActiveRideBanner ride={activeRide} /> : null}
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.primary[500],
+        tabBarActiveTintColor: colors.green500,
         tabBarInactiveTintColor: colors.ink3,
         // No fixed height/paddingBottom: the tab bar then adds the phone's
         // bottom safe-area inset itself. A hard-coded height of 64 used to
         // override it, pushing labels into the home-indicator / gesture area.
+        // White, a hairline on top, no shadow (docs/design-system.md).
         tabBarStyle: {
-          backgroundColor: colors.white,
-          borderTopColor: colors.border,
-          borderTopWidth: 1,
+          backgroundColor: colors.surface,
+          borderTopColor: colors.line,
+          borderTopWidth: StyleSheet.hairlineWidth,
           paddingTop: 6,
-          ...shadows.sm,
+          elevation: 0,
+          shadowOpacity: 0,
         },
         tabBarLabelStyle: {
-          fontSize: 13,
-          fontWeight: "600",
+          fontFamily: fonts.semibold,
+          fontSize: 12,
         },
       }}
     >

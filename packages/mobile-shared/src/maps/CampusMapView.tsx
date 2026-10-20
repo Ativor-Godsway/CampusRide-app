@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Easing, Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
 import MapView, { Circle, Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
 import type { EdgePadding } from "@rida/shared";
 import { useReduceMotion } from "../design/components/Illustration";
-import { colors, radii, shadows, withAlpha } from "../design/tokens";
+import { colors, radii, spacing, withAlpha } from "../design/tokens";
+import { IconButton } from "../design/components/IconButton";
 import { illustrations } from "../design/illustrations";
 import type { LatLng } from "./projection";
 
@@ -39,6 +39,8 @@ export interface CampusMapViewProps {
   light?: boolean;
   /** Shows a floating "recenter on route" button that re-frames the map to `initialRegion`. */
   showRecenter?: boolean;
+  /** What the recentre button says to screen readers (default: on the route). */
+  recenterLabel?: string;
   /** Rounded corners — set false for a full-bleed map. Defaults to true. */
   rounded?: boolean;
   /**
@@ -80,6 +82,7 @@ export function CampusMapView({
   routeAttribution,
   light,
   showRecenter,
+  recenterLabel = "Recentre the map on the route",
   rounded = true,
   pulseZoneId,
   fitTo,
@@ -176,16 +179,17 @@ export function CampusMapView({
       ) : null}
 
       {showRecenter ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Recenter map on route"
-          onPress={() => {
-            if (!fit(!reduceMotion)) mapRef.current?.animateToRegion(initialRegion, 300);
-          }}
-          style={[styles.recenterButton, { bottom: 12 + controlsBottomInset }]}
-        >
-          <Ionicons name="locate" size={20} color={colors.ink} />
-        </Pressable>
+        // The spec's 44px floating map button, just above whatever covers the map's bottom.
+        <View style={[styles.recenterButton, { bottom: spacing[3] + controlsBottomInset }]}>
+          <IconButton
+            variant="map"
+            icon="locate"
+            accessibilityLabel={recenterLabel}
+            onPress={() => {
+              if (!fit(!reduceMotion)) mapRef.current?.animateToRegion(initialRegion, 300);
+            }}
+          />
+        </View>
       ) : null}
     </View>
   );
@@ -334,14 +338,6 @@ const styles = StyleSheet.create({
   },
   recenterButton: {
     position: "absolute",
-    right: 12,
-    bottom: 12,
-    width: 40,
-    height: 40,
-    borderRadius: radii.full,
-    backgroundColor: colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-    ...shadows.md,
+    right: spacing.gutter,
   },
 });

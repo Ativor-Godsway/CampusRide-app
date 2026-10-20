@@ -12,7 +12,17 @@ import PlanYourRide from "../../../apps/rider/app/ride/location";
 import ChooseRide from "../../../apps/rider/app/ride/type";
 import DesignGallery from "../../../apps/rider/app/dev/design-gallery";
 import { boot, refuse, type Routes, type Scene } from "./core";
-import { driver, place, places, rider, riderRides, riderSearching, roadRoute, zones } from "./data";
+import {
+  driver,
+  place,
+  places,
+  rider,
+  riderActiveRide,
+  riderRides,
+  riderSearching,
+  roadRoute,
+  zones,
+} from "./data";
 
 /** What every signed-in rider screen asks for. */
 const signedIn: Routes = {
@@ -127,8 +137,36 @@ const scenes: Scene[] = [
   },
   {
     name: "home",
+    note: "map: grey box",
     user: rider,
     routes: signedIn,
+    chain: [RootLayout, TabsLayout, HomeTab],
+    pathname: "/",
+    position: here,
+  },
+  {
+    name: "home-no-recents",
+    note: "map: grey box; a first-time rider sees popular places",
+    user: rider,
+    routes: { ...signedIn, "GET /rides/mine": { rides: [], nextCursor: null, hasMore: false } },
+    chain: [RootLayout, TabsLayout, HomeTab],
+    pathname: "/",
+    position: here,
+  },
+  {
+    name: "home-location-off",
+    note: "map: grey box (centred on campus)",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, TabsLayout, HomeTab],
+    pathname: "/",
+    locationOff: true,
+  },
+  {
+    name: "home-active-ride",
+    note: "map: grey box; no live ETA on the web (it comes from the driver's pings)",
+    user: rider,
+    routes: { ...signedIn, "GET /rides/active": { ride: riderActiveRide } },
     chain: [RootLayout, TabsLayout, HomeTab],
     pathname: "/",
     position: here,
