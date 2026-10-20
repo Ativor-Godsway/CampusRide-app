@@ -68,10 +68,13 @@ import {
   rateLimitText,
   BottomSheet,
   BottomSheetTextInput,
+  Chip,
+  IconButton,
+  RideOptionCard,
+  illustrations,
 } from "@rida/mobile-shared";
 import { CancelRideSheet, type SwitchOffer } from "../../components/ride/CancelRideSheet";
 import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
-import { RideOptionCard, type RideOption } from "../../components/ride/RideOptionCard";
 import { SearchingPanel } from "../../components/ride/SearchingPanel";
 import { RideInProgressSheet } from "../../components/ride/RideInProgressSheet";
 import { activeRideParams, useActiveRide } from "../../lib/activeRide";
@@ -81,7 +84,19 @@ import { usePlaces } from "../../lib/chooseRide";
 const STARS = [1, 2, 3, 4, 5];
 
 /** The floating route pill: its height, and its gap below the status bar. */
-const PILL_HEIGHT = 48;
+const PILL_HEIGHT = 44;
+
+/** One ride type on Choose a ride. */
+interface RideOption {
+  type: RideType;
+  title: string;
+  /** One short, TRUE line: "up to 4 riders" / "just you". */
+  subtitle: string;
+  farePesewas: number;
+  /** Formatted with formatCedis, e.g. "GH₵5". */
+  priceLabel: string;
+  badge?: string;
+}
 const PILL_TOP_GAP = spacing.sm;
 /** A first guess at the options sheet's height, until it reports its real one. */
 const OPTIONS_SHEET_ESTIMATE = 360;
@@ -221,20 +236,22 @@ export default function RideTypeScreen() {
   const loneFare = useMemo(() => priceLoneRide().fare, []);
   const fareFor = useCallback((type: RideType) => (type === "SHARED" ? sharedFare : loneFare), [sharedFare, loneFare]);
 
+  // No pickup time here: no driver is matched yet, so there is no real ETA to
+  // show, and we never make one up.
   const options: RideOption[] = useMemo(
     () => [
       {
         type: "SHARED",
         title: "Shared",
-        subtitle: "Up to 4 riders",
+        subtitle: "up to 4 riders",
         farePesewas: sharedFare,
         priceLabel: formatCedis(sharedFare),
-        recommended: true,
+        badge: "Best value",
       },
       {
         type: "LONE",
         title: "Ride alone",
-        subtitle: "Private car",
+        subtitle: "just you",
         farePesewas: loneFare,
         priceLabel: formatCedis(loneFare),
       },
@@ -639,66 +656,76 @@ export default function RideTypeScreen() {
           maxHeightRatio={0.85}
           onChange={onSheetChange}
           contentStyle={styles.optionsSheet}
-          // The Cash + Request bar stays pinned at the bottom, above the
-          // keyboard while the note is being typed.
+          // The one action, pinned at the bottom (above the keyboard while the
+          // note is being typed).
           footer={
-        <View style={styles.requestBar}>
-          {/* Cash-only launch (Phase 1): MoMo is intentionally not
-              offered — a MOMO ride couldn't be settled while digital
-              payment is off server-side. A statement, not a picker. */}
-          <View
-            style={styles.cash}
-            accessible
-            accessibilityLabel="Payment: cash. Pay your driver at the end of the trip."
-          >
-            <Ionicons name="cash-outline" size={20} color={colors.primary[500]} />
-            <Text variant="bodyMedium" style={styles.cashText}>
-              Cash
-            </Text>
-          </View>
-          <View style={styles.requestButton}>
             <Button
               label={`Request ${selectedOption.title}`}
-              size="lg"
               onPress={() => void handleSubmit()}
               loading={submitting}
               accessibilityHint={`${spokenCedis(selectedOption.farePesewas)}, paid in cash`}
             />
-          </View>
-        </View>
           }
         >
-            <Text variant="h3" accessibilityRole="header" style={styles.optionsTitle}>
-              Choose a ride
-            </Text>
-            <View style={styles.optionList} accessibilityRole="radiogroup" accessibilityLabel="Choose a ride">
-              {options.map((option) => (
-                <RideOptionCard
-                  key={option.type}
-                  option={option}
-                  selected={selectedType === option.type}
-                  onSelect={() => {
-                    if (option.type !== selectedType) haptics.selection();
-                    setSelectedType(option.type);
-                  }}
-                />
-              ))}
-            </View>
+          <Text variant="title2" accessibilityRole="header">
+            Choose a ride
+          </Text>
+          <View style={styles.optionList} accessibilityRole="radiogroup" accessibilityLabel="Choose a ride">
+            {options.map((option) => (
+              <RideOptionCard
+                key={option.type}
+                image={option.type === "SHARED" ? illustrations.carShared : illustrations.carStandard}
+                title={option.title}
+                badge={option.badge}
+                subtitle={option.subtitle}
+                price={option.priceLabel}
+                selected={selectedType === option.type}
+                // The card plays the selection haptic itself.
+                onPress={() => setSelectedType(option.type)}
+              />
+            ))}
+          </View>
 
-            <PickupDetails
-              pickup={pickupEnd}
-              adjusting={adjusting}
-              hint={adjustHint}
-              onToggleAdjust={() => {
+          <View style={styles.optionChips}>
+            {/* Cash-only launch (Phase 1): MoMo is intentionally not offered
+                — a MOMO ride couldn't be settled while digital payment is
+                off server-side. A statement, not a picker. */}
+            <Chip
+              kind="choice"
+              icon="cash-outline"
+              label="Cash"
+              accessibilityRole="text"
+              accessibilityLabel="Payment: cash. Pay your driver at the end of the trip."
+            />
+            <Chip
+              kind="choice"
+              icon="locate-outline"
+              label="Exact pickup"
+              selected={adjusting}
+              accessibilityLabel={adjusting ? "Done moving the pickup pin" : "Move the pickup pin to the exact spot"}
+              onPress={() => {
                 setAdjusting((on) => !on);
                 setAdjustHint(null);
               }}
-              note={note}
-              noteOpen={noteOpen}
-              onOpenNote={() => setNoteOpen(true)}
-              onNoteChange={setNote}
             />
+            <Chip
+              kind="choice"
+              icon="chatbox-outline"
+              label={note.trim() ? "Note added" : "Note"}
+              selected={Boolean(note.trim())}
+              accessibilityLabel={note.trim() ? `Note for your driver: ${note.trim()}. Edit it` : "Add a note for your driver"}
+              onPress={() => setNoteOpen(true)}
+            />
+          </View>
 
+          <PickupExtras
+            adjusting={adjusting}
+            hint={adjustHint}
+            note={note}
+            noteOpen={noteOpen}
+            onNoteChange={setNote}
+            onNoteDone={() => setNoteOpen(false)}
+          />
         </BottomSheet>
       ) : (
       <BottomSheet
@@ -835,59 +862,33 @@ export default function RideTypeScreen() {
 // ── Pickup pin + note ─────────────────────────────────────────────────────────
 
 /**
- * Under the ride options: where exactly the driver will stop ("Move pin to
- * the exact spot" lets the rider drag it, within 200 m) and an optional note
- * for the driver ("At the main gate, blue shirt").
+ * Under the chips, only when wanted: what "Exact pickup" means while the pin
+ * can be dragged (within 200 m), and the note for the driver ("At the main
+ * gate, blue shirt") once "Note" is tapped.
  */
-function PickupDetails({
-  pickup,
+function PickupExtras({
   adjusting,
   hint,
-  onToggleAdjust,
   note,
   noteOpen,
-  onOpenNote,
   onNoteChange,
+  onNoteDone,
 }: {
-  pickup: TripEnd;
   adjusting: boolean;
   hint: string | null;
-  onToggleAdjust: () => void;
   note: string;
   noteOpen: boolean;
-  onOpenNote: () => void;
   onNoteChange: (note: string) => void;
+  onNoteDone: () => void;
 }) {
+  if (!adjusting && !noteOpen) return null;
   return (
-    <View style={styles.pickupDetails}>
-      <View style={styles.pickupRow}>
-        <View style={styles.pickupDotSmall} />
-        <View style={styles.pickupText}>
-          <Text variant="caption" color="muted">
-            Pickup
-          </Text>
-          <Text variant="bodyMedium" numberOfLines={1}>
-            {pickup.label}
-          </Text>
-        </View>
-      </View>
-      <Pressable
-        onPress={onToggleAdjust}
-        accessibilityRole="button"
-        hitSlop={6}
-        style={styles.noteLink}
-      >
-        <Ionicons name={adjusting ? "checkmark-circle-outline" : "move-outline"} size={16} color={colors.primary[500]} />
-        <Text variant="bodySmall" color="primary" style={styles.linkText}>
-          {adjusting ? "Done moving the pin" : "Move pin to the exact spot"}
-        </Text>
-      </Pressable>
+    <View style={styles.pickupExtras}>
       {adjusting ? (
-        <Text variant="caption" color="muted" accessibilityLiveRegion="polite">
+        <Text variant="subhead" color="secondary" accessibilityLiveRegion="polite">
           {hint ?? "Drag the green pin to the exact spot — up to 200 m from here."}
         </Text>
       ) : null}
-
       {noteOpen ? (
         <View>
           {/* The sheet's own input: typing moves the sheet above the keyboard. */}
@@ -901,19 +902,13 @@ function PickupDetails({
             accessibilityLabel="Note for driver"
             autoFocus
             returnKeyType="done"
+            onSubmitEditing={onNoteDone}
           />
-          <Text variant="caption" color="muted" style={styles.noteCount}>
+          <Text variant="caption" color="tertiary" style={styles.noteCount}>
             {note.length}/{PICKUP_NOTE_MAX_LENGTH}
           </Text>
         </View>
-      ) : (
-        <Pressable onPress={onOpenNote} accessibilityRole="button" style={styles.noteLink} hitSlop={6}>
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.primary[500]} />
-          <Text variant="bodySmall" color="primary" style={styles.linkText}>
-            Add a note for your driver
-          </Text>
-        </Pressable>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -935,34 +930,31 @@ function RoutePill({
   pickupZoneName: string;
   dropoffZoneName: string;
   onBack: () => void;
+  /** Tapping the route goes back to change it (only before the ride is requested). */
   onEdit?: () => void;
 }) {
+  const route = (
+    <Text variant="bodyStrong" numberOfLines={1} style={styles.pillRoute}>
+      {pickupZoneName} → {dropoffZoneName}
+    </Text>
+  );
   return (
-    <View style={[styles.pill, { top }]}>
-      <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Back" hitSlop={6} style={styles.pillBack}>
-        <Ionicons name="arrow-back" size={22} color={colors.ink} />
-      </Pressable>
-      <Text
-        variant="bodyMedium"
-        numberOfLines={1}
-        style={styles.pillRoute}
-        accessibilityLabel={`From ${pickupZoneName} to ${dropoffZoneName}`}
-      >
-        {pickupZoneName} → {dropoffZoneName}
-      </Text>
+    <View style={[styles.topBar, { top }]} pointerEvents="box-none">
+      <IconButton variant="map" icon="arrow-back" accessibilityLabel="Back" onPress={onBack} />
       {onEdit ? (
         <Pressable
           onPress={onEdit}
           accessibilityRole="button"
-          accessibilityLabel="Edit route"
-          hitSlop={6}
-          style={styles.pillEdit}
+          accessibilityLabel={`From ${pickupZoneName} to ${dropoffZoneName}. Change the route`}
+          style={({ pressed }) => [styles.pill, pressed && styles.pillPressed]}
         >
-          <Text variant="bodyMedium" color="primary" style={styles.pillEditText}>
-            Edit
-          </Text>
+          {route}
         </Pressable>
-      ) : null}
+      ) : (
+        <View style={styles.pill} accessible accessibilityLabel={`From ${pickupZoneName} to ${dropoffZoneName}`}>
+          {route}
+        </View>
+      )}
     </View>
   );
 }
@@ -1430,23 +1422,13 @@ function CancelledContent({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  pickupDetails: {
-    gap: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colors.border,
-  },
-  pickupRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  pickupDotSmall: { width: 10, height: 10, borderRadius: radii.full, backgroundColor: colors.primary[500] },
-  pickupText: { flex: 1, minWidth: 0 },
-  linkText: { fontWeight: typography.weight.semibold },
-  noteLink: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingVertical: spacing.xs },
+  // A filled field, as Input (docs/design-system.md): surface-2, radius 14.
   noteInput: {
-    borderWidth: 1,
-    borderColor: colors.border,
+    minHeight: 48,
     borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface2,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
     fontSize: typography.size.md,
     color: colors.ink,
   },
@@ -1495,31 +1477,30 @@ const styles = StyleSheet.create({
   sheetContent: { gap: spacing.lg },
   // ── Options
   optionsSheet: { gap: spacing.md },
-  optionsTitle: { paddingHorizontal: spacing.xs, marginBottom: -spacing.xs },
   optionList: { gap: spacing.xs },
-  requestBar: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  cash: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingHorizontal: spacing.xs },
-  cashText: { fontWeight: typography.weight.semibold },
-  requestButton: { flex: 1 },
+  optionChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing[2] },
+  pickupExtras: { gap: spacing[2] },
   // ── Route pill
-  pill: {
+  topBar: {
     position: "absolute",
-    left: spacing.lg,
-    right: spacing.lg,
-    height: PILL_HEIGHT,
+    left: spacing.gutter,
+    right: spacing.gutter,
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
-    paddingLeft: spacing.xs,
-    paddingRight: spacing.sm,
-    borderRadius: radii.full,
-    backgroundColor: colors.white,
-    ...shadows.md,
+    gap: spacing[2],
   },
-  pillBack: { width: 40, height: 40, alignItems: "center", justifyContent: "center" },
-  pillRoute: { flex: 1, fontWeight: typography.weight.semibold },
-  pillEdit: { minHeight: 40, justifyContent: "center", paddingHorizontal: spacing.sm },
-  pillEditText: { fontWeight: typography.weight.bold },
+  // The white route pill (mockup 05), as tall as the round back button beside it.
+  pill: {
+    flexShrink: 1,
+    height: PILL_HEIGHT,
+    justifyContent: "center",
+    paddingHorizontal: spacing[4],
+    borderRadius: radii.full,
+    backgroundColor: colors.surface,
+    ...shadows.float,
+  },
+  pillPressed: { backgroundColor: colors.surface2 },
+  pillRoute: { flexShrink: 1 },
   resumeSkeleton: { gap: spacing.lg, paddingTop: spacing.md },
   centerSelf: { alignSelf: "center" },
   // ── State panels

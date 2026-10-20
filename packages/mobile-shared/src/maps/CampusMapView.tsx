@@ -142,31 +142,23 @@ export function CampusMapView({
           />
         ) : null}
 
-        {zones.map((zone) =>
-          zone.role ? (
-            <ArtMarker
-              key={`${zone.id}:${zone.version ?? 0}`}
-              zone={zone}
-              onPress={() => onZonePress?.(zone.id)}
-              draggable={zone.id === draggableZoneId}
-              onDragEnd={(point) => onZoneDragEnd?.(zone.id, point)}
-            />
-          ) : (
-            <Marker
-              key={zone.id}
-              coordinate={{ latitude: zone.latitude, longitude: zone.longitude }}
-              title={zone.label}
-              pinColor={colors.accent[500]}
-              onPress={() => onZonePress?.(zone.id)}
-            />
-          ),
-        )}
+        {/* Every marker is a 3D render (docs/design-system.md, Iconography): a
+            place without a role gets the drop-off pin. */}
+        {zones.map((zone) => (
+          <ArtMarker
+            key={`${zone.id}:${zone.version ?? 0}`}
+            zone={zone}
+            onPress={() => onZonePress?.(zone.id)}
+            draggable={zone.id === draggableZoneId}
+            onDragEnd={(point) => onZoneDragEnd?.(zone.id, point)}
+          />
+        ))}
 
         {routeLine && routeLine.length >= 2 ? (
           <Polyline
             coordinates={routeLine}
-            strokeColor={colors.primary[500]}
-            strokeWidth={routeIsRoad ? 4 : 3}
+            strokeColor={colors.mapRoute}
+            strokeWidth={5}
             lineDashPattern={routeIsRoad ? undefined : [8, 6]}
           />
         ) : null}
@@ -206,7 +198,8 @@ function bearingBetween(a: LatLng, b: LatLng): number {
   return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
 }
 
-const PIN_SIZE = 46;
+/** The 3D pins at 44pt, tip on the point (anchor y 0.94). */
+const PIN_SIZE = 44;
 const CAR_SIZE = 52;
 
 /**
