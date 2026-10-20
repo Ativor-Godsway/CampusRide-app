@@ -1,11 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
-import BottomSheet, {
-  BottomSheetBackdrop,
-  BottomSheetScrollView,
-  BottomSheetTextInput,
-  type BottomSheetBackdropProps,
-} from "@gorhom/bottom-sheet";
+import { useEffect, useState } from "react";
+import { Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   RIDER_CANCEL_NOTE_MAX,
@@ -15,6 +9,8 @@ import {
   type RideType,
 } from "@rida/shared";
 import {
+  BottomSheet,
+  BottomSheetTextInput,
   Button,
   FadeIn,
   Illustration,
@@ -67,184 +63,148 @@ export function CancelRideSheet({
   onSwitch: (toType: RideType) => void;
   onConfirmCancel: (reason: RiderCancelReason, note: string) => void;
 }) {
-  const sheetRef = useRef<BottomSheet>(null);
-  const { height } = useWindowDimensions();
   const [step, setStep] = useState<Step>("confirm");
   const [reason, setReason] = useState<RiderCancelReason | null>(null);
   const [note, setNote] = useState("");
 
+  // A fresh start every time it opens.
   useEffect(() => {
-    if (visible) {
-      // A fresh start every time it opens.
-      setStep("confirm");
-      setReason(null);
-      setNote("");
-      sheetRef.current?.expand();
-    } else {
-      sheetRef.current?.close();
-    }
+    if (!visible) return;
+    setStep("confirm");
+    setReason(null);
+    setNote("");
   }, [visible]);
-
-  const renderBackdrop = useCallback(
-    (props: BottomSheetBackdropProps) => (
-      <BottomSheetBackdrop
-        {...props}
-        appearsOnIndex={0}
-        disappearsOnIndex={-1}
-        pressBehavior="close"
-      />
-    ),
-    [],
-  );
 
   const busy = switching || cancelling;
   const keepLabel = stage === "searching" ? "Keep waiting" : "Keep my ride";
 
   return (
+    // One sheet, two steps: the reason step replaces the confirm step in
+    // place, never a second sheet over a dimmed one.
     <BottomSheet
-      ref={sheetRef}
-      index={-1}
-      enablePanDownToClose={!busy}
-      enableDynamicSizing
-      maxDynamicContentSize={height * 0.9}
-      onClose={onDismiss}
-      backdropComponent={renderBackdrop}
-      backgroundStyle={styles.background}
-      handleIndicatorStyle={styles.handle}
-      keyboardBehavior="interactive"
-      keyboardBlurBehavior="restore"
-      android_keyboardInputMode="adjustResize"
+      modal
+      scrollable
+      visible={visible}
+      onDismiss={onDismiss}
+      dismissible={!busy}
+      accessibilityLabel="Cancel this ride"
     >
-      <BottomSheetScrollView contentContainerStyle={styles.content} accessibilityViewIsModal>
-        {step === "confirm" ? (
-          <FadeIn key="confirm" style={styles.step}>
-            <Text variant="h2" accessibilityRole="header">
-              Cancel this ride?
-            </Text>
+      {step === "confirm" ? (
+        <FadeIn key="confirm" style={styles.step}>
+          <Text variant="h2" accessibilityRole="header">
+            Cancel this ride?
+          </Text>
 
-            {switchOffer ? (
-              <PressableScale
-                onPress={() => onSwitch(switchOffer.toType)}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel={`${switchOffer.label}, ${switchOffer.priceSpoken}`}
-                accessibilityState={{ busy: switching, disabled: busy }}
-                style={styles.switchRow}
-              >
-                <Illustration
-                  name={switchOffer.toType === "LONE" ? "carStandard" : "carShared"}
-                  width={56}
-                />
-                <Text variant="bodyMedium" style={styles.switchLabel}>
-                  {switchOffer.label}
-                </Text>
-                <Text style={styles.switchPrice} numberOfLines={1}>
-                  {switchOffer.priceLabel}
-                </Text>
-                <Ionicons name="swap-horizontal" size={20} color={colors.primary[500]} />
-              </PressableScale>
-            ) : null}
+          {switchOffer ? (
+            <PressableScale
+              onPress={() => onSwitch(switchOffer.toType)}
+              disabled={busy}
+              accessibilityRole="button"
+              accessibilityLabel={`${switchOffer.label}, ${switchOffer.priceSpoken}`}
+              accessibilityState={{ busy: switching, disabled: busy }}
+              style={styles.switchRow}
+            >
+              <Illustration
+                name={switchOffer.toType === "LONE" ? "carStandard" : "carShared"}
+                width={56}
+              />
+              <Text variant="bodyMedium" style={styles.switchLabel}>
+                {switchOffer.label}
+              </Text>
+              <Text style={styles.switchPrice} numberOfLines={1}>
+                {switchOffer.priceLabel}
+              </Text>
+              <Ionicons name="swap-horizontal" size={20} color={colors.primary[500]} />
+            </PressableScale>
+          ) : null}
 
-            <View style={styles.actions}>
-              <Button
-                label={keepLabel}
-                size="lg"
-                onPress={() => sheetRef.current?.close()}
-                disabled={busy}
+          <View style={styles.actions}>
+            <Button label={keepLabel} size="lg" onPress={onDismiss} disabled={busy} />
+            <Button
+              label="Cancel ride"
+              variant="dangerSecondary"
+              onPress={() => setStep("reason")}
+              disabled={busy}
+            />
+          </View>
+        </FadeIn>
+      ) : (
+        <FadeIn key="reason" style={styles.step}>
+          <Text variant="h2" accessibilityRole="header">
+            Why are you cancelling?
+          </Text>
+
+          <View style={styles.chips} accessibilityRole="radiogroup">
+            {riderCancelReasonsFor(stage).map((value) => {
+              const selected = reason === value;
+              return (
+                <Pressable
+                  key={value}
+                  onPress={() => {
+                    haptics.selection();
+                    setReason(value);
+                  }}
+                  disabled={busy}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: selected, disabled: busy }}
+                  accessibilityLabel={RIDER_CANCEL_REASON_LABELS[value]}
+                  style={({ pressed }) => [
+                    styles.chip,
+                    selected && styles.chipSelected,
+                    pressed && styles.chipPressed,
+                  ]}
+                >
+                  <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
+                    {RIDER_CANCEL_REASON_LABELS[value]}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          {reason === "OTHER" ? (
+            <View style={styles.noteWrap}>
+              <BottomSheetTextInput
+                value={note}
+                onChangeText={setNote}
+                placeholder="Tell us more (optional)"
+                placeholderTextColor={colors.ink3}
+                maxLength={RIDER_CANCEL_NOTE_MAX}
+                multiline
+                editable={!busy}
+                accessibilityLabel="Tell us more, optional"
+                style={styles.note}
               />
-              <Button
-                label="Cancel ride"
-                variant="dangerSecondary"
-                onPress={() => setStep("reason")}
-                disabled={busy}
-              />
+              <Text variant="caption" color="muted" style={styles.counter}>
+                {note.length}/{RIDER_CANCEL_NOTE_MAX}
+              </Text>
             </View>
-          </FadeIn>
-        ) : (
-          <FadeIn key="reason" style={styles.step}>
-            <Text variant="h2" accessibilityRole="header">
-              Why are you cancelling?
-            </Text>
+          ) : null}
 
-            <View style={styles.chips} accessibilityRole="radiogroup">
-              {riderCancelReasonsFor(stage).map((value) => {
-                const selected = reason === value;
-                return (
-                  <Pressable
-                    key={value}
-                    onPress={() => {
-                      haptics.selection();
-                      setReason(value);
-                    }}
-                    disabled={busy}
-                    accessibilityRole="radio"
-                    accessibilityState={{ checked: selected, disabled: busy }}
-                    accessibilityLabel={RIDER_CANCEL_REASON_LABELS[value]}
-                    style={({ pressed }) => [
-                      styles.chip,
-                      selected && styles.chipSelected,
-                      pressed && styles.chipPressed,
-                    ]}
-                  >
-                    <Text style={[styles.chipText, selected && styles.chipTextSelected]}>
-                      {RIDER_CANCEL_REASON_LABELS[value]}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            {reason === "OTHER" ? (
-              <View style={styles.noteWrap}>
-                <BottomSheetTextInput
-                  value={note}
-                  onChangeText={setNote}
-                  placeholder="Tell us more (optional)"
-                  placeholderTextColor={colors.ink3}
-                  maxLength={RIDER_CANCEL_NOTE_MAX}
-                  multiline
-                  editable={!busy}
-                  accessibilityLabel="Tell us more, optional"
-                  style={styles.note}
-                />
-                <Text variant="caption" color="muted" style={styles.counter}>
-                  {note.length}/{RIDER_CANCEL_NOTE_MAX}
-                </Text>
-              </View>
-            ) : null}
-
-            <View style={styles.actions}>
-              <Button
-                label="Cancel ride"
-                variant="danger"
-                size="lg"
-                onPress={() => reason && onConfirmCancel(reason, note)}
-                disabled={!reason}
-                loading={cancelling}
-                accessibilityHint={reason ? undefined : "Pick a reason first"}
-              />
-              <Button
-                label="Back"
-                variant="neutral"
-                onPress={() => setStep("confirm")}
-                disabled={cancelling}
-              />
-            </View>
-          </FadeIn>
-        )}
-      </BottomSheetScrollView>
+          <View style={styles.actions}>
+            <Button
+              label="Cancel ride"
+              variant="danger"
+              size="lg"
+              onPress={() => reason && onConfirmCancel(reason, note)}
+              disabled={!reason}
+              loading={cancelling}
+              accessibilityHint={reason ? undefined : "Pick a reason first"}
+            />
+            <Button
+              label="Back"
+              variant="neutral"
+              onPress={() => setStep("confirm")}
+              disabled={cancelling}
+            />
+          </View>
+        </FadeIn>
+      )}
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  background: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-  },
-  handle: { backgroundColor: colors.borderStrong, width: 40, height: 5 },
-  content: { paddingHorizontal: spacing.xl, paddingTop: spacing.xs, paddingBottom: spacing["2xl"] },
   step: { gap: spacing.lg },
   switchRow: {
     flexDirection: "row",

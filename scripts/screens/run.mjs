@@ -134,13 +134,42 @@ async function build(app) {
 const WIDTH = 390;
 const HEIGHT = 844;
 
+/** The element with this accessibility label, or else this visible text. */
+async function find(tab, label) {
+  const byLabel = await tab.$(`[aria-label=${JSON.stringify(label)}]`);
+  if (byLabel) return byLabel;
+  return tab.waitForSelector(`::-p-text(${label})`, { timeout: 5_000 });
+}
+
+/** A scene step (harness/core.tsx, Step): press, type, or wait. */
+async function runStep(tab, step) {
+  if ("wait" in step) {
+    await new Promise((r) => setTimeout(r, step.wait));
+  } else if ("press" in step) {
+    await (await find(tab, step.press)).click();
+    await new Promise((r) => setTimeout(r, 500));
+  } else if ("type" in step) {
+    const field = await find(tab, step.type);
+    await field.focus();
+    await tab.keyboard.type(step.text, { delay: 30 });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+
 async function capture(browser, app, dir) {
   const index = pathToFileURL(path.join(dir, "index.html")).href;
   // The scene list: index.html with no scene named renders nothing.
   const lister = await browser.newPage();
+  const loadErrors = [];
+  lister.on("pageerror", (err) => loadErrors.push(String(err)));
   await lister.goto(index, { waitUntil: "load" });
-  const scenes = await lister.evaluate(() => window.__screens.list());
+  const scenes = await lister.evaluate(() => window.__screens?.list() ?? null);
   await lister.close();
+  if (!scenes) {
+    throw new Error(
+      `The ${app} bundle failed to start:\n  ${loadErrors.join("\n  ") || "(no error reported)"}`,
+    );
+  }
 
   const results = [];
   for (const scene of scenes) {
@@ -161,6 +190,15 @@ async function capture(browser, app, dir) {
         errors.push("[screens] timed out waiting for the scene to settle");
       });
     await tab.evaluate(() => document.fonts.ready);
+
+    for (const step of scene.steps ?? []) {
+      try {
+        await runStep(tab, step);
+      } catch (err) {
+        errors.push(`[screens] step ${JSON.stringify(step)} failed: ${String(err).split("\n")[0]}`);
+      }
+    }
+    if (scene.steps?.length) await new Promise((r) => setTimeout(r, 800));
 
     if (scene.full) {
       // Grow the window until the longest scroll view shows all its content.

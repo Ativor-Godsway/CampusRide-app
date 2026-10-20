@@ -48,8 +48,7 @@ describe("signing in", () => {
     await screen.findByText("Create an account");
     await fireEvent.changeText(screen.getByLabelText("Phone number"), "0241234567");
     await fireEvent.press(screen.getByText("Create an account"));
-    await fireEvent.changeText(await screen.findByPlaceholderText("000000"), "123456");
-    await fireEvent.press(screen.getByText("Continue"));
+    await fireEvent.changeText(await screen.findByLabelText("Verification code, 6 digits"), "123456");
     await fireEvent.changeText(await screen.findByPlaceholderText("Full name"), "Ama Test");
     await fireEvent.press(screen.getByRole("checkbox"));
     await fireEvent.press(screen.getByText("Finish"));

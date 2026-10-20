@@ -38,3 +38,11 @@ jest.mock("@sentry/react-native", () => ({
   setTags: jest.fn(),
   wrap: <T>(component: T) => component,
 }));
+
+// Reanimated and gesture-handler drive the bottom sheet, the pulse and the
+// slider natively; their own jest stand-ins run them in plain JS.
+/* eslint-disable @typescript-eslint/no-require-imports -- jest.mock factories and gesture-handler's documented setup */
+jest.mock("react-native-worklets", () => require("react-native-worklets/src/mock"));
+jest.mock("react-native-reanimated", () => require("react-native-reanimated/mock"));
+require("react-native-gesture-handler/jestSetup");
+/* eslint-enable @typescript-eslint/no-require-imports */

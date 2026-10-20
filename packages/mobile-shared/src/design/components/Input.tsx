@@ -150,6 +150,7 @@ const styles = StyleSheet.create({
     borderColor: colors.green500,
   },
   fieldError: {
+    backgroundColor: colors.surface,
     borderColor: colors.red600,
   },
   input: {

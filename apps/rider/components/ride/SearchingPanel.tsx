@@ -122,7 +122,7 @@ export function SearchingPanel({
 
       <SafetyTipCard />
 
-      <Button label="Cancel request" variant="secondary" onPress={onCancel} />
+      <Button label="Cancel request" variant="danger" onPress={onCancel} />
     </View>
   );
 }

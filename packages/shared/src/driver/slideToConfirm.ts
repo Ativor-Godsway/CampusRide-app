@@ -11,8 +11,8 @@
 
 /** Share of the track the knob must reach to count. */
 export const SLIDE_COMPLETE_AT = 0.85;
-/** Holding the knob this long confirms too. */
-export const LONG_PRESS_CONFIRM_MS = 1_000;
+/** Holding the knob this long confirms too (docs/design-system.md, SlideToConfirm). */
+export const LONG_PRESS_CONFIRM_MS = 600;
 
 /** Where the knob is (0 = start, 1 = end) for a drag of `dx` points along `travel` points of track. */
 export function slideProgress(dx: number, travel: number): number {

@@ -181,8 +181,7 @@ export async function signInThroughScreens(fireEvent: typeof import("expo-router
   await screen.findByText("Log in");
   await fireEvent.changeText(screen.getByLabelText("Phone number"), "0241234567");
   await fireEvent.press(screen.getByText("Log in"));
-  await screen.findByPlaceholderText("000000");
-  await fireEvent.changeText(screen.getByPlaceholderText("000000"), "123456");
-  await fireEvent.press(screen.getByText("Continue"));
+  // The 6th digit checks the code: there is no Continue button.
+  await fireEvent.changeText(await screen.findByLabelText("Verification code, 6 digits"), "123456");
   await screen.findByText("Home screen");
 }
