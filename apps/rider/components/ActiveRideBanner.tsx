@@ -1,22 +1,20 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Animated, Easing, StyleSheet, View } from "react-native";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { activeRideStatusLine, estimateEtaMinutes, pickupPin, stopLabel, stopPoint } from "@rida/shared";
 import {
   PressableScale,
   Text,
   colors,
   radii,
   spacing,
-  subscribeToRide,
-  useDriverLocation,
   useReduceMotion,
   withAlpha,
   type ActiveRideSummary,
 } from "@rida/mobile-shared";
 import { activeRideParams } from "../lib/activeRide";
+import { useActiveRideStatus } from "../lib/activeRideStatus";
 
 /** A soft pulsing dot: "this is live". Still with Reduce Motion on. */
 function LiveDot() {
@@ -56,41 +54,20 @@ function LiveDot() {
 }
 
 /**
- * The "you have a ride going on" bar across the top of every tab. Tapping it
- * reopens the ride screen. Rendered by the tabs layout, so it can't be
- * missed whichever tab the rider is on.
+ * The "you have a ride going on" bar across the top of the Rides and Account
+ * tabs (Home shows it as the first row of its sheet). Tapping it reopens the
+ * ride screen. Rendered by the tabs layout.
  */
 export function ActiveRideBanner({ ride }: { ride: ActiveRideSummary }) {
   const router = useRouter();
-  const [driverAt, setDriverAt] = useState<{ latitude: number; longitude: number } | null>(null);
-  const waitingForDriver = ride.status === "MATCHED" || ride.status === "ARRIVED";
-
-  // Driver location pings arrive on the ride's socket room. The ride screen
-  // leaves that room when it closes, so re-join whenever the tabs are back
-  // in view (joining twice is harmless; the server just keeps us in).
-  useFocusEffect(
-    useCallback(() => {
-      if (waitingForDriver) subscribeToRide(ride.id);
-    }, [ride.id, waitingForDriver]),
-  );
-  useDriverLocation(waitingForDriver ? ride.id : undefined, (payload) =>
-    setDriverAt({ latitude: payload.lat, longitude: payload.lng }),
-  );
-
-  const status = activeRideStatusLine({
-    status: ride.status,
-    type: ride.type,
-    legStatus: ride.legStatus,
-    driverFirstName: ride.driver?.firstName,
-    etaMinutes: waitingForDriver ? estimateEtaMinutes(driverAt, stopPoint(pickupPin(ride), ride.pickupZone)) : null,
-  });
+  const { line: status, destination } = useActiveRideStatus(ride);
 
   return (
     <SafeAreaView edges={["top"]} style={styles.safeArea}>
       <PressableScale
         onPress={() => router.push({ pathname: "/ride/type", params: activeRideParams(ride) })}
         accessibilityRole="button"
-        accessibilityLabel={`${status}. Ride to ${stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}. Open your ride.`}
+        accessibilityLabel={`${status}. Ride to ${destination}. Open your ride.`}
         style={styles.banner}
       >
         <LiveDot />
@@ -99,7 +76,7 @@ export function ActiveRideBanner({ ride }: { ride: ActiveRideSummary }) {
             {status}
           </Text>
           <Text variant="bodySmall" style={styles.route} numberOfLines={1}>
-            To {stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}
+            To {destination}
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={20} color={colors.white} />

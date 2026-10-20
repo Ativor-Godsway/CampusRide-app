@@ -9,7 +9,7 @@ import { AppRegistry } from "react-native";
 import type { AxiosAdapter, AxiosResponse } from "axios";
 import { api, rawApi, type AuthUser } from "@rida/mobile-shared";
 import { RouterScene } from "../stubs/expo-router";
-import { scenePosition, secureStoreData } from "../stubs/expo-modules";
+import { sceneLocation, scenePosition, secureStoreData } from "../stubs/expo-modules";
 
 /**
  * "GET /zones" → the response body (or a function of the request body).
@@ -43,6 +43,8 @@ export interface Scene {
   pathname: string;
   params?: Record<string, string>;
   position?: { latitude: number; longitude: number };
+  /** The rider refused location (default: allowed). */
+  locationOff?: boolean;
   /** How long to let it settle before the steps and the screenshot (ms). */
   settleMs?: number;
   /** Taps and typing (by accessibility label, or visible text) before the screenshot. */
@@ -112,6 +114,7 @@ export function boot(scenes: Scene[]) {
 
   (globalThis as { __DEV__?: boolean }).__DEV__ = Boolean(scene.dev);
   if (scene.position) Object.assign(scenePosition, scene.position);
+  sceneLocation.allowed = !scene.locationOff;
   installServer(scene.user, scene.routes ?? {});
   if (scene.user) {
     secureStoreData.set("rida.session.refreshToken", "refresh-screens");

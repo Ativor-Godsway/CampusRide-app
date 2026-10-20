@@ -174,57 +174,68 @@ async function capture(browser, app, dir) {
   const results = [];
   for (const scene of scenes) {
     if (only && !only.includes(scene.name)) continue;
-    const errors = [];
-    const tab = await browser.newPage();
-    tab.on("console", (msg) => {
-      const text = msg.text();
-      if (msg.type() === "error" || text.startsWith("[screens]")) errors.push(text);
-    });
-    tab.on("pageerror", (err) => errors.push(String(err)));
-    await tab.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 2 });
-    await tab.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
-    await tab.goto(`${index}#${scene.name}`, { waitUntil: "load" });
-    await tab
-      .waitForFunction(() => window.__screens?.ready === true, { timeout: 20_000 })
-      .catch(() => {
-        errors.push("[screens] timed out waiting for the scene to settle");
-      });
-    await tab.evaluate(() => document.fonts.ready);
-
-    for (const step of scene.steps ?? []) {
-      try {
-        await runStep(tab, step);
-      } catch (err) {
-        errors.push(`[screens] step ${JSON.stringify(step)} failed: ${String(err).split("\n")[0]}`);
-      }
+    // A page can die when the machine is busy ("detached Frame"): try once more.
+    try {
+      results.push(await captureScene(browser, app, index, scene));
+    } catch (err) {
+      console.log(`  … ${scene.name}: ${String(err).split("\n")[0]}; trying again`);
+      results.push(await captureScene(browser, app, index, scene));
     }
-    if (scene.steps?.length) await new Promise((r) => setTimeout(r, 800));
-
-    if (scene.full) {
-      // Grow the window until the longest scroll view shows all its content.
-      for (let i = 0; i < 3; i++) {
-        const extra = await tab.evaluate(() => {
-          let most = 0;
-          for (const el of document.querySelectorAll("*")) {
-            const style = getComputedStyle(el);
-            if (/(auto|scroll)/.test(style.overflowY))
-              most = Math.max(most, el.scrollHeight - el.clientHeight);
-          }
-          return most;
-        });
-        if (extra <= 1) break;
-        const { height } = tab.viewport();
-        await tab.setViewport({ width: WIDTH, height: height + extra, deviceScaleFactor: 2 });
-        await new Promise((r) => setTimeout(r, 300));
-      }
-    }
-
-    const file = path.join(outDir, `${app}-${scene.name}.png`);
-    await tab.screenshot({ path: file });
-    results.push({ file, scene, errors: [...errors] });
-    await tab.close();
   }
   return results;
+}
+
+/** One scene: open it, run its steps, screenshot it. */
+async function captureScene(browser, app, index, scene) {
+  const errors = [];
+  const tab = await browser.newPage();
+  tab.on("console", (msg) => {
+    const text = msg.text();
+    if (msg.type() === "error" || text.startsWith("[screens]")) errors.push(text);
+  });
+  tab.on("pageerror", (err) => errors.push(String(err)));
+  await tab.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 2 });
+  await tab.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
+  await tab.goto(`${index}#${scene.name}`, { waitUntil: "load" });
+  await tab
+    .waitForFunction(() => window.__screens?.ready === true, { timeout: 20_000 })
+    .catch(() => {
+      errors.push("[screens] timed out waiting for the scene to settle");
+    });
+  await tab.evaluate(() => document.fonts.ready);
+
+  for (const step of scene.steps ?? []) {
+    try {
+      await runStep(tab, step);
+    } catch (err) {
+      errors.push(`[screens] step ${JSON.stringify(step)} failed: ${String(err).split("\n")[0]}`);
+    }
+  }
+  if (scene.steps?.length) await new Promise((r) => setTimeout(r, 800));
+
+  if (scene.full) {
+    // Grow the window until the longest scroll view shows all its content.
+    for (let i = 0; i < 3; i++) {
+      const extra = await tab.evaluate(() => {
+        let most = 0;
+        for (const el of document.querySelectorAll("*")) {
+          const style = getComputedStyle(el);
+          if (/(auto|scroll)/.test(style.overflowY))
+            most = Math.max(most, el.scrollHeight - el.clientHeight);
+        }
+        return most;
+      });
+      if (extra <= 1) break;
+      const { height } = tab.viewport();
+      await tab.setViewport({ width: WIDTH, height: height + extra, deviceScaleFactor: 2 });
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  const file = path.join(outDir, `${app}-${scene.name}.png`);
+  await tab.screenshot({ path: file });
+  await tab.close();
+  return { file, scene, errors: [...errors] };
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────

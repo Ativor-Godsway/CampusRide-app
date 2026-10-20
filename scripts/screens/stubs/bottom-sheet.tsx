@@ -81,16 +81,19 @@ const BottomSheet = forwardRef(function BottomSheet(props: SheetProps, ref) {
       ? height(snapPoints[Math.min(Math.max(index, 0), snapPoints.length - 1)])
       : undefined;
 
-  // The real sheet reports where it settled: its index and its top on screen.
+  // The real sheet reports where it settled: its index and its top in its
+  // container. Measured from the panel itself once it's laid out.
+  const [top, setTop] = useState<number | null>(null);
   useEffect(() => {
-    if (index >= 0) onChange?.(index, SCREEN_HEIGHT - (fixed ?? SCREEN_HEIGHT * 0.45));
-  }, [index, fixed, onChange]);
+    if (index >= 0 && top !== null) onChange?.(index, top);
+  }, [index, top, onChange]);
 
   if (index < 0) return null;
   return (
     <>
       {backdropComponent?.({ style: StyleSheet.absoluteFill, close })}
       <View
+        onLayout={(e) => setTop(e.nativeEvent.layout.y)}
         style={[
           styles.sheet,
           fixed !== undefined ? { height: fixed } : { maxHeight: maxDynamicContentSize },

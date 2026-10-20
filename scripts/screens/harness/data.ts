@@ -260,3 +260,25 @@ export const riderSearching = (() => {
     driver: null,
   };
 })();
+
+/** GET /rides/active while Kwame is on his way to Ama (Home's ride row). */
+export const riderActiveRide = {
+  id: "ride-active",
+  status: "MATCHED" as const,
+  type: "SHARED" as const,
+  legStatus: "WAITING" as const,
+  pickupZone: {
+    id: zone("Akuafo Hall").id,
+    name: "Akuafo Hall",
+    latitude: place("Akuafo Hall").latitude,
+    longitude: place("Akuafo Hall").longitude,
+  },
+  dropoffZone: {
+    id: zone("Balme Library").id,
+    name: "Balme Library",
+    latitude: place("Balme Library").latitude,
+    longitude: place("Balme Library").longitude,
+  },
+  driver: { firstName: "Kwame" },
+  ...pins("Akuafo Hall", "Balme Library"),
+};

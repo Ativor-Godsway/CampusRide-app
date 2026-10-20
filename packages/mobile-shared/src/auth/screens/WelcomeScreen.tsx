@@ -22,7 +22,17 @@ export interface WelcomeScreenProps {
   body: string;
 }
 
+/** The road lines' drawing size; the hero itself grows to fill the screen. */
 const HERO_HEIGHT = 452;
+/**
+ * The car is 720×540 with clear space around it: the car itself fills roughly
+ * 24%–72% of the image's height. About a third of the car hangs below the
+ * hero, on white, and the title starts just under the car's shadow.
+ */
+const CAR_WIDTH = 330;
+const CAR_HEIGHT = (CAR_WIDTH * 540) / 720;
+const CAR_OVERLAP = Math.round(CAR_HEIGHT * 0.44);
+const CAR_BELOW_EDGE = Math.round(CAR_HEIGHT * 0.16);
 
 /**
  * The front door (docs/mockups/01-rider-welcome.png), both apps: the green
@@ -50,7 +60,7 @@ export function WelcomeScreen({ badge, title, body }: WelcomeScreenProps) {
         <Text variant="body" color="onBrand" style={styles.place}>
           University of Ghana, Legon
         </Text>
-        <Illustration name="carStandard" width={330} style={styles.car} />
+        <Illustration name="carStandard" width={CAR_WIDTH} style={styles.car} />
       </View>
 
       <View style={[styles.content, { paddingBottom: Math.max(insets.bottom, spacing[5]) }]}>
@@ -60,12 +70,13 @@ export function WelcomeScreen({ badge, title, body }: WelcomeScreenProps) {
         <Text variant="body" color="secondary" style={styles.body}>
           {body}
         </Text>
-        <View style={styles.spacer} />
-        <Button
-          label="Continue with phone number"
-          icon="call-outline"
-          onPress={() => router.push("/auth/phone")}
-        />
+        <View style={styles.button}>
+          <Button
+            label="Continue with phone number"
+            icon="call-outline"
+            onPress={() => router.push("/auth/phone")}
+          />
+        </View>
         <Text variant="caption" color="tertiary" style={styles.terms}>
           By continuing you agree to our{" "}
           <Text
@@ -135,8 +146,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.surface,
   },
+  // Fills what the words and the button leave, so nothing gapes above the button.
   hero: {
-    height: HERO_HEIGHT,
+    flex: 1,
+    minHeight: 360,
     backgroundColor: colors.green500,
     paddingHorizontal: spacing.gutter,
   },
@@ -171,18 +184,18 @@ const styles = StyleSheet.create({
   car: {
     position: "absolute",
     alignSelf: "center",
-    bottom: -spacing[6],
+    bottom: -CAR_OVERLAP,
+    zIndex: 1,
   },
   content: {
-    flex: 1,
     paddingHorizontal: spacing.gutter,
-    paddingTop: spacing[10] + spacing[4],
+    paddingTop: CAR_BELOW_EDGE + spacing[6],
   },
   body: {
     marginTop: spacing[2],
   },
-  spacer: {
-    flex: 1,
+  button: {
+    marginTop: spacing[8],
   },
   terms: {
     marginTop: spacing[4],

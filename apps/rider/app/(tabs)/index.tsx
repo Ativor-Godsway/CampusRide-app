@@ -1,41 +1,51 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { ActivityIndicator, Alert, Image, Pressable, StyleSheet, View } from "react-native";
+import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { TripEnd } from "@rida/shared";
-import { isSameSpot, recentTripEnds, tripEndParams, tripEndProblem } from "@rida/shared";
 import {
-  Badge,
-  Card,
-  Illustration,
+  POPULAR_PLACE_NAMES,
+  SERVICE_AREA_POLYGON,
+  isSameSpot,
+  placeEnd,
+  recentTripEnds,
+  tripEndParams,
+  tripEndProblem,
+} from "@rida/shared";
+import {
+  BottomSheet,
+  Button,
+  CampusMapView,
+  Chip,
   ListRow,
-  PressableScale,
-  Screen,
-  ServiceIcon,
+  Notice,
+  Skeleton,
   SkeletonGroup,
-  SkeletonListRows,
+  StatusChip,
   Text,
   colors,
   getRecentRides,
-  illustrations,
   myRidesQueryKeys,
   radii,
+  regionForCoordinates,
   shadows,
   spacing,
-  typography,
   useAuth,
+  type ActiveRideSummary,
   type RideSummary,
 } from "@rida/mobile-shared";
+import { activeRideParams, useActiveRide } from "../../lib/activeRide";
+import { useActiveRideStatus } from "../../lib/activeRideStatus";
 import { chooseRideParams, usePlaces, useResolvePickup } from "../../lib/chooseRide";
-import { TAB_SCREEN_BOTTOM_PADDING } from "../../lib/layout";
+import { useHomeLocation } from "../../lib/homeLocation";
 
-/** Time-of-day greeting — label + a small Ionicons glyph for visual warmth. */
-function getGreeting(): { label: string; icon: keyof typeof Ionicons.glyphMap } {
-  const hour = new Date().getHours();
-  if (hour < 12) return { label: "Good morning", icon: "sunny-outline" };
-  if (hour < 17) return { label: "Good afternoon", icon: "partly-sunny-outline" };
-  return { label: "Good evening", icon: "moon-outline" };
+/** "Good evening": by the phone's clock. */
+function greetingFor(hour: number): string {
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
 }
 
 /** A stable key for a recent place or pin. */
@@ -43,50 +53,80 @@ function endKey(end: TripEnd): string {
   return end.placeId ?? `${end.latitude.toFixed(5)},${end.longitude.toFixed(5)}`;
 }
 
+/** The whole campus: the map's view when we don't know where the rider is. */
+const CAMPUS_REGION = regionForCoordinates(
+  SERVICE_AREA_POLYGON.map(([latitude, longitude]) => ({ latitude, longitude })),
+  0.05,
+);
+/** Around the rider: a few streets. */
+const NEARBY_DELTA = 0.008;
+/** Before the sheet reports its height. */
+const SHEET_ESTIMATE = 340;
+
 /**
- * Home: greeting → "Where to?" (the main action) → service tiles → Recent.
- * No avatar: the Account tab already is the way to your profile.
+ * Home (docs/mockups/04-rider-home.png): the map first, the rider on it, and
+ * a white sheet with "Where to?" — the one main action — and the places they
+ * go. Recent places go straight to Choose a ride from where the rider is now.
  */
 export default function HomeTab() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { user } = useAuth();
+  const { location, turnOn } = useHomeLocation();
+  const { data: activeRide } = useActiveRide();
   const resolvePickup = useResolvePickup();
   const [openingKey, setOpeningKey] = useState<string | null>(null);
+  const [areaHeight, setAreaHeight] = useState(windowHeight);
+  const [sheetCover, setSheetCover] = useState(SHEET_ESTIMATE);
   const { data: places } = usePlaces();
 
   // Own cache key: the Rides tab caches history pages, a different shape.
   // Fetch a few more than we show so repeat trips still leave 3 distinct places.
-  const {
-    data: rides,
-    isLoading,
-    isError,
-    refetch,
-  } = useQuery<RideSummary[]>({
+  const { data: rides, isLoading: ridesLoading } = useQuery<RideSummary[]>({
     queryKey: myRidesQueryKeys.recent,
     queryFn: () => getRecentRides(10),
   });
   const recent = recentTripEnds(rides ?? [], places ?? null, 3);
+  // A first-time rider (or recents that didn't load): three well-known places.
+  const popular = useMemo(() => {
+    const byName = new Map((places ?? []).map((p) => [p.name.toLowerCase(), p]));
+    return POPULAR_PLACE_NAMES.map((n) => byName.get(n.toLowerCase()))
+      .filter((p) => p !== undefined)
+      .slice(0, 3)
+      .map((p) => placeEnd(p));
+  }, [places]);
+  const suggestions = recent.length > 0 ? recent : popular;
 
-  const greeting = getGreeting();
-  const firstName = user?.name?.split(" ")[0] ?? "Rider";
+  const firstName = user?.name?.split(" ")[0] ?? "";
+  const initial = user?.name?.trim().charAt(0).toUpperCase() || "?";
+  const region =
+    location.state === "here"
+      ? { ...location.coords, latitudeDelta: NEARBY_DELTA, longitudeDelta: NEARBY_DELTA }
+      : CAMPUS_REGION;
 
   const planRide = () => router.push("/ride/location");
-  const showComingSoon = (service: string) =>
-    Alert.alert(`${service} is coming soon`, "We're working on it — check back in a future update.");
+  const comingSoon = () =>
+    Alert.alert(
+      "Food and courier are coming soon",
+      "We're working on it — check back in a future update.",
+    );
 
   /**
-   * A recent place goes STRAIGHT to Choose a ride, from where the rider is
-   * now. If we can't tell where that is (location off), or they're already
-   * there, Plan your ride opens with the destination filled in instead.
+   * A place goes STRAIGHT to Choose a ride, from where the rider is now. If we
+   * can't tell where that is (location off), or they're already there, Plan
+   * your ride opens with the destination filled in instead.
    */
-  async function openRecent(destination: TripEnd) {
+  async function openPlace(destination: TripEnd) {
     if (openingKey) return;
     setOpeningKey(endKey(destination));
     try {
       const pickup = await resolvePickup();
-      // Off campus, or already there: let Plan your ride say so / ask for a pickup.
       if (pickup && !tripEndProblem(pickup, "pickup") && !isSameSpot(pickup, destination)) {
-        router.push({ pathname: "/ride/type", params: chooseRideParams(pickup, destination, "home") });
+        router.push({
+          pathname: "/ride/type",
+          params: chooseRideParams(pickup, destination, "home"),
+        });
       } else {
         router.push({ pathname: "/ride/location", params: tripEndParams("dropoff", destination) });
       }
@@ -96,250 +136,194 @@ export default function HomeTab() {
   }
 
   return (
-    <Screen scroll edges={["top"]} style={styles.content}>
-      <View style={styles.header}>
-        <View style={styles.greetingRow}>
-          <Ionicons name={greeting.icon} size={16} color={colors.accent[500]} />
-          <Text variant="bodySmall" color="muted">
-            {greeting.label}
+    <View style={styles.root} onLayout={(e) => setAreaHeight(e.nativeEvent.layout.height)}>
+      <CampusMapView
+        // A new view when we learn where the rider is (or that we can't).
+        key={location.state === "here" ? "here" : "campus"}
+        initialRegion={region}
+        zones={[]}
+        userLocation={location.state === "here" ? location.coords : null}
+        height={areaHeight}
+        light
+        rounded={false}
+        showRecenter
+        recenterLabel={
+          location.state === "here" ? "Recentre on your location" : "Show the whole campus"
+        }
+        controlsBottomInset={sheetCover}
+      />
+
+      <Pressable
+        onPress={() => router.navigate("/account")}
+        accessibilityRole="button"
+        accessibilityLabel="Your account"
+        style={({ pressed }) => [
+          styles.account,
+          { top: insets.top + spacing[2] },
+          pressed && styles.accountPressed,
+        ]}
+      >
+        <Text variant="title3" color="brand">
+          {initial}
+        </Text>
+      </Pressable>
+
+      <BottomSheet
+        maxHeightRatio={0.75}
+        contentStyle={styles.sheet}
+        onChange={(_index, position) => {
+          if (position > 0) setSheetCover(Math.round(areaHeight - position));
+        }}
+        accessibilityLabel="Where to?"
+      >
+        {activeRide ? (
+          <ActiveRideRow ride={activeRide} />
+        ) : (
+          <Text variant="body" color="secondary">
+            {greetingFor(new Date().getHours())}
+            {firstName ? `, ${firstName}` : ""}
           </Text>
-        </View>
-        <Text variant="h1" numberOfLines={1}>
-          {firstName}
-        </Text>
-      </View>
+        )}
 
-      <PressableScale
-        onPress={planRide}
-        style={styles.searchBar}
-        accessibilityRole="button"
-        accessibilityLabel="Where to? Plan a ride"
-      >
-        <View style={styles.searchDot} />
-        <Text variant="bodyMedium" style={styles.searchLabel}>
-          Where to?
-        </Text>
-        <Ionicons name="search" size={20} color={colors.ink3} />
-      </PressableScale>
+        <Pressable
+          onPress={planRide}
+          accessibilityRole="button"
+          accessibilityLabel="Where to? Plan a ride"
+          style={({ pressed }) => [styles.search, pressed && styles.searchPressed]}
+        >
+          <Ionicons name="search" size={24} color={colors.ink} />
+          <Text variant="title2">Where to?</Text>
+        </Pressable>
 
-      {/* Rides is THE service: a full-width hero with the car running off
-          the edge. Food and Courier ("Soon") sit beneath as two equal tiles. */}
-      <PressableScale
-        onPress={planRide}
-        accessibilityRole="button"
-        accessibilityLabel="Rides around campus, live now"
-        style={styles.heroWrap}
-      >
-        {/* glow={false}: no decorative circle behind the car. */}
-        <Card dark glow={false} noPadding style={styles.heroTile}>
-          {/* Clipped in its own layer: overflow:hidden on the card itself
-              would also clip the card's shadow on iOS. */}
-          <View style={styles.carClip} pointerEvents="none">
-            <Image
-              source={illustrations.serviceRide}
-              style={styles.heroCar}
-              resizeMode="contain"
-              accessibilityIgnoresInvertColors
+        {location.state === "off" ? (
+          <View style={styles.notice}>
+            <Notice
+              tone="warning"
+              icon="location-outline"
+              message="Turn on location to set your pickup."
             />
+            <Button label="Turn on location" variant="secondary" size="md" onPress={turnOn} />
           </View>
-          <View style={styles.heroText}>
-            <Badge label="Live" variant="success" style={styles.heroBadge} />
-            <Text variant="h2" color="inverse" numberOfLines={1}>
-              Rides
-            </Text>
-            <Text variant="bodySmall" style={styles.tileSubtitleDark} numberOfLines={1}>
-              Around campus
-            </Text>
-          </View>
-        </Card>
-      </PressableScale>
+        ) : location.state === "outside" ? (
+          <Notice
+            tone="warning"
+            icon="navigate-outline"
+            message="You're outside the CampusRide area. Pickups are inside UG Legon."
+            style={styles.notice}
+          />
+        ) : null}
 
-      <View style={styles.gridRow}>
-        <Pressable
-          style={styles.gridCell}
-          onPress={() => showComingSoon("Food delivery")}
-          accessibilityRole="button"
-          accessibilityLabel="Food, coming soon"
-        >
-          <Card noPadding style={styles.smallTile}>
-            <ServiceIcon name="fast-food-outline" size={56} source={illustrations.serviceFood} />
-            <Text variant="h3" numberOfLines={1}>
-              Food
-            </Text>
-            <Text variant="bodySmall" color="muted" numberOfLines={1}>
-              Campus vendors
-            </Text>
-            <Badge label="Soon" variant="soon" style={styles.tileBadge} />
-          </Card>
-        </Pressable>
-
-        <Pressable
-          style={styles.gridCell}
-          onPress={() => showComingSoon("Courier")}
-          accessibilityRole="button"
-          accessibilityLabel="Courier, coming soon"
-        >
-          <Card noPadding style={styles.smallTile}>
-            <ServiceIcon name="cube-outline" size={56} source={illustrations.serviceCourier} />
-            <Text variant="h3" numberOfLines={1}>
-              Courier
-            </Text>
-            <Text variant="bodySmall" color="muted" numberOfLines={1}>
-              Send packages
-            </Text>
-            <Badge label="Soon" variant="soon" style={styles.tileBadge} />
-          </Card>
-        </Pressable>
-      </View>
-
-      <Text variant="h3" style={styles.sectionTitle} accessibilityRole="header">
-        Recent
-      </Text>
-
-      {isLoading ? (
-        <Card>
-          <SkeletonGroup label="Loading your recent places">
-            <SkeletonListRows count={3} />
+        {ridesLoading ? (
+          <SkeletonGroup label="Loading your recent places" style={styles.chips}>
+            <Skeleton width={128} height={36} radius={radii.full} />
+            <Skeleton width={150} height={36} radius={radii.full} />
+            <Skeleton width={112} height={36} radius={radii.full} />
           </SkeletonGroup>
-        </Card>
-      ) : isError ? (
-        <Card style={styles.emptyRecents}>
-          <Text variant="bodySmall" color="muted" style={styles.centered}>
-            Couldn&apos;t load your recent places.
-          </Text>
-          <Pressable onPress={() => void refetch()} accessibilityRole="button" hitSlop={8}>
-            <Text variant="bodyMedium" color="primary">
-              Try again
-            </Text>
-          </Pressable>
-        </Card>
-      ) : recent.length > 0 ? (
-        <Card>
-          {recent.map((end, index) => (
-            <View key={endKey(end)}>
-              <ListRow
-                title={end.label}
-                leading={<ListRow.Icon name="time-outline" color={colors.ink2} background={colors.surfaceMuted} />}
-                trailing={
-                  openingKey === endKey(end) ? <ActivityIndicator color={colors.primary[500]} /> : undefined
-                }
-                showChevron={openingKey !== endKey(end)}
-                onPress={() => void openRecent(end)}
+        ) : suggestions.length > 0 ? (
+          <View
+            style={styles.chips}
+            accessibilityLabel={recent.length > 0 ? "Recent places" : "Popular places"}
+          >
+            {suggestions.map((end) => (
+              <Chip
+                key={endKey(end)}
+                kind="place"
+                icon={recent.length > 0 ? "time-outline" : "location-outline"}
+                label={end.label}
+                disabled={openingKey !== null}
+                onPress={() => void openPlace(end)}
                 accessibilityLabel={`Ride to ${end.label}`}
               />
-              {index < recent.length - 1 ? <View style={styles.divider} /> : null}
-            </View>
-          ))}
-        </Card>
-      ) : (
-        <Card style={styles.emptyRecents}>
-          <Illustration name="ridesEmpty" size={110} />
-          <Text variant="bodySmall" color="muted" style={styles.centered}>
-            Your recent trips will show here once you take your first ride.
-          </Text>
-        </Card>
-      )}
-    </Screen>
+            ))}
+          </View>
+        ) : null}
+
+        <View style={styles.divider} />
+
+        <ListRow
+          title="Food and courier"
+          subtitle="Coming to campus soon"
+          leading={<ListRow.Icon name="cube-outline" />}
+          trailing={<StatusChip label="Soon" tone="warn" style={styles.soon} />}
+          onPress={comingSoon}
+        />
+      </BottomSheet>
+    </View>
   );
 }
 
-const HERO_HEIGHT = 168;
+/** In place of the greeting while a ride is going on: "Your ride is on the way · Kwame, 3 min". */
+function ActiveRideRow({ ride }: { ride: ActiveRideSummary }) {
+  const router = useRouter();
+  const { line, etaMinutes, destination } = useActiveRideStatus(ride);
+  const onTheWay =
+    ride.status === "MATCHED" && (ride.legStatus === null || ride.legStatus === "WAITING");
+  const driver = ride.driver?.firstName;
+  const subtitle = onTheWay
+    ? [driver, etaMinutes !== null ? `${Math.max(1, Math.round(etaMinutes))} min` : null]
+        .filter(Boolean)
+        .join(", ") || `To ${destination}`
+    : `To ${destination}`;
+  return (
+    <ListRow
+      title={onTheWay ? "Your ride is on the way" : line}
+      subtitle={subtitle}
+      leading={<ListRow.Icon name="car-sport-outline" tone="brand" />}
+      onPress={() => router.push({ pathname: "/ride/type", params: activeRideParams(ride) })}
+      accessibilityLabel={`${line}. Ride to ${destination}. Open your ride.`}
+    />
+  );
+}
 
 const styles = StyleSheet.create({
-  content: {
-    paddingBottom: TAB_SCREEN_BOTTOM_PADDING,
-  },
-  header: {
-    marginBottom: spacing.lg,
-  },
-  greetingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    marginBottom: 2,
-  },
-  searchBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    backgroundColor: colors.white,
-    borderRadius: radii.lg,
-    paddingHorizontal: spacing.lg,
-    minHeight: 56,
-    marginBottom: spacing.xl,
-    ...shadows.md,
-  },
-  searchDot: {
-    width: 10,
-    height: 10,
-    borderRadius: radii.full,
-    backgroundColor: colors.primary[500],
-  },
-  searchLabel: {
+  root: {
     flex: 1,
-    fontSize: typography.size.lg,
-    fontWeight: typography.weight.semibold,
+    backgroundColor: colors.mapLand,
   },
-  heroWrap: {
-    marginBottom: spacing.md,
-  },
-  heroTile: {
-    minHeight: HERO_HEIGHT,
-    padding: spacing.lg,
-    justifyContent: "flex-end",
-  },
-  carClip: {
-    ...StyleSheet.absoluteFill,
-    borderRadius: radii.lg,
-    overflow: "hidden",
-  },
-  heroCar: {
+  account: {
     position: "absolute",
-    right: -40,
-    top: spacing.sm,
-    width: 230,
-    height: 150,
+    left: spacing.gutter,
+    width: 44,
+    height: 44,
+    borderRadius: radii.full,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    ...shadows.float,
   },
-  heroText: {
-    // Keep the words clear of the car on narrow phones.
-    maxWidth: "55%",
-    gap: 2,
+  accountPressed: {
+    backgroundColor: colors.surface2,
   },
-  heroBadge: {
-    marginBottom: spacing.xs,
+  // Above the tab bar, which has its own safe-area padding.
+  sheet: {
+    gap: spacing[4],
+    paddingBottom: spacing[5],
   },
-  tileSubtitleDark: {
-    color: colors.ink4,
-  },
-  gridRow: {
+  search: {
     flexDirection: "row",
-    gap: spacing.md,
-    marginBottom: spacing.xl,
+    alignItems: "center",
+    gap: spacing[3],
+    height: 60,
+    paddingHorizontal: spacing[4],
+    borderRadius: radii.lg,
+    backgroundColor: colors.surface2,
   },
-  gridCell: {
-    flex: 1,
+  searchPressed: {
+    backgroundColor: colors.surface3,
   },
-  smallTile: {
-    flex: 1,
-    padding: spacing.lg,
-    gap: 2,
+  notice: {
+    gap: spacing[2],
   },
-  tileBadge: {
-    marginTop: spacing.sm,
+  chips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing[2],
   },
-  sectionTitle: {
-    marginBottom: spacing.sm,
+  soon: {
+    alignSelf: "center",
   },
   divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginVertical: spacing.xs,
-  },
-  emptyRecents: {
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  centered: {
-    textAlign: "center",
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.line,
   },
 });
