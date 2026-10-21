@@ -46,6 +46,13 @@ const spec = {
   green600: "#115C2F",
   /** Green text on green-50 and on surface (tonal button labels, Recommended chip). */
   green700: "#0F5429",
+  /**
+   * Chart bars that aren't the highlighted one (today's is green-500). Checked
+   * against green-500 with the dataviz palette validator: distinct for normal
+   * and colour-blind vision; under 3:1 on white, so a chart using it always
+   * labels its bars.
+   */
+  chartBar: "#58A872",
   /** Text and icons on a green-500 or green-600 fill. */
   onBrand: "#FFFFFF",
   /** Green accents on a dark surface: Online dot, live pulse, earnings deltas. */

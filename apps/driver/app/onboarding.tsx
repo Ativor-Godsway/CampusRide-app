@@ -1,13 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Redirect, useRouter } from "expo-router";
-import { Alert, Image, Pressable, StyleSheet, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { Alert, ScrollView, StyleSheet, View } from "react-native";
 import {
+  BackButton,
   Button,
-  Card,
   DriverPhotoError,
-  Illustration,
-  Input,
   Screen,
   Text,
   colors,
@@ -19,7 +16,7 @@ import {
   useAuth,
   SessionRestoringScreen,
 } from "@rida/mobile-shared";
-import { cloudinaryAvatar } from "@rida/shared";
+import { CarDetailsForm, type CarDetails } from "../components/CarDetailsForm";
 import { DriverPhotoCard } from "../components/DriverPhotoCard";
 import { SignOutLink } from "../components/SignOutLink";
 import { driverSetupRoute } from "../lib/driverGate";
@@ -53,6 +50,20 @@ export default function OnboardingScreen() {
   // AuthContext user reflects it before navigating, so the start screen never
   // renders with the stale user and bounces the driver back here.
   const [submitted, setSubmitted] = useState(false);
+
+  // The saved profile can arrive after this screen opens (the app restarting
+  // straight into onboarding): fill the steps from it once, unless the driver
+  // has already started.
+  const seededRef = useRef(Boolean(saved));
+  useEffect(() => {
+    if (seededRef.current || !saved) return;
+    seededRef.current = true;
+    if (saved.photoUrl && photo.state.status === "idle") photo.reset(saved.photoUrl);
+    setCarMake((v) => v || (saved.carMake ?? ""));
+    setCarModel((v) => v || (saved.carModel ?? ""));
+    setCarColor((v) => v || (saved.carColor ?? ""));
+    setPlate((v) => v || (saved.plate ?? ""));
+  }, [saved, photo]);
 
   useEffect(() => {
     if (submitted && user && driverSetupRoute(user) !== "/onboarding") {
@@ -113,169 +124,112 @@ export default function OnboardingScreen() {
   }
 
   const stepIndex = STEPS.indexOf(step);
+  const car: CarDetails = { carMake, carModel, carColor, plate };
+  const setCar = (next: CarDetails) => {
+    setCarMake(next.carMake);
+    setCarModel(next.carModel);
+    setCarColor(next.carColor);
+    setPlate(next.plate);
+  };
 
   return (
-    <Screen scroll>
-      <View style={styles.topBar}>
+    <Screen edges={["top", "bottom"]} noPadding>
+      <View style={styles.top}>
         {step === "car" ? (
-          <Pressable
-            onPress={() => setStep("photo")}
-            accessibilityRole="button"
-            accessibilityLabel="Back to photo"
-            hitSlop={8}
-            style={styles.back}
-          >
-            <Ionicons name="arrow-back" size={20} color={colors.ink} />
-            <Text variant="bodyMedium">Back</Text>
-          </Pressable>
+          <BackButton onPress={() => setStep("photo")} />
         ) : (
-          <View />
+          <View style={styles.backSpace} />
         )}
-        <SignOutLink variant="compact" />
+        <View
+          style={styles.progress}
+          accessible
+          accessibilityLabel={`Step ${stepIndex + 1} of ${STEPS.length}`}
+        >
+          {STEPS.map((s, i) => (
+            <View key={s} style={[styles.bar, i <= stepIndex && styles.barDone]} />
+          ))}
+        </View>
+        <Text variant="subhead" color="secondary">
+          Step {stepIndex + 1} of {STEPS.length}
+        </Text>
       </View>
 
-      <View style={styles.stepper} accessibilityLabel={`Step ${stepIndex + 1} of ${STEPS.length}`}>
-        {STEPS.map((s, i) => (
-          <View key={s} style={[styles.stepDot, i <= stepIndex && styles.stepDotActive]} />
-        ))}
-      </View>
-      <Text variant="label" color="muted">
-        STEP {stepIndex + 1} OF {STEPS.length}
-      </Text>
-
-      {step === "photo" ? (
-        <>
-          <View style={styles.header}>
-            <Text variant="h1">Add your photo</Text>
-            <Text variant="bodySmall" color="muted" style={styles.subtitle}>
-              Our team uses this photo to confirm who you are before approving you, and riders see
-              it when you pick them up.
-            </Text>
-          </View>
-
-          <DriverPhotoCard
-            state={photo.state}
-            canRetry={photo.canRetry}
-            onPick={(source) => void photo.pick(source)}
-            onRetry={() => void photo.retry()}
-          />
-
-          <View style={styles.cta}>
-            <Button label="Continue" size="lg" onPress={goToCarStep} disabled={!photo.photoUrl} />
-          </View>
-        </>
-      ) : (
-        <>
-          <View style={styles.header}>
-            <Illustration name="driverOnboarding" size={120} float style={styles.hero} />
-            <Text variant="h1">Your car</Text>
-            <Text variant="bodySmall" color="muted" style={styles.subtitle}>
-              So riders know which car to look for. You can change these later.
-            </Text>
-          </View>
-
-          {photo.photoUrl ? (
-            <Pressable
-              onPress={() => setStep("photo")}
-              accessibilityRole="button"
-              accessibilityLabel="Change your photo"
-              style={styles.photoSummary}
-            >
-              <Image
-                source={{ uri: cloudinaryAvatar(photo.photoUrl, 44) }}
-                style={styles.photoThumb}
-              />
-              <View style={styles.photoSummaryText}>
-                <Text variant="bodyMedium">Photo added</Text>
-                <Text variant="caption" color="muted">
-                  Tap to change
-                </Text>
-              </View>
-              <Ionicons name="checkmark-circle" size={22} color={colors.success} />
-            </Pressable>
-          ) : null}
-
-          <Card style={styles.formCard}>
-            <Text variant="label" color="muted">
-              CAR DETAILS
-            </Text>
-            <Input
-              label="Car make"
-              placeholder="e.g. Toyota"
-              value={carMake}
-              onChangeText={setCarMake}
-              autoCapitalize="words"
-              returnKeyType="next"
+      <ScrollView
+        contentContainerStyle={styles.body}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
+        {step === "photo" ? (
+          <>
+            <View style={styles.heading}>
+              <Text variant="title1" accessibilityRole="header">
+                Add your photo
+              </Text>
+              <Text variant="body" color="secondary">
+                Our team uses it to confirm who you are before approving you, and riders see it when
+                you pick them up.
+              </Text>
+            </View>
+            <DriverPhotoCard
+              state={photo.state}
+              canRetry={photo.canRetry}
+              onPick={(source) => void photo.pick(source)}
+              onRetry={() => void photo.retry()}
             />
-            <Input
-              label="Car model"
-              placeholder="e.g. Corolla"
-              value={carModel}
-              onChangeText={setCarModel}
-              autoCapitalize="words"
-              returnKeyType="next"
-            />
-            <Input
-              label="Car colour"
-              placeholder="e.g. White"
-              value={carColor}
-              onChangeText={setCarColor}
-              autoCapitalize="words"
-              returnKeyType="next"
-            />
-            <Input
-              label="Licence plate"
-              placeholder="e.g. GN-1234-22"
-              value={plate}
-              onChangeText={setPlate}
-              autoCapitalize="characters"
-              returnKeyType="done"
-              onSubmitEditing={() => void handleSubmit()}
-            />
-          </Card>
+          </>
+        ) : (
+          <>
+            <View style={styles.heading}>
+              <Text variant="title1" accessibilityRole="header">
+                Your car
+              </Text>
+              <Text variant="body" color="secondary">
+                So riders know which car to look for. You can change these later.
+              </Text>
+            </View>
+            <CarDetailsForm value={car} onChange={setCar} />
+          </>
+        )}
+        <SignOutLink />
+      </ScrollView>
 
-          <View style={styles.cta}>
+      {/* The one primary action, pinned above the keyboard. */}
+      {step === "car" || photo.photoUrl ? (
+        <View style={styles.footer}>
+          {step === "photo" ? (
+            <Button label="Continue" onPress={goToCarStep} disabled={photo.isUploading} />
+          ) : (
             <Button
               label="Submit for approval"
               onPress={() => void handleSubmit()}
               loading={saving}
-              size="lg"
             />
-          </View>
-        </>
-      )}
-
-      <SignOutLink />
+          )}
+        </View>
+      ) : null}
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  topBar: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.lg,
-    minHeight: 32,
+  top: { paddingHorizontal: spacing.gutter, paddingTop: spacing[2], gap: spacing[3] },
+  backSpace: { height: 44 },
+  progress: { flexDirection: "row", gap: spacing[2] },
+  bar: { flex: 1, height: 4, borderRadius: radii.full, backgroundColor: colors.surface3 },
+  barDone: { backgroundColor: colors.green500 },
+  body: {
+    paddingHorizontal: spacing.gutter,
+    paddingTop: spacing[5],
+    paddingBottom: spacing[6],
+    gap: spacing[6],
   },
-  back: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  stepper: { flexDirection: "row", gap: spacing.xs, marginBottom: spacing.sm },
-  stepDot: { flex: 1, height: 4, borderRadius: radii.full, backgroundColor: colors.surfaceSunken },
-  stepDotActive: { backgroundColor: colors.primary[500] },
-  hero: { alignSelf: "center", marginBottom: spacing.md },
-  header: { gap: spacing.sm, marginTop: spacing.sm, marginBottom: spacing.xl },
-  subtitle: { maxWidth: 320 },
-  photoSummary: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    padding: spacing.md,
-    borderRadius: radii.lg,
-    backgroundColor: colors.successSurface,
-    marginBottom: spacing.md,
+  heading: { gap: spacing[2] },
+  footer: {
+    paddingHorizontal: spacing.gutter,
+    paddingTop: spacing[3],
+    paddingBottom: spacing[2],
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+    backgroundColor: colors.surface,
   },
-  photoThumb: { width: 44, height: 44, borderRadius: radii.full },
-  photoSummaryText: { flex: 1 },
-  formCard: { gap: spacing.lg, marginBottom: spacing.md },
-  cta: { marginTop: spacing.lg, marginBottom: spacing.sm },
 });

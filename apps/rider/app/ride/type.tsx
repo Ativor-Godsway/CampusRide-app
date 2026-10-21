@@ -34,7 +34,6 @@ import {
   type CampusMapZone,
   FadeIn,
   goHome as goToHomeTab,
-  ServiceIcon,
   Text,
   cancelRide,
   colors,
@@ -1071,16 +1070,12 @@ function MyLegDoneContent({ dropoffZoneName }: { dropoffZoneName: string }) {
   return (
     <View style={styles.section}>
       <View style={styles.stateHeader}>
-        <ServiceIcon
-          name="checkmark-circle"
-          size={48}
-          iconSize={22}
-          background={colors.successSurface}
-          color={colors.success}
-        />
+        <View style={styles.doneBadge}>
+          <Ionicons name="checkmark" size={24} color={colors.onBrand} />
+        </View>
         <View style={styles.stateHeading}>
-          <Text variant="h2">You're at {dropoffZoneName}</Text>
-          <Text variant="bodySmall" color="muted">
+          <Text variant="title2">You&apos;re at {dropoffZoneName}</Text>
+          <Text variant="subhead" color="secondary">
             Wrapping up the rest of the trip — your fare summary will appear shortly.
           </Text>
         </View>
@@ -1154,4 +1149,12 @@ const styles = StyleSheet.create({
   section: { gap: spacing.md },
   stateHeader: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   stateHeading: { flex: 1, gap: 4 },
+  doneBadge: {
+    width: 40,
+    height: 40,
+    borderRadius: radii.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.green500,
+  },
 });

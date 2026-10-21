@@ -140,7 +140,7 @@ export const taskManager = { defineTask: noop, isTaskRegisteredAsync: () => reso
 
 export const keepAwake = {
   activateKeepAwakeAsync: () => resolved(undefined),
-  deactivateKeepAwake: noop,
+  deactivateKeepAwake: () => resolved(undefined),
   useKeepAwake: noop,
 };
 
