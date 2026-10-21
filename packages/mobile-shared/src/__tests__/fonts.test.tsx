@@ -1,10 +1,11 @@
 import { act, renderHook } from "@testing-library/react-native";
-import { SplashScreen } from "expo-router";
-import { fonts, useAppFonts } from "../design/fonts";
+import * as SplashScreen from "expo-splash-screen";
+import { SPLASH_FALLBACK_MS, fonts, useAppFonts } from "../design/fonts";
 
 /**
  * The splash screen waits for Figtree, but a font that fails or hangs never
- * keeps the app from opening.
+ * keeps the app from opening. Hiding it is the root view's job (onLayout);
+ * useAppFonts only steps in if that never happens.
  */
 
 let mockFontState: [boolean, Error | null] = [false, null];
@@ -14,17 +15,19 @@ jest.mock("expo-font", () => ({
   useFonts: (map: Record<string, number>) => mockUseFonts(map),
 }));
 
-jest.mock("expo-router", () => ({
-  SplashScreen: { hideAsync: jest.fn(async () => {}), preventAutoHideAsync: jest.fn(async () => {}) },
+jest.mock("expo-splash-screen", () => ({
+  hide: jest.fn(),
+  preventAutoHideAsync: jest.fn(async () => true),
+  setOptions: jest.fn(),
 }));
 
-const hideAsync = SplashScreen.hideAsync as jest.Mock;
+const hide = SplashScreen.hide as jest.Mock;
 
 beforeEach(() => {
   jest.useFakeTimers();
   mockFontState = [false, null];
   mockUseFonts.mockClear();
-  hideAsync.mockClear();
+  hide.mockClear();
 });
 
 afterEach(() => {
@@ -37,15 +40,34 @@ it("loads one file per exported weight, under the exported names", async () => {
   expect(loaded).toEqual(Object.values(fonts).sort());
 });
 
-it("keeps the splash up while loading, then hides it once the fonts are in", async () => {
+it("is not ready while loading, then ready once the fonts are in", async () => {
   const { result, rerender } = await renderHook(() => useAppFonts());
   expect(result.current).toBe(false);
-  expect(hideAsync).not.toHaveBeenCalled();
 
   mockFontState = [true, null];
   await rerender({});
   expect(result.current).toBe(true);
-  expect(hideAsync).toHaveBeenCalledTimes(1);
+});
+
+it("leaves the splash to the root view's layout, hiding it itself only as a fallback", async () => {
+  mockFontState = [true, null];
+  await renderHook(() => useAppFonts());
+  await act(async () => {
+    jest.advanceTimersByTime(SPLASH_FALLBACK_MS - 1);
+  });
+  expect(hide).not.toHaveBeenCalled();
+  await act(async () => {
+    jest.advanceTimersByTime(1);
+  });
+  expect(hide).toHaveBeenCalledTimes(1);
+});
+
+it("never hides the splash before the app may render", async () => {
+  await renderHook(() => useAppFonts());
+  await act(async () => {
+    jest.advanceTimersByTime(3999);
+  });
+  expect(hide).not.toHaveBeenCalled();
 });
 
 it("opens on the system font when loading fails", async () => {
@@ -53,7 +75,6 @@ it("opens on the system font when loading fails", async () => {
   mockFontState = [false, new Error("font file missing")];
   await rerender({});
   expect(result.current).toBe(true);
-  expect(hideAsync).toHaveBeenCalledTimes(1);
 });
 
 it("opens anyway if loading never finishes", async () => {
@@ -66,5 +87,4 @@ it("opens anyway if loading never finishes", async () => {
     jest.advanceTimersByTime(1);
   });
   expect(result.current).toBe(true);
-  expect(hideAsync).toHaveBeenCalledTimes(1);
 });

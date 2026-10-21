@@ -188,10 +188,12 @@ export default function EarningsTab() {
         />
         {summary.commissionOwedPesewas > 0 ? (
           <Text variant="caption" color="secondary" style={styles.note}>
+            {/* All time, not this period: the running total still owed from cash trips. */}
             You collect the whole fare in cash, so CampusRide&apos;s 15% is still with you (
-            {formatCedis(summary.commissionOwedPesewas)} on {summary.commissionRidesCount}{" "}
-            {summary.commissionRidesCount === 1 ? "trip" : "trips"} so far). We&apos;ll tell you how
-            to settle it before any collection starts.
+            {formatCedis(summary.commissionOwedPesewas)} in total so far, from{" "}
+            {summary.commissionRidesCount} cash{" "}
+            {summary.commissionRidesCount === 1 ? "trip" : "trips"}). We&apos;ll tell you how to
+            settle it before any collection starts.
           </Text>
         ) : null}
       </View>

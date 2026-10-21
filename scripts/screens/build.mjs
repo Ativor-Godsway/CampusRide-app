@@ -39,6 +39,7 @@ const STAND_INS = {
   "expo-web-browser": "expo-modules.ts#webBrowser",
   "expo-linking": "expo-modules.ts#linking",
   "expo-status-bar": "expo-modules.ts#statusBar",
+  "expo-splash-screen": "expo-modules.ts#splashScreen",
   "@sentry/react-native": "expo-modules.ts#sentry",
   "socket.io-client": "expo-modules.ts#socket",
 };

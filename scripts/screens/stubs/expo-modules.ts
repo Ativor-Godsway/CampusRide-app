@@ -186,6 +186,13 @@ export const linking = {
 
 export const statusBar = { StatusBar: () => null, setStatusBarStyle: noop };
 
+export const splashScreen = {
+  setOptions: noop,
+  preventAutoHideAsync: () => resolved(true),
+  hide: noop,
+  hideAsync: () => resolved(undefined),
+};
+
 export const sentry = {
   init: noop,
   setTags: noop,
