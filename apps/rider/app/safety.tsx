@@ -18,8 +18,9 @@ import {
 /**
  * Safety settings — the rider's single emergency contact.
  *
- * This is what the SOS button on an active ride uses: tapping SOS texts this
- * person the ride's current status and a link to follow it live. One contact
+ * This is what the SOS on an active ride uses (Safety → Call emergency
+ * services): it texts this person the ride's current status and a link to
+ * follow it live. One contact
  * only, on purpose — a list implies priority ordering and a management UI,
  * and one reliable contact beats three half-configured ones.
  */
@@ -62,7 +63,7 @@ export default function SafetyScreen() {
   function handleRemove() {
     Alert.alert(
       "Remove emergency contact?",
-      "You won't be able to use the SOS button on a ride until you add one again.",
+      "If you call emergency services from a ride, only CampusRide support will be texted until you add one again.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -101,8 +102,9 @@ export default function SafetyScreen() {
         <View style={styles.explainerRow}>
           <Ionicons name="shield-checkmark" size={18} color={colors.primary[500]} />
           <Text variant="bodySmall" style={styles.explainerText}>
-            During a ride you&apos;ll see an SOS button. Tapping it texts your emergency contact
-            where you are, who your driver is, and a link to follow the trip live.
+            During a ride, tap Safety, then Call emergency services. As well as the call, we text
+            your emergency contact where you are, who your driver is, and a link to follow the
+            trip live.
           </Text>
         </View>
       </Card>
@@ -127,7 +129,7 @@ export default function SafetyScreen() {
           keyboardType="phone-pad"
         />
         <Text variant="caption" color="muted">
-          We never contact them unless you press SOS.
+          We never contact them unless you call emergency services from a ride.
         </Text>
       </Card>
 

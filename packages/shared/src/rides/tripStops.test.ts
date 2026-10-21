@@ -11,6 +11,7 @@ import {
   noShowAvailableAt,
   planTripStops,
   seatStates,
+  stopsBeforeDropoff,
   type TripPassenger,
   type TripZone,
 } from "./tripStops";
@@ -119,6 +120,30 @@ describe("planTripStops", () => {
       from: { latitude: 5.649, longitude: -0.186 },
     });
     expect(keys(plan).slice(0, 2)).toEqual(["kofi:PICKUP", "ama:PICKUP"]);
+  });
+});
+
+describe("stopsBeforeDropoff", () => {
+  it("counts the stops the car makes before this rider's drop-off", () => {
+    // Driver at A, Ama on board to E; Yaw waiting at B for C.
+    const plan = planTripStops({
+      passengers: [pax("ama", "A", "E", "PICKED_UP"), pax("yaw", "B", "C")],
+      zones,
+      from: zones.get("A")!,
+    });
+    expect(stopsBeforeDropoff(plan, "ama")).toBe(2);
+    expect(stopsBeforeDropoff(plan, "yaw")).toBe(1);
+  });
+
+  it("is 0 when this rider's drop-off is next, and null once it's done", () => {
+    const plan = planTripStops({
+      passengers: [pax("ama", "A", "B", "PICKED_UP"), pax("kofi", "A", "C", "DROPPED_OFF")],
+      zones,
+      from: zones.get("A")!,
+    });
+    expect(stopsBeforeDropoff(plan, "ama")).toBe(0);
+    expect(stopsBeforeDropoff(plan, "kofi")).toBeNull();
+    expect(stopsBeforeDropoff(plan, "nobody")).toBeNull();
   });
 });
 

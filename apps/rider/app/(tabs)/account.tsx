@@ -30,7 +30,7 @@ interface QuickAction {
 const QUICK_ACTIONS: QuickAction[] = [
   { label: "Help", icon: "help-buoy-outline" },
   // Phase 4: a real screen now — the rider's emergency contact, which the
-  // in-ride SOS button uses.
+  // in-ride SOS (Safety → Call emergency services) texts.
   { label: "Safety", icon: "shield-checkmark-outline", href: "/safety" },
   { label: "Inbox", icon: "mail-outline" },
 ];
@@ -109,7 +109,7 @@ export default function AccountTab() {
         <ListRow
           title="Emergency contact"
           // Surfaced in Settings too, not just the Safety tile: an unset
-          // contact means the SOS button cannot work, so it is worth a
+          // contact means the SOS reaches only support, so it is worth a
           // visible prompt rather than hiding behind an icon grid.
           subtitle={
             hasEmergencyContact ? (user?.emergencyContactName ?? undefined) : "Not set up yet"

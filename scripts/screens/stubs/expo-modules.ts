@@ -168,12 +168,20 @@ export const sentry = {
   wrap: <T>(component: T) => component,
 };
 
-/** A socket that never connects: live updates don't exist in a screenshot. */
+/** One event per name the scene's socket "receives" (the harness sets it), e.g. a driver's position. */
+export const sceneSocketEvents: Record<string, unknown> = {};
+
+/**
+ * A socket that never connects: live updates don't exist in a screenshot,
+ * except a scene's sceneSocketEvents, each sent once to whoever listens.
+ */
 export const socket = {
   io: () => ({
     connected: false,
     active: false,
-    on: noop,
+    on: (event: string, handler: (payload: unknown) => void) => {
+      if (event in sceneSocketEvents) setTimeout(() => handler(sceneSocketEvents[event]), 100);
+    },
     off: noop,
     once: noop,
     emit: noop,

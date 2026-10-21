@@ -4,31 +4,24 @@ import { Ionicons } from "@expo/vector-icons";
 import { DISPATCH_WINDOW_MS, dispatchSecondsLeft, type RideType } from "@rida/shared";
 import {
   Button,
+  Card,
   Illustration,
   ProgressBar,
   RouteStops,
   Text,
   colors,
-  radii,
   spacing,
 } from "@rida/mobile-shared";
-import { SafetyTipCard } from "./SafetyTipCard";
 
-function formatClock(totalSeconds: number): string {
-  const m = Math.floor(totalSeconds / 60);
-  const s = totalSeconds % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
+/** One calm tip for the wait: the check that matters most at pickup. */
+export const SAFETY_TIP = "Check the car's plate matches before you get in.";
 
 /**
- * "Finding your driver". Everything shown is real state:
- * - the status line says what the server is actually doing with this ride
- *   type (a SHARED request is offered to free drivers AND to drivers already
- *   filling a car on the way);
- * - the bar is the real 90s dispatch window counting down from the server's
- *   broadcastStartedAt, labelled as such. When it runs out we say "still
- *   searching" — the server's sweep can take a few more seconds to move the
- *   ride to "no drivers", and it is not a failure until it does.
+ * "Finding your driver": a compact sheet over the map, where the pickup
+ * pulses. Everything shown is real state: the thin line along the top of the
+ * card is the 90 s dispatch window running down from the server's
+ * broadcastStartedAt ("usually under 2 minutes" is that window, plus the few
+ * seconds the server takes to say no one was free).
  */
 export function SearchingPanel({
   pickupZoneName,
@@ -53,96 +46,74 @@ export function SearchingPanel({
   }, []);
 
   const secondsLeft = dispatchSecondsLeft(broadcastStartedAt, now);
-  const status =
-    rideType === "SHARED"
-      ? `Looking for a driver or a shared car going your way from ${pickupZoneName}…`
-      : `Contacting drivers near ${pickupZoneName}…`;
 
   return (
     <View style={styles.section}>
-      <View style={styles.hero}>
-        <Illustration name="pinRadar" size={132} pulse float />
-      </View>
-
       <View style={styles.heading} accessibilityLiveRegion="polite">
-        <Text variant="h2" style={styles.centered} accessibilityRole="header">
+        <Text variant="title2" accessibilityRole="header">
           Finding your driver
         </Text>
-        <Text variant="bodySmall" color="muted" style={styles.centered}>
-          {status}
+        <Text variant="subhead" color="secondary">
+          Asking drivers near {pickupZoneName} · usually under 2 minutes
         </Text>
       </View>
 
-      <View style={styles.window}>
-        {secondsLeft === null ? (
-          <Text variant="caption" color="subtle" style={styles.centered}>
-            Sending your request…
-          </Text>
-        ) : (
-          <>
-            <ProgressBar progress={(secondsLeft * 1000) / DISPATCH_WINDOW_MS} height={4} />
-            <Text variant="caption" color="subtle" style={styles.centered}>
-              {secondsLeft > 0
-                ? `Offering your ride to drivers · about ${formatClock(secondsLeft)} left`
-                : "Still searching — if no one's free, we'll ask what you'd like to do."}
-            </Text>
-          </>
-        )}
-      </View>
-
-      <View style={styles.summary}>
+      <Card variant="filled" style={styles.card}>
+        <View importantForAccessibility="no-hide-descendants">
+          <ProgressBar
+            progress={secondsLeft === null ? 1 : (secondsLeft * 1000) / DISPATCH_WINDOW_MS}
+            height={3}
+            color={colors.green500}
+            trackColor={colors.surface3}
+          />
+        </View>
         <RouteStops
           connectorHeight={12}
           origin={
-            <Text variant="bodyMedium" numberOfLines={1}>
+            <Text variant="bodyStrong" numberOfLines={1}>
               {pickupZoneName}
             </Text>
           }
           destination={
-            <Text variant="bodyMedium" numberOfLines={1}>
+            <Text variant="bodyStrong" numberOfLines={1}>
               {dropoffZoneName}
             </Text>
           }
         />
         <View style={styles.divider} />
-        <View style={styles.summaryRow}>
+        <View style={styles.rideRow}>
           <Illustration name={rideType === "SHARED" ? "carShared" : "carStandard"} width={56} />
-          <View style={styles.summaryText}>
-            <Text variant="bodyMedium">{rideType === "SHARED" ? "Shared" : "Ride alone"}</Text>
-            <View style={styles.cashRow}>
-              <Ionicons name="cash-outline" size={13} color={colors.ink3} />
-              <Text variant="caption" color="muted">
-                Cash
-              </Text>
-            </View>
+          <View style={styles.rideText}>
+            <Text variant="bodyStrong">{rideType === "SHARED" ? "Shared" : "Ride alone"}</Text>
+            <Text variant="subhead" color="secondary">
+              Cash
+            </Text>
           </View>
-          <Text variant="h3">{priceLabel}</Text>
+          <Text variant="title3" tabular>
+            {priceLabel}
+          </Text>
         </View>
+      </Card>
+
+      <View style={styles.tip} accessible accessibilityLabel={`Safety tip: ${SAFETY_TIP}`}>
+        <Ionicons name="shield-checkmark-outline" size={16} color={colors.ink3} />
+        <Text variant="subhead" color="secondary" style={styles.tipText}>
+          {SAFETY_TIP}
+        </Text>
       </View>
 
-      <SafetyTipCard />
-
-      <Button label="Cancel request" variant="danger" onPress={onCancel} />
+      <Button label="Cancel" variant="danger" onPress={onCancel} />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  section: { gap: spacing.lg },
-  hero: { alignItems: "center", marginTop: spacing.xs },
-  heading: { gap: spacing.xs, paddingHorizontal: spacing.sm },
-  centered: { textAlign: "center" },
-  window: { gap: spacing.sm },
-  summary: {
-    borderRadius: radii.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.lg,
-    gap: spacing.md,
-    backgroundColor: colors.white,
-  },
-  divider: { height: 1, backgroundColor: colors.hairline },
-  summaryRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  summaryText: { flex: 1, gap: 2 },
-  cashRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  section: { gap: spacing[4] },
+  heading: { gap: spacing[1] },
+  card: { gap: spacing[3] },
+  divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
+  rideRow: { flexDirection: "row", alignItems: "center", gap: spacing[3] },
+  rideText: { flex: 1, gap: 2 },
+  tip: { flexDirection: "row", alignItems: "center", gap: spacing[2] },
+  tipText: { flex: 1 },
 });

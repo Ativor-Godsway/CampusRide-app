@@ -34,7 +34,7 @@ const MapView = forwardRef(function MapView(
 });
 
 export default MapView;
-export const Marker = () => null;
+export const Marker = Object.assign(() => null, { Animated: () => null });
 export const Polyline = () => null;
 export const Polygon = () => null;
 export const Circle = () => null;

@@ -4,24 +4,23 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { usePreventRemove } from "expo-router/react-navigation";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import type { PaymentMethod, RideCompletedFareSummary, RiderCancelReason, RideType, TripEnd } from "@rida/shared";
 import {
   MAX_PIN_ADJUST_METERS,
   PICKUP_NOTE_MAX_LENGTH,
   clampToRadius,
-  cloudinaryAvatar,
   estimateEtaMinutes,
-  formatEta,
   getSharedFarePerRider,
   isInServiceArea,
   mapFitPadding,
   movedEnd,
+  planTripStops,
   pointsKey,
   priceLoneRide,
   rideLeaveBehaviour,
   decodePolyline,
+  stopsBeforeDropoff,
   tripEndBody,
   tripEndFromParams,
   tripEndParams,
@@ -38,13 +37,11 @@ import {
   LoadingState,
   ServiceIcon,
   Text,
-  callPhone,
   cancelRide,
   colors,
   createRide,
   formatCedis,
   getActiveRide,
-  raiseSos,
   radii,
   regionForCoordinates,
   shadows,
@@ -61,7 +58,6 @@ import {
   useDriverLocation,
   useCarNotice,
   useRideTracking,
-  type RideDriverInfo,
   RideRequestRefusedError,
   getRoadRoute,
   useLiveRoute,
@@ -73,13 +69,20 @@ import {
   RideOptionCard,
   illustrations,
 } from "@rida/mobile-shared";
-import { CancelRideSheet, type SwitchOffer } from "../../components/ride/CancelRideSheet";
+import { CancelRideContent, type SwitchOffer } from "../../components/ride/CancelRideContent";
+import {
+  DriverArrivedContent,
+  DriverOnTheWayContent,
+  InRideContent,
+} from "../../components/ride/DriverTripContent";
 import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
 import { SearchingPanel } from "../../components/ride/SearchingPanel";
 import { RideInProgressSheet } from "../../components/ride/RideInProgressSheet";
+import { SafetySheet } from "../../components/ride/SafetySheet";
 import { activeRideParams, useActiveRide } from "../../lib/activeRide";
 import { haptics } from "../../lib/haptics";
-import { usePlaces } from "../../lib/chooseRide";
+import { usePlaces, useZones } from "../../lib/chooseRide";
+import { shareTrip } from "../../lib/shareTrip";
 
 const STARS = [1, 2, 3, 4, 5];
 
@@ -115,7 +118,7 @@ export default function RideTypeScreen() {
    * Both ends as exact points (tripEndParams, "pickup" / "dropoff" prefixes),
    * plus: `rideId` when resuming an active ride; `from` ("plan" when opened
    * from Plan your ride, so Edit can simply go back); `openCancel` ("1": open
-   * this ride's cancel sheet as soon as it loads).
+   * this ride's cancel steps as soon as it loads).
    */
   const params = useLocalSearchParams<Record<string, string>>();
   const initialPickup = useMemo<TripEnd>(
@@ -149,7 +152,9 @@ export default function RideTypeScreen() {
   const [activeRideId, setActiveRideId] = useState<string | null>(params.rideId ?? null);
   const [driverLocation, setDriverLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [decisionBusy, setDecisionBusy] = useState<"search" | "switch" | null>(null);
-  const [cancelSheetOpen, setCancelSheetOpen] = useState(false);
+  /** The cancel steps, in place of the ride sheet's content. */
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [safetyOpen, setSafetyOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [switching, setSwitching] = useState(false);
 
@@ -227,6 +232,16 @@ export default function RideTypeScreen() {
       haptics.success();
     }
   }, [ride?.status]);
+
+  // The driver reached the pickup: the same buzz, again only live (null until
+  // the ride has loaded, so reopening an arrived ride stays quiet).
+  const legSeen = ride ? myLegStatus : null;
+  const previousLeg = useRef(legSeen);
+  useEffect(() => {
+    const before = previousLeg.current;
+    previousLeg.current = legSeen;
+    if (before === "WAITING" && legSeen === "ARRIVED") haptics.success();
+  }, [legSeen]);
 
   // ── Fares ───────────────────────────────────────────────────────────────────
   // The same @rida/shared pricing functions the server locks fares with
@@ -349,9 +364,24 @@ export default function RideTypeScreen() {
     return zones;
   }, [pickupCoord, dropoffCoord, driverLocation, pickupEnd.label, dropoffEnd.label, pinVersion]);
 
+  // Shared, in the car: "1 more stop before yours". The driver app's own stop
+  // order (planTripStops); other riders' exact pins are hidden from this
+  // rider, so their stops are placed at their zones.
+  const { data: zones } = useZones();
+  const stopsBefore = useMemo(() => {
+    if (ride?.type !== "SHARED" || myLegStatus !== "PICKED_UP" || !myPassenger || !zones) return null;
+    const plan = planTripStops({
+      passengers: ride.passengers,
+      zones: new Map(zones.map((z) => [z.id, z])),
+      from: driverLocation,
+    });
+    return stopsBeforeDropoff(plan, myPassenger.id);
+  }, [ride?.type, ride?.passengers, myLegStatus, myPassenger, zones, driverLocation]);
+
   // ── Phase ───────────────────────────────────────────────────────────────────
   const isSearching = activeRideId !== null && (!ride || ride.status === "REQUESTED" || isMerged);
   const hasDriver = ride?.status === "MATCHED" || ride?.status === "ARRIVED";
+  const driverComing = hasDriver && !!driver && (myLegStatus === "WAITING" || myLegStatus === "ARRIVED");
 
   // Still unclaimed and holding only this rider: the server will accept a
   // type switch (POST /rides/:id/switch — same rule, checked again there).
@@ -448,7 +478,7 @@ export default function RideTypeScreen() {
     try {
       await switchRideType(activeRideId, toType);
       haptics.success();
-      setCancelSheetOpen(false);
+      setCancelOpen(false);
       await refreshRide();
       void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
     } catch (err) {
@@ -472,14 +502,14 @@ export default function RideTypeScreen() {
     setCancelling(true);
     try {
       await cancelRide(activeRideId, { reason, note });
-      setCancelSheetOpen(false);
+      setCancelOpen(false);
       void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
       // A deliberate exit: lift the leave guard, then go (see effect below).
       setLeaving(true);
     } catch (err) {
       if (httpStatus(err) === 409) {
         await refreshRide();
-        setCancelSheetOpen(false);
+        setCancelOpen(false);
         Alert.alert("Can't cancel now", "This ride can no longer be cancelled.");
       } else {
         Alert.alert("Couldn't cancel", rateLimitText(err) ?? "Please check your connection and try again.");
@@ -489,13 +519,18 @@ export default function RideTypeScreen() {
     }
   }
 
+  /** "Share trip": where the rider is going and the car they're in. */
+  function shareThisTrip() {
+    if (driver) void shareTrip({ pickup: pickupEnd.label, dropoff: dropoffEnd.label, driver });
+  }
+
   /** Closes everything above the tabs, so "home" is Home even from Plan → Choose. */
   const goHome = useCallback(() => goToHomeTab(router), [router]);
 
   // ── Never lose an active ride ───────────────────────────────────────────────
   // Back arrow, iOS swipe-back and Android back all try to REMOVE this
   // screen; while a ride is going on that is intercepted. Still cancellable
-  // (searching, or waiting for the driver) → the cancel sheet, so leaving is
+  // (searching, or waiting for the driver) → the cancel steps, so leaving is
   // a deliberate choice. On the trip → minimise to Home; the ride carries on
   // and the banner there brings the rider back.
   const leaveBehaviour = rideLeaveBehaviour({
@@ -505,8 +540,15 @@ export default function RideTypeScreen() {
   });
   usePreventRemove(!leaving && leaveBehaviour !== "leave", () => {
     if (leaveBehaviour === "minimise") setLeaving(true);
-    else setCancelSheetOpen(true);
+    // Back from the cancel steps returns to the ride.
+    else setCancelOpen((open) => !open);
   });
+  // Picked up (or the ride ended) while the cancel steps were showing: there
+  // is nothing left to cancel.
+  const canCancel = leaveBehaviour === "confirm";
+  useEffect(() => {
+    if (!canCancel) setCancelOpen(false);
+  }, [canCancel]);
   useEffect(() => {
     // Runs after the render that switched the guard off, so the pop is allowed.
     if (leaving) goHome();
@@ -517,7 +559,7 @@ export default function RideTypeScreen() {
   useEffect(() => {
     if (!params.openCancel || autoOpenedCancel.current || !ride) return;
     autoOpenedCancel.current = true;
-    if (leaveBehaviour === "confirm") setCancelSheetOpen(true);
+    if (leaveBehaviour === "confirm") setCancelOpen(true);
   }, [params.openCancel, ride, leaveBehaviour]);
 
   // Choose a ride opened while another ride is still going on: say so up
@@ -646,6 +688,8 @@ export default function RideTypeScreen() {
         onBack={goBack}
         // A requested ride's route can't change, so Edit only exists before.
         onEdit={inOptions ? editRoute : undefined}
+        // Mockup 06: while the driver comes, only where to meet matters.
+        pickupOnly={driverComing}
       />
 
       {inOptions ? (
@@ -728,10 +772,10 @@ export default function RideTypeScreen() {
           />
         </BottomSheet>
       ) : (
+      // Sized to its content, so searching stays compact over the map.
       <BottomSheet
         key="tracking"
-        snapPoints={["55%", "90%"]}
-        index={0}
+        maxHeightRatio={0.9}
         onChange={onSheetChange}
         scrollable
         contentStyle={styles.sheetContent}
@@ -743,6 +787,19 @@ export default function RideTypeScreen() {
               <Skeleton width="80%" height={14} style={styles.centerSelf} />
               <Skeleton height={120} radius={radii.lg} />
             </SkeletonGroup>
+          ) : activeRideId !== null && cancelOpen && canCancel ? (
+            // The cancel steps take the sheet's place; never a second sheet.
+            <FadeIn key="cancel">
+              <CancelRideContent
+                stage={hasDriver ? "driver_assigned" : "searching"}
+                switchOffer={switchOffer}
+                switching={switching}
+                cancelling={cancelling}
+                onKeep={() => setCancelOpen(false)}
+                onSwitch={(toType) => void handleSwitch(toType, "sheet")}
+                onConfirmCancel={(reason, note) => void handleConfirmCancel(reason, note)}
+              />
+            </FadeIn>
           ) : activeRideId !== null &&
             (myPassenger?.status === "CANCELLED" ? (
               <CancelledContent
@@ -760,7 +817,7 @@ export default function RideTypeScreen() {
                     rideType={rideType}
                     priceLabel={priceLabel}
                     broadcastStartedAt={ride?.broadcastStartedAt}
-                    onCancel={() => setCancelSheetOpen(true)}
+                    onCancel={() => setCancelOpen(true)}
                   />
                 </FadeIn>
               )}
@@ -778,7 +835,7 @@ export default function RideTypeScreen() {
                     busy={decisionBusy}
                     onSearchAgain={() => void handleSearchAgain()}
                     onSwitch={() => void handleSwitch(switchTarget, "no_drivers")}
-                    onCancel={() => setCancelSheetOpen(true)}
+                    onCancel={() => setCancelOpen(true)}
                   />
                 </FadeIn>
               )}
@@ -792,23 +849,34 @@ export default function RideTypeScreen() {
                     <MyLegDoneContent dropoffZoneName={dropoffEnd.label} />
                   </FadeIn>
                 ) : myLegStatus === "PICKED_UP" ? (
-                  <FadeIn key="in-progress">
-                    <InProgressContent
+                  <FadeIn key="in-ride">
+                    <InRideContent
                       driver={driver}
-                      dropoffZoneName={dropoffEnd.label}
+                      dropoffName={dropoffEnd.label}
                       etaMinutes={etaToDropoff}
-                      rideId={ride.id}
+                      stopsBefore={stopsBefore}
+                      onShare={shareThisTrip}
+                      onSafety={() => setSafetyOpen(true)}
+                    />
+                  </FadeIn>
+                ) : myLegStatus === "ARRIVED" ? (
+                  <FadeIn key="driver-arrived">
+                    <DriverArrivedContent
+                      driver={driver}
+                      pickupName={pickupEnd.label}
+                      onShare={shareThisTrip}
+                      onSafety={() => setSafetyOpen(true)}
+                      onCancel={() => setCancelOpen(true)}
                     />
                   </FadeIn>
                 ) : (
-                  <FadeIn key="driver-found">
-                    <DriverFoundContent
-                      arrived={myLegStatus === "ARRIVED"}
+                  <FadeIn key="driver-on-the-way">
+                    <DriverOnTheWayContent
                       driver={driver}
-                      hasLocation={!!driverLocation}
                       etaMinutes={etaToPickup}
-                      rideId={ride.id}
-                      onCancel={() => setCancelSheetOpen(true)}
+                      onShare={shareThisTrip}
+                      onSafety={() => setSafetyOpen(true)}
+                      onCancel={() => setCancelOpen(true)}
                     />
                   </FadeIn>
                 ))}
@@ -844,15 +912,11 @@ export default function RideTypeScreen() {
       ) : null}
 
       {activeRideId !== null ? (
-        <CancelRideSheet
-          visible={cancelSheetOpen}
-          stage={hasDriver ? "driver_assigned" : "searching"}
-          switchOffer={switchOffer}
-          switching={switching}
-          cancelling={cancelling}
-          onDismiss={() => setCancelSheetOpen(false)}
-          onSwitch={(toType) => void handleSwitch(toType, "sheet")}
-          onConfirmCancel={(reason, note) => void handleConfirmCancel(reason, note)}
+        <SafetySheet
+          visible={safetyOpen}
+          rideId={ride?.id ?? activeRideId}
+          onDismiss={() => setSafetyOpen(false)}
+          onShareTrip={shareThisTrip}
         />
       ) : null}
     </View>
@@ -917,7 +981,8 @@ function PickupExtras({
 
 /**
  * Floats over the top of the map: back · "Pickup → Drop-off" · Edit. Takes
- * the place of the route text that used to sit inside the sheet.
+ * the place of the route text that used to sit inside the sheet. While the
+ * driver is coming it says only "● Pickup: Legon Barrier".
  */
 function RoutePill({
   top,
@@ -925,6 +990,7 @@ function RoutePill({
   dropoffZoneName,
   onBack,
   onEdit,
+  pickupOnly = false,
 }: {
   top: number;
   pickupZoneName: string;
@@ -932,7 +998,21 @@ function RoutePill({
   onBack: () => void;
   /** Tapping the route goes back to change it (only before the ride is requested). */
   onEdit?: () => void;
+  pickupOnly?: boolean;
 }) {
+  if (pickupOnly) {
+    return (
+      <View style={[styles.topBar, { top }]} pointerEvents="box-none">
+        <IconButton variant="map" icon="arrow-back" accessibilityLabel="Back" onPress={onBack} />
+        <View style={[styles.pill, styles.pickupPill]} accessible accessibilityLabel={`Pickup: ${pickupZoneName}`}>
+          <View style={styles.pickupDot} />
+          <Text variant="bodyStrong" numberOfLines={1} style={styles.pillRoute}>
+            Pickup: {pickupZoneName}
+          </Text>
+        </View>
+      </View>
+    );
+  }
   const route = (
     <Text variant="bodyStrong" numberOfLines={1} style={styles.pillRoute}>
       {pickupZoneName} → {dropoffZoneName}
@@ -960,245 +1040,6 @@ function RoutePill({
 }
 
 // ── Tracking phase content ────────────────────────────────────────────────────
-
-function DriverAvatar({ name, photoUrl }: { name: string; photoUrl?: string | null }) {
-  const [failed, setFailed] = useState(false);
-  const initials = name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0] ?? "")
-    .join("")
-    .toUpperCase();
-  const showPhoto = Boolean(photoUrl) && !failed;
-  return (
-    <View style={styles.avatar} accessibilityLabel={`Driver ${name}`}>
-      {showPhoto ? (
-        <Image
-          source={{ uri: cloudinaryAvatar(photoUrl!, 48) }}
-          style={styles.avatarImage}
-          contentFit="cover"
-          cachePolicy="memory-disk"
-          transition={200}
-          onError={() => setFailed(true)}
-        />
-      ) : (
-        <Text variant="h3" color="inverse">
-          {initials}
-        </Text>
-      )}
-    </View>
-  );
-}
-
-function PremiumDriverCard({ driver }: { driver: RideDriverInfo }) {
-  const car = [driver.carColor, driver.carMake, driver.carModel].filter(Boolean).join(" ");
-  return (
-    <Card style={styles.driverCard}>
-      <View style={styles.driverRow}>
-        <DriverAvatar name={driver.name} photoUrl={driver.photoUrl} />
-        <View style={styles.driverInfo}>
-          <Text variant="h3">{driver.name}</Text>
-          {driver.rating != null && (
-            <View style={styles.ratingRow}>
-              <Ionicons name="star" size={13} color={colors.accent[500]} />
-              <Text variant="bodySmall" color="muted">
-                {" "}
-                {driver.rating.toFixed(1)}
-              </Text>
-            </View>
-          )}
-          {car ? (
-            <Text variant="bodySmall" color="muted">
-              {car}
-            </Text>
-          ) : null}
-        </View>
-        {driver.plate ? (
-          <View style={styles.plateBadge}>
-            <Text variant="mono" style={styles.plateText}>{driver.plate}</Text>
-          </View>
-        ) : null}
-      </View>
-    </Card>
-  );
-}
-
-/**
- * Phase 4: the actions a rider needs while a ride is live — reach the driver,
- * or raise an alarm. Rendered in every in-ride state (driver assigned, en
- * route, on the trip) so its position never moves; a safety control that
- * relocates between screens is one the rider has to hunt for.
- */
-function RideSafetyActions({ rideId, driver }: { rideId: string; driver: RideDriverInfo }) {
-  const [sending, setSending] = useState(false);
-
-  function confirmSos() {
-    Alert.alert(
-      "Send an SOS?",
-      "We'll text your emergency contact where you are, who your driver is, and a link to follow this trip.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Send SOS",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              setSending(true);
-              try {
-                const result = await raiseSos(rideId);
-
-                // Report exactly who was actually reached, rather than a
-                // blanket "sent" — in an emergency the difference matters.
-                const reached: string[] = [];
-                if (result.smsDelivered && result.contactName) reached.push(result.contactName);
-                if (result.supportNotified) reached.push("CampusRide support");
-
-                if (reached.length > 0 && result.alreadyAlerted) {
-                  // A repeat press: the first one got through moments ago.
-                  Alert.alert(
-                    "SOS already sent",
-                    `${reached.join(" and ")} ${reached.length === 1 ? "was" : "were"} sent a link to follow your trip a moment ago. If you're in danger, call someone now.`,
-                  );
-                } else if (reached.length > 0) {
-                  const nudge = result.hasEmergencyContact
-                    ? ""
-                    : "\n\nAdd an emergency contact in Account → Safety so someone you know is alerted too.";
-                  Alert.alert(
-                    "SOS sent",
-                    `${reached.join(" and ")} ${reached.length === 1 ? "has" : "have"} been sent a link to follow your trip.${nudge}`,
-                  );
-                } else {
-                  // Nothing got through — hand over the link so the rider can
-                  // still get help through some other channel.
-                  Alert.alert(
-                    "SOS raised, but we couldn't send a message",
-                    `Share this link with someone you trust, or call them directly:\n\n${result.trackingUrl}`,
-                  );
-                }
-              } catch {
-                Alert.alert("Couldn't send SOS", "Please try again, or call someone directly.");
-              } finally {
-                setSending(false);
-              }
-            })();
-          },
-        },
-      ],
-    );
-  }
-
-  return (
-    <View style={styles.safetyRow}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Call ${driver.name}`}
-        onPress={() => void callPhone(driver.phone, driver.name)}
-        style={styles.callButton}
-      >
-        <Ionicons name="call" size={18} color={colors.primary[500]} />
-        <Text variant="bodySmall" color="primary">
-          Call driver
-        </Text>
-      </Pressable>
-
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Send an emergency SOS"
-        onPress={confirmSos}
-        disabled={sending}
-        style={[styles.sosButton, sending && styles.sosButtonBusy]}
-      >
-        <Ionicons name="alert-circle" size={18} color={colors.surface2} />
-        <Text variant="bodySmall" color="inverse">
-          {sending ? "Sending…" : "SOS"}
-        </Text>
-      </Pressable>
-    </View>
-  );
-}
-
-function DriverFoundContent({
-  arrived,
-  driver,
-  hasLocation,
-  etaMinutes,
-  rideId,
-  onCancel,
-}: {
-  /** Ride-level ARRIVED (LONE) OR this rider's own passenger row is ARRIVED
-   * (SHARED, Phase 6b-3 — the ride itself may still be MATCHED if this
-   * passenger's pickup is the car's first). */
-  arrived: boolean;
-  driver: RideDriverInfo;
-  hasLocation: boolean;
-  /** Minutes until the driver reaches the pickup point, or null if unknown. */
-  etaMinutes: number | null;
-  rideId: string;
-  /** Opens the cancel sheet (reason required). */
-  onCancel: () => void;
-}) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.stateHeader}>
-        <ServiceIcon
-          name={arrived ? "flag" : "car"}
-          size={48}
-          iconSize={22}
-          background={arrived ? colors.successSurface : colors.primary[50]}
-          color={arrived ? colors.success : colors.primary[500]}
-        />
-        <View style={styles.stateHeading}>
-          <Text variant="h2">{arrived ? "Your driver has arrived" : "Driver is on the way to you"}</Text>
-          <Text variant="bodySmall" color="muted">
-            {arrived
-              ? "Head to your pickup point — your driver is waiting."
-              : hasLocation
-                ? `${formatEta(etaMinutes)} away`
-                : "Your driver is getting ready"}
-          </Text>
-        </View>
-      </View>
-
-      <PremiumDriverCard driver={driver} />
-
-      <RideSafetyActions rideId={rideId} driver={driver} />
-
-      <Button label="Cancel ride" variant="danger" onPress={onCancel} />
-    </View>
-  );
-}
-
-function InProgressContent({
-  driver,
-  dropoffZoneName,
-  etaMinutes,
-  rideId,
-}: {
-  driver: RideDriverInfo;
-  dropoffZoneName: string;
-  /** Minutes until the dropoff point, or null if the driver's location is unknown. */
-  etaMinutes: number | null;
-  rideId: string;
-}) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.stateHeader}>
-        <ServiceIcon name="navigate" size={48} iconSize={22} />
-        <View style={styles.stateHeading}>
-          <Text variant="h2">On your way</Text>
-          <Text variant="bodySmall" color="muted">
-            Heading to {dropoffZoneName} · {formatEta(etaMinutes)}
-          </Text>
-        </View>
-      </View>
-
-      <PremiumDriverCard driver={driver} />
-
-      <RideSafetyActions rideId={rideId} driver={driver} />
-    </View>
-  );
-}
 
 /**
  * Phase 6b-3: shown once THIS rider's own passenger row is DROPPED_OFF, even
@@ -1448,31 +1289,6 @@ const styles = StyleSheet.create({
     ...shadows.md,
   },
   carNoticeText: { color: colors.white, flex: 1, fontWeight: "600" },
-  // Phase 4: in-ride safety + contact row.
-  safetyRow: { flexDirection: "row", gap: spacing.sm },
-  callButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.xs,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    borderWidth: 1.5,
-    borderColor: colors.primary[500],
-    backgroundColor: colors.primary[50],
-  },
-  sosButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.xs,
-    paddingVertical: spacing.md,
-    borderRadius: radii.md,
-    backgroundColor: colors.error,
-  },
-  sosButtonBusy: { opacity: 0.6 },
   container: { flex: 1 },
   sheetContent: { gap: spacing.lg },
   // ── Options
@@ -1500,6 +1316,8 @@ const styles = StyleSheet.create({
     ...shadows.float,
   },
   pillPressed: { backgroundColor: colors.surface2 },
+  pickupPill: { flexDirection: "row", alignItems: "center", gap: spacing[2] },
+  pickupDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.green500 },
   pillRoute: { flexShrink: 1 },
   resumeSkeleton: { gap: spacing.lg, paddingTop: spacing.md },
   centerSelf: { alignSelf: "center" },
@@ -1523,32 +1341,6 @@ const styles = StyleSheet.create({
   infoRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
   infoLabel: { flex: 1 },
   buttonGroup: { gap: spacing.md },
-  // ── Driver card
-  driverCard: {},
-  driverRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  driverInfo: { flex: 1, gap: 2 },
-  ratingRow: { flexDirection: "row", alignItems: "center" },
-  // 14pt: the plate is what a rider checks before getting in.
-  plateText: { fontSize: typography.size.sm },
-  plateBadge: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.sm,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: radii.full,
-    backgroundColor: colors.primary[500],
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  avatarImage: {
-    width: 48,
-    height: 48,
-    borderRadius: radii.full,
-  },
   // ── Rating
   ratingSection: { alignItems: "center", gap: spacing.sm },
   starsRow: { flexDirection: "row", gap: spacing.sm },

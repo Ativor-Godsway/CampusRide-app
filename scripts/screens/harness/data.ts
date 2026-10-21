@@ -282,3 +282,70 @@ export const riderActiveRide = {
   driver: { firstName: "Kwame" },
   ...pins("Akuafo Hall", "Balme Library"),
 };
+
+/** Ama's driver, as GET /rides/:id sends him. */
+export const riderDriver = {
+  driverId: "driver-1",
+  name: "Kwame Mensah",
+  phone: "+233241234567",
+  carMake: "Toyota",
+  carModel: "Corolla",
+  carColor: "Silver",
+  plate: "GR 1234-24",
+  rating: 4.9,
+  photoUrl: null,
+};
+
+/**
+ * Ama's shared ride with Kwame, from Akuafo Hall to Balme Library: Kwame on
+ * his way, at the pickup, or with Ama on board and Yaw (Legon Hall → Main
+ * Gate) still to collect first. Yaw's pins are hidden, as the server does
+ * for another rider.
+ */
+export function riderTrip(stage: "coming" | "arrived" | "onboard") {
+  const base = ride("ride-live", "Akuafo Hall", "Balme Library", {
+    status: stage === "onboard" ? "IN_PROGRESS" : "MATCHED",
+    occupancy: stage === "onboard" ? 2 : 1,
+    paymentStatus: "PENDING",
+    createdAt: new Date(Date.now() - 6 * 60_000),
+    broadcastStartedAt: new Date(Date.now() - 6 * 60_000),
+    departedAt: stage === "onboard" ? new Date(Date.now() - 60_000) : null,
+    completedAt: null,
+  });
+  const ama = {
+    id: "passenger-ama",
+    rideId: base.id,
+    riderId: rider.id,
+    pickupZoneId: base.pickupZoneId,
+    dropoffZoneId: base.dropoffZoneId,
+    fareCharged: null,
+    lockedFare: 500,
+    status: stage === "coming" ? "WAITING" : stage === "arrived" ? "ARRIVED" : "PICKED_UP",
+    ...pins("Akuafo Hall", "Balme Library"),
+  };
+  const yaw = {
+    id: "passenger-yaw",
+    rideId: base.id,
+    riderId: "rider-yaw",
+    pickupZoneId: zone("Legon Hall").id,
+    dropoffZoneId: zone("Main Gate").id,
+    fareCharged: null,
+    lockedFare: 500,
+    status: "WAITING",
+  };
+  return {
+    ride: { ...base, passengers: stage === "onboard" ? [ama, yaw] : [ama] },
+    driver: riderDriver,
+  };
+}
+
+/** Where Kwame is: coming up from Bush Canteen's way, or just past Akuafo Hall with Ama. */
+export function riderTripDriverAt(stage: "coming" | "arrived" | "onboard") {
+  const at =
+    stage === "coming"
+      ? { lat: 5.6468, lng: -0.1832 }
+      : stage === "arrived"
+        ? { lat: place("Akuafo Hall").latitude, lng: place("Akuafo Hall").longitude }
+        : { lat: 5.65, lng: -0.1865 };
+  return { "ride:driver_location": { rideId: "ride-live", ...at, ts: Date.now() } };
+}
