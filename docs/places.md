@@ -96,9 +96,9 @@ the map the same places spread over ~4.5 km. `zones:realign`
 applies the owner's decisions of 2026-10-12, in one transaction:
 
 - **Moves** 14 zones to their OpenStreetMap positions (148 m to 2.3 km).
-- **Renames** "Medical School (UGMS)" to **"UG Medical Centre (UGMC)"** and
-  puts it at the UGMC on campus (the real UG Medical School is at Korle
-  Bu). The USSD menu lists both names, so it works before and after.
+- **Moved** "UG Medical Centre (UGMC)" to the UGMC on campus (originally
+  seeded as "Medical School (UGMS)"; the rename is now baked into
+  `seed.ts`).
 - **Retires** "Accra Mall Junction" (off campus) by setting
   `Zone.retiredAt`. The row stays for old rides, which still show its
   name. Nothing new uses it:
@@ -113,9 +113,9 @@ applies the owner's decisions of 2026-10-12, in one transaction:
   - places and the place seed use zones in service only; the realign
     re-zones every place and moves any driver still in it;
   - `routes:precompute` and the realign skip it.
-- **Renames** "Botanical Gardens Gate" (OSM shows no clear named entrance)
-  to **"James Topp Nelson Yankah Hall (TF Hall)"** at TF Hall, to serve the
-  north of campus. USSD lists it under Halls.
+- **Moved** "James Topp Nelson Yankah Hall (TF Hall)" to TF Hall, to serve
+  the north of campus (originally seeded as "Botanical Gardens Gate"; the
+  rename is now baked into `seed.ts`). USSD lists it under Halls.
 
 It is idempotent: a second run reports 0 m for every zone and changes
 nothing. Re-run `routes:precompute` afterwards (without `--only-missing`:

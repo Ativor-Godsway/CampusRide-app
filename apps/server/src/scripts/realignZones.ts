@@ -39,14 +39,11 @@ import { SCRIPT_TX_OPTIONS } from "./scriptTx";
 export const RETIRED_ZONES = ["Accra Mall Junction"] as const;
 
 /**
- * Current name → new name. The real UG Medical School is at Korle Bu; the
- * Legon one is the UGMC. "Botanical Gardens Gate" had no clear entrance in
- * OSM, so the owner chose TF Hall to serve the north of campus (2026-10-12).
+ * Old seed name → production name.  Applied in production (2026-10) and now
+ * baked into prisma/seed.ts, so a fresh DB already has the right names.
+ * Kept empty: the realign script no longer needs to rename anything.
  */
-export const RENAMED_ZONES: Record<string, string> = {
-  "Medical School (UGMS)": "UG Medical Centre (UGMC)",
-  "Botanical Gardens Gate": "James Topp Nelson Yankah Hall (TF Hall)",
-};
+export const RENAMED_ZONES: Record<string, string> = {};
 
 /** Zone (by its name AFTER renaming) → real position, from OpenStreetMap. */
 export const REAL_ZONE_CENTRES: Record<string, { latitude: number; longitude: number; from: string }> = {

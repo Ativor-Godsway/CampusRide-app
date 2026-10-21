@@ -34,11 +34,11 @@ describe("realignZones", () => {
     expect(report.actions.find((a) => a.name === "Accra Mall Junction")).toMatchObject({ kind: "retire", already: false });
     expect(report.actions.find((a) => a.name === "UG Medical Centre (UGMC)")).toMatchObject({
       kind: "move",
-      renamedFrom: "Medical School (UGMS)",
+      renamedFrom: null,
     });
     expect(report.actions.find((a) => a.name === "James Topp Nelson Yankah Hall (TF Hall)")).toMatchObject({
       kind: "move",
-      renamedFrom: "Botanical Gardens Gate",
+      renamedFrom: null,
     });
     expect(report.actions.some((a) => a.kind === "leave")).toBe(false);
     expect(await prisma.zone.findMany()).toEqual(expect.arrayContaining(snapshot));
@@ -62,11 +62,11 @@ describe("realignZones", () => {
       expect(retired.latitude).toBe(accra.latitude); // retired zones aren't moved
       const ugmc = zones.find((z) => z.name === "UG Medical Centre (UGMC)")!;
       expect(ugmc).toMatchObject({ latitude: 5.631864, longitude: -0.185925 });
-      expect(zones.some((z) => z.name === "Medical School (UGMS)")).toBe(false);
+      expect(zones.some((z) => z.name === "UG Medical Centre (UGMC)")).toBe(true);
       for (const [name, real] of Object.entries(REAL_ZONE_CENTRES)) {
         expect(zones.find((z) => z.name === name)).toMatchObject({ latitude: real.latitude, longitude: real.longitude });
       }
-      const botanical = snapshot.find((z) => z.name === "Botanical Gardens Gate")!;
+      const botanical = snapshot.find((z) => z.name === "James Topp Nelson Yankah Hall (TF Hall)")!;
       expect(zones.find((z) => z.id === botanical.id)).toMatchObject({
         name: "James Topp Nelson Yankah Hall (TF Hall)",
         latitude: 5.666259,
