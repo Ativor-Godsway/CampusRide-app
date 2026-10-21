@@ -1,11 +1,13 @@
 import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { SplashScreen, Stack, useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { RIDER_DEEP_LINK_POLICY } from "@rida/shared";
 import {
   AuthProvider,
   TermsConfirmationGate,
+  hideSplashScreen,
+  holdSplashScreen,
   initMonitoring,
   installAppStateFocusManager,
   useAppFonts,
@@ -19,8 +21,9 @@ import { RiderPushNotifications } from "../lib/push";
 // anything renders, so a crash on the first screen is reported too.
 initMonitoring("rider");
 
-// The splash stays up until Figtree has loaded (useAppFonts hides it).
-void SplashScreen.preventAutoHideAsync();
+// The splash stays up until Figtree has loaded and the first screen is laid
+// out under it: the root view's onLayout below hides it.
+holdSplashScreen();
 
 const queryClient = new QueryClient();
 
@@ -52,7 +55,7 @@ function RootLayout() {
   if (!fontsReady) return null;
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }} onLayout={hideSplashScreen}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <DeepLinkGuard />

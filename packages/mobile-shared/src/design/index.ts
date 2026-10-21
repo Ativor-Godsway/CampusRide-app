@@ -1,6 +1,7 @@
 export * from "./tokens";
 export * from "./illustrations";
 export * from "./fonts";
+export * from "./splash";
 export * from "./haptics";
 export * from "./components/Text";
 export * from "./components/Button";

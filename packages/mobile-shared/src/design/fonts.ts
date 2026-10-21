@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { useFonts } from "expo-font";
-import { SplashScreen } from "expo-router";
 import { Figtree_400Regular } from "@expo-google-fonts/figtree/400Regular";
 import { Figtree_500Medium } from "@expo-google-fonts/figtree/500Medium";
 import { Figtree_600SemiBold } from "@expo-google-fonts/figtree/600SemiBold";
 import { Figtree_700Bold } from "@expo-google-fonts/figtree/700Bold";
 import { Figtree_800ExtraBold } from "@expo-google-fonts/figtree/800ExtraBold";
+import { hideSplashScreen } from "./splash";
 
 /**
  * Figtree, the one type family in docs/design-system.md, as a family name
@@ -38,13 +38,21 @@ const fontFiles: Record<(typeof fonts)[keyof typeof fonts], number> = {
 const FONT_WAIT_MS = 4000;
 
 /**
- * Loads Figtree and hides the splash screen once it is ready. Returns true
- * when the app may render. The root layout calls
- * `SplashScreen.preventAutoHideAsync()` at module scope so the splash stays
- * up until then.
+ * Once the app may render, how long before the splash is hidden anyway if
+ * the root view's onLayout hasn't hidden it (a first render that failed).
+ */
+export const SPLASH_FALLBACK_MS = 1500;
+
+/**
+ * Loads Figtree. Returns true when the app may render. The root layout
+ * holds the splash at module scope (holdSplashScreen) and hides it from its
+ * root view's onLayout (hideSplashScreen) once this is true, so the first
+ * screen is already laid out when the splash goes.
  *
  * A font that fails to load, or takes longer than FONT_WAIT_MS, never keeps
- * the app on the splash: it opens on the system font instead.
+ * the app on the splash: it opens on the system font instead. Nor does a
+ * first render that never lays out: SPLASH_FALLBACK_MS later, the splash
+ * goes regardless.
  */
 export function useAppFonts(): boolean {
   const [loaded, error] = useFonts(fontFiles);
@@ -58,7 +66,9 @@ export function useAppFonts(): boolean {
   const ready = loaded || error != null || timedOut;
 
   useEffect(() => {
-    if (ready) void SplashScreen.hideAsync();
+    if (!ready) return;
+    const timer = setTimeout(hideSplashScreen, SPLASH_FALLBACK_MS);
+    return () => clearTimeout(timer);
   }, [ready]);
 
   return ready;
