@@ -140,7 +140,7 @@ export function TripCompleteView({
         <CountUpFare pesewas={totalPesewas} />
         <View style={styles.rows}>
           <Row label="Your share" value={formatCedis(driverSharePesewas)} />
-          <Row label="Platform fee (15%)" value={formatCedis(commissionPesewas)} />
+          <Row label="Commission (15%)" value={formatCedis(commissionPesewas)} />
         </View>
       </Card>
 
