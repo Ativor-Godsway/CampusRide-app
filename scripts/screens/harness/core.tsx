@@ -10,8 +10,10 @@ import type { AxiosAdapter, AxiosResponse } from "axios";
 import { api, rawApi, type AuthUser } from "@rida/mobile-shared";
 import { RouterScene } from "../stubs/expo-router";
 import {
+  device,
   sceneLocation,
   scenePosition,
+  scenePush,
   sceneSocketEvents,
   secureStoreData,
 } from "../stubs/expo-modules";
@@ -52,6 +54,8 @@ export interface Scene {
   locationOff?: boolean;
   /** Socket events the screen receives once, by name, e.g. a driver's position. */
   socket?: Record<string, unknown>;
+  /** A real phone that hasn't been asked about notifications (default: a simulator, so "unsupported"). */
+  pushUndetermined?: boolean;
   /** How long to let it settle before the steps and the screenshot (ms). */
   settleMs?: number;
   /** Taps and typing (by accessibility label, or visible text) before the screenshot. */
@@ -123,6 +127,10 @@ export function boot(scenes: Scene[]) {
   if (scene.position) Object.assign(scenePosition, scene.position);
   sceneLocation.allowed = !scene.locationOff;
   Object.assign(sceneSocketEvents, scene.socket ?? {});
+  if (scene.pushUndetermined) {
+    device.isDevice = true;
+    scenePush.status = "undetermined";
+  }
   installServer(scene.user, scene.routes ?? {});
   if (scene.user) {
     secureStoreData.set("rida.session.refreshToken", "refresh-screens");

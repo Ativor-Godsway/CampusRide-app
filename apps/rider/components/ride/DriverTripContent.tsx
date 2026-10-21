@@ -2,7 +2,7 @@ import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import { cloudinaryAvatar } from "@rida/shared";
+import { clockTime, cloudinaryAvatar } from "@rida/shared";
 import {
   Button,
   IconButton,
@@ -19,15 +19,13 @@ import {
 import { carDescription } from "../../lib/shareTrip";
 
 /** "Kwame" from "Kwame Mensah". */
-function firstNameOf(name: string): string {
+export function firstNameOf(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
 
 /** "6:38 PM": when the driver should get there, `minutes` from now. */
 export function arrivalClock(minutes: number, now = new Date()): string {
-  const at = new Date(now.getTime() + Math.round(minutes) * 60_000);
-  const h = at.getHours();
-  return `${h % 12 === 0 ? 12 : h % 12}:${String(at.getMinutes()).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+  return clockTime(now.getTime() + Math.round(minutes) * 60_000);
 }
 
 /** Whole minutes for the big number: never "0 min" while the car is still coming. */
@@ -37,7 +35,7 @@ function etaLabel(minutes: number): string {
 
 // ── Driver row ────────────────────────────────────────────────────────────────
 
-function DriverAvatar({ driver, size }: { driver: RideDriverInfo; size: number }) {
+export function DriverAvatar({ driver, size }: { driver: RideDriverInfo; size: number }) {
   const [failed, setFailed] = useState(false);
   const initials = driver.name
     .trim()
@@ -240,11 +238,15 @@ export function DriverOnTheWayContent({
 /** The driver is at the pickup: who to look for, and where. */
 export function DriverArrivedContent({
   driver,
-  pickupName,
+  pickup,
   onShare,
   onSafety,
   onCancel,
-}: Shared & { pickupName: string; onCancel: () => void }) {
+}: Shared & {
+  /** Where the pickup is (pickupPlace); null when there's no place name for it. */
+  pickup: { name: string; at: boolean } | null;
+  onCancel: () => void;
+}) {
   return (
     <View style={styles.section}>
       <View style={styles.header} accessibilityLiveRegion="polite">
@@ -255,7 +257,11 @@ export function DriverArrivedContent({
           {firstNameOf(driver.name)} is waiting
         </Text>
         <Text variant="subhead" color="secondary">
-          Meet at {pickupName}
+          {!pickup
+            ? "Meet at your pickup point"
+            : pickup.at
+              ? `Meet at ${pickup.name}`
+              : `Meet near ${pickup.name}`}
         </Text>
       </View>
       <View style={styles.divider} />

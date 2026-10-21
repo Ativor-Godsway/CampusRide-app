@@ -25,13 +25,17 @@ export const SAFETY_TIP = "Check the car's plate matches before you get in.";
  */
 export function SearchingPanel({
   pickupZoneName,
+  pickupPlaceName,
   dropoffZoneName,
   rideType,
   priceLabel,
   broadcastStartedAt,
   onCancel,
 }: {
+  /** The pickup as listed in the card ("Current location" is fine there). */
   pickupZoneName: string;
+  /** A real place name for the sentence (pickupPlace), or null: "near you". */
+  pickupPlaceName: string | null;
   dropoffZoneName: string;
   rideType: RideType;
   priceLabel: string;
@@ -54,7 +58,7 @@ export function SearchingPanel({
           Finding your driver
         </Text>
         <Text variant="subhead" color="secondary">
-          Asking drivers near {pickupZoneName} · usually under 2 minutes
+          Asking drivers near {pickupPlaceName ?? "you"} · usually under 2 minutes
         </Text>
       </View>
 

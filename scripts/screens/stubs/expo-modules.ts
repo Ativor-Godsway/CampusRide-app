@@ -11,6 +11,17 @@ const granted = { status: "granted", granted: true, canAskAgain: true, expires: 
 
 export const device = { isDevice: false, osName: "iOS", modelName: "iPhone", brand: "Apple" };
 
+/**
+ * What the phone says about notifications. The harness sets "undetermined"
+ * (and isDevice) for a scene of the explanation screen before anyone's asked.
+ */
+export const scenePush = { status: "granted" as "granted" | "undetermined" | "denied" };
+const pushPermission = () => ({
+  ...granted,
+  status: scenePush.status,
+  granted: scenePush.status === "granted",
+});
+
 /** Whether the scene's rider allowed location (the harness sets it). */
 export const sceneLocation = { allowed: true };
 const refused = { status: "denied", granted: false, canAskAgain: false, expires: "never" };
@@ -77,8 +88,8 @@ export const notifications = {
   addNotificationResponseReceivedListener: subscription,
   clearLastNotificationResponseAsync: () => resolved(undefined),
   getExpoPushTokenAsync: () => resolved({ data: "ExponentPushToken[screens]" }),
-  getPermissionsAsync: () => resolved(granted),
-  requestPermissionsAsync: () => resolved(granted),
+  getPermissionsAsync: () => resolved(pushPermission()),
+  requestPermissionsAsync: () => resolved(pushPermission()),
   setNotificationChannelAsync: () => resolved(null),
   setNotificationHandler: noop,
   useLastNotificationResponse: () => null,

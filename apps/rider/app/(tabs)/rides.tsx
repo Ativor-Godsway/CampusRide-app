@@ -1,37 +1,26 @@
 import { useRouter } from "expo-router";
-import { rideEnd, stopLabel, tripEndParams } from "@rida/shared";
+import { clockTime, groupByDay, rideEnd, stopLabel, tripEndParams } from "@rida/shared";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Pressable, RefreshControl, StyleSheet, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { RefreshControl, StyleSheet, View } from "react-native";
 import type { RideStatus } from "@rida/shared";
 import {
-  Badge,
-  type BadgeVariant,
-  Card,
-  EmptyState,
+  Button,
+  Illustration,
   ListRow,
+  Notice,
   Screen,
   SkeletonGroup,
   SkeletonListRows,
+  StatusChip,
   Text,
   colors,
-  Button,
   formatCedis,
   getMyRidesPage,
   myRidesQueryKeys,
   spacing,
+  type RideSummary,
 } from "@rida/mobile-shared";
 import { TAB_SCREEN_BOTTOM_PADDING } from "../../lib/layout";
-
-const STATUS_BADGE: Record<RideStatus, { label: string; variant: BadgeVariant }> = {
-  REQUESTED: { label: "Requested", variant: "accent" },
-  MATCHED: { label: "Matched", variant: "accent" },
-  ARRIVED: { label: "Driver arrived", variant: "accent" },
-  IN_PROGRESS: { label: "In progress", variant: "accent" },
-  AWAITING_RIDER_DECISION: { label: "Awaiting decision", variant: "warning" },
-  COMPLETED: { label: "Completed", variant: "success" },
-  CANCELLED: { label: "Cancelled", variant: "error" },
-};
 
 const ACTIVE_STATUSES: RideStatus[] = [
   "REQUESTED",
@@ -41,12 +30,19 @@ const ACTIVE_STATUSES: RideStatus[] = [
   "AWAITING_RIDER_DECISION",
 ];
 
-function formatDate(value: Date | string): string {
-  const date = new Date(value);
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+/**
+ * A request absorbed into another car (#7: CANCELLED / MERGED) is still
+ * going on — tapping it follows the pointer to the anchor ride.
+ */
+function isMerged(ride: RideSummary): boolean {
+  return (
+    ride.status === "CANCELLED" &&
+    ride.cancelReason === "MERGED_INTO_ANOTHER_RIDE" &&
+    !!ride.mergedIntoRideId
+  );
 }
 
-/** Rides tab — the rider's trip history. */
+/** Rides tab — the rider's trip history, grouped by day. */
 export default function RidesTab() {
   const router = useRouter();
   /**
@@ -77,41 +73,52 @@ export default function RidesTab() {
   });
 
   const rides = data?.pages.flatMap((page) => page?.rides ?? []) ?? [];
+  const days = groupByDay(rides, (ride) => ride.createdAt);
 
   const refreshControl = (
     <RefreshControl
       refreshing={isRefetching && !isFetchingNextPage}
       onRefresh={() => void refetch()}
-      tintColor={colors.primary[500]}
-      colors={[colors.primary[500]]}
+      tintColor={colors.green500}
+      colors={[colors.green500]}
     />
+  );
+
+  const title = (
+    <Text variant="title1" accessibilityRole="header" style={styles.title}>
+      Your rides
+    </Text>
   );
 
   if (isLoading) {
     return (
-      <Screen edges={["top"]}>
-        <View style={styles.header}>
-          <Text variant="h1">Your rides</Text>
-        </View>
-        <Card>
-          <SkeletonGroup label="Loading your rides">
-            <SkeletonListRows count={5} twoLines />
-          </SkeletonGroup>
-        </Card>
+      <Screen edges={["top"]} style={styles.content}>
+        {title}
+        <SkeletonGroup label="Loading your rides">
+          <SkeletonListRows count={6} twoLines />
+        </SkeletonGroup>
       </Screen>
     );
   }
 
-  // First page failed: nothing to show, so offer a retry instead.
+  // First page failed: nothing to show, so say so where the list would be.
   if (isError && rides.length === 0) {
     return (
-      <Screen edges={["top"]}>
-        <EmptyState
-          title="Couldn't load your rides"
-          message="Check your connection and try again."
-          illustration="offline"
-          action={<Button label="Retry" onPress={() => void refetch()} loading={isRefetching} />}
-        />
+      <Screen edges={["top"]} style={styles.content}>
+        {title}
+        <View style={styles.error}>
+          <Notice
+            tone="error"
+            icon="cloud-offline-outline"
+            message="Couldn't load your rides. Check your connection and try again."
+          />
+          <Button
+            label="Try again"
+            variant="secondary"
+            onPress={() => void refetch()}
+            loading={isRefetching}
+          />
+        </View>
       </Screen>
     );
   }
@@ -119,98 +126,94 @@ export default function RidesTab() {
   if (rides.length === 0) {
     return (
       <Screen scroll edges={["top"]} refreshControl={refreshControl} style={styles.content}>
-        <View style={styles.header}>
-          <Text variant="h1">Your rides</Text>
+        {title}
+        <View style={styles.empty}>
+          <Illustration name="carStandard" width={160} />
+          <Text variant="title2" accessibilityRole="header" style={styles.centered}>
+            No rides yet
+          </Text>
+          <Text variant="body" color="secondary" style={styles.centered}>
+            Your trips will show up here after your first ride.
+          </Text>
+          <Button label="Book a ride" onPress={() => router.push("/ride/location")} />
         </View>
-        <EmptyState
-          title="No rides yet"
-          message="Your trip history will show up here once you take your first ride."
-          illustration="ridesEmpty"
-        />
       </Screen>
     );
   }
 
   return (
     <Screen scroll edges={["top"]} refreshControl={refreshControl} style={styles.content}>
-      <View style={styles.header}>
-        <Text variant="h1">Your rides</Text>
-      </View>
+      {title}
 
-      <Card>
-        {rides.map((ride, index) => {
-          const status = STATUS_BADGE[ride.status];
-          const isActive = ACTIVE_STATUSES.includes(ride.status);
-          // #7: a request absorbed into another car (CANCELLED / MERGED) is
-          // still resumable — tap follows the pointer to the anchor ride.
-          const isMerged =
-            ride.status === "CANCELLED" &&
-            ride.cancelReason === "MERGED_INTO_ANOTHER_RIDE" &&
-            !!ride.mergedIntoRideId;
-          const isResumable = isActive || isMerged;
-          return (
-            <View key={ride.id}>
-              <Pressable
-                style={({ pressed }) => [styles.row, pressed && isResumable && styles.pressed]}
-                onPress={
-                  isResumable
-                    ? () =>
-                        router.push({
-                          pathname: "/ride/type",
-                          params: {
-                            rideId: ride.mergedIntoRideId ?? ride.id,
-                            ...tripEndParams("pickup", rideEnd(ride, "pickup", ride.pickupZone)),
-                            ...tripEndParams("dropoff", rideEnd(ride, "dropoff", ride.dropoffZone)),
-                          },
-                        })
-                    : undefined
-                }
-                accessibilityRole={isResumable ? "button" : undefined}
-              >
-                <ListRow.Icon
-                  name={ride.type === "SHARED" ? "people-outline" : "person-outline"}
-                  color={colors.primary[500]}
-                  background={colors.primary[50]}
+      {days.map((day) => (
+        <View key={day.label} style={styles.day}>
+          <Text variant="bodyStrong" color="secondary" accessibilityRole="header">
+            {day.label}
+          </Text>
+          <View>
+            {day.items.map((ride, index) => {
+              const resumable = ACTIVE_STATUSES.includes(ride.status) || isMerged(ride);
+              const cancelled = ride.status === "CANCELLED" && !isMerged(ride);
+              const from = stopLabel(ride.pickupLabel, ride.pickupZone.name);
+              const to = stopLabel(ride.dropoffLabel, ride.dropoffZone.name);
+              const kind = ride.type === "SHARED" ? "Shared" : "Ride alone";
+              const price = ride.fareTotal != null ? formatCedis(ride.fareTotal) : null;
+              return (
+                <ListRow
+                  key={ride.id}
+                  divider={index > 0}
+                  title={`${from} → ${to}`}
+                  subtitle={`${clockTime(ride.createdAt)} · ${kind}`}
+                  leading={<ListRow.Icon name="time-outline" />}
+                  trailing={
+                    cancelled ? (
+                      <StatusChip label="Cancelled" tone="danger" style={styles.chip} />
+                    ) : resumable ? (
+                      <StatusChip label="In progress" tone="brand" style={styles.chip} />
+                    ) : price ? (
+                      <Text variant="bodyStrong" tabular>
+                        {price}
+                      </Text>
+                    ) : null
+                  }
+                  showChevron={resumable}
+                  accessibilityLabel={[
+                    `${from} to ${to}`,
+                    `${clockTime(ride.createdAt)}, ${kind}`,
+                    cancelled ? "Cancelled" : resumable ? "In progress. Open your ride" : price,
+                  ]
+                    .filter(Boolean)
+                    .join(". ")}
+                  onPress={
+                    resumable
+                      ? () =>
+                          router.push({
+                            pathname: "/ride/type",
+                            params: {
+                              rideId: ride.mergedIntoRideId ?? ride.id,
+                              ...tripEndParams("pickup", rideEnd(ride, "pickup", ride.pickupZone)),
+                              ...tripEndParams(
+                                "dropoff",
+                                rideEnd(ride, "dropoff", ride.dropoffZone),
+                              ),
+                            },
+                          })
+                      : undefined
+                  }
                 />
-                <View style={styles.body}>
-                  <View style={styles.routeRow}>
-                    <View style={styles.markers}>
-                      <View style={styles.dot} />
-                      <View style={styles.connector} />
-                      <Ionicons name="location" size={10} color={colors.ink3} />
-                    </View>
-                    <View style={styles.routeLabels}>
-                      <Text variant="bodyMedium" numberOfLines={1}>
-                        {stopLabel(ride.pickupLabel, ride.pickupZone.name)}
-                      </Text>
-                      <Text variant="bodyMedium" numberOfLines={1}>
-                        {stopLabel(ride.dropoffLabel, ride.dropoffZone.name)}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text variant="bodySmall" color="muted" style={styles.date}>
-                    {formatDate(ride.createdAt)}
-                  </Text>
-                </View>
-                <View style={styles.trailing}>
-                  {ride.fareTotal != null ? (
-                    <Text variant="bodyMedium">{formatCedis(ride.fareTotal)}</Text>
-                  ) : null}
-                  <Badge label={status.label} variant={status.variant} />
-                </View>
-              </Pressable>
-              {index < rides.length - 1 ? <View style={styles.divider} /> : null}
-            </View>
-          );
-        })}
-      </Card>
+              );
+            })}
+          </View>
+        </View>
+      ))}
 
       {hasNextPage && (
         <View style={styles.loadMore}>
           {isFetchNextPageError && !isFetchingNextPage ? (
-            <Text variant="bodySmall" color="error" style={styles.loadMoreError}>
-              Couldn&apos;t load older rides. Check your connection and try again.
-            </Text>
+            <Notice
+              tone="error"
+              message="Couldn't load older rides. Check your connection and try again."
+            />
           ) : null}
           <Button
             label={isFetchNextPageError ? "Try again" : "Load older rides"}
@@ -225,63 +228,12 @@ export default function RidesTab() {
 }
 
 const styles = StyleSheet.create({
-  content: { paddingBottom: TAB_SCREEN_BOTTOM_PADDING },
-  loadMore: { marginTop: spacing.lg, gap: spacing.sm },
-  loadMoreError: { textAlign: "center" },
-  header: {
-    marginBottom: spacing.xl,
-  },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: spacing.sm,
-    gap: spacing.md,
-  },
-  pressed: {
-    opacity: 0.6,
-  },
-  body: {
-    flex: 1,
-    gap: spacing.xs,
-  },
-  routeRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  markers: {
-    alignItems: "center",
-    width: 12,
-    paddingTop: 4,
-    paddingBottom: 2,
-  },
-  dot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.primary[500],
-  },
-  connector: {
-    flex: 1,
-    minHeight: 14,
-    width: 1,
-    backgroundColor: colors.border,
-    marginVertical: 2,
-  },
-  routeLabels: {
-    flex: 1,
-    justifyContent: "space-between",
-    gap: spacing.sm,
-  },
-  date: {
-    marginLeft: 12 + spacing.sm,
-  },
-  trailing: {
-    alignItems: "flex-end",
-    gap: spacing.xs,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginVertical: spacing.xs,
-  },
+  content: { paddingBottom: TAB_SCREEN_BOTTOM_PADDING, gap: spacing[5] },
+  title: { marginTop: spacing[2] },
+  day: { gap: spacing[1] },
+  chip: { alignSelf: "center" },
+  error: { gap: spacing[3] },
+  empty: { alignItems: "center", gap: spacing[3], paddingTop: spacing[8] },
+  centered: { textAlign: "center" },
+  loadMore: { gap: spacing[2] },
 });

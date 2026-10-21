@@ -1,13 +1,11 @@
 import { useState } from "react";
 import { useRouter } from "expo-router";
-import { Alert, StyleSheet, View } from "react-native";
+import { Alert, StyleSheet } from "react-native";
 import {
   Button,
-  Card,
   Input,
   Screen,
   Text,
-  colors,
   spacing,
   updateProfile,
   useAuth,
@@ -25,7 +23,10 @@ export default function EditProfileScreen() {
   const router = useRouter();
   const { user, refreshMe } = useAuth();
 
-  const [name, setName] = useState(user?.name ?? "");
+  // Null until the rider types: until then the field shows the account's
+  // name, even if it loads after this screen opens.
+  const [draft, setDraft] = useState<string | null>(null);
+  const name = draft ?? user?.name ?? "";
   const [saving, setSaving] = useState(false);
 
   const trimmed = name.trim();
@@ -53,25 +54,21 @@ export default function EditProfileScreen() {
 
   return (
     <Screen scroll style={styles.content}>
-      <Text variant="h2">Edit profile</Text>
+      <Text variant="title1" accessibilityRole="header">
+        Profile
+      </Text>
 
-      <Card style={styles.card}>
-        <Input label="Name" value={name} onChangeText={setName} autoCapitalize="words" />
-
-        <View style={styles.lockedField}>
-          <Text variant="label" color="muted">
-            PHONE NUMBER
-          </Text>
-          <Text variant="bodyMedium">{user?.phone}</Text>
-          <Text variant="caption" color="muted">
-            Your phone number is how you sign in, so it can&apos;t be changed here. Contact
-            support if you need to move your account to a new number.
-          </Text>
-        </View>
-      </Card>
+      <Input label="Name" value={name} onChangeText={setDraft} autoCapitalize="words" />
+      {/* Locked: it is the sign-in. */}
+      <Input
+        label="Phone number"
+        value={user?.phone ?? ""}
+        editable={false}
+        helper="Your phone number is how you sign in, so it can't be changed here. Contact support to move your account to a new number."
+      />
 
       <Button
-        label="Save changes"
+        label="Save"
         onPress={() => void handleSave()}
         loading={saving}
         disabled={unchanged || trimmed.length === 0}
@@ -81,12 +78,5 @@ export default function EditProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  content: { paddingBottom: spacing["4xl"], gap: spacing.lg },
-  card: { gap: spacing.lg },
-  lockedField: {
-    gap: spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    paddingTop: spacing.lg,
-  },
+  content: { paddingBottom: spacing[10], gap: spacing[5] },
 });

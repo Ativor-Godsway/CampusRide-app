@@ -5,7 +5,7 @@ import { usePreventRemove } from "expo-router/react-navigation";
 import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import type { PaymentMethod, RideCompletedFareSummary, RiderCancelReason, RideType, TripEnd } from "@rida/shared";
+import type { PaymentMethod, RiderCancelReason, RideType, TripEnd } from "@rida/shared";
 import {
   MAX_PIN_ADJUST_METERS,
   PICKUP_NOTE_MAX_LENGTH,
@@ -15,6 +15,7 @@ import {
   isInServiceArea,
   mapFitPadding,
   movedEnd,
+  pickupPlace,
   planTripStops,
   pointsKey,
   priceLoneRide,
@@ -29,12 +30,10 @@ import {
   ActiveRideExistsError,
   activeRideQueryKey,
   Button,
-  Card,
   CampusMapView,
   type CampusMapZone,
   FadeIn,
   goHome as goToHomeTab,
-  LoadingState,
   ServiceIcon,
   Text,
   cancelRide,
@@ -50,7 +49,6 @@ import {
   SkeletonGroup,
   spacing,
   spokenCedis,
-  submitRating,
   submitRideDecision,
   switchRideType,
   typography,
@@ -58,6 +56,7 @@ import {
   useDriverLocation,
   useCarNotice,
   useRideTracking,
+  useToast,
   RideRequestRefusedError,
   getRoadRoute,
   useLiveRoute,
@@ -79,12 +78,11 @@ import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
 import { SearchingPanel } from "../../components/ride/SearchingPanel";
 import { RideInProgressSheet } from "../../components/ride/RideInProgressSheet";
 import { SafetySheet } from "../../components/ride/SafetySheet";
+import { TripCancelledSheet, TripCompleteSheet } from "../../components/ride/TripEndSheet";
 import { activeRideParams, useActiveRide } from "../../lib/activeRide";
 import { haptics } from "../../lib/haptics";
 import { usePlaces, useZones } from "../../lib/chooseRide";
 import { shareTrip } from "../../lib/shareTrip";
-
-const STARS = [1, 2, 3, 4, 5];
 
 /** The floating route pill: its height, and its gap below the status bar. */
 const PILL_HEIGHT = 44;
@@ -155,6 +153,7 @@ export default function RideTypeScreen() {
   /** The cancel steps, in place of the ride sheet's content. */
   const [cancelOpen, setCancelOpen] = useState(false);
   const [safetyOpen, setSafetyOpen] = useState(false);
+  const { showToast, toast } = useToast();
   const [cancelling, setCancelling] = useState(false);
   const [switching, setSwitching] = useState(false);
 
@@ -378,9 +377,26 @@ export default function RideTypeScreen() {
     return stopsBeforeDropoff(plan, myPassenger.id);
   }, [ride?.type, ride?.passengers, myLegStatus, myPassenger, zones, driverLocation]);
 
+  // The pickup in sentences ("Asking drivers near Akuafo Hall"): a real
+  // place, never "Current location". This rider's own zone as the fallback.
+  const myPickupZoneName = zones?.find((z) => z.id === (myPassenger?.pickupZoneId ?? ride?.pickupZoneId))?.name;
+  const pickupWhere = useMemo(
+    () => pickupPlace(pickupEnd, places, myPickupZoneName),
+    [pickupEnd, places, myPickupZoneName],
+  );
+
   // ── Phase ───────────────────────────────────────────────────────────────────
   const isSearching = activeRideId !== null && (!ride || ride.status === "REQUESTED" || isMerged);
   const hasDriver = ride?.status === "MATCHED" || ride?.status === "ARRIVED";
+  /** Over: a modal sheet over the dimmed map takes the ride sheet's place. */
+  const tripEnded: "completed" | "cancelled" | "driverCancelled" | null =
+    myPassenger?.status === "CANCELLED"
+      ? "driverCancelled"
+      : ride?.status === "COMPLETED"
+        ? "completed"
+        : ride?.status === "CANCELLED" && !isMerged
+          ? "cancelled"
+          : null;
   const driverComing = hasDriver && !!driver && (myLegStatus === "WAITING" || myLegStatus === "ARRIVED");
 
   // Still unclaimed and holding only this rider: the server will accept a
@@ -521,7 +537,7 @@ export default function RideTypeScreen() {
 
   /** "Share trip": where the rider is going and the car they're in. */
   function shareThisTrip() {
-    if (driver) void shareTrip({ pickup: pickupEnd.label, dropoff: dropoffEnd.label, driver });
+    if (driver) void shareTrip({ pickup: pickupWhere?.name ?? null, dropoff: dropoffEnd.label, driver });
   }
 
   /** Closes everything above the tabs, so "home" is Home even from Plan → Choose. */
@@ -683,7 +699,7 @@ export default function RideTypeScreen() {
 
       <RoutePill
         top={insets.top + PILL_TOP_GAP}
-        pickupZoneName={pickupEnd.label}
+        pickupZoneName={driverComing ? (pickupWhere?.name ?? pickupEnd.label) : pickupEnd.label}
         dropoffZoneName={dropoffEnd.label}
         onBack={goBack}
         // A requested ride's route can't change, so Edit only exists before.
@@ -771,7 +787,7 @@ export default function RideTypeScreen() {
             onNoteDone={() => setNoteOpen(false)}
           />
         </BottomSheet>
-      ) : (
+      ) : tripEnded ? null : (
       // Sized to its content, so searching stays compact over the map.
       <BottomSheet
         key="tracking"
@@ -800,19 +816,13 @@ export default function RideTypeScreen() {
                 onConfirmCancel={(reason, note) => void handleConfirmCancel(reason, note)}
               />
             </FadeIn>
-          ) : activeRideId !== null &&
-            (myPassenger?.status === "CANCELLED" ? (
-              <CancelledContent
-                onDone={() => setLeaving(true)}
-                title="Driver cancelled"
-                message="Your driver cancelled your pickup. Please request a ride again."
-              />
-            ) : (
+          ) : activeRideId !== null && (
             <>
               {isSearching && (
                 <FadeIn key="searching">
                   <SearchingPanel
                     pickupZoneName={pickupEnd.label}
+                    pickupPlaceName={pickupWhere?.name ?? null}
                     dropoffZoneName={dropoffEnd.label}
                     rideType={rideType}
                     priceLabel={priceLabel}
@@ -863,7 +873,7 @@ export default function RideTypeScreen() {
                   <FadeIn key="driver-arrived">
                     <DriverArrivedContent
                       driver={driver}
-                      pickupName={pickupEnd.label}
+                      pickup={pickupWhere}
                       onShare={shareThisTrip}
                       onSafety={() => setSafetyOpen(true)}
                       onCancel={() => setCancelOpen(true)}
@@ -881,24 +891,30 @@ export default function RideTypeScreen() {
                   </FadeIn>
                 ))}
 
-              {ride?.status === "COMPLETED" && (
-                <FadeIn key="completed">
-                  <CompletedContent
-                    rideId={ride.id}
-                    rideType={ride.type}
-                    fareSummary={trackingData?.fareSummary}
-                    onDone={() => setLeaving(true)}
-                  />
-                </FadeIn>
-              )}
-
-              {ride?.status === "CANCELLED" && !isMerged && (
-                <CancelledContent onDone={() => setLeaving(true)} />
-              )}
             </>
-            ))}
+          )}
       </BottomSheet>
       )}
+
+      {tripEnded === "completed" && ride ? (
+        <TripCompleteSheet
+          rideId={ride.id}
+          rideType={ride.type}
+          fareSummary={trackingData?.fareSummary}
+          driver={driver}
+          dropoffName={dropoffEnd.label}
+          completedAt={ride.completedAt}
+          onDone={() => setLeaving(true)}
+        />
+      ) : tripEnded === "driverCancelled" ? (
+        <TripCancelledSheet
+          title="Driver cancelled"
+          message="Your driver cancelled your pickup. Please request a ride again."
+          onDone={() => setLeaving(true)}
+        />
+      ) : tripEnded === "cancelled" ? (
+        <TripCancelledSheet onDone={() => setLeaving(true)} />
+      ) : null}
 
       {inOptions ? (
         <RideInProgressSheet
@@ -917,8 +933,11 @@ export default function RideTypeScreen() {
           rideId={ride?.id ?? activeRideId}
           onDismiss={() => setSafetyOpen(false)}
           onShareTrip={shareThisTrip}
+          showToast={showToast}
         />
       ) : null}
+
+      {toast}
     </View>
   );
 }
@@ -1070,196 +1089,6 @@ function MyLegDoneContent({ dropoffZoneName }: { dropoffZoneName: string }) {
   );
 }
 
-function RatingPanel({
-  rideId,
-  onDone,
-}: {
-  rideId: string;
-  onDone: () => void;
-}) {
-  const [stars, setStars] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-
-  async function handleSubmit() {
-    if (stars === 0) return;
-    setSubmitting(true);
-    try {
-      await submitRating({ rideId, stars });
-      setSubmitted(true);
-    } catch (err) {
-      Alert.alert("Couldn't submit rating", rateLimitText(err) ?? "Please try again.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (submitted) {
-    return (
-      <>
-        <Text variant="body" color="muted">
-          Thanks for rating your driver!
-        </Text>
-        <Button label="Back to home" onPress={onDone} />
-      </>
-    );
-  }
-
-  return (
-    <>
-      <View style={styles.ratingSection}>
-        <Text variant="bodyMedium">How was your ride?</Text>
-        <View style={styles.starsRow}>
-          {STARS.map((value) => (
-            <Pressable key={value} accessibilityRole="button" onPress={() => setStars(value)}>
-              <Ionicons
-                name={value <= stars ? "star" : "star-outline"}
-                size={36}
-                color={value <= stars ? colors.accent[500] : colors.ink4}
-              />
-            </Pressable>
-          ))}
-        </View>
-      </View>
-      <View style={styles.buttonGroup}>
-        <Button
-          label="Submit rating"
-          onPress={() => void handleSubmit()}
-          loading={submitting}
-          disabled={stars === 0}
-        />
-        <Button label="Skip" variant="ghost" onPress={onDone} />
-      </View>
-    </>
-  );
-}
-
-/** Mint "shared & saved" note — purely presentational, derived from the existing flat lone-fare constant. */
-function SharedSavingsNote({ amountPesewas }: { amountPesewas: number }) {
-  return (
-    <View style={styles.savingsNote}>
-      <Ionicons name="people" size={14} color={colors.success} />
-      <Text variant="bodySmall" style={styles.savingsNoteText}>
-        Shared ride — you saved {formatCedis(amountPesewas)} vs. lone
-      </Text>
-    </View>
-  );
-}
-
-/**
- * Ride-complete state. Cash-only launch (Phase 1): digital payment is
- * disabled server-side, so there is no "Pay with MoMo" trigger here and this
- * screen never calls POST /rides/:id/initiate-payment. Every completed ride
- * is settled in cash directly with the driver; the rider goes straight from
- * the fare summary to rating.
- */
-function CompletedContent({
-  rideId,
-  rideType,
-  fareSummary,
-  onDone,
-}: {
-  rideId: string;
-  rideType: RideType;
-  fareSummary: RideCompletedFareSummary | undefined;
-  onDone: () => void;
-}) {
-  const [ratingReady, setRatingReady] = useState(false);
-
-  if (!fareSummary) {
-    return (
-      <View style={styles.section}>
-        <LoadingState />
-      </View>
-    );
-  }
-
-  const { yourFarePesewas } = fareSummary;
-  const savingsPesewas =
-    rideType === "SHARED" ? Math.max(0, priceLoneRide().fare - yourFarePesewas) : 0;
-
-  if (ratingReady) {
-    return (
-      <View style={styles.section}>
-        <View style={styles.stateHeader}>
-          <ServiceIcon
-            name="checkmark-circle"
-            size={48}
-            iconSize={22}
-            background={colors.successSurface}
-            color={colors.success}
-          />
-          <View style={styles.stateHeading}>
-            <Text variant="h2">Ride completed</Text>
-          </View>
-        </View>
-        <RatingPanel rideId={rideId} onDone={onDone} />
-      </View>
-    );
-  }
-
-  return (
-    <View style={styles.section}>
-      <View style={styles.stateHeader}>
-        <ServiceIcon
-          name="checkmark-circle"
-          size={48}
-          iconSize={22}
-          background={colors.successSurface}
-          color={colors.success}
-        />
-        <View style={styles.stateHeading}>
-          <Text variant="h2">Ride completed</Text>
-          <Text variant="bodySmall" color="muted">
-            Your fare: {formatCedis(yourFarePesewas)}
-          </Text>
-        </View>
-      </View>
-      {savingsPesewas > 0 && <SharedSavingsNote amountPesewas={savingsPesewas} />}
-      <Card style={styles.infoCard}>
-        <View style={styles.infoRow}>
-          <Ionicons name="cash-outline" size={16} color={colors.ink3} />
-          <Text variant="bodySmall" style={styles.infoLabel}>
-            Please pay {formatCedis(yourFarePesewas)} to your driver in cash.
-          </Text>
-        </View>
-      </Card>
-      <Button label="Done — rate your driver" onPress={() => setRatingReady(true)} />
-    </View>
-  );
-}
-
-function CancelledContent({
-  onDone,
-  title = "Ride cancelled",
-  message = "Your request has been cancelled.",
-}: {
-  onDone: () => void;
-  title?: string;
-  message?: string;
-}) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.stateHeader}>
-        <ServiceIcon
-          name="close-circle"
-          size={48}
-          iconSize={22}
-          background={colors.errorSurface}
-          color={colors.error}
-        />
-        <View style={styles.stateHeading}>
-          <Text variant="h2">{title}</Text>
-          <Text variant="bodySmall" color="muted">
-            {message}
-          </Text>
-        </View>
-      </View>
-      <Button label="Back to home" variant="secondary" onPress={onDone} />
-    </View>
-  );
-}
-
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -1325,23 +1154,4 @@ const styles = StyleSheet.create({
   section: { gap: spacing.md },
   stateHeader: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
   stateHeading: { flex: 1, gap: 4 },
-  savingsNote: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    backgroundColor: colors.successSurface,
-    borderWidth: 1,
-    borderColor: colors.primary[100],
-    borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-  },
-  savingsNoteText: { flex: 1, color: colors.success, fontWeight: typography.weight.semibold },
-  infoCard: { gap: spacing.sm },
-  infoRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs },
-  infoLabel: { flex: 1 },
-  buttonGroup: { gap: spacing.md },
-  // ── Rating
-  ratingSection: { alignItems: "center", gap: spacing.sm },
-  starsRow: { flexDirection: "row", gap: spacing.sm },
 });

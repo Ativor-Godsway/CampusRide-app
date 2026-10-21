@@ -8,6 +8,11 @@ import OtpRoute from "../../../apps/rider/app/auth/otp";
 import SignupRoute from "../../../apps/rider/app/auth/signup";
 import TabsLayout from "../../../apps/rider/app/(tabs)/_layout";
 import HomeTab from "../../../apps/rider/app/(tabs)/index";
+import RidesTab from "../../../apps/rider/app/(tabs)/rides";
+import AccountTab from "../../../apps/rider/app/(tabs)/account";
+import SafetyRoute from "../../../apps/rider/app/safety";
+import ProfileRoute from "../../../apps/rider/app/profile";
+import NotificationsRoute from "../../../apps/rider/app/notifications";
 import PlanYourRide from "../../../apps/rider/app/ride/location";
 import ChooseRide from "../../../apps/rider/app/ride/type";
 import DesignGallery from "../../../apps/rider/app/dev/design-gallery";
@@ -18,9 +23,12 @@ import {
   places,
   rider,
   riderActiveRide,
+  riderHistory,
   riderRides,
   riderSearching,
   riderTrip,
+  riderTripCancelled,
+  riderTripCompleted,
   riderTripDriverAt,
   roadRoute,
   zones,
@@ -93,6 +101,27 @@ const trip = (stage: "coming" | "arrived" | "onboard", extra: Partial<Scene>): S
     ...extra,
   };
 };
+
+/** The trip is over: Choose a ride reopened on it, under its end-of-trip sheet. */
+const ended = (
+  name: string,
+  answer: { ride: { id: string } },
+  extra: Partial<Scene> = {},
+): Scene => ({
+  name,
+  note: "map: grey box",
+  user: rider,
+  routes: {
+    ...signedIn,
+    [`GET /rides/${answer.ride.id}`]: answer,
+    "POST /ratings": { rating: {} },
+  },
+  chain: [RootLayout, ChooseRide],
+  pathname: "/ride/type",
+  params: { ...routeParams, rideId: answer.ride.id },
+  position: here,
+  ...extra,
+});
 
 const scenes: Scene[] = [
   {
@@ -290,6 +319,69 @@ const scenes: Scene[] = [
     name: "safety-sheet",
     steps: [{ press: "Safety: share your trip or call emergency services" }],
   }),
+  trip("coming", {
+    name: "safety-sheet-no-contact",
+    user: { ...rider, emergencyContactName: null, emergencyContactPhone: null },
+    steps: [{ press: "Safety: share your trip or call emergency services" }],
+  }),
+  ended("trip-complete", riderTripCompleted()),
+  ended("trip-complete-4-stars", riderTripCompleted(), { steps: [{ press: "4 stars" }] }),
+  ended("trip-complete-2-stars", riderTripCompleted(), { steps: [{ press: "2 stars" }] }),
+  ended("trip-cancelled", riderTripCancelled),
+  {
+    name: "rides",
+    user: rider,
+    routes: {
+      ...signedIn,
+      "GET /rides/mine": { rides: riderHistory, nextCursor: null, hasMore: false },
+    },
+    chain: [RootLayout, TabsLayout, RidesTab],
+    pathname: "/rides",
+  },
+  {
+    name: "rides-empty",
+    user: rider,
+    routes: { ...signedIn, "GET /rides/mine": { rides: [], nextCursor: null, hasMore: false } },
+    chain: [RootLayout, TabsLayout, RidesTab],
+    pathname: "/rides",
+  },
+  {
+    name: "account",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, TabsLayout, AccountTab],
+    pathname: "/account",
+  },
+  {
+    name: "safety-screen",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, SafetyRoute],
+    pathname: "/safety",
+  },
+  {
+    name: "safety-screen-no-contact",
+    user: { ...rider, emergencyContactName: null, emergencyContactPhone: null },
+    routes: signedIn,
+    chain: [RootLayout, SafetyRoute],
+    pathname: "/safety",
+  },
+  {
+    name: "profile-edit",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, ProfileRoute],
+    pathname: "/profile",
+  },
+  {
+    name: "notifications",
+    note: "as on a phone that hasn't been asked yet",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, NotificationsRoute],
+    pathname: "/notifications",
+    pushUndetermined: true,
+  },
 ];
 
 boot(scenes);

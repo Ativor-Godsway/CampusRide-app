@@ -7,7 +7,13 @@
 import { haversineDistanceMeters } from "../geo/distance";
 import { isInServiceArea } from "../geo/serviceArea";
 import { MAX_PIN_ADJUST_METERS, type RidePinFields } from "../rides/ridePins";
-import { AT_PLACE_METERS, labelForPoint, nearestPlace, type CampusPlace } from "./campusPlaces";
+import {
+  AT_PLACE_METERS,
+  NEAR_PLACE_METERS,
+  labelForPoint,
+  nearestPlace,
+  type CampusPlace,
+} from "./campusPlaces";
 
 export type TripEndKind = "place" | "gps" | "pin";
 
@@ -61,6 +67,29 @@ export function gpsSubtitle(end: TripEnd, places: readonly Pick<CampusPlace, "id
   if (end.kind !== "gps" || !end.placeId) return null;
   const place = places.find((p) => p.id === end.placeId);
   return place ? `At ${place.name}` : null;
+}
+
+/**
+ * Where a pickup is, for sentences ("Asking drivers near Akuafo Hall",
+ * "Meet at Akuafo Hall"): a real place name, never "Current location" or
+ * "Pinned location". The place chosen (or the one a GPS fix is at), else the
+ * nearest within NEAR_PLACE_METERS, else the ride's zone. `at` is false when
+ * the point is only near the place. Null when there is no name to give.
+ */
+export function pickupPlace(
+  end: TripEnd,
+  places: readonly Pick<CampusPlace, "id" | "name" | "latitude" | "longitude">[],
+  zoneName?: string | null,
+): { name: string; at: boolean } | null {
+  const chosen = end.placeId ? places.find((p) => p.id === end.placeId) : undefined;
+  if (chosen) return { name: chosen.name, at: true };
+  if (end.kind === "place") return { name: end.label, at: true };
+  const near = nearestPlace(end, places);
+  if (near && near.meters <= NEAR_PLACE_METERS) {
+    return { name: near.place.name, at: near.meters <= AT_PLACE_METERS };
+  }
+  const zone = zoneName?.trim();
+  return zone ? { name: zone, at: false } : null;
 }
 
 export function isSameSpot(a: TripEnd | null, b: TripEnd | null, meters = 100): boolean {

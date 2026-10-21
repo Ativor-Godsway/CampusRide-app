@@ -22,36 +22,45 @@ const EMERGENCY_NUMBER = "112";
 /**
  * Safety, opened from the round Safety button on a live ride
  * (docs/design-system.md, "Calm safety": SOS is never a big red button on
- * every ride). Opening it gives a warning buzz.
+ * every ride). Opening it gives a warning buzz. Two separate ways to get
+ * help, both after a confirm:
  *
- * "Call emergency services" is also the SOS: as the dialler opens, the
- * server texts the rider's emergency contact AND CampusRide support where
- * they are, who the driver is and a link to follow the trip (POST
- * /rides/:id/sos), and the rider is told exactly who was reached.
+ * - "Alert my emergency contact": the SOS alone (POST /rides/:id/sos). The
+ *   server texts the rider's emergency contact AND CampusRide support where
+ *   they are, who the driver is and a link to follow the trip. No call.
+ *   Without a contact the row is "Add an emergency contact" instead.
+ * - "Call emergency services (112)": the dialler opens, and the same SOS is
+ *   sent at once.
+ *
+ * Either way the rider is told exactly who was reached.
  */
 export function SafetySheet({
   visible,
   rideId,
   onDismiss,
   onShareTrip,
+  showToast,
 }: {
   visible: boolean;
   rideId: string;
   onDismiss: () => void;
   onShareTrip: () => void;
+  /** The screen's toast (it sits above the sheet). */
+  showToast: (message: string) => void;
 }) {
   const router = useRouter();
   const { user } = useAuth();
-  const [sending, setSending] = useState(false);
+  const [sending, setSending] = useState<"alert" | "call" | null>(null);
   const contactName =
     user?.emergencyContactName && user.emergencyContactPhone ? user.emergencyContactName : null;
+  const contactFirstName = contactName?.trim().split(/\s+/)[0] ?? null;
 
   useEffect(() => {
     if (visible) haptics.warning();
   }, [visible]);
 
-  async function sendSos() {
-    setSending(true);
+  async function sendSos(via: "alert" | "call") {
+    setSending(via);
     try {
       const result = await raiseSos(rideId);
 
@@ -67,6 +76,10 @@ export function SafetySheet({
           "SOS already sent",
           `${reached.join(" and ")} ${reached.length === 1 ? "was" : "were"} sent a link to follow your trip a moment ago. If you're in danger, call someone now.`,
         );
+      } else if (result.smsDelivered && result.contactName) {
+        // Their own person got it: say so briefly, and get out of the way.
+        onDismiss();
+        showToast(`We alerted ${result.contactName.trim().split(/\s+/)[0]}`);
       } else if (reached.length > 0) {
         const nudge = result.hasEmergencyContact
           ? ""
@@ -86,8 +99,19 @@ export function SafetySheet({
     } catch {
       Alert.alert("Couldn't send SOS", "Please try again, or call someone directly.");
     } finally {
-      setSending(false);
+      setSending(null);
     }
+  }
+
+  function confirmAlert() {
+    Alert.alert(
+      `Alert ${contactFirstName}?`,
+      `We'll text ${contactName} and CampusRide support where you are, who your driver is, and a link to follow this trip.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Send alert", style: "destructive", onPress: () => void sendSos("alert") },
+      ],
+    );
   }
 
   function confirmEmergency() {
@@ -102,11 +126,16 @@ export function SafetySheet({
           onPress: () => {
             // The call first: it must never wait on the network.
             void callPhone(EMERGENCY_NUMBER, "emergency services");
-            void sendSos();
+            void sendSos("call");
           },
         },
       ],
     );
+  }
+
+  function openContacts() {
+    onDismiss();
+    router.push("/safety");
   }
 
   return (
@@ -123,34 +152,54 @@ export function SafetySheet({
             leading={<ListRow.Icon name="share-outline" />}
             onPress={onShareTrip}
           />
-          <ListRow
-            divider
-            title="Emergency contacts"
-            subtitle={contactName ?? "Not set up yet"}
-            leading={<ListRow.Icon name="people-outline" />}
-            onPress={() => {
-              onDismiss();
-              router.push("/safety");
-            }}
-          />
+          {contactName ? (
+            <>
+              <ListRow
+                divider
+                title="Alert my emergency contact"
+                subtitle={`Text ${contactFirstName} where you are`}
+                leading={<ListRow.Icon name="megaphone-outline" />}
+                trailing={
+                  sending === "alert" ? <ActivityIndicator color={colors.ink2} /> : undefined
+                }
+                onPress={confirmAlert}
+                disabled={sending !== null}
+              />
+              <ListRow
+                divider
+                title="Emergency contacts"
+                subtitle={contactName}
+                leading={<ListRow.Icon name="people-outline" />}
+                onPress={openContacts}
+              />
+            </>
+          ) : (
+            <ListRow
+              divider
+              title="Add an emergency contact"
+              subtitle="Someone we can text if you need help"
+              leading={<ListRow.Icon name="person-add-outline" />}
+              onPress={openContacts}
+            />
+          )}
         </View>
 
         <Pressable
           onPress={confirmEmergency}
-          disabled={sending}
+          disabled={sending !== null}
           accessibilityRole="button"
-          accessibilityLabel="Call emergency services"
+          accessibilityLabel={`Call emergency services, ${EMERGENCY_NUMBER}`}
           accessibilityHint="Also texts your emergency contact and CampusRide support"
-          accessibilityState={{ busy: sending, disabled: sending }}
+          accessibilityState={{ busy: sending === "call", disabled: sending !== null }}
           style={({ pressed }) => [styles.emergency, pressed && styles.emergencyPressed]}
         >
-          {sending ? (
+          {sending === "call" ? (
             <ActivityIndicator color={colors.red600} />
           ) : (
             <>
               <Ionicons name="call" size={20} color={colors.red600} />
               <Text variant="button" style={styles.emergencyLabel}>
-                Call emergency services
+                Call emergency services ({EMERGENCY_NUMBER})
               </Text>
             </>
           )}
