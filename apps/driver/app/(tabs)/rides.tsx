@@ -1,66 +1,66 @@
-import { StyleSheet, View } from "react-native";
+import { useState } from "react";
+import { RefreshControl, StyleSheet, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { clockTime, groupByDay, periodEarnings, weekEarnings } from "@rida/shared";
 import {
-  Badge,
   Button,
-  Card,
-  EmptyState,
   Illustration,
-  LoadingState,
-  RouteStops,
+  ListRow,
+  Notice,
   Screen,
+  SegmentedControl,
+  SkeletonGroup,
+  SkeletonListRows,
+  Skeleton,
   Text,
   colors,
   formatCedis,
   getDriverRideHistory,
+  radii,
   spacing,
-  typography,
   useAuth,
+  useCountUp,
+  type DriverRideHistoryItem,
 } from "@rida/mobile-shared";
-import type { DriverRideHistoryItem } from "@rida/mobile-shared";
+import { WeekBars } from "../../components/earnings/WeekBars";
 
-/** Short, human date for a completed ride — system locale, no extra deps. */
-function formatRideDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+type Period = "today" | "week";
+const PERIODS = [
+  { value: "today", label: "Today" },
+  { value: "week", label: "This week" },
+] as const;
 
-function HistoryRow({ item }: { item: DriverRideHistoryItem }) {
+/** The big number counts up this fast (docs/design-system.md, "Motion"). */
+const COUNT_MS = 600;
+
+/** Counts up in whole cedis, then shows the exact amount; a negative amount just shows. */
+function CountUpAmount({ pesewas }: { pesewas: number }) {
+  const target = Math.max(0, Math.floor(pesewas / 100));
+  const cedis = useCountUp(target, COUNT_MS);
+  const shown = pesewas < 0 || cedis >= target ? pesewas : cedis * 100;
   return (
-    <Card style={styles.rideCard}>
-      <View style={styles.rideTop}>
-        <View style={styles.tags}>
-          <Badge variant="default" label={item.type === "SHARED" ? "Shared" : "Private"} />
-          <Badge variant={item.source === "USSD" ? "warning" : "soon"} label={item.source} />
-        </View>
-        <Text variant="bodyMedium" style={styles.earn}>
-          {formatCedis(item.driverGrossPesewas)}
-        </Text>
-      </View>
-
-      <RouteStops
-        connectorHeight={16}
-        origin={<Text variant="bodySmall">{item.pickupPlaceName ?? item.pickupZoneName}</Text>}
-        destination={<Text variant="bodySmall">{item.dropoffPlaceName ?? item.dropoffZoneName}</Text>}
-      />
-
-      <Text variant="caption" color="muted">
-        {formatRideDate(item.completedAt)}
-      </Text>
-    </Card>
+    <Text variant="display" tabular accessibilityLabel={formatCedis(pesewas)}>
+      {formatCedis(shown)}
+    </Text>
   );
 }
 
+/** "Maison Française → Night Market": place names, or zone names from an older server. */
+function route(item: DriverRideHistoryItem): string {
+  return `${item.pickupPlaceName ?? item.pickupZoneName} → ${item.dropoffPlaceName ?? item.dropoffZoneName}`;
+}
+
 /**
- * Rides tab — real completed-ride history with derived (gross, unsettled)
- * earnings from GET /driver/rides/history. The earnings figure is what the
- * driver has accrued, not money that has been paid out (see the caption).
+ * Earnings — what the driver made after commission today or this week (a
+ * bar a day, Monday to Sunday), how that splits, and every completed trip by
+ * day. All from GET /driver/rides/history: its own summary is all-time, so
+ * the periods are added up here by the same rule (earningsTotals,
+ * @rida/shared): Gross = the fares, Commission = 15% of them, After
+ * commission = the sum of "You earn". Accrued, not paid out (see the note).
  */
-export default function RidesTab() {
+export default function EarningsTab() {
   const { isAuthenticated } = useAuth();
+  const [period, setPeriod] = useState<Period>("today");
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
     queryKey: ["driverRideHistory"],
@@ -68,26 +68,41 @@ export default function RidesTab() {
     enabled: isAuthenticated,
   });
 
+  const title = (
+    <Text variant="title1" accessibilityRole="header" style={styles.title}>
+      Earnings
+    </Text>
+  );
+
   if (isLoading) {
     return (
-      <Screen>
-        <LoadingState />
+      <Screen edges={["top"]} style={styles.content}>
+        {title}
+        <SkeletonGroup label="Loading your earnings" style={styles.section}>
+          <Skeleton height={36} radius={radii.md} />
+          <Skeleton width={180} height={44} />
+          <SkeletonListRows count={5} twoLines />
+        </SkeletonGroup>
       </Screen>
     );
   }
 
   if (isError || !data) {
     return (
-      <Screen>
-        <View style={styles.center}>
-          <Illustration name="offline" size={140} float />
-          <Text variant="h3" style={styles.centerTitle}>
-            Couldn&apos;t load your rides
-          </Text>
-          <Text variant="bodySmall" color="muted" style={styles.centerBody}>
-            Check your connection and try again.
-          </Text>
-          <Button label="Retry" onPress={() => void refetch()} loading={isRefetching} />
+      <Screen edges={["top"]} style={styles.content}>
+        {title}
+        <View style={styles.section}>
+          <Notice
+            tone="error"
+            icon="cloud-offline-outline"
+            message="Couldn't load your earnings. Check your connection and try again."
+          />
+          <Button
+            label="Try again"
+            variant="secondary"
+            onPress={() => void refetch()}
+            loading={isRefetching}
+          />
         </View>
       </Screen>
     );
@@ -95,133 +110,138 @@ export default function RidesTab() {
 
   const { rides, summary } = data;
 
+  if (rides.length === 0) {
+    return (
+      <Screen edges={["top"]} style={styles.content}>
+        {title}
+        <View style={styles.empty}>
+          <Illustration name="carStandard" width={160} />
+          <Text variant="title2" style={styles.centered} accessibilityRole="header">
+            No trips yet
+          </Text>
+          <Text variant="body" color="secondary" style={styles.centered}>
+            Your earnings and completed trips show up here after your first trip.
+          </Text>
+        </View>
+      </Screen>
+    );
+  }
+
+  const totals = periodEarnings(rides, period);
+  const days = weekEarnings(rides);
+  const tripsLabel = `${totals.trips} trip${totals.trips === 1 ? "" : "s"} ${period === "today" ? "today" : "this week"}`;
+
   return (
-    <Screen scroll>
-      <View style={styles.header}>
-        <Text variant="title1" accessibilityRole="header">
-          Earnings
+    <Screen
+      scroll
+      edges={["top"]}
+      style={styles.content}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefetching}
+          onRefresh={() => void refetch()}
+          tintColor={colors.green500}
+          colors={[colors.green500]}
+        />
+      }
+    >
+      {title}
+
+      <SegmentedControl
+        options={PERIODS}
+        value={period}
+        onChange={setPeriod}
+        accessibilityLabel="Earnings for"
+      />
+
+      <View style={styles.hero}>
+        <Text variant="eyebrow" color="secondary">
+          After commission
+        </Text>
+        <CountUpAmount key={period} pesewas={totals.netPesewas} />
+        <Text variant="subhead" color="secondary">
+          {tripsLabel}
         </Text>
       </View>
 
-      {/*
-        Phase 4: the headline figure is now NET, not gross. A driver taking
-        cash fares keeps the whole fare in hand but owes 15% of each one back
-        as commission, so showing only gross overstated what is actually
-        theirs. Gross and commission stay visible underneath so the number is
-        explainable rather than just smaller.
-      */}
-      <Card style={styles.earningsCard}>
-        <Text variant="label" color="muted">
-          YOUR EARNINGS
-        </Text>
-        <Text variant="h1" style={styles.earningsAmount}>
-          {formatCedis(summary.netPesewas)}
-        </Text>
-        <Text variant="caption" color="muted">
-          After commission · not yet settled
-        </Text>
+      {period === "week" ? <WeekBars days={days} /> : null}
 
-        <View style={styles.breakdown}>
-          <View style={styles.breakdownRow}>
-            <Text variant="bodySmall" color="muted">
-              Gross earned
+      <View>
+        <ListRow
+          title="Gross"
+          trailing={
+            <Text variant="bodyStrong" tabular>
+              {formatCedis(totals.grossPesewas)}
             </Text>
-            <Text variant="bodySmall">{formatCedis(summary.totalGrossPesewas)}</Text>
-          </View>
-          <View style={styles.breakdownRow}>
-            <Text variant="bodySmall" color="muted">
-              Commission owed
-            </Text>
-            <Text variant="bodySmall" color="error">
-              −{formatCedis(summary.commissionOwedPesewas)}
-            </Text>
-          </View>
-        </View>
-
-        {summary.commissionOwedPesewas > 0 && (
-          <Text variant="caption" color="muted">
-            Commission is 15% of each completed cash ride ({summary.commissionRidesCount}{" "}
-            {summary.commissionRidesCount === 1 ? "ride" : "rides"}). We&apos;ll tell you how to
-            settle it before any collection starts.
-          </Text>
-        )}
-
-        <Text variant="bodySmall" color="muted" style={styles.ridesCount}>
-          {summary.totalRides} {summary.totalRides === 1 ? "ride" : "rides"} completed
-        </Text>
-      </Card>
-
-      {rides.length === 0 ? (
-        <EmptyState
-          title="No completed rides yet"
-          message="Your trip history and earnings will show up here once you complete your first ride."
-          illustration="historyEmpty"
+          }
+          showChevron={false}
         />
-      ) : (
-        <View style={styles.list}>
-          {rides.map((item) => (
-            <HistoryRow key={item.rideId} item={item} />
-          ))}
-        </View>
-      )}
+        <ListRow
+          divider
+          title="Commission (15%)"
+          trailing={
+            <Text variant="bodyStrong" color="danger" tabular>
+              −{formatCedis(totals.commissionPesewas)}
+            </Text>
+          }
+          showChevron={false}
+        />
+        {summary.commissionOwedPesewas > 0 ? (
+          <Text variant="caption" color="secondary" style={styles.note}>
+            You collect the whole fare in cash, so CampusRide&apos;s 15% is still with you (
+            {formatCedis(summary.commissionOwedPesewas)} on {summary.commissionRidesCount}{" "}
+            {summary.commissionRidesCount === 1 ? "trip" : "trips"} so far). We&apos;ll tell you how
+            to settle it before any collection starts.
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={styles.section}>
+        <Text variant="title3" accessibilityRole="header">
+          Trips
+        </Text>
+        {groupByDay(rides, (r) => r.completedAt).map((day) => (
+          <View key={day.label} style={styles.day}>
+            <Text variant="bodyStrong" color="secondary" accessibilityRole="header">
+              {day.label}
+            </Text>
+            <View>
+              {day.items.map((item, i) => (
+                <ListRow
+                  key={item.rideId}
+                  divider={i > 0}
+                  title={route(item)}
+                  subtitle={`${clockTime(item.completedAt)} · ${item.type === "SHARED" ? "Shared" : "Ride alone"}${item.source === "USSD" ? " · USSD" : ""}`}
+                  trailing={
+                    <View style={styles.earn}>
+                      <Text variant="caption" color="secondary">
+                        You earn
+                      </Text>
+                      <Text variant="bodyStrong" tabular>
+                        {formatCedis(item.driverGrossPesewas)}
+                      </Text>
+                    </View>
+                  }
+                  showChevron={false}
+                  accessibilityLabel={`${route(item)}, ${clockTime(item.completedAt)}. You earn ${formatCedis(item.driverGrossPesewas)}.`}
+                />
+              ))}
+            </View>
+          </View>
+        ))}
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  breakdown: {
-    marginTop: spacing.md,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    gap: spacing.xs,
-  },
-  breakdownRow: { flexDirection: "row", justifyContent: "space-between" },
-  header: {
-    marginBottom: spacing.xl,
-  },
-  earningsCard: {
-    gap: spacing.xs,
-    marginBottom: spacing.xl,
-  },
-  earningsAmount: {
-    color: colors.primary[600],
-  },
-  ridesCount: {
-    marginTop: spacing.xs,
-  },
-  list: {
-    gap: spacing.md,
-  },
-  rideCard: {
-    gap: spacing.sm,
-  },
-  rideTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  tags: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  earn: {
-    color: colors.primary[600],
-    fontWeight: typography.weight.semibold,
-  },
-  center: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.md,
-    paddingHorizontal: spacing.xl,
-  },
-  centerTitle: {
-    marginTop: spacing.sm,
-  },
-  centerBody: {
-    textAlign: "center",
-    marginBottom: spacing.sm,
-  },
+  content: { gap: spacing[5], paddingBottom: spacing[10] },
+  title: { marginTop: spacing[2] },
+  section: { gap: spacing[3] },
+  hero: { gap: spacing[1] },
+  note: { marginTop: spacing[2] },
+  day: { gap: spacing[1] },
+  earn: { alignItems: "flex-end" },
+  empty: { alignItems: "center", gap: spacing[3], paddingTop: spacing[8] },
+  centered: { textAlign: "center" },
 });

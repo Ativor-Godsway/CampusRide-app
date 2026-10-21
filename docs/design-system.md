@@ -68,7 +68,7 @@ CampusRide is a ride-hailing service for the University of Ghana, Legon. Two app
 
 ## Imagery
 
-- One style only: realistic studio renders of the forest-green CampusRide car on white or transparent (`car-standard.png`, `car-shared.png`). Toy "clay" art is retired.
+- One style only: realistic studio renders of the forest-green CampusRide car on white or transparent (`car-standard.png`, `car-shared.png`). The toy "clay" art has been removed from the apps (PR 12).
 - The same car model appears everywhere: `car-standard.png`, `car-shared.png`, `car-topdown.png` and `no-drivers.png` are all the same green sedan.
 - Illustrations top out at 160pt wide in sheets and 220pt on full-screen empty states.
 
@@ -204,7 +204,7 @@ The one style for every tappable action, with a strict order: one `primary` per 
 
 Don't: outline buttons, green glow shadows, two green buttons stacked, or full-width text buttons.
 
-In code: `packages/mobile-shared/src/design/components/Button.tsx` (replace the `secondary` outline, `dangerSecondary` and `brand` shadow).
+In code: `packages/mobile-shared/src/design/components/Button.tsx`. The old names `ghost` and `dangerSecondary` still work and render as `text` and `danger`.
 
 ### SlideToConfirm
 
@@ -218,7 +218,7 @@ A full-width 64px slider for the driver's irreversible trip steps (picked up, ca
 - Accessibility: also completes on a long-press of 600 ms and exposes an `accessibilityActions` "activate", so it works with VoiceOver/TalkBack.
 - One per screen, and it IS the primary action: no green button next to it.
 
-In code: `apps/driver/components/trip/SlideToConfirm.tsx` (move to mobile-shared and restyle).
+In code: `packages/mobile-shared/src/design/components/SlideToConfirm.tsx`.
 
 ### Input
 
@@ -276,7 +276,7 @@ The white sheet that holds every map screen's content, built on `@gorhom/bottom-
 - Keyboard: use `BottomSheetTextInput` with `keyboardBehavior="interactive"` so the sheet rises above the keyboard (fixes the hidden note field).
 - Floating map controls (route pill, recentre) sit above the sheet and move with it.
 
-In code: replace the Modal-based `Sheet.tsx` with this.
+In code: `packages/mobile-shared/src/design/components/BottomSheet.tsx` (the Modal-based `Sheet.tsx` is gone).
 
 ### ListRow
 
@@ -298,7 +298,7 @@ Compact pills for filters, single/multi choice, recent places and status.
 **Consumer provides:** `label`, `selected`, optional `icon`, `onPress`; status chips take `tone`.
 
 - **Filter** (36px): `surface-2` + `ink`; selected = `ink` fill + white text. One selected at a time (All / Shared / Private).
-- **Choice** (36px): `surface-2`; selected = `green-50` + 1.5px `green-500` border + `green-700` text and a check. Cancel reasons, rating tags.
+- **Choice** (36px): `surface-2`; selected = `green-50` + 1.5px `green-500` border + `green-700` text and a check. Cancel reasons, car makes on driver onboarding. (Rating tags wait for the rating API to take tags.)
 - **Place** (36px): white with a `line` border and a clock icon; recent destinations on rider home.
 - **Status** (24px, `radius-sm`, 12/700): `brand` Best value / Online / In car; `neutral` Shared · 1 seat; `warn` Waiting / Under review; `danger` Cancelled; `amber` DRIVER badge. Always a word, never a bare dot.
 - `selection` haptic on change. Hit area padded to 48.
@@ -314,6 +314,38 @@ A short dark message that slides down from the top for 3 seconds to confirm some
 - One at a time; a new one replaces the old. Swipe up to dismiss. Announced to screen readers.
 - **Inline notice:** `amber-50` / `amber-700` (warning) or `red-50` / `red-600` (error), `radius-md`, icon + one sentence that says how to fix it. Stays until the problem is fixed (e.g. out-of-area pickup).
 
+## Rules settled during the redesign (PRs 2–12)
+
+What the mockups didn't say, or what changed once real data and real phones were involved. They are as binding as the rest of this spec.
+
+**Real data only**
+- Never invent a number. No ETA until there is a driver position ("On the way" instead of minutes); no "Online" time on the driver's trip-complete card (it isn't tracked); no distance on it either.
+- "Current location" is never a place name in a sentence: say the place it resolves to ("Asking drivers near Akuafo Hall"), else "near you" / "Meet at your pickup point".
+- Phone numbers are shown formatted: "+233 54 860 8146".
+- Driver money has ONE rule (`earningsTotals` in @rida/shared, used by the server's all-time summary and the app alike): **Gross** = the fares riders paid; **Commission** = CampusRide's 15% of them; **After commission** = the sum of the driver's 85% shares, the "You earn" amounts. The commission comes out once. "Today" is after commission everywhere: the Home pill, the trip-complete card and the Earnings tab show the same number.
+
+**Rider**
+- Cancelling swaps the ride sheet's content in two steps (confirm, then a reason); never a second sheet.
+- The Safety button opens its own modal sheet with two separate actions: "Alert my emergency contact" (the SOS text and link, after a confirm, success toast) and "Call emergency services (112)", a red-50 / red-600 button 56 tall that dials and sends the same alert. Without a contact the first row is "Add an emergency contact". A warning haptic when the sheet opens.
+- Trip complete and a cancelled trip are one modal sheet over the dimmed map.
+- Pushed screens (Profile, Safety, Notifications, Delete account, Licences) start with the 44px round Back (`BackButton`, `IconButton` variant `compact`): they have no navigation header.
+
+**Driver**
+- Going online asks for location only then; if location isn't allowed or asking fails (e.g. "Always" in a store build), the driver stays offline, the server is never told otherwise, and Home shows an inline notice with Open Settings.
+- A new request is a full-screen takeover over everything (`RequestTakeover`): map on top, white panel with the countdown ring, the 48px fare, "You earn", the stops card, a 64px Accept whose green-600 fill runs down with the countdown, Decline as text. Accept waits for the server: a spinner, then the trip (success haptic), or a toast ("That request was taken" / "That request expired"), or an inline error with Try again. While Accept is waiting the countdown stops. Adding a rider to a shared trip uses the same takeover, with the server's detour as "Fits your route · +2 min".
+- The trip screen has ONE big control, the slider ("Slide when Kwame is in", the dark "Slide when you have GH₵15" under "Collect GH₵15 cash"). Navigate, Call, Message and Stops are round buttons; everything else (I'm here, Add a rider, Stops, Cancel pickup, Rider didn't show, the dev-only fake drive) lives in the ⋯ menu. "I'm here · tell Kwame" appears above the slider within the automatic-arrival distance; once arrived, a "Waiting · 1:42" chip, and "Rider didn't show" after 3 minutes.
+- Trip complete and "This trip has ended" are white pages with a 60px badge in an 84px ring (green check, or grey), and one button at the bottom ("Find next trip", which goes back online if needed, or "Back to Home").
+- Onboarding: two steps with a progress bar, one primary button pinned at the bottom, and ONE "Use a different number" at the bottom of the page. Plates are formatted as typed ("GR 1234-24").
+
+**Maps**
+- The driver's car is `car-topdown.png` at 44px, turned to its heading, gliding about a second to each GPS fix (it jumps with Reduce Motion on).
+- The searching / online pulse is PulseRings' look drawn as map circles, so it stays on the point as the map moves.
+- On the trip map only the leg to the next stop is bold green-500 (6px); later legs are green at 35%. Before Accept, places are drawn at their campus zones: the server sends no exact pins or rider notes then.
+
+**Components added**
+- `SegmentedControl` (Today / This week), `BackButton`, `IconButton` variant `compact`, `OpenSourceLicensesScreen` (Account → Open-source licenses in both apps).
+- Chart bars: today's `green-500`, the other days `chartBar` (validated against green-500 for normal and colour-blind vision; under 3:1 on white, so the bars always carry labels).
+
 ## Screens (mockups in docs/mockups/)
 
 | file | screen | key points |
@@ -324,9 +356,9 @@ A short dark message that slides down from the top for 3 seconds to confirm some
 | 04-rider-home.png | Rider home | full map, "Where to?" sheet, recent-place chips, slim "Food and courier · Soon" row, tabs Home/Rides/Account |
 | 05-rider-choose-ride.png | Choose a ride | floating back + route pill, two ride options (selected = green-50 + green border), chips Cash / Exact pickup / Note, one "Request Shared" button |
 | 06-rider-driver-on-the-way.png | Driver on the way / in ride | eyebrow + display "3 min", driver card (avatar + amber rating, plate frame), round Call/Message/Share trip/Safety, "Cancel ride" red text; SOS lives inside Safety |
-| 07-rider-trip-complete.png | Trip complete + rating | one modal sheet: arrived, display fare + "Pay Kwame in cash", shared-savings chip, avatar, 5 amber stars, tag chips, Done |
+| 07-rider-trip-complete.png | Trip complete + rating | one modal sheet: arrived, display fare + "Pay Kwame in cash", shared-savings chip, avatar, 5 amber stars, Done (tag chips not built: POST /ratings takes stars and a comment only) |
 | 08-driver-home-offline.png | Driver home offline | full map + top-down car, "Today GH₵0.00" pill, 64px "Go online" pill, short offline sheet, tabs Home/Earnings/Account |
 | 09-driver-home-online.png | Driver home online | pulse rings around the car, dark "Today GH₵17.50 · 2 trips" pill, sheet "Finding trips near you", filter chips, "Go offline" pill |
 | 10-driver-ride-offer.png | Ride offer | full takeover over map (route to pickup dashed, trip green), countdown ring, huge fare + "You earn", pickup/drop-off card, 64px Accept pill with countdown fill, Decline text |
 | 11-driver-trip.png | Trip | back + "type · fare" pill + ⋯ menu (I'm here, Cancel pickup, Add rider live there), sheet: eyebrow + "Pick up Kwame", rider note, round Navigate(green)/Call/Message/Stops, ONE slider |
-| 12-driver-trip-complete.png | Driver trip complete | check badge, dark cash-collected card, Today/Trips/Online stats, rate rider stars, "Find next trip" |
+| 12-driver-trip-complete.png | Driver trip complete | check badge, dark cash-collected card, Today/Trips stats ("Online" time isn't tracked, so it's left out), rate rider stars, "Find next trip" |

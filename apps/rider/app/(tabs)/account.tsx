@@ -102,6 +102,12 @@ export default function AccountTab() {
           leading={<ListRow.Icon name="lock-closed-outline" />}
           onPress={() => void openLegalPage(PRIVACY_URL)}
         />
+        <ListRow
+          divider
+          title="Open-source licenses"
+          leading={<ListRow.Icon name="code-slash-outline" />}
+          onPress={() => router.push("/licenses")}
+        />
       </View>
 
       <View>

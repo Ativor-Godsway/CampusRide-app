@@ -13,8 +13,11 @@ import AccountTab from "../../../apps/rider/app/(tabs)/account";
 import SafetyRoute from "../../../apps/rider/app/safety";
 import ProfileRoute from "../../../apps/rider/app/profile";
 import NotificationsRoute from "../../../apps/rider/app/notifications";
+import LicensesRoute from "../../../apps/rider/app/licenses";
 import PlanYourRide from "../../../apps/rider/app/ride/location";
 import ChooseRide from "../../../apps/rider/app/ride/type";
+import PickOnMap from "../../../apps/rider/app/ride/pick";
+import DeleteAccountRoute from "../../../apps/rider/app/delete-account";
 import DesignGallery from "../../../apps/rider/app/dev/design-gallery";
 import { boot, refuse, type Routes, type Scene } from "./core";
 import {
@@ -372,6 +375,30 @@ const scenes: Scene[] = [
     routes: signedIn,
     chain: [RootLayout, ProfileRoute],
     pathname: "/profile",
+  },
+  {
+    name: "pick-on-map",
+    note: "map: grey box",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, PickOnMap],
+    pathname: "/ride/pick",
+    params: { ...routeParams, field: "dropoff" },
+    position: here,
+  },
+  {
+    name: "delete-account",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, DeleteAccountRoute],
+    pathname: "/delete-account",
+  },
+  {
+    name: "licenses",
+    user: rider,
+    routes: signedIn,
+    chain: [RootLayout, LicensesRoute],
+    pathname: "/licenses",
   },
   {
     name: "notifications",

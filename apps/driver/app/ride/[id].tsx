@@ -32,6 +32,7 @@ import {
   getSharedFarePerRider,
   routeAttribution,
   splitFare,
+  todayEarnings,
   tripPath,
   type LatLng,
   type TripStop,
@@ -40,9 +41,7 @@ import {
 import {
   BottomSheet,
   Button,
-  Card,
   IconButton,
-  Illustration,
   ListRow,
   LoadingState,
   Notice,
@@ -53,9 +52,9 @@ import {
   Text,
   callPhone,
   colors,
-  haptics,
   errorStatus,
   getAddRiderPreview,
+  getDriverRideHistory,
   getFillSuggestions,
   serverReason,
   getRideSocket,
@@ -65,9 +64,7 @@ import {
   shadows,
   spacing,
   textPhone,
-  typography,
   useAuth,
-  useCountUp,
   useToast,
   useLiveRoute,
   type FillSuggestion,
@@ -92,13 +89,16 @@ import { TripMap } from "../../components/trip/TripMap";
 import { StopListSheet } from "../../components/trip/StopListSheet";
 import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
 import { AddRiderTakeover } from "../../components/trip/AddRiderTakeover";
-import { RateRidersPanel } from "../../components/trip/RateRidersPanel";
+import { TripCompleteView, TripEndedView } from "../../components/trip/TripEndScreens";
+import { useDriverPresence } from "../../lib/presence";
 
 /** The trip screen checks its trip more often than the rest of the app (a rider may cancel). */
 const TRIP_POLL_MS = 5_000;
 
 interface DoneSummary {
   rideId: string;
+  /** "Maison Française → Night Market" (one rider), or "3 riders · Shared". */
+  route: string;
   /** What the riders paid in total (cash to collect, or MoMo). */
   totalPesewas: number;
   driverSharePesewas: number;
@@ -295,10 +295,12 @@ export default function TripScreen() {
     if (carried.length === 0) return;
     const total = carried.reduce((sum, p) => sum + (p.lockedFare ?? 0), 0);
     const { driverShare, commission } = splitFare(total);
-    // The trip is over.
-    haptics.success();
+    const only = carried.length === 1 ? carried[0]! : null;
     setDone({
       rideId: ride.id,
+      route: only
+        ? `${only.pickupLabel ?? only.pickupZoneName} → ${only.dropoffLabel ?? only.dropoffZoneName}`
+        : `${carried.length} riders · Shared`,
       totalPesewas: total,
       driverSharePesewas: driverShare,
       commissionPesewas: commission,
@@ -516,6 +518,23 @@ export default function TripScreen() {
     goToHomeTab(router);
   }, [router, queryClient]);
 
+  // Today so far, for the trip-complete card: the same history as Home's
+  // "Today" pill and the Earnings tab, fetched again once the trip is done.
+  const finished = Boolean(done && done.rideId === rideId);
+  const history = useQuery({
+    queryKey: ["driverRideHistory"],
+    queryFn: getDriverRideHistory,
+    enabled: finished,
+  });
+  const today = history.data ? todayEarnings(history.data.rides) : null;
+
+  // "Find next trip": Home, online (going online if the driver had gone offline).
+  const presence = useDriverPresence();
+  const findNextTrip = useCallback(() => {
+    if (!presence.isOnline) presence.toggle();
+    goHome();
+  }, [presence, goHome]);
+
   // iOS swipe-back is off while a trip is running: the slide-to-confirm knob
   // starts near the left edge, and the system gesture used to grab the drag
   // and slide the whole screen away. Back stays on the ← button (which
@@ -546,52 +565,30 @@ export default function TripScreen() {
   // ─── Done ────────────────────────────────────────────────────────────────
   if (done && done.rideId === rideId) {
     return (
-      <Screen>
-        <View style={styles.center}>
-          <Illustration name="tripComplete" size={150} pop />
-          <Text variant="h1" style={styles.centerText}>
-            Trip complete
-          </Text>
-          <Card dark style={styles.earnCard}>
-            <Text variant="label" color="glow">
-              {done.cash ? "CASH COLLECTED" : "YOUR EARNINGS (85%)"}
-            </Text>
-            <CountUpCedis pesewas={done.cash ? done.totalPesewas : done.driverSharePesewas} />
-            {done.cash ? (
-              <Text variant="bodySmall" style={styles.earnSub}>
-                Your share {formatCedis(done.driverSharePesewas)} · platform fee {formatCedis(done.commissionPesewas)}
-              </Text>
-            ) : null}
-          </Card>
-          <RateRidersPanel rideId={done.rideId} />
-          <Button label="Back to Home" size="lg" onPress={goHome} />
-        </View>
-      </Screen>
+      <TripCompleteView
+        rideId={done.rideId}
+        route={done.route}
+        cash={done.cash}
+        totalPesewas={done.totalPesewas}
+        driverSharePesewas={done.driverSharePesewas}
+        commissionPesewas={done.commissionPesewas}
+        today={today}
+        onFindNext={findNextTrip}
+      />
     );
   }
 
   // ─── Accept refused (another driver was first, the rider cancelled) ─────
   if (!serverRide && claim?.state === "refused") {
     return (
-      <Screen>
-        <View style={styles.center}>
-          <Illustration name="searchEmpty" size={140} />
-          <Text variant="h2" style={styles.centerText} accessibilityRole="alert">
-            {claim.message ?? "Not accepted"}
-          </Text>
-          <Text variant="bodySmall" color="muted" style={styles.centerText}>
-            Taking you back to Home…
-          </Text>
-          <Button
-            label="Back to Home"
-            size="lg"
-            onPress={() => {
-              clearClaim();
-              goHome();
-            }}
-          />
-        </View>
-      </Screen>
+      <TripEndedView
+        title={claim.message ?? "Not accepted"}
+        message="Taking you back to Home…"
+        onHome={() => {
+          clearClaim();
+          goHome();
+        }}
+      />
     );
   }
 
@@ -604,18 +601,11 @@ export default function TripScreen() {
       );
     }
     return (
-      <Screen>
-        <View style={styles.center}>
-          <Illustration name="searchEmpty" size={140} />
-          <Text variant="h2" style={styles.centerText}>
-            This trip has ended
-          </Text>
-          <Text variant="bodySmall" color="muted" style={styles.centerText}>
-            The rider cancelled, or the trip was closed. You&apos;re free to take new requests.
-          </Text>
-          <Button label="Back to Home" onPress={goHome} size="lg" />
-        </View>
-      </Screen>
+      <TripEndedView
+        title="This trip has ended"
+        message="The rider cancelled, or the trip was closed. You're free to take new requests."
+        onHome={goHome}
+      />
     );
   }
 
@@ -1066,22 +1056,8 @@ function TopBar({
   );
 }
 
-function CountUpCedis({ pesewas }: { pesewas: number }) {
-  const shown = useCountUp(pesewas);
-  return (
-    <Text variant="h1" color="inverse" style={styles.earnAmount}>
-      {formatCedis(shown)}
-    </Text>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.mapLand },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, paddingHorizontal: spacing.xl },
-  centerText: { textAlign: "center" },
-  earnCard: { alignItems: "center", paddingVertical: spacing.xl, gap: spacing.sm, width: "100%" },
-  earnAmount: { fontWeight: typography.weight.extrabold },
-  earnSub: { color: "rgba(255,255,255,0.7)", textAlign: "center" },
   // ── Top bar
   topBar: { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: spacing.gutter, paddingBottom: spacing[2], gap: spacing[2] },
   topRow: { flexDirection: "row", alignItems: "center", gap: spacing[2] },

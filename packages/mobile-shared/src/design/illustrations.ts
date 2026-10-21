@@ -21,29 +21,16 @@ export const illustrations = {
   /** Realistic 4:3 cars for the rider's ride-choice list. Use with `width`, not `size`. */
   carStandard: require("../../assets/illustrations/car-standard.png"),
   carShared: require("../../assets/illustrations/car-shared.png"),
-  carIdle: require("../../assets/illustrations/car-idle.png"),
-  carFull: require("../../assets/illustrations/car-full.png"),
+  /** The driver on the map, seen from above (front of the car points up). */
   carTopdown: require("../../assets/illustrations/car-topdown.png"),
-  serviceRide: require("../../assets/illustrations/service-ride.png"),
   noDrivers: require("../../assets/illustrations/no-drivers.png"),
 
   // Map pins
   pinPickup: require("../../assets/illustrations/pin-pickup.png"),
   pinDropoff: require("../../assets/illustrations/pin-dropoff.png"),
-  pinRadar: require("../../assets/illustrations/pin-radar.png"),
 
-  // Empty / status screens
-  searchEmpty: require("../../assets/illustrations/search-empty.png"),
-  historyEmpty: require("../../assets/illustrations/history-empty.png"),
-  ridesEmpty: require("../../assets/illustrations/rides-empty.png"),
-  offline: require("../../assets/illustrations/offline.png"),
-  tripComplete: require("../../assets/illustrations/trip-complete.png"),
-  driverOnboarding: require("../../assets/illustrations/driver-onboarding.png"),
+  // Screens
   safetyShield: require("../../assets/illustrations/safety-shield.png"),
-
-  // Rider home services
-  serviceFood: require("../../assets/illustrations/service-food.png"),
-  serviceCourier: require("../../assets/illustrations/service-courier.png"),
 
   // Brand
   logoMark: require("../../assets/illustrations/logo-mark.png"),

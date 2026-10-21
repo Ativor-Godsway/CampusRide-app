@@ -12,3 +12,4 @@ export * from "./navigation";
 export * from "./contact";
 export * from "./push";
 export * from "./monitoring";
+export * from "./about";

@@ -2,7 +2,7 @@ import { ActivityIndicator, Image, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Button,
-  Card,
+  Notice,
   ProgressBar,
   Text,
   colors,
@@ -12,7 +12,7 @@ import {
 } from "@rida/mobile-shared";
 import type { DriverPhotoState, PhotoSource } from "../lib/useDriverPhotoUpload";
 
-const AVATAR = 148;
+const AVATAR = 168;
 
 export interface DriverPhotoCardProps {
   state: DriverPhotoState;
@@ -22,8 +22,11 @@ export interface DriverPhotoCardProps {
 }
 
 /**
- * The onboarding photo step: a large preview, a live progress bar while the
- * photo uploads, and a clear error with "Try again" when it doesn't.
+ * The onboarding photo step: a large circle — the guidance inside it until
+ * there's a photo — then "Take a selfie" (primary) and "Choose from
+ * gallery". While it uploads, a progress bar; once it's up, the photo with
+ * "Retake" as a text button (the screen's Continue moves on). A clear error
+ * with "Try again" when it doesn't upload.
  */
 export function DriverPhotoCard({ state, canRetry, onPick, onRetry }: DriverPhotoCardProps) {
   const previewUri =
@@ -36,7 +39,7 @@ export function DriverPhotoCard({ state, canRetry, onPick, onRetry }: DriverPhot
   const percent = uploading && state.progress !== null ? Math.round(state.progress * 100) : null;
 
   return (
-    <Card style={styles.card}>
+    <View style={styles.wrap}>
       <View style={styles.avatarWrap}>
         {previewUri ? (
           <Image
@@ -46,62 +49,58 @@ export function DriverPhotoCard({ state, canRetry, onPick, onRetry }: DriverPhot
           />
         ) : (
           <View style={[styles.avatar, styles.placeholder]}>
-            <Ionicons name="person" size={64} color={colors.primary[300]} />
+            <Ionicons name="happy-outline" size={44} color={colors.green500} />
+            <Text variant="subhead" color="secondary" style={styles.guide}>
+              Face the camera in good light. No sunglasses, hat or filter.
+            </Text>
           </View>
         )}
 
-        {uploading && (
+        {uploading ? (
           <View style={styles.overlay}>
-            <ActivityIndicator color={colors.white} />
-            {percent !== null && (
-              <Text variant="bodyMedium" color="inverse">
+            <ActivityIndicator color={colors.onBrand} />
+            {percent !== null ? (
+              <Text variant="bodyStrong" color="onDark">
                 {percent}%
               </Text>
-            )}
+            ) : null}
           </View>
-        )}
+        ) : null}
 
-        {state.status === "done" && (
+        {state.status === "done" ? (
           <View style={[styles.statusBadge, styles.successBadge]}>
-            <Ionicons name="checkmark" size={18} color={colors.white} />
+            <Ionicons name="checkmark" size={18} color={colors.onBrand} />
           </View>
-        )}
-        {state.status === "error" && (
-          <View style={[styles.statusBadge, styles.errorBadge]}>
-            <Ionicons name="alert" size={18} color={colors.white} />
-          </View>
-        )}
+        ) : null}
       </View>
 
-      {uploading && (
+      {uploading ? (
         <View style={styles.progress} accessibilityLiveRegion="polite">
-          <ProgressBar progress={state.progress ?? 0.05} />
-          <Text variant="bodySmall" color="muted" style={styles.centered}>
+          <ProgressBar progress={state.progress ?? 0.05} height={4} color={colors.green500} />
+          <Text variant="subhead" color="secondary" style={styles.centered}>
             {percent === null ? "Preparing your upload…" : `Uploading your photo… ${percent}%`}
           </Text>
         </View>
-      )}
+      ) : null}
 
-      {state.status === "done" && (
-        <Text variant="bodySmall" color="success" style={styles.centered}>
-          Photo uploaded
-        </Text>
-      )}
-
-      {state.status === "error" && <PhotoErrorBox state={state} />}
-
-      {state.status === "idle" && (
-        <Text variant="bodySmall" color="muted" style={styles.centered}>
-          Face the camera in good light — no sunglasses, hats or filters.
-        </Text>
-      )}
+      {state.status === "error" ? <PhotoError state={state} /> : null}
 
       <View style={styles.actions}>
-        {state.status === "error" && canRetry && <Button label="Try again" onPress={onRetry} />}
-        {state.status !== "done" ? (
+        {state.status === "done" ? (
+          <Button
+            label="Retake"
+            variant="text"
+            icon="camera-outline"
+            onPress={() => onPick("camera")}
+          />
+        ) : (
           <>
+            {state.status === "error" && canRetry ? (
+              <Button label="Try again" onPress={onRetry} />
+            ) : null}
             <Button
               label="Take a selfie"
+              icon="camera-outline"
               variant={state.status === "error" && canRetry ? "secondary" : "primary"}
               onPress={() => onPick("camera")}
               disabled={uploading}
@@ -113,36 +112,20 @@ export function DriverPhotoCard({ state, canRetry, onPick, onRetry }: DriverPhot
               disabled={uploading}
             />
           </>
-        ) : (
-          <View style={styles.row}>
-            <View style={styles.rowItem}>
-              <Button label="Retake" variant="secondary" onPress={() => onPick("camera")} />
-            </View>
-            <View style={styles.rowItem}>
-              <Button
-                label="Choose another"
-                variant="secondary"
-                onPress={() => onPick("library")}
-              />
-            </View>
-          </View>
         )}
       </View>
-    </Card>
+    </View>
   );
 }
 
-function PhotoErrorBox({ state }: { state: Extract<DriverPhotoState, { status: "error" }> }) {
+function PhotoError({ state }: { state: Extract<DriverPhotoState, { status: "error" }> }) {
   const { title, message } = describeDriverPhotoError(state.error);
   return (
-    <View style={styles.errorBox} accessibilityRole="alert">
-      <Text variant="bodyMedium" color="error">
-        {title}
-      </Text>
-      <Text variant="bodySmall">{message}</Text>
+    <View style={styles.error}>
+      <Notice tone="error" icon="alert-circle-outline" message={`${title}. ${message}`} />
       {/* The raw cause, for whoever is testing a development build. */}
       {__DEV__ && state.error.detail ? (
-        <Text variant="caption" color="muted">
+        <Text variant="caption" color="tertiary">
           Details: {state.error.detail}
         </Text>
       ) : null}
@@ -151,48 +134,40 @@ function PhotoErrorBox({ state }: { state: Extract<DriverPhotoState, { status: "
 }
 
 const styles = StyleSheet.create({
-  card: { gap: spacing.lg, alignItems: "stretch" },
+  wrap: { gap: spacing[5] },
   avatarWrap: { alignSelf: "center", width: AVATAR, height: AVATAR },
   avatar: { width: AVATAR, height: AVATAR, borderRadius: radii.full },
   placeholder: {
-    backgroundColor: colors.primary[50],
+    backgroundColor: colors.green50,
     alignItems: "center",
     justifyContent: "center",
-    borderWidth: 2,
-    borderStyle: "dashed",
-    borderColor: colors.primary[200],
+    gap: spacing[2],
+    paddingHorizontal: spacing[5],
   },
+  guide: { textAlign: "center" },
   overlay: {
     ...StyleSheet.absoluteFill,
     borderRadius: radii.full,
-    backgroundColor: "rgba(8, 40, 19, 0.55)",
+    backgroundColor: colors.scrim,
     alignItems: "center",
     justifyContent: "center",
-    gap: spacing.xs,
+    gap: spacing[1],
   },
   statusBadge: {
     position: "absolute",
-    right: 4,
-    bottom: 4,
+    right: 8,
+    bottom: 8,
     width: 32,
     height: 32,
     borderRadius: radii.full,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 3,
-    borderColor: colors.white,
+    borderColor: colors.surface,
   },
-  successBadge: { backgroundColor: colors.success },
-  errorBadge: { backgroundColor: colors.error },
-  progress: { gap: spacing.sm },
+  successBadge: { backgroundColor: colors.green500 },
+  progress: { gap: spacing[2] },
   centered: { textAlign: "center" },
-  errorBox: {
-    backgroundColor: colors.errorSurface,
-    borderRadius: radii.lg,
-    padding: spacing.md,
-    gap: spacing.xs,
-  },
-  actions: { gap: spacing.sm },
-  row: { flexDirection: "row", gap: spacing.md },
-  rowItem: { flex: 1 },
+  error: { gap: spacing[1] },
+  actions: { gap: spacing[2] },
 });
