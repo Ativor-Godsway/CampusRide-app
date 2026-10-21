@@ -18,6 +18,7 @@ import TripScreen from "../../../apps/driver/app/ride/[id]";
 import DesignGallery from "../../../apps/driver/app/dev/design-gallery";
 import { boot, refuse, type Routes, type Scene } from "./core";
 import {
+  appMinVersions,
   driver,
   driverHistory,
   driverRequests,
@@ -378,6 +379,24 @@ const scenes: Scene[] = [
     steps: [{ press: ACCEPT_LONE }, { wait: 400 }],
   }),
   tripScene("trip-to-pickup", driverTripAt("coming"), onTheWay),
+  tripScene("update-held-mid-trip", driverTripAt("onboard"), midTrip, {
+    note: "an update is due mid-trip: no screen until the trip is over and its screen closed",
+    routes: { "GET /app/min-version": appMinVersions("driver") },
+  }),
+  home("update-required", true, {
+    note: "this version is below the server's minimum: covers every screen; the driver goes offline",
+    routes: signedIn({
+      "GET /driver/rides/history": driverHistory(true),
+      "GET /app/min-version": appMinVersions("driver"),
+    }),
+  }),
+  home("update-required-no-link", false, {
+    note: "no store link set (the App Store listing doesn't exist yet)",
+    routes: signedIn({
+      "GET /driver/rides/history": driverHistory(false),
+      "GET /app/min-version": appMinVersions("driver", null),
+    }),
+  }),
   tripScene("trip-near-pickup", driverTripAt("coming"), atPickup, {
     note: "within the arrival distance of Kwame's pin: I'm here, before automatic arrival",
   }),

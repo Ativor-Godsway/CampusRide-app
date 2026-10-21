@@ -2,6 +2,7 @@ import dotenv from "dotenv";
 import path from "node:path";
 import { resolveCloudinaryConfig } from "./services/uploads/cloudinaryConfig";
 import { normalizePhone } from "./lib/phone";
+import { resolveAppMinVersions } from "./lib/appMinVersions";
 import { ACCOUNT_DELETION_RETENTION_DAYS } from "@rida/shared";
 
 // Per-environment .env loading (dev/test/prod split — see docs/environments.md).
@@ -306,6 +307,13 @@ export const config = {
    * secret. Same pattern as `moolre.paymentsEnabled`.
    */
   enableUssd: process.env.ENABLE_USSD === "true",
+  /**
+   * The forced "Time to update" screen: per app and platform, the lowest
+   * store version still allowed and the store link, served by
+   * GET /app/min-version (MIN_VERSION_RIDER_IOS … STORE_URL_DRIVER_ANDROID,
+   * lib/appMinVersions.ts). All unset = nobody is ever blocked.
+   */
+  appMinVersions: resolveAppMinVersions(process.env).versions,
   /**
    * How long a ride offer stays up on a driver's screen before it times out
    * (seconds). The app reads it from each offer, so changing it needs no app

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { driverTripHref, driverTripStatusLine } from "@rida/shared";
+import { driverTripHref, driverTripStatusLine, type TripState } from "@rida/shared";
 import { getDriverActiveRide, useAuth, type RideWithZones } from "@rida/mobile-shared";
 import { finishedLocally, overlayPassengers, useTripActions } from "./tripActions";
 
@@ -30,6 +30,20 @@ export function useDriverActiveTrip(refetchIntervalMs = 15_000, options: { inclu
   const hidden = Boolean(ride && !options.includeFinished && finishedLocally(ride));
   void actions;
   return hidden ? { ...query, data: null } : query;
+}
+
+/**
+ * For the forced update screen, which never interrupts a trip. A trip this
+ * device has just finished still counts until the server agrees, and
+ * "unknown" while a signed-in driver's trip hasn't loaded yet.
+ */
+export function useDriverTripState(): TripState {
+  const { isLoading, isAuthenticated, user } = useAuth();
+  const trip = useDriverActiveTrip(15_000, { includeFinished: true });
+  if (isLoading) return "unknown";
+  if (!isAuthenticated || user?.role !== "DRIVER" || !user.driver?.isApproved) return "none";
+  if (trip.data) return "active";
+  return trip.isSuccess ? "none" : "unknown";
 }
 
 /** Where "back to my trip" leads: the trip screen, for every kind of trip. */

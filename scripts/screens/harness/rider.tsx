@@ -21,6 +21,7 @@ import DeleteAccountRoute from "../../../apps/rider/app/delete-account";
 import DesignGallery from "../../../apps/rider/app/dev/design-gallery";
 import { boot, refuse, type Routes, type Scene } from "./core";
 import {
+  appMinVersions,
   driver,
   place,
   places,
@@ -221,6 +222,37 @@ const scenes: Scene[] = [
     note: "map: grey box; no live ETA on the web (it comes from the driver's pings)",
     user: rider,
     routes: { ...signedIn, "GET /rides/active": { ride: riderActiveRide } },
+    chain: [RootLayout, TabsLayout, HomeTab],
+    pathname: "/",
+    position: here,
+  },
+  {
+    name: "update-required",
+    note: "this version is below the server's minimum: covers every screen, no way past",
+    user: rider,
+    routes: { ...signedIn, "GET /app/min-version": appMinVersions("rider") },
+    chain: [RootLayout, TabsLayout, HomeTab],
+    pathname: "/",
+    position: here,
+  },
+  {
+    name: "update-required-no-link",
+    note: "no store link set (the App Store listing doesn't exist yet)",
+    user: rider,
+    routes: { ...signedIn, "GET /app/min-version": appMinVersions("rider", null) },
+    chain: [RootLayout, TabsLayout, HomeTab],
+    pathname: "/",
+    position: here,
+  },
+  {
+    name: "update-held-active-ride",
+    note: "an update is due but the rider has a ride going on: no screen until it ends",
+    user: rider,
+    routes: {
+      ...signedIn,
+      "GET /rides/active": { ride: riderActiveRide },
+      "GET /app/min-version": appMinVersions("rider"),
+    },
     chain: [RootLayout, TabsLayout, HomeTab],
     pathname: "/",
     position: here,

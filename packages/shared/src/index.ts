@@ -24,6 +24,7 @@ export * from "./driver/zoneUpdate";
 export * from "./driver/requestsNearYou";
 export * from "./config/serverUrl";
 export * from "./config/appVersion";
+export * from "./config/appUpdate";
 export * from "./geo/polyline";
 export * from "./rides/tripStops";
 export * from "./driver/actionFailure";
