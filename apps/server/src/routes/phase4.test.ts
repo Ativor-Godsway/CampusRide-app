@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, afterEach, afterAll, beforeAll } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
-import { getLoneFare, splitFare } from "@rida/shared";
+import { earningsTotals, getLoneFare, splitFare } from "@rida/shared";
 import { prisma } from "../db/prisma";
 import { config } from "../config";
 import { registerAuthRoutes } from "./auth";
@@ -890,7 +890,16 @@ describe("POST /rides/:id/reject", () => {
 // ── Task 5: earnings breakdown ────────────────────────────────────────────────
 
 describe("GET /driver/rides/history — commission and net", () => {
-  it("reports gross, commission owed and net for CASH rides", async () => {
+  async function history(token: string) {
+    const res = await app.inject({ method: "GET", url: "/driver/rides/history", headers: auth(token) });
+    expect(res.statusCode).toBe(200);
+    return res.json() as {
+      rides: { facePesewas: number; driverGrossPesewas: number }[];
+      summary: Record<string, number>;
+    };
+  }
+
+  it("gross is the fare, commission 15% of it, net the driver's share: taken out once", async () => {
     const driver = await authedDriver();
     const { ride } = await createTestRide({
       type: "LONE",
@@ -899,26 +908,49 @@ describe("GET /driver/rides/history — commission and net", () => {
     });
     createdRideIds.push(ride.id);
 
-    const { commission } = splitFare(getLoneFare());
+    const fare = getLoneFare();
+    const { commission, driverShare } = splitFare(fare);
     await prisma.commissionLedger.create({
       data: { driverUserId: driver.user.id, rideId: ride.id, amountPesewas: commission },
     });
 
-    const res = await app.inject({
-      method: "GET",
-      url: "/driver/rides/history",
-      headers: auth(driver.token),
+    const { rides, summary } = await history(driver.token);
+    // Per ride: the fare, and the driver's 85% share of it ("You earn").
+    expect(rides[0]).toMatchObject({ facePesewas: fare, driverGrossPesewas: driverShare });
+    expect(summary).toMatchObject({
+      totalRides: 1,
+      totalGrossPesewas: fare,
+      totalCommissionPesewas: commission,
+      commissionOwedPesewas: commission,
+      commissionRidesCount: 1,
+      netPesewas: driverShare,
     });
-
-    expect(res.statusCode).toBe(200);
-    const { summary } = res.json();
-    expect(summary.totalRides).toBe(1);
-    expect(summary.commissionOwedPesewas).toBe(commission);
-    expect(summary.commissionRidesCount).toBe(1);
-    expect(summary.netPesewas).toBe(summary.totalGrossPesewas - commission);
+    // GH₵15 → GH₵12.75, never GH₵10.50 (the 15% taken a second time).
+    expect(summary.netPesewas).toBe(summary.totalGrossPesewas - summary.totalCommissionPesewas);
+    expect(summary.netPesewas).toBe(Math.round(fare * 0.85));
   });
 
-  it("reports zero commission when the driver has no ledger rows", async () => {
+  it("several trips: the totals are the sums of the rides, by the app's rule", async () => {
+    const driver = await authedDriver();
+    const { ride: first } = await createTestRide({ type: "LONE", status: "COMPLETED", driverId: driver.user.id });
+    createdRideIds.push(first.id);
+    // The second is tidied up here: the shared cleanup removes the driver with the first.
+    const { ride: second } = await createTestRide({ type: "LONE", status: "COMPLETED", driverId: driver.user.id });
+    const { rides, summary } = await history(driver.token);
+    await prisma.ride.delete({ where: { id: second.id } });
+    await prisma.user.delete({ where: { id: second.riderId } });
+    const t = earningsTotals(rides.map((r) => ({ ...r, completedAt: new Date().toISOString() })));
+    expect(summary).toMatchObject({
+      totalRides: 2,
+      totalGrossPesewas: t.grossPesewas,
+      totalCommissionPesewas: t.commissionPesewas,
+      netPesewas: t.netPesewas,
+    });
+    expect(summary.totalGrossPesewas).toBe(2 * getLoneFare());
+    expect(summary.netPesewas).toBe(rides.reduce((sum, r) => sum + r.driverGrossPesewas, 0));
+  });
+
+  it("nothing owed on file: the share is still after commission", async () => {
     const driver = await authedDriver();
     const { ride } = await createTestRide({
       type: "LONE",
@@ -927,16 +959,9 @@ describe("GET /driver/rides/history — commission and net", () => {
     });
     createdRideIds.push(ride.id);
 
-    const res = await app.inject({
-      method: "GET",
-      url: "/driver/rides/history",
-      headers: auth(driver.token),
-    });
-
-    const { summary } = res.json();
+    const { summary } = await history(driver.token);
     expect(summary.commissionOwedPesewas).toBe(0);
-    // With nothing owed, net is exactly gross.
-    expect(summary.netPesewas).toBe(summary.totalGrossPesewas);
+    expect(summary.netPesewas).toBe(splitFare(getLoneFare()).driverShare);
   });
 });
 

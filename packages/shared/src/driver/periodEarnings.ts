@@ -1,26 +1,47 @@
-import { splitFare } from "../pricing/pricing";
-
 /**
- * The driver's Earnings tab, for "Today" and "This week": what they earned
- * after commission, as GET /driver/rides/history sums it for all time
- * (net = the driver's gross share − the 15% commission recorded on cash
- * trips). The history has no per-trip payment method; CampusRide is
- * cash-only at launch, so every trip is counted as cash. Phone's own clock.
+ * The ONE rule for a driver's earnings, used by the server's all-time summary
+ * (GET /driver/rides/history) and by the driver app's Today / This week:
+ *
+ * - Gross = the sum of the FARES riders paid (`facePesewas`).
+ * - Commission = CampusRide's 15% of those fares (fare − driver share).
+ * - After commission = the sum of the driver's 85% SHARES — the "You earn"
+ *   amounts. The commission is taken out ONCE: the share already excludes it.
+ *
+ * `driverGrossPesewas` is the API's (older) name for the driver's 85% share
+ * of one trip; it is not a gross. Phone's own clock for days.
  */
 export interface EarningTrip {
   completedAt: string;
-  /** The rider fare(s), pesewas. */
+  /** The rider fare(s) for the trip, pesewas (all riders on a shared trip). */
   facePesewas: number;
-  /** The driver's share (85%), pesewas. */
+  /** The driver's 85% share of that fare ("You earn"), pesewas. */
   driverGrossPesewas: number;
 }
 
 export interface EarningsTotals {
   trips: number;
+  /** Fares paid, pesewas. */
   grossPesewas: number;
+  /** CampusRide's 15% of them, pesewas. */
   commissionPesewas: number;
-  /** gross − commission: may go negative, never clamped (as the server's summary). */
+  /** What the driver keeps: gross − commission = the sum of their shares. */
   netPesewas: number;
+}
+
+/** Gross, commission and after-commission for any set of trips (all time, a day, a week). */
+export function earningsTotals(trips: readonly EarningTrip[]): EarningsTotals {
+  let gross = 0;
+  let net = 0;
+  for (const t of trips) {
+    gross += t.facePesewas;
+    net += t.driverGrossPesewas;
+  }
+  return {
+    trips: trips.length,
+    grossPesewas: gross,
+    commissionPesewas: gross - net,
+    netPesewas: net,
+  };
 }
 
 export interface EarningsDay extends EarningsTotals {
@@ -38,21 +59,6 @@ function startOfDay(value: Date | string | number): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-function totals(trips: readonly EarningTrip[]): EarningsTotals {
-  let gross = 0;
-  let commission = 0;
-  for (const t of trips) {
-    gross += t.driverGrossPesewas;
-    commission += splitFare(t.facePesewas).commission;
-  }
-  return {
-    trips: trips.length,
-    grossPesewas: gross,
-    commissionPesewas: commission,
-    netPesewas: gross - commission,
-  };
-}
-
 /** This week, Monday to Sunday, one entry a day (days still to come are empty). */
 export function weekEarnings(trips: readonly EarningTrip[], now: Date = new Date()): EarningsDay[] {
   const today = startOfDay(now);
@@ -66,7 +72,7 @@ export function weekEarnings(trips: readonly EarningTrip[], now: Date = new Date
       label,
       start,
       isToday: start === today,
-      ...totals(trips.filter((t) => startOfDay(t.completedAt) === start)),
+      ...earningsTotals(trips.filter((t) => startOfDay(t.completedAt) === start)),
     };
   });
 }

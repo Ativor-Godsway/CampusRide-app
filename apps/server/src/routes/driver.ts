@@ -16,6 +16,7 @@ import {
   onboardAddNotice,
   previewAddRider,
   splitFare,
+  earningsTotals,
   ROAD_CIRCUITY_FACTOR,
   dropoffPin,
   haversineDistanceMeters,
@@ -369,7 +370,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * Read-only completed-ride history for the authenticated driver, newest
    * first. Earnings are DERIVED from the fixed fare model (no stored per-ride
    * driver share exists, and the CommissionLedger stores the platform's cut,
-   * not the driver's) — gross accrued, not settled/paid out.
+   * not the driver's). Per ride: `facePesewas` is the FARE riders paid, and
+   * `driverGrossPesewas` (an older name) is the driver's 85% SHARE of it.
    *
    * SHARED gross is derived from the count of riders who actually completed
    * (DROPPED_OFF passengers), not the ride's raw `occupancy`: occupancy is
@@ -417,31 +419,33 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       };
     });
 
-    // Phase 4: commission owed comes from CommissionLedger — the 15% recorded
-    // on each completed CASH ride (see finalizeRideCompletion). It is an
-    // unenforced debt record for now, so "owed" here means every row on file,
-    // not an unpaid balance; there is no settlement mechanism to net against
-    // yet. MOMO rides never create a ledger row (the commission is taken at
-    // source), so they contribute gross but no commission.
+    // The summary follows the ONE earnings rule the driver app uses too
+    // (earningsTotals, @rida/shared): gross = the fares, commission = 15% of
+    // them, net = the driver's shares. The commission comes out once.
+    const totals = earningsTotals(items);
+
+    // Phase 4: commission OWED comes from CommissionLedger — the 15% recorded
+    // on each completed CASH ride (see finalizeRideCompletion): the driver
+    // collected the whole fare in cash and owes CampusRide its share. An
+    // unenforced debt record for now (no settlement mechanism yet). MOMO rides
+    // never create a ledger row (the commission is taken at source). It is
+    // shown beside the totals, never subtracted from the driver's share again.
     const ledger = await prisma.commissionLedger.aggregate({
       where: { driverUserId: userId },
       _sum: { amountPesewas: true },
       _count: true,
     });
-    const commissionOwedPesewas = ledger._sum.amountPesewas ?? 0;
-    const totalGrossPesewas = items.reduce((sum, i) => sum + i.driverGrossPesewas, 0);
 
     const summary = {
-      totalRides: items.length,
-      totalGrossPesewas,
-      commissionOwedPesewas,
-      /**
-       * What the driver actually keeps: gross minus the commission recorded
-       * against them. Can go negative in principle (a driver whose only rides
-       * were cash and who has taken no payouts), so it is not clamped —
-       * showing a negative number is more honest than hiding a debt.
-       */
-      netPesewas: totalGrossPesewas - commissionOwedPesewas,
+      totalRides: totals.trips,
+      /** The fares riders paid, all time. */
+      totalGrossPesewas: totals.grossPesewas,
+      /** CampusRide's 15% of those fares. */
+      totalCommissionPesewas: totals.commissionPesewas,
+      /** Of that, what's on file as owed from cash rides. */
+      commissionOwedPesewas: ledger._sum.amountPesewas ?? 0,
+      /** What the driver keeps after commission: the sum of their 85% shares. */
+      netPesewas: totals.netPesewas,
       commissionRidesCount: ledger._count,
     };
 

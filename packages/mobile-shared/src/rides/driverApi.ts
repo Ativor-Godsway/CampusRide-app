@@ -249,16 +249,25 @@ export interface DriverRideHistoryItem {
   source: RideSource;
   /** ISO timestamp the ride was marked COMPLETED. */
   completedAt: string;
-  /** Face fare for the ride in pesewas (fixed model). */
+  /** The FARE riders paid for the trip, pesewas (all riders on a shared trip). */
   facePesewas: number;
-  /** Driver's derived gross (85%) share in pesewas — accrued, not paid out. */
+  /**
+   * The driver's 85% SHARE of that fare ("You earn"), pesewas — after
+   * commission. Despite the (older) name, not a gross. Accrued, not paid out.
+   */
   driverGrossPesewas: number;
 }
 
+/**
+ * All time, by the ONE earnings rule (earningsTotals in @rida/shared):
+ * gross = the fares, commission = 15% of them, net = the driver's shares.
+ */
 export interface DriverRideHistorySummary {
   totalRides: number;
-  /** Sum of per-ride driver gross, pesewas. Gross accrued, not settled. */
+  /** The fares riders paid, pesewas. (Servers before 2026-10-21 sent the sum of the driver's shares here.) */
   totalGrossPesewas: number;
+  /** CampusRide's 15% of those fares, pesewas. 0 from servers before 2026-10-21. */
+  totalCommissionPesewas: number;
   /**
    * Phase 4: total 15% platform commission recorded against this driver on
    * completed CASH rides (CommissionLedger). An unenforced debt record — no
@@ -266,7 +275,7 @@ export interface DriverRideHistorySummary {
    * unpaid balance.
    */
   commissionOwedPesewas: number;
-  /** Gross minus commission owed. May be negative; deliberately not clamped. */
+  /** What the driver keeps after commission: the sum of their 85% shares. */
   netPesewas: number;
   /** How many completed rides carry a commission row (CASH rides only). */
   commissionRidesCount: number;
@@ -280,6 +289,7 @@ export interface DriverRideHistory {
 const EMPTY_HISTORY_SUMMARY: DriverRideHistorySummary = {
   totalRides: 0,
   totalGrossPesewas: 0,
+  totalCommissionPesewas: 0,
   commissionOwedPesewas: 0,
   netPesewas: 0,
   commissionRidesCount: 0,

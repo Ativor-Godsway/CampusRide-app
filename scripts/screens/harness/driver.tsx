@@ -283,6 +283,7 @@ const scenes: Scene[] = [
         summary: {
           totalRides: 0,
           totalGrossPesewas: 0,
+          totalCommissionPesewas: 0,
           commissionOwedPesewas: 0,
           netPesewas: 0,
           commissionRidesCount: 0,

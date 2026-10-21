@@ -54,8 +54,9 @@ function route(item: DriverRideHistoryItem): string {
  * Earnings — what the driver made after commission today or this week (a
  * bar a day, Monday to Sunday), how that splits, and every completed trip by
  * day. All from GET /driver/rides/history: its own summary is all-time, so
- * the periods are added up here the same way (periodEarnings, @rida/shared).
- * Accrued, not paid out: commission isn't collected yet (see the note).
+ * the periods are added up here by the same rule (earningsTotals,
+ * @rida/shared): Gross = the fares, Commission = 15% of them, After
+ * commission = the sum of "You earn". Accrued, not paid out (see the note).
  */
 export default function EarningsTab() {
   const { isAuthenticated } = useAuth();
@@ -177,7 +178,7 @@ export default function EarningsTab() {
         />
         <ListRow
           divider
-          title="Commission owed (15%)"
+          title="Commission (15%)"
           trailing={
             <Text variant="bodyStrong" color="danger" tabular>
               −{formatCedis(totals.commissionPesewas)}
@@ -187,7 +188,7 @@ export default function EarningsTab() {
         />
         {summary.commissionOwedPesewas > 0 ? (
           <Text variant="caption" color="secondary" style={styles.note}>
-            Commission is 15% of each completed cash trip (
+            You collect the whole fare in cash, so CampusRide&apos;s 15% is still with you (
             {formatCedis(summary.commissionOwedPesewas)} on {summary.commissionRidesCount}{" "}
             {summary.commissionRidesCount === 1 ? "trip" : "trips"} so far). We&apos;ll tell you how
             to settle it before any collection starts.

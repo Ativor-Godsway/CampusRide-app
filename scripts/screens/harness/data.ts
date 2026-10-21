@@ -440,15 +440,17 @@ export function driverHistory(today: boolean) {
     earning("ride-e3", "Akuafo Hall", "Night Market", 30, "SHARED"),
     earning("ride-e4", "Legon Hall", "Bush Canteen", 54, "LONE"),
   ];
-  const gross = rides.reduce((sum, r) => sum + r.driverGrossPesewas, 0);
-  const commission = rides.reduce((sum, r) => sum + Math.round(r.facePesewas * 0.15), 0);
+  // The server's summary rule (earningsTotals): gross = fares, net = the shares.
+  const gross = rides.reduce((sum, r) => sum + r.facePesewas, 0);
+  const net = rides.reduce((sum, r) => sum + r.driverGrossPesewas, 0);
   return {
     rides,
     summary: {
       totalRides: rides.length,
       totalGrossPesewas: gross,
-      commissionOwedPesewas: commission,
-      netPesewas: gross - commission,
+      totalCommissionPesewas: gross - net,
+      commissionOwedPesewas: gross - net,
+      netPesewas: net,
       commissionRidesCount: rides.length,
     },
   };

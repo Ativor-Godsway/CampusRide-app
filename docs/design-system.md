@@ -322,7 +322,7 @@ What the mockups didn't say, or what changed once real data and real phones were
 - Never invent a number. No ETA until there is a driver position ("On the way" instead of minutes); no "Online" time on the driver's trip-complete card (it isn't tracked); no distance on it either.
 - "Current location" is never a place name in a sentence: say the place it resolves to ("Asking drivers near Akuafo Hall"), else "near you" / "Meet at your pickup point".
 - Phone numbers are shown formatted: "+233 54 860 8146".
-- Driver money: the Home "Today" pill is the driver's share (gross) of today's trips; the Earnings tab's big number is after the 15% commission, as the server's summary counts it. Today and This week are added up on the phone from the trip history (cash-only launch: every trip counts as cash).
+- Driver money has ONE rule (`earningsTotals` in @rida/shared, used by the server's all-time summary and the app alike): **Gross** = the fares riders paid; **Commission** = CampusRide's 15% of them; **After commission** = the sum of the driver's 85% shares, the "You earn" amounts. The commission comes out once. "Today" is after commission everywhere: the Home pill, the trip-complete card and the Earnings tab show the same number.
 
 **Rider**
 - Cancelling swaps the ride sheet's content in two steps (confirm, then a reason); never a second sheet.
