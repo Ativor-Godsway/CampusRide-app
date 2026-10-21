@@ -13,3 +13,4 @@ export * from "./contact";
 export * from "./push";
 export * from "./monitoring";
 export * from "./about";
+export * from "./appUpdate";

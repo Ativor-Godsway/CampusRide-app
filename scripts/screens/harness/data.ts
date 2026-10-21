@@ -668,3 +668,20 @@ export const driverSharedFilling: RideWithZones = {
   ...driverSharedTrip,
   id: "ride-shared-3",
 };
+
+/**
+ * GET /app/min-version's answer: nobody blocked, or this app's iPhone
+ * version below the minimum (the harness reports iOS), with or without a store link.
+ */
+export function appMinVersions(
+  app?: "rider" | "driver",
+  storeUrl: string | null = "https://apps.apple.com/app/campusride",
+) {
+  const unset = { minVersion: null, storeUrl: null };
+  const answer = {
+    rider: { ios: unset, android: unset },
+    driver: { ios: unset, android: unset },
+  };
+  if (app) answer[app] = { ...answer[app], ios: { minVersion: "9.0.0", storeUrl } };
+  return answer;
+}

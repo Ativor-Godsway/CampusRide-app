@@ -26,6 +26,7 @@ import { checkPushReceipts } from "./services/push/pushService";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
 import { checkDeployEnv, checkProductionEnv } from "./lib/productionEnv";
+import { resolveAppMinVersions } from "./lib/appMinVersions";
 import { SOCKET_MAX_PAYLOAD_BYTES, serverOptions } from "./http/serverOptions";
 import { createShutdown, installSignalHandlers } from "./lib/shutdown";
 import { installFatalHandlers, onFatal } from "./lib/fatal";
@@ -103,6 +104,11 @@ async function bootstrap() {
     }
   } else if (config.adminPhoneAllowlist.phones.length === 0) {
     app.log.warn("ADMIN_PHONE_ALLOWLIST is empty: outside production any ADMIN account may use the admin site");
+  }
+
+  // A forced-update setting that can't be used blocks nobody (lib/appMinVersions.ts): say which.
+  for (const name of resolveAppMinVersions(process.env).invalid) {
+    app.log.warn({ event: "app_min_version_invalid" }, `${name} is not a version like 1.2.0 (or an https link): ignored, nobody is blocked by it`);
   }
 
   // Security headers (HSTS, X-Content-Type-Options, frame-ancestors denial,

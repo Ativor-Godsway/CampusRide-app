@@ -18,6 +18,7 @@ import { registerSafetyRoutes } from "./safety";
 import { registerPlaceRoutes } from "./places";
 import { registerPushRoutes } from "./push";
 import { registerHealthRoutes } from "./health";
+import { registerAppVersionRoutes } from "./appVersion";
 import { installRateLimits } from "../rateLimit/http";
 import { installErrorHandling } from "../http/errors";
 import { useRequestValidation } from "../http/validation";
@@ -49,6 +50,8 @@ export function registerAllRoutes(
 
   // /health (Render) and /health/ready (UptimeRobot): unlimited, see health.ts.
   registerHealthRoutes(app, prisma);
+  // Public: whether this app version must update first (the "Time to update" screen).
+  registerAppVersionRoutes(app);
 
   registerAuthRoutes(app, prisma, deps.otpService);
   registerDemoOtpRoutes(app, prisma, deps.otpService);

@@ -212,6 +212,57 @@ published after the native change only reach the **new** build. If an OTA fix is
 also needed on the old build, publish it from the old code (a git tag or commit
 made before the native change).
 
+### Forcing people off an old build ("Time to update")
+
+Sometimes the old build must stop being used, for example because the server no
+longer works with it. You can make the old version show a full-screen **"Time to
+update"** screen that can't be closed. Its only button, **Update now**, opens the
+app's store page.
+
+**Only do this after the new version is live in BOTH stores** (Google Play and the
+App Store) and you can install it from each store yourself. If you set it earlier,
+people are told to update to a version they can't get yet, and they're locked out.
+
+How to do it:
+
+1. Find the new version number. It's `"version"` in `apps/<app>/app.json`, and the
+   first number on the app's Account screen ("Version 1.1.0 (12) …").
+2. Open the API service on Render → **Environment**.
+3. Add the variable for that app and phone type, set to the new version (for
+   example `1.1.0`). Anyone on a **lower** version sees the screen.
+
+   | App    | iPhone                       | Android                          |
+   | ------ | ---------------------------- | -------------------------------- |
+   | Rider  | `MIN_VERSION_RIDER_IOS`      | `MIN_VERSION_RIDER_ANDROID`      |
+   | Driver | `MIN_VERSION_DRIVER_IOS`     | `MIN_VERSION_DRIVER_ANDROID`     |
+
+   Usually you set both phone types for the app, each only once that store has the
+   new version.
+4. **Save changes.** Render restarts the server (about a minute). Phones check
+   when the app is opened and every time it's brought back on screen.
+
+To undo it, delete the variable (or set it to a lower version) and save. The
+screen goes away the next time the app is brought back on screen.
+
+Good to know:
+
+- **It compares the store version** (the number the store installed), not OTA
+  updates. An OTA update can't get anyone past the screen; only the store can.
+- **Nobody is blocked by mistake.** No variable set means nobody is blocked. If the
+  check can't reach the server, or gets no answer within about 5 seconds, the
+  app lets the person in. A value that isn't a version like `1.1.0` is ignored
+  (the server's log says so when it starts).
+- **Nobody is interrupted mid-trip.** A driver in a trip, or a rider searching,
+  waiting for their driver or in the car, sees the screen only once the trip is
+  over. A driver is switched offline when the screen comes up.
+- **Store links.** On Android, Update now opens the app's Google Play page. On
+  iPhone there's no link until you add one: until then the screen says
+  "Search CampusRide in your app store". Once the App Store listing exists, add
+  `STORE_URL_RIDER_IOS` and `STORE_URL_DRIVER_IOS` (the `https://apps.apple.com/…`
+  page of each app). `STORE_URL_RIDER_ANDROID` and `STORE_URL_DRIVER_ANDROID`
+  change the Play links, if ever needed. Links must start with `https://`.
+- Anyone can see these values (`GET /app/min-version`); they're not secret.
+
 ---
 
 ## 5. Rolling back a bad update

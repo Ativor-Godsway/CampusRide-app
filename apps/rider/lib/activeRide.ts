@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { rideEnd, tripEndParams } from "@rida/shared";
+import { rideEnd, tripEndParams, type TripState } from "@rida/shared";
 import {
   activeRideQueryKey,
   getActiveRide,
@@ -25,6 +25,20 @@ export function useActiveRide() {
     staleTime: 5_000,
     refetchInterval: (query) => (query.state.data ? 15_000 : false),
   });
+}
+
+/**
+ * For the forced update screen, which never interrupts a ride: searching,
+ * a driver on the way, or in the car. "unknown" while a signed-in rider's
+ * ride hasn't loaded yet (it might be one).
+ */
+export function useRiderTripState(): TripState {
+  const { isLoading, isAuthenticated, user } = useAuth();
+  const activeRide = useActiveRide();
+  if (isLoading) return "unknown";
+  if (!isAuthenticated || user?.role !== "RIDER") return "none";
+  if (activeRide.data) return "active";
+  return activeRide.isSuccess ? "none" : "unknown";
 }
 
 /**

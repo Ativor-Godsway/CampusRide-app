@@ -16,6 +16,12 @@ export const Platform = {
     options.ios ?? options.native ?? options.default,
 };
 
+/** Android's back button: there is none on the web. */
+export const BackHandler = {
+  addEventListener: () => ({ remove: () => undefined }),
+  exitApp: () => undefined,
+};
+
 /** iOS's bar above the keyboard: there's no keyboard in a screenshot. */
 export const InputAccessoryView = () => null;
 

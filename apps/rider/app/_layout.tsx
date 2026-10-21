@@ -2,8 +2,9 @@ import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useRouter } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { RIDER_DEEP_LINK_POLICY } from "@rida/shared";
+import { RIDER_DEEP_LINK_POLICY, holdUpdateScreen } from "@rida/shared";
 import {
+  AppUpdateGate,
   AuthProvider,
   TermsConfirmationGate,
   hideSplashScreen,
@@ -14,7 +15,7 @@ import {
   useDeepLinkGuard,
   withMonitoring,
 } from "@rida/mobile-shared";
-import { useResetCacheOnAccountChange } from "../lib/activeRide";
+import { useResetCacheOnAccountChange, useRiderTripState } from "../lib/activeRide";
 import { RiderPushNotifications } from "../lib/push";
 
 // Error and crash reporting (Sentry), when a DSN was built in: before
@@ -50,6 +51,16 @@ function SessionCacheReset() {
   return null;
 }
 
+/**
+ * "Time to update" when this store version is below the server's minimum
+ * (docs/runbooks/releasing.md): never during a ride; it shows once the ride
+ * is over.
+ */
+function RiderUpdateGate() {
+  const trip = useRiderTripState();
+  return <AppUpdateGate app="rider" hold={holdUpdateScreen({ trip, onTripScreen: false })} />;
+}
+
 function RootLayout() {
   const fontsReady = useAppFonts();
   if (!fontsReady) return null;
@@ -64,6 +75,8 @@ function RootLayout() {
           <Stack screenOptions={{ headerShown: false }} />
           {/* An account from before sign-up asked 18+ and the terms: asked once, over every screen. */}
           <TermsConfirmationGate />
+          {/* Last, so it covers everything else, the terms confirmation included. */}
+          <RiderUpdateGate />
         </AuthProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>

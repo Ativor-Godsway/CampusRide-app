@@ -17,6 +17,7 @@ import {
   sceneSocketEvents,
   secureStoreData,
 } from "../stubs/expo-modules";
+import { appMinVersions } from "./data";
 
 /**
  * "GET /zones" → the response body (or a function of the request body).
@@ -95,6 +96,8 @@ function installServer(user: AuthUser | null, routes: Routes) {
         : fail(401);
     }
     if (key === "GET /me" && user) return ok({ user });
+    // Every scene asks; nobody is blocked unless the scene says so.
+    if (key === "GET /app/min-version" && !(key in routes)) return ok(appMinVersions());
     if (key in routes) {
       const raw = routes[key];
       const answer = await (typeof raw === "function" ? raw(body) : raw);
