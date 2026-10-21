@@ -9,7 +9,7 @@ Added 2026-10-16.
 **Driver app**
 
 - **Nothing is asked at install.** Location is asked for the first time a
-  driver flips the **Online** switch on Home.
+  driver taps **Go online** on Home.
 - **First a full-screen explanation** (Google's "prominent disclosure"):
   "Share your location while you're online. CampusRide Driver collects
   location data to share your position with riders and match you with
@@ -89,7 +89,7 @@ Permissions → Location: **"Don't allow"**, so the prompts appear.
 | 0:18–0:21 | Home now shows **Online**. | Going online. |
 | 0:21–0:25 | Swipe down from the top of the screen. | The notification "You're online · CampusRide Driver is sharing your location." |
 | 0:25–0:28 | Press Home, open Google Maps (or any app) for 2 seconds. | The notification and the location icon in the status bar while CampusRide is in the background: location in use. |
-| 0:28–0:30 | Back in CampusRide, flip the switch to **Offline**, swipe down. | The notification is gone: location stopped. |
+| 0:28–0:30 | Back in CampusRide, tap **Go offline**, swipe down. | The notification is gone: location stopped. |
 
 If the last step doesn't fit in 30 seconds, end on step 0:25–0:28; Google
 mainly needs the disclosure, the prompt, and location in use.

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState, Linking, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { PushApp } from "@rida/shared";
-import { Button, Screen, Text, colors, spacing } from "../design";
+import { BackButton, Button, Screen, Text, colors, spacing } from "../design";
 import {
   getPushPermission,
   markAskedForPush,
@@ -17,6 +17,8 @@ export interface NotificationPermissionScreenProps {
   reasons: ReadonlyArray<{ icon: keyof typeof Ionicons.glyphMap; text: string }>;
   /** Leave the screen (allowed, declined or "Not now"). */
   onDone: () => void;
+  /** A round Back at the top (it does what "Not now" does). */
+  backButton?: boolean;
 }
 
 /**
@@ -29,6 +31,7 @@ export function NotificationPermissionScreen({
   app,
   reasons,
   onDone,
+  backButton = false,
 }: NotificationPermissionScreenProps) {
   const [permission, setPermission] = useState<PushPermission | null>(null);
   const [asking, setAsking] = useState(false);
@@ -79,6 +82,7 @@ export function NotificationPermissionScreen({
   return (
     <Screen edges={["top", "bottom"]} style={styles.screen}>
       <View style={styles.body}>
+        {backButton ? <BackButton onPress={onDone} style={styles.back} /> : null}
         <Text variant="title1" accessibilityRole="header">
           {heading}
         </Text>
@@ -125,6 +129,10 @@ const styles = StyleSheet.create({
   body: {
     gap: spacing[3],
     paddingTop: spacing[10],
+  },
+  back: {
+    marginTop: -spacing[8],
+    marginBottom: spacing[4],
   },
   reasons: {
     gap: spacing[4],

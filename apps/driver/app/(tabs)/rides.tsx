@@ -98,7 +98,9 @@ export default function RidesTab() {
   return (
     <Screen scroll>
       <View style={styles.header}>
-        <Text variant="h1">Your rides</Text>
+        <Text variant="title1" accessibilityRole="header">
+          Earnings
+        </Text>
       </View>
 
       {/*

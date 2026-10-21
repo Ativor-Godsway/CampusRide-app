@@ -7,6 +7,7 @@ export default function NotificationsScreen() {
   return (
     <NotificationPermissionScreen
       app="rider"
+      backButton
       reasons={[
         {
           icon: "car-outline",

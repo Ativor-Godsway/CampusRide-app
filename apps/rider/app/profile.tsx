@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { useRouter } from "expo-router";
 import { Alert, StyleSheet } from "react-native";
+import { formatGhanaPhone } from "@rida/shared";
 import {
+  BackButton,
   Button,
   Input,
   Screen,
@@ -54,6 +56,7 @@ export default function EditProfileScreen() {
 
   return (
     <Screen scroll style={styles.content}>
+      <BackButton />
       <Text variant="title1" accessibilityRole="header">
         Profile
       </Text>
@@ -62,7 +65,7 @@ export default function EditProfileScreen() {
       {/* Locked: it is the sign-in. */}
       <Input
         label="Phone number"
-        value={user?.phone ?? ""}
+        value={user?.phone ? formatGhanaPhone(user.phone) : ""}
         editable={false}
         helper="Your phone number is how you sign in, so it can't be changed here. Contact support to move your account to a new number."
       />

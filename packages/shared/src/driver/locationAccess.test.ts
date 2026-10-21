@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   DRIVER_LOCATION_DISCLOSURE,
   DRIVER_ONLINE_NOTIFICATION,
+  LOCATION_PROBLEM_MESSAGE,
   accessFromAlwaysAnswer,
   isExpoGoMissingAlwaysKey,
   planLocationAccess,
+  resolveGoOnlineAccess,
+  type LocationAccessPlan,
   type LocationPermissions,
 } from "./locationAccess";
 
@@ -101,5 +104,114 @@ describe("the answer to the 'all the time' prompt", () => {
     expect(isExpoGoMissingAlwaysKey(new Error("no code"), true)).toBe(false);
     expect(isExpoGoMissingAlwaysKey(null, true)).toBe(false);
     expect(isExpoGoMissingAlwaysKey("ERR_LOCATION_INFO_PLIST", true)).toBe(false);
+  });
+});
+
+describe("going online: the location steps", () => {
+  /** Fake phone: the plans it reports in turn, the disclosure answer, the prompts' result. */
+  function phone(opts: {
+    plans: LocationAccessPlan[];
+    accept?: boolean;
+    request?: () => Promise<"always" | "whileUsing" | "none">;
+  }) {
+    const plans = [...opts.plans];
+    const calls: string[] = [];
+    return {
+      calls,
+      steps: {
+        currentPlan: async () => {
+          calls.push("plan");
+          return plans.shift() ?? opts.plans[opts.plans.length - 1]!;
+        },
+        askDisclosure: async () => {
+          calls.push("disclosure");
+          return opts.accept ?? true;
+        },
+        requestAccess: async () => {
+          calls.push("request");
+          return (opts.request ?? (async () => "always" as const))();
+        },
+      },
+    };
+  }
+
+  it("already allowed: online at once, nothing shown", async () => {
+    const p = phone({ plans: ["always"] });
+    expect(await resolveGoOnlineAccess(p.steps)).toEqual({
+      kind: "go",
+      access: "always",
+      explainWhileUsing: false,
+    });
+    expect(p.calls).toEqual(["plan"]);
+  });
+
+  it("disclosure, Continue, 'all the time': online", async () => {
+    const p = phone({ plans: ["disclose"] });
+    expect(await resolveGoOnlineAccess(p.steps)).toMatchObject({ kind: "go", access: "always" });
+    expect(p.calls).toEqual(["plan", "disclosure", "request"]);
+  });
+
+  it("'while using' only: online, explained once", async () => {
+    const p = phone({ plans: ["disclose"], request: async () => "whileUsing" });
+    expect(await resolveGoOnlineAccess(p.steps)).toEqual({
+      kind: "go",
+      access: "whileUsing",
+      explainWhileUsing: true,
+    });
+  });
+
+  it("refused, or Not now with nothing allowed: offline, pointing to Settings", async () => {
+    expect(
+      await resolveGoOnlineAccess(
+        phone({ plans: ["disclose"], request: async () => "none" }).steps,
+      ),
+    ).toEqual({ kind: "stop", problem: "refused" });
+    expect(
+      await resolveGoOnlineAccess(phone({ plans: ["disclose", "disclose"], accept: false }).steps),
+    ).toEqual({ kind: "stop", problem: "refused" });
+    expect(await resolveGoOnlineAccess(phone({ plans: ["settings"] }).steps)).toEqual({
+      kind: "stop",
+      problem: "refused",
+    });
+  });
+
+  it("Not now with 'while using' already allowed: online", async () => {
+    const p = phone({ plans: ["disclose", "whileUsing"], accept: false });
+    expect(await resolveGoOnlineAccess(p.steps)).toMatchObject({
+      kind: "go",
+      access: "whileUsing",
+    });
+    expect(p.calls).toEqual(["plan", "disclosure", "plan"]);
+  });
+
+  it("the 'Always' request failing in a store build: stays OFFLINE, never online on a guess", async () => {
+    const boom = Object.assign(new Error("location services off"), {
+      code: "E_LOCATION_UNAVAILABLE",
+    });
+    const result = await resolveGoOnlineAccess(
+      phone({
+        plans: ["disclose"],
+        request: async () => {
+          throw boom;
+        },
+      }).steps,
+    );
+    expect(result).toEqual({ kind: "stop", problem: "failed", error: boom });
+  });
+
+  it("reading the permissions failing: offline too", async () => {
+    const result = await resolveGoOnlineAccess({
+      currentPlan: async () => {
+        throw new Error("permissions module unavailable");
+      },
+      askDisclosure: async () => true,
+      requestAccess: async () => "always",
+    });
+    expect(result).toMatchObject({ kind: "stop", problem: "failed" });
+  });
+
+  it("every problem has words that say what to do", () => {
+    expect(LOCATION_PROBLEM_MESSAGE.failed).toContain("Allow location “Always” in Settings");
+    expect(LOCATION_PROBLEM_MESSAGE.refused).toContain("Settings");
   });
 });

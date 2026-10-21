@@ -1,6 +1,6 @@
 import { StyleSheet, View } from "react-native";
 import { formatDistance, requestedAgo, spokenCedis, type RideType } from "@rida/shared";
-import { Badge, Button, Card, Text, colors, formatCedis, spacing, typography } from "@rida/mobile-shared";
+import { Button, Card, StatusChip, Text, colors, formatCedis, spacing } from "@rida/mobile-shared";
 
 /** One request on Home, already measured from the driver. */
 export interface HomeRequest {
@@ -39,9 +39,10 @@ function spoken(item: HomeRequest): string {
 }
 
 /**
- * A request on Home: type + seats, distance, price, pickup → drop-off, who
- * and how long ago, then the action — Accept, or (on a shared trip) See
- * route + Add. Rows wrap instead of truncating, so large text sizes work.
+ * A request in Home's sheet, compact: type chip + distance and the price on
+ * top, pickup → drop-off, who and how long ago, then the action — Accept,
+ * or (on a shared trip) See route + Add, as small pills. Rows wrap instead
+ * of truncating, so large text sizes work.
  */
 export function RequestCard({
   item,
@@ -55,26 +56,31 @@ export function RequestCard({
   onAdd?: () => void;
 }) {
   return (
-    <Card style={styles.card}>
+    <Card variant="filled" style={styles.card}>
       <View accessible accessibilityLabel={spoken(item)} style={styles.body}>
         <View style={styles.top}>
-          <Badge label={typeLabel(item)} variant={item.type === "SHARED" ? "success" : "default"} />
+          <StatusChip
+            label={typeLabel(item)}
+            tone={item.type === "SHARED" ? "brand" : "neutral"}
+            // White on the grey card, so a neutral chip still reads as one.
+            style={item.type === "SHARED" ? undefined : styles.neutralChip}
+          />
           {item.distanceMeters !== null ? (
-            <Text variant="caption" color="muted">
+            <Text variant="subhead" color="secondary">
               {formatDistance(item.distanceMeters)}
             </Text>
           ) : null}
           <View style={styles.spacer} />
-          <Text variant="h3" style={styles.price}>
+          <Text variant="title3" tabular>
             {formatCedis(item.farePesewas)}
           </Text>
         </View>
-        <Text variant="bodyMedium" style={styles.route}>
+        <Text variant="bodyStrong">
           {from(item)} → {to(item)}
         </Text>
       </View>
       <View style={styles.bottom}>
-        <Text variant="caption" color="muted" style={styles.meta}>
+        <Text variant="subhead" color="secondary" style={styles.meta}>
           {item.riderFirstName ? `${item.riderFirstName} · ` : ""}
           {requestedAgo(item.createdAt)}
         </Text>
@@ -83,7 +89,7 @@ export function RequestCard({
             <Button
               label="See route"
               variant="secondary"
-              fullWidth={false}
+              size="pill"
               onPress={onSeeRoute}
               accessibilityLabel={`See the route with ${item.riderFirstName ?? "this rider"} added`}
             />
@@ -91,7 +97,7 @@ export function RequestCard({
           {onAdd ? (
             <Button
               label="Add"
-              fullWidth={false}
+              size="pill"
               onPress={onAdd}
               accessibilityLabel={`Add ${item.riderFirstName ?? "this rider"} to your car`}
             />
@@ -99,7 +105,7 @@ export function RequestCard({
           {onAccept ? (
             <Button
               label="Accept"
-              fullWidth={false}
+              size="pill"
               onPress={onAccept}
               accessibilityLabel={`Accept ride from ${from(item)} to ${to(item)}`}
             />
@@ -111,13 +117,12 @@ export function RequestCard({
 }
 
 const styles = StyleSheet.create({
-  card: { gap: spacing.sm },
-  body: { gap: spacing.xs },
-  top: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
+  card: { gap: spacing[3] },
+  body: { gap: spacing[2] },
+  top: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing[2] },
   spacer: { flex: 1 },
-  price: { fontWeight: typography.weight.extrabold, color: colors.ink },
-  route: { fontWeight: typography.weight.semibold },
-  bottom: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing.sm },
+  neutralChip: { backgroundColor: colors.surface },
+  bottom: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: spacing[2] },
   meta: { flex: 1, minWidth: 120 },
-  buttons: { flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" },
+  buttons: { flexDirection: "row", gap: spacing[2], flexWrap: "wrap" },
 });

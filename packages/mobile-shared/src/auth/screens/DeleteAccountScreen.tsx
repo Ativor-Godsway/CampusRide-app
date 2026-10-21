@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "expo-router";
-import { Alert, Pressable, StyleSheet, View } from "react-native";
+import { Alert, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   ACCOUNT_DELETION_RETENTION_DAYS,
@@ -11,7 +11,7 @@ import {
 import { useAuth } from "../AuthContext";
 import { requestDeletionCode } from "../api";
 import { describeDeleteAccountError, isRideBlockingDeletion } from "../deleteAccountFlow";
-import { Button, Card, OtpInput, Screen, Text, colors, spacing } from "../../design";
+import { BackButton, Button, Card, OtpInput, Screen, Text, colors, spacing } from "../../design";
 import { errorStatus } from "../errorMessage";
 
 type Step = "explain" | "code" | "blocked";
@@ -116,15 +116,7 @@ export function DeleteAccountScreen({ app }: { app: "rider" | "driver" }) {
 
   return (
     <Screen scroll style={styles.content}>
-      <Pressable
-        onPress={() => router.back()}
-        accessibilityRole="button"
-        accessibilityLabel="Back"
-        style={styles.back}
-      >
-        <Ionicons name="chevron-back" size={22} color={colors.ink} />
-        <Text variant="body">Back</Text>
-      </Pressable>
+      <BackButton />
       <Text variant="h2">Delete account</Text>
 
       {step === "blocked" ? (
@@ -251,7 +243,6 @@ function Section({
 
 const styles = StyleSheet.create({
   content: { gap: spacing.md, paddingBottom: spacing["3xl"] },
-  back: { flexDirection: "row", alignItems: "center", gap: spacing.xs, alignSelf: "flex-start" },
   card: { gap: spacing.sm },
   row: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
   flex: { flex: 1 },

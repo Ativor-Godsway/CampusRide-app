@@ -52,6 +52,8 @@ export interface Scene {
   position?: { latitude: number; longitude: number };
   /** The rider refused location (default: allowed). */
   locationOff?: boolean;
+  /** The driver's "all the time" location: not asked yet, or asking fails (default: allowed). */
+  locationBackground?: "undetermined" | "fails";
   /** Socket events the screen receives once, by name, e.g. a driver's position. */
   socket?: Record<string, unknown>;
   /** A real phone that hasn't been asked about notifications (default: a simulator, so "unsupported"). */
@@ -126,6 +128,7 @@ export function boot(scenes: Scene[]) {
   (globalThis as { __DEV__?: boolean }).__DEV__ = Boolean(scene.dev);
   if (scene.position) Object.assign(scenePosition, scene.position);
   sceneLocation.allowed = !scene.locationOff;
+  sceneLocation.background = scene.locationBackground ?? "granted";
   Object.assign(sceneSocketEvents, scene.socket ?? {});
   if (scene.pushUndetermined) {
     device.isDevice = true;

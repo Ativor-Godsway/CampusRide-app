@@ -401,3 +401,88 @@ export const riderHistory: RideSummary[] = [
   ride("ride-h4", "Balme Library", "Commonwealth Hall", { createdAt: at(3, 19, 2) }),
   ride("ride-h5", "Bush Canteen", "Legon Hall", { createdAt: at(4, 13, 40) }),
 ];
+
+/** A completed trip on the driver's Earnings, `hoursAgo` from now. */
+function earning(
+  rideId: string,
+  from: string,
+  to: string,
+  hoursAgo: number,
+  type: "SHARED" | "LONE",
+) {
+  const face = type === "LONE" ? 1500 : 500;
+  return {
+    rideId,
+    pickupZoneName: from,
+    dropoffZoneName: to,
+    pickupPlaceName: from,
+    dropoffPlaceName: to,
+    type,
+    source: "APP" as const,
+    completedAt: new Date(Date.now() - hoursAgo * 3_600_000).toISOString(),
+    facePesewas: face,
+    driverGrossPesewas: Math.round(face * 0.85),
+  };
+}
+
+/**
+ * GET /driver/rides/history. `today`: two trips completed in the last half
+ * hour (GH₵4.25 + GH₵12.75 = GH₵17.00), so they're today at any clock time.
+ */
+export function driverHistory(today: boolean) {
+  const rides = [
+    ...(today
+      ? [
+          earning("ride-e1", "Night Market", "Balme Library", 0.1, "SHARED"),
+          earning("ride-e2", "Main Gate", "Volta Hall", 0.4, "LONE"),
+        ]
+      : []),
+    earning("ride-e3", "Akuafo Hall", "Night Market", 30, "SHARED"),
+    earning("ride-e4", "Legon Hall", "Bush Canteen", 54, "LONE"),
+  ];
+  const gross = rides.reduce((sum, r) => sum + r.driverGrossPesewas, 0);
+  const commission = rides.reduce((sum, r) => sum + Math.round(r.facePesewas * 0.15), 0);
+  return {
+    rides,
+    summary: {
+      totalRides: rides.length,
+      totalGrossPesewas: gross,
+      commissionOwedPesewas: commission,
+      netPesewas: gross - commission,
+      commissionRidesCount: rides.length,
+    },
+  };
+}
+
+/** Requests near the driver: a shared and a private one. */
+export const driverRequests: EligibleRideItem[] = [
+  offer,
+  {
+    ...offer,
+    rideId: "ride-offer-2",
+    riderFirstName: "Akosua",
+    pickupZoneName: "Volta Hall",
+    pickupZoneId: zone("Volta Hall").id,
+    pickupPlaceName: "Volta Hall",
+    dropoffZoneName: "Balme Library",
+    dropoffZoneId: zone("Balme Library").id,
+    dropoffPlaceName: "Balme Library",
+    type: "SHARED",
+    farePesewas: 500,
+    driverSharePesewas: 425,
+    createdAt: minutesAgo(2),
+    bestFit: false,
+    pickupDistanceMeters: 650,
+    pickupMinutes: 3,
+  },
+];
+
+/** A shared trip still filling up: one rider so far. */
+export const driverSharedTrip: RideWithZones = {
+  ...driverTrip,
+  id: "ride-shared",
+  type: "SHARED",
+  fareTotal: 500,
+  driverShare: 425,
+  passengers: driverTrip.passengers.map((p) => ({ ...p, lockedFare: 500 })),
+};

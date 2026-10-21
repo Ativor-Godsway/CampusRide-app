@@ -5,6 +5,7 @@ export * from "./haptics";
 export * from "./components/Text";
 export * from "./components/Button";
 export * from "./components/IconButton";
+export * from "./components/BackButton";
 export * from "./components/Card";
 export * from "./components/RideOptionCard";
 export * from "./components/Input";

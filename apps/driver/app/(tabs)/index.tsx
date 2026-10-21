@@ -1,30 +1,62 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useIsFocused, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { FlatList, Pressable, RefreshControl, StyleSheet, Switch, View } from "react-native";
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from "react-native";
+import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   CAR_SEATS,
   DRIVER_EVENTS,
+  LOCATION_PROBLEM_MESSAGE,
+  SERVICE_AREA_POLYGON,
+  cloudinaryAvatar,
   filterRequestsByType,
   getSharedFarePerRider,
   sortRequestsNearestFirst,
+  todayEarnings,
+  type LatLng,
   type RequestTypeFilter,
 } from "@rida/shared";
 import {
-  Illustration,
+  BottomSheet,
+  Button,
+  CampusMapView,
+  Chip,
   LoadingState,
+  Notice,
   Screen,
+  StatusChip,
   Text,
   colors,
+  formatCedis,
+  getDriverRideHistory,
   getFillSuggestions,
   getRideSocket,
+  haptics,
   radii,
+  regionForCoordinates,
+  shadows,
   spacing,
-  typography,
   useAuth,
   type EligibleRideItem,
+  type RideWithZones,
 } from "@rida/mobile-shared";
-import { markTripOpened, useDriverActiveTrip, wasTripOpened } from "../../lib/activeTrip";
+import {
+  markTripOpened,
+  tripHref,
+  tripStatusLine,
+  useDriverActiveTrip,
+  wasTripOpened,
+} from "../../lib/activeTrip";
+import { useDriverLocation } from "../../lib/location";
 import { useDriverPresence } from "../../lib/presence";
 import { useRequestsNearYou } from "../../lib/requests";
 import { overlayPassengers, runAddRider, runClaim, useTripActions } from "../../lib/tripActions";
@@ -39,38 +71,91 @@ const FILTERS: { value: RequestTypeFilter; label: string }[] = [
   { value: "LONE", label: "Private" },
 ];
 
+/** The whole campus: the map's view before we know where the car is. */
+const CAMPUS_REGION = regionForCoordinates(
+  SERVICE_AREA_POLYGON.map(([latitude, longitude]) => ({ latitude, longitude })),
+  0.05,
+);
+/** Around the car: a few streets. */
+const NEARBY_DELTA = 0.008;
+/** Before the sheet reports its height. */
+const SHEET_ESTIMATE = 220;
+/** The Go online pill (64) and its gap above the sheet. */
+const GO_ONLINE_BLOCK = 64 + spacing[4];
+/** The earnings history is shared with the Earnings tab (same cache entry). */
+const HISTORY_QUERY_KEY = ["driverRideHistory"];
+
 /**
- * Home — where requests live.
+ * Home, map-first (docs/mockups/08-driver-home-offline.png and
+ * 09-driver-home-online.png): the car on the map, the account button and
+ * today's earnings floating on top, and a sheet at the bottom.
  *
- * - Header: greeting and the Online switch.
- * - On a trip, the green trip banner sits above everything (from the tabs
- *   layout, identical on every tab).
- * - Free: every request near you, nearest first, filtered by type, with
- *   Accept. Accepting opens the trip at once (lib/tripActions).
- * - On a Shared trip: only riders who fit the route, each with See route
- *   (the dotted preview on the trip screen) and Add.
- * - On a Ride-alone trip: no requests, and a line saying why.
- * - No requests: the pulsing pin. Offline: "Ready when you are".
+ * - Offline: "You're offline" in a short sheet, and the green Go online
+ *   pill above it.
+ * - Online and free: the car pulses; the sheet says it's looking, with the
+ *   All / Shared / Private chips, Go offline, and every request near you
+ *   (nearest first, Accept opens the trip at once — lib/tripActions). New
+ *   requests also open full screen (OfferCard).
+ * - On a trip: a dark row at the top of the sheet opens it. On a Shared trip,
+ *   riders who fit the route, each with See route and Add.
  *
  * The list updates live (new requests arrive over the socket; it also polls),
  * and a request you accept or add leaves the list the moment you tap.
  */
 export default function DriverHomeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { isLoading: authLoading, user } = useAuth();
-  const { isOnline, waking, outsideServiceArea, position, toggle } = useDriverPresence();
+  const { isOnline, waking, outsideServiceArea, position, locationProblem, toggle } =
+    useDriverPresence();
+  const location = useDriverLocation();
   const { data: trip, isLoading: tripLoading } = useDriverActiveTrip();
   const actions = useTripActions();
   const { data: zones = [] } = useZones();
   const [filter, setFilter] = useState<RequestTypeFilter>("ALL");
+  const [areaHeight, setAreaHeight] = useState(windowHeight);
+  const [sheetCover, setSheetCover] = useState(SHEET_ESTIMATE);
+  const focused = useIsFocused();
 
   // Open a trip's screen once per trip (one started elsewhere, or the app
-  // reopened mid-trip). After that, the banner leads back.
+  // reopened mid-trip). After that, the dark row in the sheet leads back.
   useEffect(() => {
     if (!trip || wasTripOpened(trip.id)) return;
     markTripOpened(trip.id);
     router.push(`/ride/${trip.id}`);
   }, [trip, router]);
+
+  // ─── Where the car is ───────────────────────────────────────────────────
+  // Online, the live position. Offline, location isn't tracked (no GPS, no
+  // "You're online" notification), so the car sits at the last fix the
+  // phone already has, looked up whenever Home comes into view.
+  const [lastFix, setLastFix] = useState<LatLng | null>(null);
+  const { currentOrLastKnown } = location;
+  useEffect(() => {
+    if (!focused) return;
+    let alive = true;
+    void currentOrLastKnown().then((fix) => alive && fix && setLastFix(fix));
+    return () => {
+      alive = false;
+    };
+  }, [focused, isOnline, currentOrLastKnown]);
+  const car = position ?? location.position ?? lastFix;
+
+  // ─── Today's earnings ───────────────────────────────────────────────────
+  // GET /driver/rides/history has no "today" total, so it's the sum of the
+  // driver's share of today's completed trips (todayEarnings).
+  const history = useQuery({
+    queryKey: HISTORY_QUERY_KEY,
+    queryFn: getDriverRideHistory,
+    enabled: Boolean(user),
+  });
+  const { refetch: refetchHistory } = history;
+  useEffect(() => {
+    // A trip finished elsewhere: fresh numbers each time Home is shown.
+    if (focused) void refetchHistory();
+  }, [focused, refetchHistory]);
+  const today = history.data ? todayEarnings(history.data.rides) : null;
 
   // ─── Requests when free ─────────────────────────────────────────────────
   const free = isOnline && !trip;
@@ -78,7 +163,8 @@ export default function DriverHomeScreen() {
 
   // ─── Riders who fit a shared trip ───────────────────────────────────────
   const sharedTrip =
-    trip?.type === "SHARED" && (trip.status === "MATCHED" || trip.status === "ARRIVED" || trip.status === "IN_PROGRESS")
+    trip?.type === "SHARED" &&
+    (trip.status === "MATCHED" || trip.status === "ARRIVED" || trip.status === "IN_PROGRESS")
       ? trip
       : null;
   const seated = sharedTrip
@@ -115,7 +201,9 @@ export default function DriverHomeScreen() {
         distanceMeters: r.pickupDistanceMeters ?? r.distanceMeters,
       }));
       measured.sort((a, b) =>
-        a.distanceMeters !== null && b.distanceMeters !== null && a.distanceMeters !== b.distanceMeters
+        a.distanceMeters !== null &&
+        b.distanceMeters !== null &&
+        a.distanceMeters !== b.distanceMeters
           ? a.distanceMeters - b.distanceMeters
           : 0,
       );
@@ -140,12 +228,23 @@ export default function DriverHomeScreen() {
       return sortRequestsNearestFirst(fits, position, zones);
     }
     return [];
-  }, [free, eligible.data, actions.claim, actions.adds, position, zones, filter, sharedTrip, freeSeats, fill.data, sharedFare]);
+  }, [
+    free,
+    eligible.data,
+    actions.claim,
+    actions.adds,
+    position,
+    zones,
+    filter,
+    sharedTrip,
+    freeSeats,
+    fill.data,
+    sharedFare,
+  ]);
 
   // ─── Offer pop-ups (one at a time, nearest first) ───────────────────────
   // Over Home only, while it's on screen, online and free. Accept is the
   // same instant accept as the list's (lib/tripActions).
-  const focused = useIsFocused();
   const acceptRequest = useCallback(
     (request: EligibleRideItem) => {
       runClaim(request);
@@ -169,10 +268,6 @@ export default function DriverHomeScreen() {
     );
   }
 
-  const firstName = user.name?.split(" ")[0] ?? "Driver";
-  const refreshing = free ? eligible.isRefetching : fill.isRefetching;
-  const refresh = () => void (free ? eligible.refetch() : fill.refetch());
-
   const accept = (item: HomeRequest) => {
     const request = eligible.data?.find((r) => r.rideId === item.rideId);
     if (!request) return;
@@ -184,150 +279,191 @@ export default function DriverHomeScreen() {
     if (!sharedTrip || !suggestion) return;
     runAddRider(sharedTrip.id, suggestion, sharedFare, position);
   };
+  const goOnline = () => {
+    haptics.impactMedium();
+    toggle();
+  };
 
-  const header = (
-    <View style={styles.headerBlock}>
-      <View style={styles.header}>
-        <View style={styles.greeting}>
-          <Text variant="bodySmall" color="muted">
-            Welcome back
-          </Text>
-          <Text variant="h1" numberOfLines={1}>
-            {firstName}
-          </Text>
-        </View>
-        <View style={styles.onlineToggle}>
-          <View style={[styles.statusDot, isOnline ? styles.dotOnline : styles.dotOffline]} />
-          <Text variant="bodySmall" style={styles.onlineLabel}>
-            {isOnline ? "Online" : "Offline"}
-          </Text>
-          {/* Flips on tap; the server is told in the background (lib/presence). */}
-          <Switch
-            value={isOnline}
-            onValueChange={toggle}
-            trackColor={{ false: colors.surface3, true: colors.primary[200] }}
-            thumbColor={isOnline ? colors.primary[500] : colors.ink3}
-            accessibilityLabel="Online"
-            accessibilityHint={isOnline ? "Go offline and stop receiving requests" : "Go online to receive requests"}
-          />
-        </View>
-      </View>
-
-      {waking ? (
-        <Text variant="caption" color="muted" accessibilityLiveRegion="polite">
-          Connecting to CampusRide… this can take a few seconds.
-        </Text>
-      ) : null}
-
-      {free && !outsideServiceArea ? (
-        <View style={styles.chips}>
-          {FILTERS.map(({ value, label }) => {
-            const active = value === filter;
-            return (
-              <Pressable
-                key={value}
-                onPress={() => setFilter(value)}
-                style={[styles.chip, active && styles.chipActive]}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                accessibilityLabel={`Show ${label.toLowerCase()} requests`}
-              >
-                <Text variant="bodySmall" style={active ? styles.chipTextActive : styles.chipText}>
-                  {label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
-
-      {sharedTrip && freeSeats > 0 && items.length > 0 ? (
-        <Text variant="label" color="muted">
-          RIDERS ON YOUR ROUTE · {freeSeats} FREE SEAT{freeSeats === 1 ? "" : "S"}
-        </Text>
-      ) : null}
-    </View>
-  );
-
-  let empty: ReactElement;
-  if (!isOnline) {
-    empty = (
-      <EmptyState
-        illustration={<Illustration name="carIdle" size={170} float accessibilityLabel="Parked car" />}
-        title="Ready when you are"
-        body="Go online above to start getting trips around campus."
-      />
-    );
-  } else if (outsideServiceArea) {
-    empty = (
-      <EmptyState
-        illustration={<Illustration name="searchEmpty" size={150} accessibilityLabel="Map" />}
-        title="You're outside the CampusRide area"
-        body="Requests reach drivers within 2 km of campus. Head back towards campus and they'll start coming in."
-      />
-    );
-  } else if (trip && trip.type === "LONE") {
-    empty = (
-      <EmptyState
-        illustration={<Illustration name="carIdle" size={130} accessibilityLabel="Car" />}
-        title="You're on a Ride alone trip"
-        body="A private trip takes one rider, so new requests show here once it ends."
-      />
-    );
-  } else if (sharedTrip && freeSeats === 0) {
-    empty = (
-      <EmptyState
-        illustration={<Illustration name="carFull" size={130} accessibilityLabel="Full car" />}
-        title="Your car is full"
-        body="Riders on your route will show here again when a seat frees up."
-      />
-    );
-  } else if (trip && !sharedTrip) {
-    empty = <View />;
-  } else {
-    empty = (
-      <EmptyState
-        illustration={<Illustration name="pinRadar" size={150} pulse accessibilityLabel="Map pin" />}
-        title={sharedTrip ? "No riders on your route right now" : "Waiting for requests"}
-        body={
-          sharedTrip
-            ? "Riders whose trip fits yours show up here as they request."
-            : "Keep the app open. New requests show up here as they come in."
-        }
-      />
-    );
-  }
+  const region = car
+    ? { ...car, latitudeDelta: NEARBY_DELTA, longitudeDelta: NEARBY_DELTA }
+    : CAMPUS_REGION;
+  const listed = items.length > 0;
 
   return (
-    // On a trip the banner above already covers the top safe area.
-    <Screen noPadding edges={trip ? [] : ["top"]}>
-      <FlatList
-        data={items}
-        keyExtractor={(item) => item.rideId}
-        ListHeaderComponent={header}
-        ListEmptyComponent={empty}
-        renderItem={({ item }) =>
-          free ? (
-            <RequestCard item={item} onAccept={() => accept(item)} />
-          ) : (
-            <RequestCard
-              item={item}
-              onSeeRoute={() => sharedTrip && router.push(`/ride/${sharedTrip.id}?preview=${item.rideId}`)}
-              onAdd={() => add(item)}
-            />
-          )
-        }
-        contentContainerStyle={styles.content}
-        ItemSeparatorComponent={Separator}
-        refreshControl={
-          free || sharedTrip ? (
-            <RefreshControl refreshing={Boolean(refreshing)} onRefresh={refresh} tintColor={colors.primary[500]} />
-          ) : undefined
-        }
+    <View style={styles.root} onLayout={(e) => setAreaHeight(e.nativeEvent.layout.height)}>
+      <CampusMapView
+        // A new view when we learn where the car is.
+        key={car ? "car" : "campus"}
+        initialRegion={region}
+        zones={car ? [{ id: "car", ...car, label: "You", role: "driver" }] : []}
+        // Looking for trips: the same pulse as a rider's pickup while searching.
+        pulseZoneId={free && car ? "car" : undefined}
+        height={areaHeight}
+        light
+        rounded={false}
+        showRecenter
+        recenterLabel={car ? "Recentre on your car" : "Show the whole campus"}
+        controlsBottomInset={sheetCover + (isOnline ? 0 : GO_ONLINE_BLOCK)}
       />
+
+      <View style={[styles.topBar, { top: insets.top + spacing[2] }]} pointerEvents="box-none">
+        <AccountButton
+          name={user.name}
+          photoUrl={user.driver?.photoUrl ?? null}
+          onPress={() => router.navigate("/account")}
+        />
+        {today ? (
+          <TodayPill
+            pesewas={today.pesewas}
+            trips={today.trips}
+            dark={isOnline}
+            onPress={() => router.navigate("/rides")}
+          />
+        ) : null}
+        {/* Balances the account button, so the pill sits in the middle. */}
+        <View style={styles.topBarEnd} />
+      </View>
+
+      {!isOnline ? (
+        <View style={[styles.goOnline, { bottom: sheetCover + spacing[4] }]}>
+          <Button
+            label="Go online"
+            icon="power"
+            size="go"
+            fullWidth
+            onPress={goOnline}
+            accessibilityHint="Start getting ride requests around campus"
+          />
+        </View>
+      ) : null}
+
+      <BottomSheet
+        // Short while offline or quiet; with requests it opens to a list that
+        // can be pulled up.
+        key={!isOnline ? "offline" : listed ? "list" : "online"}
+        snapPoints={isOnline && listed ? ["45%", "88%"] : undefined}
+        maxHeightRatio={0.88}
+        scrollable={isOnline && listed}
+        contentStyle={styles.sheet}
+        onChange={(_index, top) => {
+          if (top > 0) setSheetCover(Math.round(areaHeight - top));
+        }}
+        accessibilityLabel={isOnline ? "Trips near you" : "You're offline"}
+      >
+        {trip ? <TripRow trip={trip} onPress={() => router.push(tripHref(trip))} /> : null}
+
+        {!isOnline && locationProblem ? (
+          <View style={styles.problem}>
+            <Notice
+              tone="error"
+              icon="location-outline"
+              message={LOCATION_PROBLEM_MESSAGE[locationProblem]}
+            />
+            <Button
+              label="Open Settings"
+              variant="secondary"
+              size="md"
+              onPress={() => void Linking.openSettings()}
+            />
+          </View>
+        ) : null}
+
+        {!isOnline ? (
+          <View style={styles.heading}>
+            <View style={styles.offlineTitle}>
+              <View style={styles.offlineDot} />
+              <Text variant="title2" accessibilityRole="header">
+                You&apos;re offline
+              </Text>
+            </View>
+            <Text variant="body" color="secondary">
+              Go online to start getting ride requests around campus. Your location is shared only
+              while you&apos;re online.
+            </Text>
+          </View>
+        ) : (
+          <>
+            <View style={styles.heading}>
+              <StatusChip label="Online" tone="brand" icon="ellipse" style={styles.onlineChip} />
+              <OnlineHeading
+                free={free}
+                trip={trip ?? null}
+                freeSeats={freeSeats}
+                hasRiders={Boolean(sharedTrip) && listed}
+              />
+            </View>
+
+            {/* One row: the filters scroll sideways on a narrow phone, Go offline stays put. */}
+            <View style={styles.controls}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.filters}
+                contentContainerStyle={styles.filtersContent}
+              >
+                {free && !outsideServiceArea
+                  ? FILTERS.map(({ value, label }) => (
+                      <Chip
+                        key={value}
+                        kind="filter"
+                        label={label}
+                        selected={value === filter}
+                        onPress={() => setFilter(value)}
+                        accessibilityLabel={`Show ${label.toLowerCase()} requests`}
+                      />
+                    ))
+                  : null}
+              </ScrollView>
+              <Button
+                label="Go offline"
+                icon="power"
+                variant="neutral"
+                size="pill"
+                onPress={toggle}
+                accessibilityHint="Stop getting ride requests"
+              />
+            </View>
+
+            {waking ? (
+              <Text variant="subhead" color="secondary" accessibilityLiveRegion="polite">
+                Connecting to CampusRide… this can take a few seconds.
+              </Text>
+            ) : null}
+
+            {outsideServiceArea ? (
+              <Notice
+                tone="warning"
+                icon="navigate-outline"
+                message="You're outside the CampusRide area. Requests reach drivers within 2 km of campus: head back towards campus."
+              />
+            ) : null}
+
+            {items.map((item) =>
+              free ? (
+                <RequestCard key={item.rideId} item={item} onAccept={() => accept(item)} />
+              ) : (
+                <RequestCard
+                  key={item.rideId}
+                  item={item}
+                  onSeeRoute={() =>
+                    sharedTrip && router.push(`/ride/${sharedTrip.id}?preview=${item.rideId}`)
+                  }
+                  onAdd={() => add(item)}
+                />
+              ),
+            )}
+          </>
+        )}
+      </BottomSheet>
+
       {offers.notice ? (
-        <View style={styles.offerNotice} pointerEvents="none" accessibilityLiveRegion="polite" accessibilityRole="alert">
-          <Text variant="bodySmall" style={styles.offerNoticeText}>
+        <View
+          style={styles.offerNotice}
+          pointerEvents="none"
+          accessibilityLiveRegion="polite"
+          accessibilityRole="alert"
+        >
+          <Text variant="bodyStrong" color="onDark">
             {offers.notice}
           </Text>
         </View>
@@ -341,66 +477,214 @@ export default function DriverHomeScreen() {
           onDecline={offers.decline}
         />
       ) : null}
-    </Screen>
-  );
-}
-
-function Separator() {
-  return <View style={styles.separator} />;
-}
-
-function EmptyState({ illustration, title, body }: { illustration: ReactElement; title: string; body: string }) {
-  return (
-    <View style={styles.empty}>
-      {illustration}
-      <Text variant="h3" style={styles.emptyTitle}>
-        {title}
-      </Text>
-      <Text variant="bodySmall" color="muted" style={styles.emptyBody}>
-        {body}
-      </Text>
     </View>
   );
 }
 
+/** What the online sheet says under the chip: looking, or what the trip allows. */
+function OnlineHeading({
+  free,
+  trip,
+  freeSeats,
+  hasRiders,
+}: {
+  free: boolean;
+  trip: RideWithZones | null;
+  freeSeats: number;
+  hasRiders: boolean;
+}) {
+  const [title, subtitle] = free
+    ? ["Finding trips near you", "New requests open full screen with a sound."]
+    : trip?.type === "LONE"
+      ? [
+          "You're on a Ride alone trip",
+          "A private trip takes one rider, so new requests show here once it ends.",
+        ]
+      : freeSeats === 0
+        ? ["Your car is full", "Riders on your route show here again when a seat frees up."]
+        : hasRiders
+          ? [
+              "Riders on your route",
+              `${freeSeats} free seat${freeSeats === 1 ? "" : "s"} · add one without a detour.`,
+            ]
+          : [
+              "No riders on your route right now",
+              "Riders whose trip fits yours show up here as they request.",
+            ];
+  return (
+    <>
+      <Text variant="title2" accessibilityRole="header">
+        {title}
+      </Text>
+      <Text variant="subhead" color="secondary">
+        {subtitle}
+      </Text>
+    </>
+  );
+}
+
+/** The 44px round account button: the driver's photo, or their initial. */
+function AccountButton({
+  name,
+  photoUrl,
+  onPress,
+}: {
+  name: string | null | undefined;
+  photoUrl: string | null;
+  onPress: () => void;
+}) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel="Your account"
+      style={({ pressed }) => [styles.account, pressed && styles.accountPressed]}
+    >
+      {photoUrl && !failed ? (
+        <Image
+          source={{ uri: cloudinaryAvatar(photoUrl, 44) }}
+          style={styles.accountPhoto}
+          contentFit="cover"
+          cachePolicy="memory-disk"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <Text variant="title3" color="brand">
+          {name?.trim().charAt(0).toUpperCase() || "?"}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
+/** "Today GH₵17.50 · 2 trips": white while offline, dark while online. Opens Earnings. */
+function TodayPill({
+  pesewas,
+  trips,
+  dark,
+  onPress,
+}: {
+  pesewas: number;
+  trips: number;
+  dark: boolean;
+  onPress: () => void;
+}) {
+  const tripsLabel = `${trips} trip${trips === 1 ? "" : "s"}`;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Today ${formatCedis(pesewas)}${trips > 0 ? `, ${tripsLabel}` : ""}. Open earnings`}
+      style={[styles.today, dark && styles.todayDark]}
+    >
+      <Text variant="subhead" color={dark ? "onDark2" : "secondary"}>
+        Today
+      </Text>
+      <Text variant="title3" color={dark ? "onDark" : "default"} tabular>
+        {formatCedis(pesewas)}
+      </Text>
+      {trips > 0 ? (
+        <Text variant="subhead" color={dark ? "onDark2" : "secondary"}>
+          · {tripsLabel}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+/** On a trip: the dark first row of the sheet ("Filling your car · 1 rider"), which opens it. */
+function TripRow({ trip, onPress }: { trip: RideWithZones; onPress: () => void }) {
+  const status = tripStatusLine(trip);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`${status}. Open your trip.`}
+      style={({ pressed }) => [styles.trip, pressed && styles.tripPressed]}
+    >
+      <Ionicons name="car-sport" size={22} color={colors.onDark} />
+      <View style={styles.tripText}>
+        <Text variant="bodyStrong" color="onDark" numberOfLines={2}>
+          {status}
+        </Text>
+        <Text variant="subhead" color="onDark2">
+          Tap to open your trip
+        </Text>
+      </View>
+      <Ionicons name="chevron-forward" size={20} color={colors.onDark} />
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.mapLand },
+  // ── Over the map
+  topBar: {
+    position: "absolute",
+    left: spacing.gutter,
+    right: spacing.gutter,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  topBarEnd: { width: 44 },
+  account: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.full,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    ...shadows.float,
+  },
+  accountPressed: { backgroundColor: colors.surface2 },
+  accountPhoto: { width: 44, height: 44 },
+  today: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: spacing[2],
+    height: 44,
+    paddingHorizontal: spacing[5],
+    paddingTop: 10,
+    borderRadius: radii.full,
+    backgroundColor: colors.surface,
+    ...shadows.float,
+  },
+  todayDark: { backgroundColor: colors.surfaceDark },
+  goOnline: { position: "absolute", left: spacing.gutter, right: spacing.gutter },
+  // ── Sheet
+  sheet: { gap: spacing[4], paddingBottom: spacing[5] },
+  heading: { gap: spacing[2] },
+  offlineTitle: { flexDirection: "row", alignItems: "center", gap: spacing[3] },
+  offlineDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: colors.ink4 },
+  onlineChip: { alignSelf: "flex-start" },
+  controls: { flexDirection: "row", alignItems: "center", gap: spacing[2] },
+  filters: { flex: 1 },
+  filtersContent: { gap: spacing[2], paddingVertical: 6 },
+  problem: { gap: spacing[2] },
+  trip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[3],
+    minHeight: 64,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderRadius: radii.lg,
+    backgroundColor: colors.surfaceDark,
+  },
+  tripPressed: { backgroundColor: colors.surfaceDark2 },
+  tripText: { flex: 1, gap: 2 },
   offerNotice: {
     position: "absolute",
-    left: spacing.lg,
-    right: spacing.lg,
-    bottom: spacing.xl,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
+    left: spacing.gutter,
+    right: spacing.gutter,
+    bottom: spacing[6],
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[4],
     borderRadius: radii.lg,
-    backgroundColor: colors.ink,
+    backgroundColor: colors.surfaceDark,
     alignItems: "center",
   },
-  offerNoticeText: { color: colors.white, fontWeight: typography.weight.semibold },
-  // One side padding (16) and one gap between sections, everywhere on Home.
-  content: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xl },
-  headerBlock: { gap: spacing.md, marginBottom: spacing.lg },
-  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
-  greeting: { flexShrink: 1 },
-  onlineToggle: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  onlineLabel: { fontWeight: typography.weight.semibold },
-  statusDot: { width: 10, height: 10, borderRadius: radii.full },
-  dotOnline: { backgroundColor: colors.primary[500] },
-  dotOffline: { backgroundColor: colors.ink3 },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  chip: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    borderRadius: radii.full,
-    backgroundColor: colors.surfaceMuted,
-    minHeight: 36,
-    justifyContent: "center",
-  },
-  chipActive: { backgroundColor: colors.primary[500] },
-  chipText: { color: colors.ink2, fontWeight: typography.weight.semibold },
-  chipTextActive: { color: colors.white, fontWeight: typography.weight.semibold },
-  separator: { height: spacing.md },
-  // Fills the space under the header so the illustration sits centred in it.
-  empty: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.md, paddingVertical: spacing["2xl"] },
-  emptyTitle: { textAlign: "center" },
-  emptyBody: { textAlign: "center", maxWidth: 300 },
 });

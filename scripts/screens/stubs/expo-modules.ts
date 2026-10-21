@@ -22,8 +22,15 @@ const pushPermission = () => ({
   granted: scenePush.status === "granted",
 });
 
-/** Whether the scene's rider allowed location (the harness sets it). */
-export const sceneLocation = { allowed: true };
+/**
+ * Whether the scene's rider allowed location, and the driver's "all the
+ * time" answer: granted, not asked yet, or the request failing outright
+ * (the harness sets them).
+ */
+export const sceneLocation = {
+  allowed: true,
+  background: "granted" as "granted" | "undetermined" | "fails",
+};
 const refused = { status: "denied", granted: false, canAskAgain: false, expires: "never" };
 const foregroundPermission = () => (sceneLocation.allowed ? granted : refused);
 
@@ -105,8 +112,18 @@ export const location = {
   ActivityType: { Other: 1, AutomotiveNavigation: 2, Fitness: 3, OtherNavigation: 4 },
   getForegroundPermissionsAsync: () => resolved(foregroundPermission()),
   requestForegroundPermissionsAsync: () => resolved(foregroundPermission()),
-  getBackgroundPermissionsAsync: () => resolved(granted),
-  requestBackgroundPermissionsAsync: () => resolved(granted),
+  getBackgroundPermissionsAsync: () =>
+    resolved(
+      sceneLocation.background === "granted"
+        ? granted
+        : { status: "undetermined", granted: false, canAskAgain: true, expires: "never" },
+    ),
+  requestBackgroundPermissionsAsync: async () => {
+    if (sceneLocation.background === "fails") {
+      throw Object.assign(new Error("Location request failed"), { code: "E_LOCATION_UNAVAILABLE" });
+    }
+    return granted;
+  },
   hasServicesEnabledAsync: () => resolved(true),
   getLastKnownPositionAsync: () => resolved(fix()),
   getCurrentPositionAsync: () => resolved(fix()),
