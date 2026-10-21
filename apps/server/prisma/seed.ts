@@ -29,9 +29,9 @@ const zones = [
   { name: "Great Hall",                     quadrant: "CENTRAL", latitude: 5.6535, longitude: -0.1869 },
   { name: "Balme Library",                  quadrant: "CENTRAL", latitude: 5.6533, longitude: -0.1874 },
   { name: "Pentagon Hostel",                quadrant: "NORTH",   latitude: 5.6551, longitude: -0.1860 },
-  { name: "Medical School (UGMS)",          quadrant: "EAST",    latitude: 5.6524, longitude: -0.1830 },
+  { name: "UG Medical Centre (UGMC)",        quadrant: "EAST",    latitude: 5.6524, longitude: -0.1830 },
   { name: "Sports Stadium",                 quadrant: "WEST",    latitude: 5.6514, longitude: -0.1900 },
-  { name: "Botanical Gardens Gate",         quadrant: "NORTH",   latitude: 5.6562, longitude: -0.1870 },
+  { name: "James Topp Nelson Yankah Hall (TF Hall)", quadrant: "NORTH", latitude: 5.6562, longitude: -0.1870 },
   { name: "Accra Mall Junction",            quadrant: "SOUTH",   latitude: 5.6490, longitude: -0.1856 },
 ];
 
