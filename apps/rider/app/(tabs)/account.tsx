@@ -1,41 +1,28 @@
 import { useRouter } from "expo-router";
-import { stopLabel } from "@rida/shared";
-import { Alert, Pressable, StyleSheet, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { PRIVACY_URL, TERMS_URL, WEBSITE_URL, stopLabel } from "@rida/shared";
+import { Alert, StyleSheet, View } from "react-native";
 import {
-  Card,
   ListRow,
   Screen,
-  ServiceIcon,
   Text,
   colors,
   getAppVersionLabel,
-  showAppAbout,
+  openLegalPage,
   radii,
+  showAppAbout,
   spacing,
   useAuth,
 } from "@rida/mobile-shared";
 import { TAB_SCREEN_BOTTOM_PADDING } from "../../lib/layout";
 import { useActiveRide } from "../../lib/activeRide";
 
-interface QuickAction {
-  label: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  /** Route to open; tiles without one are still placeholders. */
-  href?: "/safety";
-}
+const SUPPORT_URL = `${WEBSITE_URL}/support`;
 
-// No Wallet tile: CampusRide is cash-only for now (digital payment is
-// disabled server-side), so there is no balance to show and no stub to leave.
-const QUICK_ACTIONS: QuickAction[] = [
-  { label: "Help", icon: "help-buoy-outline" },
-  // Phase 4: a real screen now — the rider's emergency contact, which the
-  // in-ride SOS (Safety → Call emergency services) texts.
-  { label: "Safety", icon: "shield-checkmark-outline", href: "/safety" },
-  { label: "Inbox", icon: "mail-outline" },
-];
-
-/** Account tab — profile header, Uber-style quick-action grid, settings list, and logout. */
+/**
+ * Account tab: who's signed in, then grouped rows — the account itself
+ * (profile, safety, notifications), help and the legal pages, and leaving
+ * (log out, delete account). The app's version is at the bottom.
+ */
 export default function AccountTab() {
   const router = useRouter();
   const { user, signOut } = useAuth();
@@ -54,115 +41,102 @@ export default function AccountTab() {
     ]);
   };
 
-  // Settings → Delete account: its own screen (mobile-shared DeleteAccountScreen)
-  // explains what is deleted and kept, and confirms with a texted code.
-  const startDeleteAccount = () => router.push("/delete-account");
-
-  const showComingSoon = (label: string) =>
-    Alert.alert(`${label} is coming soon`, "We're working on it — check back in a future update.");
-
   return (
     <Screen scroll edges={["top"]} style={styles.content}>
+      {/* Riders have no profile photo, so the avatar is their initial. */}
       <View style={styles.header}>
         <View style={styles.avatar}>
-          <Text variant="h2" color="inverse">
-            {user?.name?.charAt(0).toUpperCase() ?? "?"}
+          <Text variant="title2" color="brand">
+            {user?.name?.trim().charAt(0).toUpperCase() || "?"}
           </Text>
         </View>
         <View style={styles.profileInfo}>
-          <Text variant="h2">{user?.name ?? "Rider"}</Text>
-          <Text variant="bodySmall" color="muted">
+          <Text variant="title2" numberOfLines={1}>
+            {user?.name ?? "Rider"}
+          </Text>
+          <Text variant="subhead" color="secondary">
             {user?.phone}
           </Text>
         </View>
       </View>
 
-      <View style={styles.quickGrid}>
-        {QUICK_ACTIONS.map((action) => (
-          <Pressable
-            key={action.label}
-            style={styles.quickTilePressable}
-            onPress={() => (action.href ? router.push(action.href) : showComingSoon(action.label))}
-            accessibilityRole="button"
-          >
-            <Card noPadding style={styles.quickTile}>
-              <ServiceIcon name={action.icon} color={colors.primary[500]} background={colors.primary[50]} size={44} />
-              <Text variant="bodyMedium" style={styles.quickLabel}>
-                {action.label}
-              </Text>
-            </Card>
-          </Pressable>
-        ))}
-      </View>
-
-      <Text variant="label" color="muted" style={styles.sectionLabel}>
-        SETTINGS
-      </Text>
-
-      <Card>
+      <View>
         <ListRow
-          title="Edit profile"
+          title="Profile"
           leading={<ListRow.Icon name="person-outline" />}
           onPress={() => router.push("/profile")}
         />
-        <View style={styles.divider} />
         <ListRow
-          title="Emergency contact"
-          // Surfaced in Settings too, not just the Safety tile: an unset
-          // contact means the SOS reaches only support, so it is worth a
-          // visible prompt rather than hiding behind an icon grid.
+          divider
+          title="Safety and emergency contacts"
+          // An unset contact means an SOS reaches only support: worth saying here.
           subtitle={
             hasEmergencyContact ? (user?.emergencyContactName ?? undefined) : "Not set up yet"
           }
           leading={<ListRow.Icon name="shield-checkmark-outline" />}
           onPress={() => router.push("/safety")}
         />
-        <View style={styles.divider} />
         <ListRow
+          divider
           title="Notifications"
           leading={<ListRow.Icon name="notifications-outline" />}
           onPress={() => router.push("/notifications")}
         />
-        <View style={styles.divider} />
-        <ListRow
-          title="Help & support"
-          leading={<ListRow.Icon name="help-circle-outline" />}
-          onPress={() => showComingSoon("Help & support")}
-        />
-      </Card>
+      </View>
 
-      <Card style={styles.logoutCard}>
+      <View>
+        <ListRow
+          title="Help and support"
+          leading={<ListRow.Icon name="help-circle-outline" />}
+          onPress={() => void openLegalPage(SUPPORT_URL)}
+        />
+        <ListRow
+          divider
+          title="Terms"
+          leading={<ListRow.Icon name="document-text-outline" />}
+          onPress={() => void openLegalPage(TERMS_URL)}
+        />
+        <ListRow
+          divider
+          title="Privacy"
+          leading={<ListRow.Icon name="lock-closed-outline" />}
+          onPress={() => void openLegalPage(PRIVACY_URL)}
+        />
+      </View>
+
+      <View>
         <ListRow
           title="Log out"
-          leading={<ListRow.Icon name="log-out-outline" color={colors.error} background={colors.errorSurface} />}
+          leading={<ListRow.Icon name="log-out-outline" />}
           onPress={confirmLogout}
           showChevron={false}
         />
-        <View style={styles.divider} />
+        {/* Its own screen (mobile-shared DeleteAccountScreen) explains what is
+            deleted and kept, and confirms with a texted code. */}
         <ListRow
+          divider
+          tone="danger"
           title="Delete account"
-          leading={<ListRow.Icon name="trash-outline" color={colors.error} background={colors.errorSurface} />}
-          onPress={startDeleteAccount}
+          leading={<ListRow.Icon name="trash-outline" tone="danger" />}
+          onPress={() => router.push("/delete-account")}
           showChevron={false}
         />
-      </Card>
+      </View>
 
       {/* Dev builds only: every design-system component, to compare with docs/design-system.md. */}
       {__DEV__ ? (
-        <Card style={styles.logoutCard}>
-          <ListRow
-            title="Design gallery"
-            subtitle="Dev only: components and text styles"
-            leading={<ListRow.Icon name="color-palette-outline" />}
-            onPress={() => router.push("/dev/design-gallery")}
-          />
-        </Card>
+        <ListRow
+          title="Design gallery"
+          subtitle="Dev only: components and text styles"
+          leading={<ListRow.Icon name="color-palette-outline" />}
+          onPress={() => router.push("/dev/design-gallery")}
+        />
       ) : null}
 
       {/* Which build/update this phone runs — docs/runbooks/releasing.md. Long-press: About this app. */}
       <Text
         variant="caption"
-        color="subtle"
+        color="tertiary"
         style={styles.versionLabel}
         onLongPress={showAppAbout}
         accessibilityHint="Long-press for the build number and update ID"
@@ -176,56 +150,27 @@ export default function AccountTab() {
 const styles = StyleSheet.create({
   content: {
     paddingBottom: TAB_SCREEN_BOTTOM_PADDING,
+    gap: spacing[6],
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.lg,
-    marginBottom: spacing.xl,
+    gap: spacing[4],
+    marginTop: spacing[2],
   },
   avatar: {
-    width: 60,
-    height: 60,
+    width: 64,
+    height: 64,
     borderRadius: radii.full,
-    backgroundColor: colors.primary[500],
+    backgroundColor: colors.green50,
     alignItems: "center",
     justifyContent: "center",
   },
   profileInfo: {
     flex: 1,
-    gap: spacing.xs,
-  },
-  quickGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.md,
-    marginBottom: spacing["2xl"],
-  },
-  quickTilePressable: {
-    flexBasis: "47%",
-    flexGrow: 1,
-  },
-  quickTile: {
-    padding: spacing.lg,
-    alignItems: "flex-start",
-    gap: spacing.sm,
-  },
-  quickLabel: {
-    marginTop: spacing.xs,
-  },
-  sectionLabel: {
-    marginBottom: spacing.md,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginVertical: spacing.xs,
-  },
-  logoutCard: {
-    marginTop: spacing.xl,
+    gap: 2,
   },
   versionLabel: {
-    marginTop: spacing.xl,
     textAlign: "center",
   },
 });

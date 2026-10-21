@@ -1,12 +1,11 @@
 import { useState } from "react";
-import { useRouter } from "expo-router";
 import { Alert, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
   Button,
-  Card,
   Illustration,
   Input,
+  ListRow,
   Screen,
   Text,
   colors,
@@ -15,26 +14,44 @@ import {
   useAuth,
 } from "@rida/mobile-shared";
 
+/** "How the Safety button works", one line each. */
+const HOW_IT_WORKS: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
+  { icon: "shield-checkmark-outline", text: "On a ride, tap Safety under your driver's details." },
+  {
+    icon: "megaphone-outline",
+    text: "Alert my emergency contact texts them and CampusRide support where you are, with a link to follow the trip.",
+  },
+  { icon: "call-outline", text: "Call emergency services rings 112 and sends the same alert." },
+];
+
 /**
  * Safety settings — the rider's single emergency contact.
  *
- * This is what the SOS on an active ride uses (Safety → Call emergency
- * services): it texts this person the ride's current status and a link to
- * follow it live. One contact
- * only, on purpose — a list implies priority ordering and a management UI,
- * and one reliable contact beats three half-configured ones.
+ * This is who the SOS on an active ride texts (Safety → Alert my emergency
+ * contact, or Call emergency services): the ride's current status and a link
+ * to follow it live. One contact only, on purpose — a list implies priority
+ * ordering and a management UI, and one reliable contact beats three
+ * half-configured ones.
  */
 export default function SafetyScreen() {
-  const router = useRouter();
   const { user, refreshMe } = useAuth();
+  const savedName = user?.emergencyContactName ?? "";
+  const savedPhone = user?.emergencyContactPhone ?? "";
+  const hasExisting = Boolean(savedName && savedPhone);
 
-  const [contactName, setContactName] = useState(user?.emergencyContactName ?? "");
-  const [contactPhone, setContactPhone] = useState(user?.emergencyContactPhone ?? "");
+  const [editing, setEditing] = useState(false);
+  const [contactName, setContactName] = useState(savedName);
+  const [contactPhone, setContactPhone] = useState(savedPhone);
   const [saving, setSaving] = useState(false);
 
-  const hasExisting = Boolean(user?.emergencyContactName && user?.emergencyContactPhone);
   const name = contactName.trim();
   const phone = contactPhone.trim();
+
+  function startEditing() {
+    setContactName(savedName);
+    setContactPhone(savedPhone);
+    setEditing(true);
+  }
 
   async function handleSave() {
     if (!name || !phone) {
@@ -49,7 +66,7 @@ export default function SafetyScreen() {
     try {
       await updateProfile({ emergencyContactName: name, emergencyContactPhone: phone });
       await refreshMe();
-      router.back();
+      setEditing(false);
     } catch (error) {
       const message =
         (error as { response?: { data?: { error?: string } } }).response?.data?.error ??
@@ -63,7 +80,7 @@ export default function SafetyScreen() {
   function handleRemove() {
     Alert.alert(
       "Remove emergency contact?",
-      "If you call emergency services from a ride, only CampusRide support will be texted until you add one again.",
+      "If you ask for help on a ride, only CampusRide support will be texted until you add one again.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -78,8 +95,7 @@ export default function SafetyScreen() {
                   emergencyContactPhone: null,
                 });
                 await refreshMe();
-                setContactName("");
-                setContactPhone("");
+                setEditing(false);
               } catch {
                 Alert.alert("Couldn't remove", "Please try again.");
               } finally {
@@ -94,59 +110,95 @@ export default function SafetyScreen() {
 
   return (
     <Screen scroll style={styles.content}>
-      <Text variant="h2">Safety</Text>
-
-      <Illustration name="safetyShield" size={140} float style={styles.hero} />
-
-      <Card style={styles.explainer}>
-        <View style={styles.explainerRow}>
-          <Ionicons name="shield-checkmark" size={18} color={colors.primary[500]} />
-          <Text variant="bodySmall" style={styles.explainerText}>
-            During a ride, tap Safety, then Call emergency services. As well as the call, we text
-            your emergency contact where you are, who your driver is, and a link to follow the
-            trip live.
-          </Text>
-        </View>
-      </Card>
-
-      <Text variant="label" color="muted">
-        EMERGENCY CONTACT
-      </Text>
-
-      <Card style={styles.card}>
-        <Input
-          label="Their name"
-          placeholder="e.g. Mum"
-          value={contactName}
-          onChangeText={setContactName}
-          autoCapitalize="words"
-        />
-        <Input
-          label="Their phone number"
-          placeholder="+233..."
-          value={contactPhone}
-          onChangeText={setContactPhone}
-          keyboardType="phone-pad"
-        />
-        <Text variant="caption" color="muted">
-          We never contact them unless you call emergency services from a ride.
+      <Illustration name="safetyShield" width={120} style={styles.hero} />
+      <View style={styles.heading}>
+        <Text variant="title1" accessibilityRole="header">
+          Safety
         </Text>
-      </Card>
+        <Text variant="body" color="secondary">
+          Someone we text if you ask for help on a ride. We never contact them otherwise.
+        </Text>
+      </View>
 
-      <Button label="Save contact" onPress={() => void handleSave()} loading={saving} />
+      <View style={styles.section}>
+        <Text variant="eyebrow" color="secondary">
+          Emergency contact
+        </Text>
+        {editing ? (
+          <View style={styles.form}>
+            <Input
+              label="Their name"
+              placeholder="e.g. Mum"
+              value={contactName}
+              onChangeText={setContactName}
+              autoCapitalize="words"
+              autoFocus
+            />
+            <Input
+              label="Their phone number"
+              placeholder="+233..."
+              value={contactPhone}
+              onChangeText={setContactPhone}
+              keyboardType="phone-pad"
+              doneAccessory
+            />
+            <Button label="Save contact" onPress={() => void handleSave()} loading={saving} />
+            {hasExisting ? (
+              <Button
+                label="Remove contact"
+                variant="danger"
+                onPress={handleRemove}
+                disabled={saving}
+              />
+            ) : null}
+            <Button
+              label="Cancel"
+              variant="text"
+              onPress={() => setEditing(false)}
+              disabled={saving}
+            />
+          </View>
+        ) : hasExisting ? (
+          <ListRow
+            title={savedName}
+            subtitle={savedPhone}
+            leading={<ListRow.Icon name="person-outline" tone="brand" />}
+            onPress={startEditing}
+            accessibilityLabel={`${savedName}, ${savedPhone}. Change your emergency contact`}
+          />
+        ) : (
+          <View style={styles.form}>
+            <Text variant="body" color="secondary">
+              No emergency contact yet.
+            </Text>
+            <Button label="Add emergency contact" variant="secondary" onPress={startEditing} />
+          </View>
+        )}
+      </View>
 
-      {hasExisting && (
-        <Button label="Remove contact" variant="secondary" onPress={handleRemove} />
-      )}
+      <View style={styles.section}>
+        <Text variant="eyebrow" color="secondary">
+          How the Safety button works
+        </Text>
+        {HOW_IT_WORKS.map((line) => (
+          <View key={line.text} style={styles.line}>
+            <Ionicons name={line.icon} size={20} color={colors.green700} />
+            <Text variant="subhead" color="secondary" style={styles.lineText}>
+              {line.text}
+            </Text>
+          </View>
+        ))}
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
+  content: { paddingBottom: spacing[10], gap: spacing[6] },
   hero: { alignSelf: "center" },
-  content: { paddingBottom: spacing["4xl"], gap: spacing.lg },
-  explainer: { backgroundColor: colors.primary[50] },
-  explainerRow: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
-  explainerText: { flex: 1 },
-  card: { gap: spacing.lg },
+  heading: { gap: spacing[2] },
+  section: { gap: spacing[3] },
+  form: { gap: spacing[3] },
+  line: { flexDirection: "row", alignItems: "flex-start", gap: spacing[3] },
+  lineText: { flex: 1 },
 });

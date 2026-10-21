@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState, Linking, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { PushApp } from "@rida/shared";
-import { Button, Screen, ServiceIcon, Text, colors, spacing } from "../design";
+import { Button, Screen, Text, colors, spacing } from "../design";
 import {
   getPushPermission,
   markAskedForPush,
@@ -23,6 +23,7 @@ export interface NotificationPermissionScreenProps {
  * The short explanation shown before the system's notification prompt —
  * after login, never at first launch — and from Account › Notifications
  * later. The system prompt appears only when the person taps "Turn on".
+ * A plain white page: title, a few lines, one primary action and "Not now".
  */
 export function NotificationPermissionScreen({
   app,
@@ -78,23 +79,17 @@ export function NotificationPermissionScreen({
   return (
     <Screen edges={["top", "bottom"]} style={styles.screen}>
       <View style={styles.body}>
-        <ServiceIcon
-          name="notifications-outline"
-          color={colors.primary[500]}
-          background={colors.primary[50]}
-          size={64}
-        />
-        <Text variant="h1" style={styles.heading}>
+        <Text variant="title1" accessibilityRole="header">
           {heading}
         </Text>
-        <Text variant="body" color="muted">
+        <Text variant="body" color="secondary">
           {lead}
         </Text>
         {permission !== "unsupported" && permission !== "granted" && (
           <View style={styles.reasons}>
             {reasons.map((reason) => (
               <View key={reason.text} style={styles.reason}>
-                <Ionicons name={reason.icon} size={22} color={colors.primary[500]} />
+                <Ionicons name={reason.icon} size={22} color={colors.green700} />
                 <Text variant="body" style={styles.reasonText}>
                   {reason.text}
                 </Text>
@@ -113,7 +108,7 @@ export function NotificationPermissionScreen({
         )}
         <Button
           label={permission === "undetermined" || permission === "denied" ? "Not now" : "Done"}
-          variant="ghost"
+          variant="text"
           onPress={onDone}
           disabled={asking}
         />
@@ -125,28 +120,26 @@ export function NotificationPermissionScreen({
 const styles = StyleSheet.create({
   screen: {
     justifyContent: "space-between",
+    backgroundColor: colors.surface,
   },
   body: {
-    gap: spacing.md,
-    paddingTop: spacing["2xl"],
-  },
-  heading: {
-    marginTop: spacing.md,
+    gap: spacing[3],
+    paddingTop: spacing[10],
   },
   reasons: {
-    gap: spacing.lg,
-    marginTop: spacing.lg,
+    gap: spacing[4],
+    marginTop: spacing[4],
   },
   reason: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.md,
+    gap: spacing[3],
   },
   reasonText: {
     flex: 1,
   },
   actions: {
-    gap: spacing.sm,
-    paddingBottom: spacing.lg,
+    gap: spacing[2],
+    paddingBottom: spacing[4],
   },
 });

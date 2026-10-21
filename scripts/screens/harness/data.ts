@@ -349,3 +349,55 @@ export function riderTripDriverAt(stage: "coming" | "arrived" | "onboard") {
         : { lat: 5.65, lng: -0.1865 };
   return { "ride:driver_location": { rideId: "ride-live", ...at, ts: Date.now() } };
 }
+
+/** Ama's shared ride, finished: Kwame dropped her at Balme Library a moment ago. */
+export function riderTripCompleted() {
+  const live = riderTrip("onboard");
+  return {
+    ride: {
+      ...live.ride,
+      status: "COMPLETED",
+      completedAt: new Date(),
+      passengers: live.ride.passengers.map((p) => ({ ...p, status: "DROPPED_OFF" })),
+    },
+    driver: riderDriver,
+    fareSummary: {
+      yourFarePesewas: 500,
+      totalFarePesewas: 1000,
+      paymentMethod: "CASH",
+      paymentStatus: "PENDING",
+    },
+  };
+}
+
+/** Ama's request, cancelled because no driver was free. */
+export const riderTripCancelled = {
+  ...riderSearching,
+  ride: { ...riderSearching.ride, status: "CANCELLED", cancelReason: "NO_DRIVERS_AVAILABLE" },
+};
+
+/** A time `days` ago at hh:mm, for the history's day groups. */
+function at(days: number, hours: number, minutes: number): Date {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  d.setHours(hours, minutes, 0, 0);
+  return d;
+}
+
+/** The Rides tab: today, yesterday and earlier, with one cancelled trip. */
+export const riderHistory: RideSummary[] = [
+  ride("ride-h1", "Night Market", "Balme Library", { createdAt: at(0, 0, 5) }),
+  ride("ride-h2", "Akuafo Hall", "Main Gate", {
+    createdAt: at(1, 18, 36),
+    status: "CANCELLED",
+    cancelReason: "RIDER_CANCELLED",
+    fareTotal: null,
+  }),
+  ride("ride-h3", "Volta Hall", "Night Market", {
+    createdAt: at(1, 8, 12),
+    type: "LONE",
+    fareTotal: 1500,
+  }),
+  ride("ride-h4", "Balme Library", "Commonwealth Hall", { createdAt: at(3, 19, 2) }),
+  ride("ride-h5", "Bush Canteen", "Legon Hall", { createdAt: at(4, 13, 40) }),
+];

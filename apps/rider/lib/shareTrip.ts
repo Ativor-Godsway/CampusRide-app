@@ -14,7 +14,8 @@ export function carDescription(
  * link is only made by an SOS (POST /rides/:id/sos).
  */
 export function tripShareMessage(input: {
-  pickup: string;
+  /** A real place name (pickupPlace), or null: the message then gives only where the rider's going. */
+  pickup: string | null;
   dropoff: string;
   driver: Pick<RideDriverInfo, "name" | "carColor" | "carMake" | "carModel" | "plate">;
 }): string {
@@ -24,7 +25,7 @@ export function tripShareMessage(input: {
     .filter(Boolean)
     .join(", ");
   return (
-    `I'm on a CampusRide from ${input.pickup} to ${input.dropoff}. ` +
+    `I'm on a CampusRide ${input.pickup ? `from ${input.pickup} ` : ""}to ${input.dropoff}. ` +
     `My driver is ${driverName}${vehicle ? ` (${vehicle})` : ""}.`
   );
 }

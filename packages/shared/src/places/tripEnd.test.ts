@@ -8,6 +8,7 @@ import {
   isSameSpot,
   movedEnd,
   pinEnd,
+  pickupPlace,
   placeEnd,
   recentTripEnds,
   rideEnd,
@@ -100,5 +101,28 @@ describe("from a ride", () => {
     expect(recent.map((r) => r.label)).toEqual(["Balme Library", "Pinned location", "Legon Hall"]);
     // A place that no longer exists is still a usable pin.
     expect(recentTripEnds(rides.slice(0, 1), [night], 3)[0]).toMatchObject({ kind: "pin", placeId: null, label: "Balme" });
+  });
+});
+
+describe("the pickup in a sentence", () => {
+  it("names the place a GPS fix is at, never 'Current location'", () => {
+    const end = gpsEnd({ latitude: 5.65203, longitude: -0.18705 }, places);
+    expect(end.label).toBe(CURRENT_LOCATION_LABEL);
+    expect(pickupPlace(end, places)).toEqual({ name: "Balme Library", at: true });
+  });
+
+  it("a point near a place is near it; a chosen place is at it", () => {
+    expect(pickupPlace(gpsEnd({ latitude: 5.6531, longitude: -0.18705 }, places), places)).toEqual({
+      name: "Balme Library",
+      at: false,
+    });
+    expect(pickupPlace(placeEnd(night), [])).toEqual({ name: "Night Market", at: true });
+  });
+
+  it("falls back to the ride's zone, then to nothing", () => {
+    const far = gpsEnd({ latitude: 5.66, longitude: -0.2 }, places);
+    expect(pickupPlace(far, places, "Legon Hall")).toEqual({ name: "Legon Hall", at: false });
+    expect(pickupPlace(far, places)).toBeNull();
+    expect(pickupPlace(far, [], "  ")).toBeNull();
   });
 });
