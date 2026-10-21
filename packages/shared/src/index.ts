@@ -27,6 +27,7 @@ export * from "./config/appVersion";
 export * from "./geo/polyline";
 export * from "./rides/tripStops";
 export * from "./driver/actionFailure";
+export * from "./driver/claimOutcome";
 export * from "./geo/tripRoute";
 export * from "./rides/addRiderPreview";
 export * from "./driver/autoArrival";

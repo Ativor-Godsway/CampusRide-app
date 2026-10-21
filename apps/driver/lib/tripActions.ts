@@ -4,8 +4,10 @@ import {
   SEAT_RANK as RANK,
   applySeatOverlays,
   classifyActionFailure,
+  classifyClaimFailure,
   refusalMessage,
   settleSeatOverlays,
+  type ClaimOutcome,
   type PassengerStatus,
   type SeatOverlay,
 } from "@rida/shared";
@@ -312,15 +314,44 @@ export function runAddRider(
   });
 }
 
+/** Accept waits for this long before saying it couldn't reach CampusRide (the driver can try again). */
+const CLAIM_TIMEOUT_MS = 15_000;
+
 /**
- * Accept a request: the trip opens at once (a provisional trip built from
- * the request), the claim follows. Once the server confirms, the store
- * fetches the trip itself to learn the rider's seat id and hands it to the
- * app (`onRide`), so nothing waits on a poll.
+ * Accept a request (the offer's Accept, or a Home request card's): ONE claim,
+ * waited for, so the screen can show a spinner, then go to the trip — or say
+ * that the request was taken / expired, or that CampusRide couldn't be
+ * reached (Try again: a repeat claim of a ride already ours just returns it).
+ *
+ * Once the server says yes, the trip is handed to the store as confirmed, so
+ * the trip screen opens with it at once; the store then fetches the trip
+ * itself to learn the rider's seat id and hands it to the app (`onRide`).
  */
-export function runClaim(request: EligibleRideItem) {
+export async function acceptRequest(request: EligibleRideItem): Promise<ClaimOutcome> {
+  try {
+    await driverClaimRide(request.rideId, { timeoutMs: CLAIM_TIMEOUT_MS });
+  } catch (err) {
+    const data = (err as { response?: { data?: { code?: unknown; reason?: unknown; error?: unknown } } })
+      .response?.data;
+    return classifyClaimFailure({ status: errorStatus(err), ...data });
+  }
+  adoptClaim(request);
+  return { kind: "accepted" };
+}
+
+/** The server has given this driver the request: the trip is theirs from now on. */
+function adoptClaim(request: EligibleRideItem) {
   forRide(request.rideId);
-  set({ claim: { rideId: request.rideId, request, state: "sending", message: null, passengerId: null, serverSeen: false } });
+  set({
+    claim: {
+      rideId: request.rideId,
+      request,
+      state: "confirmed",
+      message: null,
+      passengerId: null,
+      serverSeen: false,
+    },
+  });
   let retrying = false;
   const onRetrying = (on: boolean) => {
     if (on !== retrying) setRetrying(on);
@@ -328,11 +359,6 @@ export function runClaim(request: EligibleRideItem) {
   };
   enqueue(async () => {
     try {
-      await sendUntilAnswered(
-        (timeoutMs) => driverClaimRide(request.rideId, { timeoutMs }),
-        "Couldn't accept this request.",
-        onRetrying,
-      );
       const ride = await sendUntilAnswered(() => getDriverActiveRide(), "Couldn't load the trip.", onRetrying).catch(
         () => null,
       );
@@ -344,7 +370,6 @@ export function runClaim(request: EligibleRideItem) {
         set({
           claim: {
             ...state.claim,
-            state: "confirmed",
             passengerId: seat?.id ?? null,
             serverSeen: state.claim.serverSeen || Boolean(ride && ride.id === request.rideId),
           },
@@ -352,11 +377,6 @@ export function runClaim(request: EligibleRideItem) {
       }
       if (seat) moveSeat(claimPassengerId(request.rideId), seat.id);
       if (ride) hooks.onRide(ride);
-    } catch (err) {
-      if (state.claim?.rideId === request.rideId) {
-        set({ claim: { ...state.claim, state: "refused", message: (err as Error).message } });
-      }
-      dropSeat(claimPassengerId(request.rideId));
     } finally {
       if (retrying) setRetrying(false);
       hooks.refresh();

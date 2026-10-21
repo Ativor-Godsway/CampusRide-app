@@ -486,3 +486,36 @@ export const driverSharedTrip: RideWithZones = {
   driverShare: 425,
   passengers: driverTrip.passengers.map((p) => ({ ...p, lockedFare: 500 })),
 };
+
+/** The Ride-alone offer from a rider nobody has rated yet. */
+export const newRiderOffer: EligibleRideItem = { ...offer, riderRating: null };
+
+/** A Shared request from Ama (rated 4.8), nearest, with three more waiting behind it. */
+export const sharedOfferQueue: EligibleRideItem[] = [
+  {
+    ...offer,
+    rideId: "ride-q1",
+    riderFirstName: "Ama",
+    type: "SHARED",
+    seats: 1,
+    farePesewas: 500,
+    driverSharePesewas: 425,
+    riderRating: 4.8,
+    pickupZoneName: "Legon Hall",
+    pickupZoneId: zone("Legon Hall").id,
+    pickupPlaceName: "Legon Hall",
+    dropoffZoneName: "Balme Library",
+    dropoffZoneId: zone("Balme Library").id,
+    dropoffPlaceName: "Balme Library",
+    pickupDistanceMeters: 250,
+    pickupMinutes: 1,
+    tripDistanceMeters: 450,
+    tripMinutes: 2,
+  },
+  ...[1, 2, 3].map((n) => ({
+    ...offer,
+    rideId: `ride-q${n + 1}`,
+    pickupDistanceMeters: 600 + n * 200,
+    pickupMinutes: 2 + n,
+  })),
+];

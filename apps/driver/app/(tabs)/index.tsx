@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useIsFocused, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -14,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   CAR_SEATS,
+  CLAIM_NETWORK_MESSAGE,
   DRIVER_EVENTS,
   LOCATION_PROBLEM_MESSAGE,
   SERVICE_AREA_POLYGON,
@@ -46,6 +47,7 @@ import {
   shadows,
   spacing,
   useAuth,
+  useToast,
   type EligibleRideItem,
   type RideWithZones,
 } from "@rida/mobile-shared";
@@ -59,10 +61,15 @@ import {
 import { useDriverLocation } from "../../lib/location";
 import { useDriverPresence } from "../../lib/presence";
 import { useRequestsNearYou } from "../../lib/requests";
-import { overlayPassengers, runAddRider, runClaim, useTripActions } from "../../lib/tripActions";
+import {
+  acceptRequest,
+  overlayPassengers,
+  runAddRider,
+  useTripActions,
+} from "../../lib/tripActions";
 import { useZones } from "../../lib/zones";
 import { RequestCard, type HomeRequest } from "../../components/home/RequestCard";
-import { OfferCard } from "../../components/offers/OfferCard";
+import { OfferTakeover } from "../../components/offers/OfferTakeover";
 import { useOfferQueue } from "../../lib/offers";
 
 const FILTERS: { value: RequestTypeFilter; label: string }[] = [
@@ -95,7 +102,7 @@ const HISTORY_QUERY_KEY = ["driverRideHistory"];
  * - Online and free: the car pulses; the sheet says it's looking, with the
  *   All / Shared / Private chips, Go offline, and every request near you
  *   (nearest first, Accept opens the trip at once — lib/tripActions). New
- *   requests also open full screen (OfferCard).
+ *   requests also open full screen (OfferTakeover).
  * - On a trip: a dark row at the top of the sheet opens it. On a Shared trip,
  *   riders who fit the route, each with See route and Add.
  *
@@ -242,23 +249,65 @@ export default function DriverHomeScreen() {
     sharedFare,
   ]);
 
-  // ─── Offer pop-ups (one at a time, nearest first) ───────────────────────
-  // Over Home only, while it's on screen, online and free. Accept is the
-  // same instant accept as the list's (lib/tripActions).
-  const acceptRequest = useCallback(
-    (request: EligibleRideItem) => {
-      runClaim(request);
-      markTripOpened(request.rideId);
-      router.push(`/ride/${request.rideId}`);
+  // ─── Accept (the offer's, or a request card's) ──────────────────────────
+  // One flow for both (lib/tripActions acceptRequest): a spinner while the
+  // server answers, then the trip — or a toast that the request was taken
+  // or expired, or "Couldn't reach CampusRide" with Try again.
+  const { showToast, toast } = useToast();
+  const [accepting, setAccepting] = useState<{ rideId: string; fromOffer: boolean } | null>(null);
+  const [acceptError, setAcceptError] = useState<{ rideId: string; message: string } | null>(null);
+  const acceptingRef = useRef(false);
+  const offersRef = useRef<ReturnType<typeof useOfferQueue> | null>(null);
+  const { refetch: refetchEligible } = eligible;
+  const runAccept = useCallback(
+    async (request: EligibleRideItem, fromOffer: boolean) => {
+      if (acceptingRef.current) return;
+      acceptingRef.current = true;
+      setAccepting({ rideId: request.rideId, fromOffer });
+      setAcceptError(null);
+      const outcome = await acceptRequest(request);
+      acceptingRef.current = false;
+      setAccepting(null);
+      if (outcome.kind === "accepted") {
+        haptics.success();
+        offersRef.current?.markHandled(request.rideId);
+        markTripOpened(request.rideId);
+        router.push(`/ride/${request.rideId}`);
+      } else if (outcome.kind === "gone") {
+        // Closes the offer (if it's this one) with the toast; never offered again.
+        offersRef.current?.closeGone(request.rideId, outcome.reason);
+        void refetchEligible();
+      } else {
+        setAcceptError({
+          rideId: request.rideId,
+          message: outcome.kind === "network" ? CLAIM_NETWORK_MESSAGE : outcome.message,
+        });
+      }
     },
-    [router],
+    [router, refetchEligible],
   );
+
+  // ─── Offer takeovers (one at a time, nearest first) ─────────────────────
+  // Over Home only, while it's on screen, online and free — and not while a
+  // request card's accept is on its way.
   const offers = useOfferQueue({
-    // Not while an accept is still on its way (a finished trip's accept doesn't count).
-    enabled: free && focused && actions.claim?.state !== "sending",
+    enabled: free && focused && !(accepting && !accepting.fromOffer),
     items: eligible.data ?? [],
-    onAccept: acceptRequest,
+    onAccept: (request) => void runAccept(request, true),
   });
+  offersRef.current = offers;
+
+  // An offer that went away (taken, cancelled, expired): a toast.
+  const { notice } = offers;
+  useEffect(() => {
+    if (notice) showToast({ message: notice, tone: "info", icon: "information-circle" });
+  }, [notice, showToast]);
+
+  // A card's error belongs to that request: gone from the list, gone from here.
+  const listError =
+    acceptError && acceptError.rideId !== offers.offer?.item.rideId
+      ? (eligible.data ?? []).find((r) => r.rideId === acceptError.rideId)
+      : undefined;
 
   if (authLoading || tripLoading || !user) {
     return (
@@ -270,9 +319,7 @@ export default function DriverHomeScreen() {
 
   const accept = (item: HomeRequest) => {
     const request = eligible.data?.find((r) => r.rideId === item.rideId);
-    if (!request) return;
-    offers.markHandled(request.rideId);
-    acceptRequest(request);
+    if (request) void runAccept(request, false);
   };
   const add = (item: HomeRequest) => {
     const suggestion = fill.data?.suggestions.find((s) => s.requestRideId === item.rideId);
@@ -438,9 +485,26 @@ export default function DriverHomeScreen() {
               />
             ) : null}
 
+            {listError ? (
+              <View style={styles.problem}>
+                <Notice tone="error" icon="cloud-offline-outline" message={acceptError!.message} />
+                <Button
+                  label="Try again"
+                  variant="secondary"
+                  size="md"
+                  onPress={() => void runAccept(listError, false)}
+                />
+              </View>
+            ) : null}
+
             {items.map((item) =>
               free ? (
-                <RequestCard key={item.rideId} item={item} onAccept={() => accept(item)} />
+                <RequestCard
+                  key={item.rideId}
+                  item={item}
+                  accepting={accepting?.rideId === item.rideId}
+                  onAccept={() => accept(item)}
+                />
               ) : (
                 <RequestCard
                   key={item.rideId}
@@ -456,27 +520,24 @@ export default function DriverHomeScreen() {
         )}
       </BottomSheet>
 
-      {offers.notice ? (
-        <View
-          style={styles.offerNotice}
-          pointerEvents="none"
-          accessibilityLiveRegion="polite"
-          accessibilityRole="alert"
-        >
-          <Text variant="bodyStrong" color="onDark">
-            {offers.notice}
-          </Text>
-        </View>
-      ) : null}
       {offers.offer ? (
-        <OfferCard
+        <OfferTakeover
           key={offers.offer.item.rideId}
           offer={offers.offer}
           waiting={offers.waiting}
+          car={car}
+          zones={zones}
+          accepting={accepting?.rideId === offers.offer.item.rideId}
+          error={acceptError?.rideId === offers.offer.item.rideId ? acceptError.message : null}
           onAccept={offers.accept}
-          onDecline={offers.decline}
+          onDecline={() => {
+            setAcceptError(null);
+            offers.decline();
+          }}
         />
       ) : null}
+
+      {toast}
     </View>
   );
 }
@@ -676,15 +737,4 @@ const styles = StyleSheet.create({
   },
   tripPressed: { backgroundColor: colors.surfaceDark2 },
   tripText: { flex: 1, gap: 2 },
-  offerNotice: {
-    position: "absolute",
-    left: spacing.gutter,
-    right: spacing.gutter,
-    bottom: spacing[6],
-    paddingVertical: spacing[3],
-    paddingHorizontal: spacing[4],
-    borderRadius: radii.lg,
-    backgroundColor: colors.surfaceDark,
-    alignItems: "center",
-  },
 });
