@@ -5,11 +5,13 @@ import {
   DISPATCH_WINDOW_MS,
   DRIVER_EVENTS,
   MIN_OFFER_SHOW_MS,
+  REQUEST_GONE_TOAST,
   isOfferLive,
   nextOffer,
   offerDeadline,
   type OfferClosedPayload,
   type OfferClosedReason,
+  type RequestGoneReason,
 } from "@rida/shared";
 import { getRideSocket, type EligibleRideItem } from "@rida/mobile-shared";
 import { alertNewOffer } from "./offerAlert";
@@ -23,14 +25,16 @@ export interface ShownOffer {
   /** When the countdown started and ends (epoch ms). */
   shownAt: number;
   deadline: number;
+  /**
+   * When the driver tapped Accept (epoch ms), or undefined. From then on the
+   * offer stays up until the claim's answer closes it: its countdown stops
+   * where it was and it can't time out underneath the spinner or an error.
+   */
+  heldAt?: number;
 }
 
-/** Why an offer that was showing went away, in words for a short note. */
-const GONE_NOTICE: Record<OfferClosedReason, string> = {
-  TAKEN: "Ride taken by another driver",
-  CANCELLED: "The rider cancelled",
-  EXPIRED: "That request expired",
-};
+/** Why an offer that was showing went away, in words for a toast. */
+const GONE_NOTICE: Record<OfferClosedReason, string> = REQUEST_GONE_TOAST;
 
 /**
  * Offers this driver has dealt with this session — accepted, declined,
@@ -103,13 +107,15 @@ export function useOfferQueue({
   }, []);
 
   // Keep the offer on screen honest: gone from the list or withdrawn →
-  // close with a note; countdown over → timed out.
+  // close with a note; countdown over → timed out. Not while it's held: the
+  // claim's own answer closes it then.
   useEffect(() => {
     if (!current) return;
     if (!enabled) {
       setCurrent(null); // went offline / got a trip: not a decline
       return;
     }
+    if (current.heldAt !== undefined) return;
     const state = isOfferLive(
       { rideId: current.item.rideId, deadline: current.deadline },
       queue,
@@ -166,14 +172,17 @@ export function useOfferQueue({
     offer: current,
     /** How many more offers are lined up behind this one. */
     waiting,
-    /** "Ride taken by another driver" etc., for a moment after an offer went away. */
+    /** "That request was taken" etc., for a moment after an offer went away. */
     notice,
+    /** Accept tapped: the offer is held (see ShownOffer.heldAt) and handed to `onAccept`. */
     accept: () => {
       if (!current) return;
       const item = current.item;
-      close(item.rideId, "accepted");
+      if (current.heldAt === undefined) setCurrent({ ...current, heldAt: Date.now() });
       onAccept(item);
     },
+    /** The claim said the request is gone: close it with that toast (nothing to decline). */
+    closeGone: (rideId: string, reason: RequestGoneReason) => close(rideId, "gone", GONE_NOTICE[reason]),
     decline: () => current && close(current.item.rideId, "declined"),
     /** For an offer handled elsewhere (accepted from the Home list). */
     markHandled: (rideId: string) => close(rideId, "accepted"),

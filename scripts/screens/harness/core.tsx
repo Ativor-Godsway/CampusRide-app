@@ -20,13 +20,15 @@ import {
 
 /**
  * "GET /zones" → the response body (or a function of the request body).
- * `refuse(400, "…")` answers with that error instead.
+ * `refuse(400, "…")` answers with that error instead (`extra` adds fields
+ * to its body, e.g. `{ code, reason }`). A function may return a promise:
+ * one that never settles keeps the screen waiting (a spinner).
  */
 export type Routes = Record<string, unknown | ((body: Record<string, unknown>) => unknown)>;
 
 const REFUSAL = Symbol("refusal");
-export function refuse(status: number, error: string) {
-  return { [REFUSAL]: true, status, error };
+export function refuse(status: number, error: string, extra: Record<string, unknown> = {}) {
+  return { [REFUSAL]: true, status, error, extra };
 }
 
 /** Done in the browser before the screenshot, in order (run.mjs carries them out). */
@@ -95,21 +97,25 @@ function installServer(user: AuthUser | null, routes: Routes) {
     if (key === "GET /me" && user) return ok({ user });
     if (key in routes) {
       const raw = routes[key];
-      const answer = typeof raw === "function" ? raw(body) : raw;
+      const answer = await (typeof raw === "function" ? raw(body) : raw);
       if (answer && typeof answer === "object" && REFUSAL in answer) {
-        const { status, error } = answer as unknown as { status: number; error: string };
-        return fail(status, error);
+        const { status, error, extra } = answer as unknown as {
+          status: number;
+          error: string;
+          extra: Record<string, unknown>;
+        };
+        return fail(status, error, extra);
       }
       return ok(answer);
     }
     console.log(`[screens] no fake answer for ${key} (404)`);
     return fail(404);
 
-    function fail(status: number, error = "screens"): never {
+    function fail(status: number, error = "screens", extra: Record<string, unknown> = {}): never {
       throw Object.assign(new Error(`Request failed with status code ${status}`), {
         isAxiosError: true,
         config,
-        response: { status, data: { error }, headers: {}, config, statusText: "" },
+        response: { status, data: { error, ...extra }, headers: {}, config, statusText: "" },
       });
     }
   };

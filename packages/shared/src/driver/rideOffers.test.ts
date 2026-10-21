@@ -6,6 +6,7 @@ import {
   nextOffer,
   offerDeadline,
   offerKindLabel,
+  offerStopLines,
   orderOffers,
 } from "./rideOffers";
 
@@ -66,5 +67,25 @@ describe("offer wording", () => {
     expect(minutesAndDistance(0.4, 120)).toBe("under 1 min · 100 m");
     expect(minutesAndDistance(null, 300)).toBe("300 m");
     expect(minutesAndDistance(null, null)).toBe("");
+  });
+});
+
+describe("offerStopLines", () => {
+  it("says how far the pickup is and how long the trip is", () => {
+    expect(
+      offerStopLines({
+        pickupMinutes: 1,
+        pickupDistanceMeters: 400,
+        tripMinutes: 5,
+        tripDistanceMeters: 1600,
+      }),
+    ).toEqual({ pickup: "Pickup · 1 min · 400 m away", dropoff: "Drop-off · 5 min trip · 1.6 km" });
+  });
+
+  it("leaves out what the server didn't send", () => {
+    expect(offerStopLines({ pickupMinutes: 0.4, tripDistanceMeters: null })).toEqual({
+      pickup: "Pickup · under 1 min",
+      dropoff: "Drop-off",
+    });
   });
 });

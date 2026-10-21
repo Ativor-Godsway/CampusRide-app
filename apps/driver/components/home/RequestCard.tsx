@@ -47,11 +47,14 @@ function spoken(item: HomeRequest): string {
 export function RequestCard({
   item,
   onAccept,
+  accepting = false,
   onSeeRoute,
   onAdd,
 }: {
   item: HomeRequest;
   onAccept?: () => void;
+  /** Accept tapped: a spinner until the server answers (lib/tripActions acceptRequest). */
+  accepting?: boolean;
   onSeeRoute?: () => void;
   onAdd?: () => void;
 }) {
@@ -107,6 +110,7 @@ export function RequestCard({
               label="Accept"
               size="pill"
               onPress={onAccept}
+              loading={accepting}
               accessibilityLabel={`Accept ride from ${from(item)} to ${to(item)}`}
             />
           ) : null}

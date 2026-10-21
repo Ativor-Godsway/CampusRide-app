@@ -34,6 +34,11 @@ export interface CampusMapViewProps {
    * solid. Otherwise it is a straight-line stand-in and drawn dashed.
    */
   routeIsRoad?: boolean;
+  /**
+   * The way to the start of the route (e.g. the driver's car to a pickup on
+   * a ride offer): a dashed ink line, drawn under the route.
+   */
+  approachLine?: LatLng[];
   /** Credit line for the road route's data, shown small in a corner (required by the routing provider). */
   routeAttribution?: string;
   /** Forces a light map appearance regardless of device theme (iOS Apple Maps). */
@@ -80,6 +85,7 @@ export function CampusMapView({
   height,
   routeLine,
   routeIsRoad = false,
+  approachLine,
   routeAttribution,
   light,
   showRecenter,
@@ -162,6 +168,15 @@ export function CampusMapView({
             />
           ),
         )}
+
+        {approachLine && approachLine.length >= 2 ? (
+          <Polyline
+            coordinates={approachLine}
+            strokeColor={colors.ink2}
+            strokeWidth={3}
+            lineDashPattern={[4, 6]}
+          />
+        ) : null}
 
         {routeLine && routeLine.length >= 2 ? (
           <Polyline

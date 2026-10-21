@@ -8,16 +8,17 @@ import DriverHome from "../../../apps/driver/app/(tabs)/index";
 import EarningsTab from "../../../apps/driver/app/(tabs)/rides";
 import TripScreen from "../../../apps/driver/app/ride/[id]";
 import DesignGallery from "../../../apps/driver/app/dev/design-gallery";
-import { boot, type Routes, type Scene } from "./core";
+import { boot, refuse, type Routes, type Scene } from "./core";
 import {
   driver,
   driverHistory,
   driverRequests,
   driverSharedTrip,
   driverTrip,
-  offer,
+  newRiderOffer,
   place,
   roadRoute,
+  sharedOfferQueue,
   zones,
 } from "./data";
 
@@ -50,6 +51,42 @@ const home = (name: string, online: boolean, extra: Partial<Scene> = {}): Scene 
   position: here,
   ...extra,
 });
+
+/**
+ * Online with requests near the driver: the first opens full screen. `claim`
+ * is POST /rides/<id>/claim's answer for that one; once tried, the request
+ * leaves the list (as the server's would, for a request that's gone).
+ */
+const offerScene = (
+  name: string,
+  requests: typeof sharedOfferQueue,
+  extra: Partial<Scene> & { claim?: () => unknown } = {},
+): Scene => {
+  let tried = false;
+  const { claim, ...rest } = extra;
+  return {
+    name,
+    note: "map: grey box (the car, a dashed line to the pickup and the route are drawn on the map)",
+    user: driver(true),
+    routes: signedIn({
+      "GET /driver/rides/history": driverHistory(true),
+      "GET /driver/rides/eligible": () => ({ rides: tried ? requests.slice(1) : requests }),
+      ...(claim
+        ? {
+            [`POST /rides/${requests[0]!.rideId}/claim`]: () => {
+              tried = true;
+              return claim();
+            },
+          }
+        : {}),
+    }),
+    chain: [RootLayout, TabsLayout, DriverHome],
+    pathname: "/",
+    position: here,
+    ...rest,
+  };
+};
+const ACCEPT_LONE = "Accept, 15 cedis";
 
 const scenes: Scene[] = [
   {
@@ -116,14 +153,23 @@ const scenes: Scene[] = [
     chain: [RootLayout, TabsLayout, EarningsTab],
     pathname: "/rides",
   },
-  {
-    name: "ride-offer",
-    user: driver(true),
-    routes: signedIn({ "GET /driver/rides/eligible": { rides: [offer] } }),
-    chain: [RootLayout, TabsLayout, DriverHome],
-    pathname: "/",
-    position: here,
-  },
+  offerScene("offer-ride-alone-new-rider", [newRiderOffer]),
+  offerScene("offer-shared-waiting", sharedOfferQueue),
+  offerScene("offer-accepting", [newRiderOffer], {
+    // The server hasn't answered yet.
+    claim: () => new Promise(() => undefined),
+    steps: [{ press: ACCEPT_LONE }, { wait: 300 }],
+  }),
+  offerScene("offer-error", [newRiderOffer], {
+    claim: () => refuse(503, "Service unavailable"),
+    steps: [{ press: ACCEPT_LONE }, { wait: 500 }],
+  }),
+  offerScene("offer-taken-toast", [newRiderOffer], {
+    note: "Accept, but another driver got there first: the takeover closes with a toast",
+    claim: () =>
+      refuse(409, "Ride taken by another driver.", { code: "RIDE_NOT_AVAILABLE", reason: "TAKEN" }),
+    steps: [{ press: ACCEPT_LONE }, { wait: 400 }],
+  }),
   {
     name: "trip",
     note: "map: grey box",

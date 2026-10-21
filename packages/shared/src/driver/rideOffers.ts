@@ -97,3 +97,33 @@ export function minutesAndDistance(minutes: number | null, meters: number | null
   if (meters !== null) parts.push(meters < 1000 ? `${Math.max(50, Math.round(meters / 50) * 50)} m` : `${(meters / 1000).toFixed(1)} km`);
   return parts.join(" · ");
 }
+
+/** One distance as the offer shows it: "400 m", "1.6 km". */
+function offerDistance(meters: number): string {
+  return meters < 1000 ? `${Math.max(50, Math.round(meters / 50) * 50)} m` : `${(meters / 1000).toFixed(1)} km`;
+}
+
+/** One time as the offer shows it: "1 min", "under 1 min". */
+function offerMinutes(minutes: number): string {
+  return minutes < 1 ? "under 1 min" : `${Math.round(minutes)} min`;
+}
+
+/**
+ * The two lines under the stops on a ride offer, from the numbers the server
+ * sent (missing ones are left out): "Pickup · 1 min · 400 m away" and
+ * "Drop-off · 5 min trip · 1.6 km".
+ */
+export function offerStopLines(offer: {
+  pickupMinutes?: number | null;
+  pickupDistanceMeters?: number | null;
+  tripMinutes?: number | null;
+  tripDistanceMeters?: number | null;
+}): { pickup: string; dropoff: string } {
+  const pickup = ["Pickup"];
+  if (offer.pickupMinutes != null) pickup.push(offerMinutes(offer.pickupMinutes));
+  if (offer.pickupDistanceMeters != null) pickup.push(`${offerDistance(offer.pickupDistanceMeters)} away`);
+  const dropoff = ["Drop-off"];
+  if (offer.tripMinutes != null) dropoff.push(`${offerMinutes(offer.tripMinutes)} trip`);
+  if (offer.tripDistanceMeters != null) dropoff.push(offerDistance(offer.tripDistanceMeters));
+  return { pickup: pickup.join(" · "), dropoff: dropoff.join(" · ") };
+}
