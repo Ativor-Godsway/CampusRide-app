@@ -8,7 +8,10 @@ import * as Haptics from "expo-haptics";
 export const haptics = {
   /** Picking an option (ride type, cancel reason). */
   selection: () => void Haptics.selectionAsync().catch(() => undefined),
-  /** Something good happened (a driver accepted, a switch went through). */
+  /** Something good happened (a driver accepted or arrived, a switch went through). */
   success: () =>
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => undefined),
+  /** The Safety sheet opened. */
+  warning: () =>
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined),
 };

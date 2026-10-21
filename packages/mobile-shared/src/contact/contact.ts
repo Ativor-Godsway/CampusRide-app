@@ -1,7 +1,7 @@
 import { Alert, Linking, Platform } from "react-native";
 
 /**
- * Phase 4: placing a call and handing off to a maps app.
+ * Phase 4: placing a call or a text, and handing off to a maps app.
  *
  * Both are intentionally thin wrappers over `Linking.openURL`. Calls use a
  * plain `tel:` link to the other party's real number — number masking (a
@@ -34,6 +34,23 @@ export async function callPhone(phone: string | null | undefined, who = "them"):
     // Simulators and tablets often have no dialler at all; surfacing the
     // number means the person can still act on it.
     Alert.alert("Couldn't open the dialler", `You can call ${who} on ${phone}.`);
+  }
+}
+
+/**
+ * Opens the messages app with a new text to `phone`. Same shape as callPhone:
+ * no number, or no messages app, and the person is told what to do instead.
+ */
+export async function textPhone(phone: string | null | undefined, who = "them"): Promise<void> {
+  if (!phone) {
+    Alert.alert("No phone number", `We don't have a number for ${who} yet.`);
+    return;
+  }
+
+  try {
+    await Linking.openURL(`sms:${normalizeForDial(phone)}`);
+  } catch {
+    Alert.alert("Couldn't open messages", `You can text ${who} on ${phone}.`);
   }
 }
 

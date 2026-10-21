@@ -262,6 +262,16 @@ export function planTripStops(input: {
   return { upcoming, doneCount, totalCount: doneCount + upcoming.length };
 }
 
+/**
+ * For a rider in a shared car: how many stops the plan puts before their own
+ * drop-off ("1 more stop before yours"), or null when their drop-off isn't in
+ * the plan (dropped off, cancelled, or not known).
+ */
+export function stopsBeforeDropoff(plan: TripPlan, passengerId: string): number | null {
+  const index = plan.upcoming.findIndex((s) => s.passengerId === passengerId && s.kind === "DROPOFF");
+  return index === -1 ? null : index;
+}
+
 export type SeatState = "onboard" | "coming" | "empty";
 
 /** Seat dots: filled = on board, light = being picked up, empty = free. */

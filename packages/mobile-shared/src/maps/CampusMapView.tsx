@@ -5,6 +5,7 @@ import type { EdgePadding } from "@rida/shared";
 import { useReduceMotion } from "../design/components/Illustration";
 import { colors, radii, spacing, withAlpha } from "../design/tokens";
 import { IconButton } from "../design/components/IconButton";
+import { PULSE_MS } from "../design/components/PulseRings";
 import { illustrations } from "../design/illustrations";
 import type { LatLng } from "./projection";
 
@@ -144,15 +145,23 @@ export function CampusMapView({
 
         {/* Every marker is a 3D render (docs/design-system.md, Iconography): a
             place without a role gets the drop-off pin. */}
-        {zones.map((zone) => (
-          <ArtMarker
-            key={`${zone.id}:${zone.version ?? 0}`}
-            zone={zone}
-            onPress={() => onZonePress?.(zone.id)}
-            draggable={zone.id === draggableZoneId}
-            onDragEnd={(point) => onZoneDragEnd?.(zone.id, point)}
-          />
-        ))}
+        {zones.map((zone) =>
+          zone.role === "driver" ? (
+            <CarMarker
+              key={`${zone.id}:${zone.version ?? 0}`}
+              zone={zone}
+              onPress={() => onZonePress?.(zone.id)}
+            />
+          ) : (
+            <ArtMarker
+              key={`${zone.id}:${zone.version ?? 0}`}
+              zone={zone}
+              onPress={() => onZonePress?.(zone.id)}
+              draggable={zone.id === draggableZoneId}
+              onDragEnd={(point) => onZoneDragEnd?.(zone.id, point)}
+            />
+          ),
+        )}
 
         {routeLine && routeLine.length >= 2 ? (
           <Polyline
@@ -200,13 +209,16 @@ function bearingBetween(a: LatLng, b: LatLng): number {
 
 /** The 3D pins at 44pt, tip on the point (anchor y 0.94). */
 const PIN_SIZE = 44;
-const CAR_SIZE = 52;
-
+/** The top-down car, about a pin's size. */
+const CAR_SIZE = 44;
 /**
- * Map marker drawn with the 3D artwork. The driver car rotates to face its
- * direction of travel (worked out from its last two positions). Markers stop
- * re-rendering once the image has loaded, which keeps Android smooth.
+ * How long the car takes to glide to a new GPS fix. Drivers report about
+ * every 5 s; a short glide keeps the car close to where it really is while
+ * hiding the jump.
  */
+const GLIDE_MS = 1000;
+
+/** Map marker drawn with a 3D pin. Stops re-rendering once the image has loaded, which keeps Android smooth. */
 function ArtMarker({
   zone,
   onPress,
@@ -218,45 +230,86 @@ function ArtMarker({
   draggable?: boolean;
   onDragEnd?: (point: LatLng) => void;
 }) {
-  const isCar = zone.role === "driver";
   const [ready, setReady] = useState(false);
-  const [heading, setHeading] = useState(0);
-  const last = useRef<LatLng | null>(null);
-
-  useEffect(() => {
-    if (!isCar) return;
-    const prev = last.current;
-    const next = { latitude: zone.latitude, longitude: zone.longitude };
-    // Ignore GPS jitter under ~3 m so the car doesn't spin while parked.
-    if (prev && Math.abs(prev.latitude - next.latitude) + Math.abs(prev.longitude - next.longitude) > 0.00003) {
-      setHeading(bearingBetween(prev, next));
-    }
-    last.current = next;
-  }, [isCar, zone.latitude, zone.longitude]);
-
-  const source =
-    zone.role === "driver"
-      ? illustrations.carTopdown
-      : zone.role === "dropoff"
-        ? illustrations.pinDropoff
-        : illustrations.pinPickup;
-  const size = isCar ? CAR_SIZE : PIN_SIZE;
-
+  const source = zone.role === "dropoff" ? illustrations.pinDropoff : illustrations.pinPickup;
   return (
     <Marker
       coordinate={{ latitude: zone.latitude, longitude: zone.longitude }}
       title={zone.label}
       onPress={onPress}
-      anchor={isCar ? { x: 0.5, y: 0.5 } : { x: 0.5, y: 0.94 }}
-      rotation={isCar ? heading : 0}
-      flat={isCar}
+      anchor={{ x: 0.5, y: 0.94 }}
       draggable={draggable}
       onDragEnd={(e) => onDragEnd?.(e.nativeEvent.coordinate)}
       tracksViewChanges={!ready}
-      zIndex={isCar ? 3 : 2}
+      zIndex={2}
     >
-      <Image source={source} style={{ width: size, height: size }} resizeMode="contain" onLoad={() => setReady(true)} />
+      <Image
+        source={source}
+        style={{ width: PIN_SIZE, height: PIN_SIZE }}
+        resizeMode="contain"
+        onLoad={() => setReady(true)}
+      />
     </Marker>
+  );
+}
+
+/**
+ * The driver's top-down car. It turns to face its direction of travel
+ * (worked out from its last two positions) and glides to each new GPS fix
+ * instead of jumping; with Reduce Motion on it jumps. The glide moves the
+ * native marker, so the image itself stops re-rendering once it has loaded.
+ */
+function CarMarker({ zone, onPress }: { zone: CampusMapZone; onPress: () => void }) {
+  const reduceMotion = useReduceMotion();
+  const [ready, setReady] = useState(false);
+  const [heading, setHeading] = useState(0);
+  const last = useRef<LatLng | null>(null);
+  const latitude = useRef(new Animated.Value(zone.latitude)).current;
+  const longitude = useRef(new Animated.Value(zone.longitude)).current;
+  const coordinate = useRef({ latitude, longitude }).current;
+
+  useEffect(() => {
+    const prev = last.current;
+    const next = { latitude: zone.latitude, longitude: zone.longitude };
+    last.current = next;
+    if (!prev) return;
+    // Ignore GPS jitter under ~3 m so the car doesn't spin while parked.
+    if (Math.abs(prev.latitude - next.latitude) + Math.abs(prev.longitude - next.longitude) > 0.00003) {
+      setHeading(bearingBetween(prev, next));
+    }
+    latitude.stopAnimation();
+    longitude.stopAnimation();
+    if (reduceMotion) {
+      latitude.setValue(next.latitude);
+      longitude.setValue(next.longitude);
+      return;
+    }
+    // Map coordinates aren't native-driver capable: one small JS animation per fix.
+    const glide = { duration: GLIDE_MS, easing: Easing.inOut(Easing.quad), useNativeDriver: false };
+    Animated.parallel([
+      Animated.timing(latitude, { ...glide, toValue: next.latitude }),
+      Animated.timing(longitude, { ...glide, toValue: next.longitude }),
+    ]).start();
+  }, [zone.latitude, zone.longitude, reduceMotion, latitude, longitude]);
+
+  return (
+    <Marker.Animated
+      coordinate={coordinate}
+      title={zone.label}
+      onPress={onPress}
+      anchor={{ x: 0.5, y: 0.5 }}
+      rotation={heading}
+      flat
+      tracksViewChanges={!ready}
+      zIndex={3}
+    >
+      <Image
+        source={illustrations.carTopdown}
+        style={{ width: CAR_SIZE, height: CAR_SIZE }}
+        resizeMode="contain"
+        onLoad={() => setReady(true)}
+      />
+    </Marker.Animated>
   );
 }
 
@@ -264,48 +317,70 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 /** Largest radius of the pickup pulse, in metres on the ground. */
 const PULSE_MAX_RADIUS_M = 70;
+/** PulseRings' look (design/components/PulseRings): green at 22%, fading out. */
+const PULSE_OPACITY = 0.22;
 
 /**
- * A soft ring that grows out from a map point and fades, on a loop. Drawn as
- * a native map Circle (radius in metres) rather than an animated marker
- * view: a custom Marker only animates on Android with tracksViewChanges on,
- * which re-rasterizes the marker every frame.
+ * PulseRings on the map: two rings growing out from a point and fading, the
+ * second half a cycle behind. Drawn as native map Circles (radius in metres)
+ * rather than PulseRings inside a marker: they stay on the point as the map
+ * moves, and a custom Marker only animates on Android with tracksViewChanges
+ * on, which re-rasterizes it every frame. With Reduce Motion on they stand
+ * still, faint, as PulseRings does.
  */
 function ZonePulse({ center }: { center: LatLng }) {
+  return (
+    <>
+      <PulseCircle center={center} delay={0} still={0.55} />
+      <PulseCircle center={center} delay={PULSE_MS / 2} still={1} />
+    </>
+  );
+}
+
+function PulseCircle({ center, delay, still }: { center: LatLng; delay: number; still: number }) {
   const reduceMotion = useReduceMotion();
   const progress = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (reduceMotion) return;
+    if (reduceMotion) {
+      progress.setValue(still);
+      return;
+    }
+    progress.setValue(0);
     // Circle props aren't native-driver capable, so this runs on JS — but it
-    // is one small value, and only while this screen shows it.
-    const loop = Animated.loop(
-      Animated.timing(progress, {
-        toValue: 1,
-        duration: 2200,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: false,
-      }),
-    );
+    // is two small values, and only while this screen shows them.
+    const loop = Animated.sequence([
+      Animated.delay(delay),
+      Animated.loop(
+        Animated.timing(progress, {
+          toValue: 1,
+          duration: PULSE_MS,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: false,
+        }),
+      ),
+    ]);
     loop.start();
     return () => loop.stop();
-  }, [progress, reduceMotion]);
+  }, [progress, reduceMotion, delay, still]);
 
-  if (reduceMotion) return null;
+  const fill = reduceMotion
+    ? withAlpha(colors.green500, PULSE_OPACITY / 3)
+    : progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [withAlpha(colors.green500, PULSE_OPACITY), withAlpha(colors.green500, 0)],
+      });
 
   return (
     <AnimatedCircle
       center={{ latitude: center.latitude, longitude: center.longitude }}
-      radius={progress.interpolate({ inputRange: [0, 1], outputRange: [8, PULSE_MAX_RADIUS_M] })}
-      fillColor={progress.interpolate({
+      radius={progress.interpolate({
         inputRange: [0, 1],
-        outputRange: [withAlpha(colors.primary[500], 0.28), withAlpha(colors.primary[500], 0)],
+        outputRange: [PULSE_MAX_RADIUS_M * 0.15, PULSE_MAX_RADIUS_M],
       })}
-      strokeColor={progress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [withAlpha(colors.primary[500], 0.55), withAlpha(colors.primary[500], 0)],
-      })}
-      strokeWidth={1.5}
+      fillColor={fill}
+      strokeColor="transparent"
+      strokeWidth={0}
       zIndex={1}
     />
   );

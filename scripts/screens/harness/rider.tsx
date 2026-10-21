@@ -20,6 +20,8 @@ import {
   riderActiveRide,
   riderRides,
   riderSearching,
+  riderTrip,
+  riderTripDriverAt,
   roadRoute,
   zones,
 } from "./data";
@@ -59,18 +61,38 @@ const otp = (extra: Partial<Scene>): Scene => ({
   params: { phone: rider.phone },
   ...extra,
 });
-/** Choose a ride reopened on Ama's request, still searching, with its cancel sheet open. */
-const searching = (extra: Partial<Scene>): Scene => ({
-  name: "cancel",
-  note: "map: grey box",
+/** Choose a ride reopened on Ama's request, still searching (`openCancel`: on its cancel steps). */
+const searching = (extra: Partial<Scene>, openCancel = false): Scene => ({
+  name: "searching",
+  note: "map: grey box (the pickup's pulse rings are drawn on the map)",
   user: rider,
   routes: { ...signedIn, [`GET /rides/${riderSearching.ride.id}`]: riderSearching },
   chain: [RootLayout, ChooseRide],
   pathname: "/ride/type",
-  params: { ...routeParams, rideId: riderSearching.ride.id, openCancel: "1" },
+  params: {
+    ...routeParams,
+    rideId: riderSearching.ride.id,
+    ...(openCancel ? { openCancel: "1" } : {}),
+  },
   position: here,
   ...extra,
 });
+/** Ama's ride with Kwame (riderTrip), with one GPS fix from him so there's an ETA. */
+const trip = (stage: "coming" | "arrived" | "onboard", extra: Partial<Scene>): Scene => {
+  const live = riderTrip(stage);
+  return {
+    name: `trip-${stage}`,
+    note: "map: grey box (the car glides on the map)",
+    user: rider,
+    routes: { ...signedIn, [`GET /rides/${live.ride.id}`]: live },
+    chain: [RootLayout, ChooseRide],
+    pathname: "/ride/type",
+    params: { ...routeParams, rideId: live.ride.id },
+    position: here,
+    socket: riderTripDriverAt(stage),
+    ...extra,
+  };
+};
 
 const scenes: Scene[] = [
   {
@@ -241,8 +263,33 @@ const scenes: Scene[] = [
       { type: "Note for driver", text: "At the main gate, blue shirt" },
     ],
   },
-  searching({ name: "cancel-confirm" }),
-  searching({ name: "cancel-reason", steps: [{ press: "Cancel ride" }] }),
+  searching({ name: "searching" }),
+  searching({ name: "cancel-confirm" }, true),
+  searching(
+    { name: "cancel-reason", steps: [{ press: "Cancel ride" }, { press: "Changed plans" }] },
+    true,
+  ),
+  searching({
+    name: "no-drivers",
+    routes: {
+      ...signedIn,
+      [`GET /rides/${riderSearching.ride.id}`]: {
+        ...riderSearching,
+        ride: {
+          ...riderSearching.ride,
+          status: "AWAITING_RIDER_DECISION",
+          decisionStartedAt: new Date(),
+        },
+      },
+    },
+  }),
+  trip("coming", { name: "driver-on-the-way" }),
+  trip("arrived", { name: "driver-arrived" }),
+  trip("onboard", { name: "in-ride-shared" }),
+  trip("coming", {
+    name: "safety-sheet",
+    steps: [{ press: "Safety: share your trip or call emergency services" }],
+  }),
 ];
 
 boot(scenes);
