@@ -14,7 +14,12 @@ import {
   driverHistory,
   driverRequests,
   driverSharedTrip,
+  driverSharedFilling,
+  driverSharedOnTheWay,
   driverTrip,
+  driverTripAt,
+  fitPreview,
+  fitSuggestion,
   newRiderOffer,
   place,
   roadRoute,
@@ -87,6 +92,58 @@ const offerScene = (
   };
 };
 const ACCEPT_LONE = "Accept, 15 cedis";
+
+/**
+ * The trip screen on `ride`, with the driver at `position`. Every step the
+ * driver can take on it is answered (and the passengers' new state isn't
+ * fetched again, so the screen keeps what it showed).
+ */
+const tripScene = (
+  name: string,
+  ride: typeof driverTrip,
+  position: { latitude: number; longitude: number },
+  extra: Partial<Scene> & { routes?: Routes } = {},
+): Scene => {
+  const steps = ride.passengers.flatMap((p) =>
+    ["arrived", "pickup", "dropoff", "cancel"].map((a) => [
+      `POST /rides/${ride.id}/passengers/${p.id}/${a}`,
+      { ok: true },
+    ]),
+  );
+  const { routes, ...rest } = extra;
+  return {
+    name,
+    note: "map: grey box (the route, numbered stops and the car are drawn on the map)",
+    user: driver(true),
+    routes: signedIn({
+      "GET /driver/rides/active": { ride },
+      [`GET /rides/${ride.id}/fill-suggestions`]: {
+        suggestions: [],
+        freeSeats: 4,
+        occupancy: 1,
+        passengers: [],
+      },
+      ...Object.fromEntries(steps),
+      ...routes,
+    }),
+    chain: [RootLayout, TripScreen],
+    pathname: `/ride/${ride.id}`,
+    params: { id: ride.id },
+    position,
+    // Foreground tracking: the harness has no background location task to deliver fixes.
+    locationBackground: "undetermined",
+    ...rest,
+  };
+};
+/** About 400 m from Maison Française. */
+const onTheWay = { latitude: 5.6524, longitude: -0.1868 };
+/** At Kwame's pickup pin. */
+const atPickup = {
+  latitude: place("Maison Française").latitude,
+  longitude: place("Maison Française").longitude,
+};
+/** Between the pickup and Night Market. */
+const midTrip = { latitude: 5.6462, longitude: -0.1868 };
 
 const scenes: Scene[] = [
   {
@@ -170,19 +227,35 @@ const scenes: Scene[] = [
       refuse(409, "Ride taken by another driver.", { code: "RIDE_NOT_AVAILABLE", reason: "TAKEN" }),
     steps: [{ press: ACCEPT_LONE }, { wait: 400 }],
   }),
-  {
-    name: "trip",
-    note: "map: grey box",
-    user: driver(true),
-    routes: signedIn({
-      "GET /driver/rides/active": { ride: driverTrip },
-      [`GET /rides/${driverTrip.id}/fill-suggestions`]: { suggestions: [], freeSeats: 3 },
-    }),
-    chain: [RootLayout, TripScreen],
-    pathname: `/ride/${driverTrip.id}`,
-    params: { id: driverTrip.id },
-    position: here,
-  },
+  tripScene("trip-to-pickup", driverTripAt("coming"), onTheWay),
+  tripScene("trip-near-pickup", driverTripAt("coming"), atPickup, {
+    note: "within the arrival distance of Kwame's pin: I'm here, before automatic arrival",
+  }),
+  tripScene("trip-waiting", driverTripAt("waiting"), atPickup),
+  tripScene("trip-dropoff-cash", driverTripAt("onboard"), midTrip),
+  tripScene("trip-shared", driverSharedOnTheWay, midTrip),
+  tripScene("trip-menu", driverTripAt("coming"), atPickup, {
+    steps: [{ press: "More actions" }, { wait: 300 }],
+  }),
+  tripScene("trip-stops", driverSharedOnTheWay, midTrip, {
+    steps: [{ press: "Show all stops" }, { wait: 300 }],
+  }),
+  tripScene("trip-add-rider", driverSharedFilling, onTheWay, {
+    note: "a rider who fits, offered by itself with the detour the server worked out",
+    routes: {
+      [`GET /rides/${driverSharedFilling.id}/fill-suggestions`]: {
+        suggestions: [fitSuggestion],
+        occupancy: 1,
+        passengers: [],
+      },
+      [`GET /rides/${driverSharedFilling.id}/add-preview`]: fitPreview(driverSharedFilling),
+    },
+    settleMs: 3500,
+  }),
+  tripScene("trip-in-car-toast", driverTripAt("coming"), atPickup, {
+    note: "after the pickup slide (a long-press in the harness)",
+    steps: [{ press: "Slide when Kwame is in" }, { wait: 400 }],
+  }),
 ];
 
 boot(scenes);

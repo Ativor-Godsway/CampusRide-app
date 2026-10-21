@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import * as SecureStore from "expo-secure-store";
 import {
   CAR_SEATS,
   DEFAULT_OFFER_SECONDS,
@@ -24,14 +23,14 @@ import {
   PIN_ARRIVAL_RADIUS_METERS,
   haversineDistanceMeters,
   routeStops,
-  nextStopInstruction,
   noShowAvailableAt,
   riderName,
   stepToast,
   isOutsideServiceArea,
   planTripStops,
+  formatDistance,
+  getSharedFarePerRider,
   routeAttribution,
-  seatStates,
   splitFare,
   tripPath,
   type LatLng,
@@ -39,16 +38,22 @@ import {
   type TripZone,
 } from "@rida/shared";
 import {
+  BottomSheet,
   Button,
   Card,
+  IconButton,
   Illustration,
+  ListRow,
   LoadingState,
+  Notice,
   Screen,
   SessionRestoringScreen,
   SlideToConfirm,
+  StatusChip,
   Text,
   callPhone,
   colors,
+  haptics,
   errorStatus,
   getAddRiderPreview,
   getFillSuggestions,
@@ -59,6 +64,7 @@ import {
   radii,
   shadows,
   spacing,
+  textPhone,
   typography,
   useAuth,
   useCountUp,
@@ -71,8 +77,7 @@ import {
 import { driverActiveRideQueryKey, useDriverActiveTrip } from "../../lib/activeTrip";
 import { useDriverLocation, useLocationDemand } from "../../lib/location";
 import { useZoneRoutes, useZones } from "../../lib/zones";
-import { CountdownBar } from "../../components/offers/CountdownBar";
-import { alertNewOffer, tapFeedback } from "../../lib/offerAlert";
+import { alertNewOffer } from "../../lib/offerAlert";
 import {
   claimPassengerId,
   clearClaim,
@@ -83,13 +88,11 @@ import {
   settleWith,
   useTripActions,
 } from "../../lib/tripActions";
-import { TripMap, type TripPreviewOverlay } from "../../components/trip/TripMap";
+import { TripMap } from "../../components/trip/TripMap";
 import { StopListSheet } from "../../components/trip/StopListSheet";
 import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
-import { SeatDots } from "../../components/trip/SeatDots";
+import { AddRiderTakeover } from "../../components/trip/AddRiderTakeover";
 import { RateRidersPanel } from "../../components/trip/RateRidersPanel";
-
-const SEAT_LEGEND_KEY = "campusride.driver.seatLegendSeen";
 
 /** The trip screen checks its trip more often than the rest of the app (a rider may cancel). */
 const TRIP_POLL_MS = 5_000;
@@ -292,6 +295,8 @@ export default function TripScreen() {
     if (carried.length === 0) return;
     const total = carried.reduce((sum, p) => sum + (p.lockedFare ?? 0), 0);
     const { driverShare, commission } = splitFare(total);
+    // The trip is over.
+    haptics.success();
     setDone({
       rideId: ride.id,
       totalPesewas: total,
@@ -406,7 +411,13 @@ export default function TripScreen() {
   // server so this rider isn't offered to this driver again. A rider the
   // driver opened themselves (Add rider / See route) has no countdown.
   const autoOffer = previewing !== null && !previewing.manual;
-  const [offerClock, setOfferClock] = useState<{ rideId: string; shownAt: number; deadline: number } | null>(null);
+  const [offerClock, setOfferClock] = useState<{
+    rideId: string;
+    shownAt: number;
+    deadline: number;
+    /** "Add" tapped: the countdown stops here. */
+    heldAt?: number;
+  } | null>(null);
   useEffect(() => {
     if (!autoOffer || !previewData || offerClock?.rideId === previewData.requestRideId) return;
     const shownAt = Date.now();
@@ -450,24 +461,14 @@ export default function TripScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [previewData?.proposedPolyline],
   );
-  const previewOverlay = useMemo<TripPreviewOverlay | null>(() => {
-    if (!previewData) return null;
-    return {
-      stops: previewData.stops.map((st) => ({
-        key: st.key,
-        kind: st.kind,
-        isNew: st.isNew,
-        riderFirstName: st.riderFirstName,
-        zone: { name: st.label ?? st.zoneName, latitude: st.latitude, longitude: st.longitude },
-      })),
-      // What's ahead only: cut off what the driver has already driven.
-      path: position && proposedFull.length >= 2 ? trimPathToPosition(proposedFull, position) : proposedFull,
-      committing,
-    };
-  }, [previewData, proposedFull, position, committing]);
+  // The proposed route, ahead of the driver only (the add-rider takeover's map).
+  const previewPath = useMemo(
+    () => (position && proposedFull.length >= 2 ? trimPathToPosition(proposedFull, position) : proposedFull),
+    [proposedFull, position],
+  );
 
-  // "Add": the dotted route turns solid, then the rider joins the car and the
-  // trip's own route (which is the same line) takes over.
+  // "Add": a moment's spinner on the takeover (its countdown stopped), then
+  // the rider joins the car and the trip's own route takes over.
   const commitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => {
     if (commitTimer.current) clearTimeout(commitTimer.current);
@@ -475,6 +476,7 @@ export default function TripScreen() {
   const acceptPreview = useCallback(() => {
     if (!ride || !previewing || !previewData || committing) return;
     setCommitting(true);
+    setOfferClock((c) => (c ? { ...c, heldAt: Date.now() } : c));
     const { suggestion } = previewing;
     const fare = previewData.farePesewas;
     commitTimer.current = setTimeout(() => {
@@ -490,6 +492,7 @@ export default function TripScreen() {
   const [topHeight, setTopHeight] = useState(insets.top + 64);
   const [stopsOpen, setStopsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
 
   const now = useNow(next?.kind === "PICKUP" && next.passengerStatus === "ARRIVED");
@@ -507,28 +510,6 @@ export default function TripScreen() {
     },
     [plan.upcoming, showToast],
   );
-
-  // The seat dots explain themselves the first time a driver sees them.
-  const [seatLegend, setSeatLegend] = useState(false);
-  useEffect(() => {
-    if (ride?.type !== "SHARED") return;
-    let cancelled = false;
-    void SecureStore.getItemAsync(SEAT_LEGEND_KEY)
-      .then((seen) => {
-        if (cancelled || seen) return;
-        setSeatLegend(true);
-        void SecureStore.setItemAsync(SEAT_LEGEND_KEY, "1").catch(() => {});
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [ride?.type]);
-  useEffect(() => {
-    if (!seatLegend) return;
-    const t = setTimeout(() => setSeatLegend(false), 10_000);
-    return () => clearTimeout(t);
-  }, [seatLegend]);
 
   const goHome = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
@@ -642,7 +623,39 @@ export default function TripScreen() {
   const tripFare = passengers
     .filter((p) => p.status !== "CANCELLED")
     .reduce((sum, p) => sum + (p.lockedFare ?? 0), 0);
-  const seats = seatStates(passengers);
+  const price = tripFare > 0 ? ` · ${formatCedis(tripFare)}` : "";
+  const pill =
+    ride.type === "SHARED"
+      ? `Shared · ${activeSeats}/${CAR_SEATS} seats${price}`
+      : `Ride alone${price}`;
+
+  // The next pickup's own actions, for the ⋯ menu.
+  const nextPickup = next?.kind === "PICKUP" ? next : null;
+  const nextName = next ? riderName(next) : "";
+  const noShowAt = noShowAvailableAt(nextPickup?.arrivedAt);
+  const canNoShow = noShowAt !== null && now >= noShowAt;
+  const actOnNext = (action: Parameters<typeof runPassengerAction>[2]) => {
+    if (next) runPassengerAction(ride.id, next.passengerId, action);
+  };
+  const closeMenuThen = (then: () => void) => {
+    setMenuOpen(false);
+    then();
+  };
+  const confirmCancelPickup = () =>
+    Alert.alert(`Remove ${nextName}?`, "They'll be told their pickup was cancelled.", [
+      { text: "Keep", style: "cancel" },
+      { text: "Remove", style: "destructive", onPress: () => actOnNext("cancel") },
+    ]);
+  const confirmNoShow = () =>
+    Alert.alert(`${nextName} didn't show?`, "Their pickup is cancelled and they're told why.", [
+      { text: "Keep waiting", style: "cancel" },
+      { text: "Cancel pickup", style: "destructive", onPress: () => actOnNext("no-show") },
+    ]);
+  const tellHere = () => {
+    if (!next) return;
+    actOnNext("arrived");
+    onStep(next, "arrived");
+  };
 
   return (
     <View style={styles.root}>
@@ -652,176 +665,123 @@ export default function TripScreen() {
         path={path}
         insets={{ top: topHeight, bottom: cardHeight }}
         attribution={live.attribution ?? (storedRoutes.length > 0 ? routeAttribution(storedRoutes[0]!.provider) : null)}
-        preview={previewOverlay}
       />
 
-
-      {seatLegend ? (
-        <Pressable
-          onPress={() => setSeatLegend(false)}
-          style={[styles.legend, { top: topHeight + spacing.xs }]}
-          accessibilityRole="button"
-          accessibilityLabel="Seat dots: filled means in the car, light means to pick up, empty means a free seat. Dismiss."
-        >
-          <Text variant="caption" style={styles.legendText}>
-            ● in the car · ◐ to pick up · ○ free seat
-          </Text>
-        </Pressable>
-      ) : null}
-
-      <TopBar onBack={goHome} onLayout={(e) => setTopHeight(e.nativeEvent.layout.height)} syncing={actions.retrying}>
-        {ride.type === "SHARED" ? (
-          <View style={styles.seatChip} accessible accessibilityLabel={`${activeSeats} of ${CAR_SEATS} seats taken`}>
-            <SeatDots seats={seats} />
-            <Text variant="caption" style={styles.chipText}>
-              {activeSeats} of {CAR_SEATS}
-            </Text>
-          </View>
-        ) : (
-          <Chip label="Ride alone" />
-        )}
-        {tripFare > 0 ? <Chip label={formatCedis(tripFare)} /> : null}
-        {farFromCampus ? <Chip label="Far from campus" warn /> : null}
-        {location.isFake && location.fake && next ? (
-          <Pressable
-            onPress={() =>
-              location.fake!.driving
-                ? location.fake!.driveAlong(null)
-                : location.fake!.driveAlong(position ? pathToNext : null)
-            }
-            accessibilityRole="button"
-            accessibilityLabel={location.fake.driving ? "Stop the fake drive" : "Fake-drive to the next stop"}
-          >
-            <Chip label={location.fake.driving ? "■ Stop" : "▶ Drive (fake)"} warn />
-          </Pressable>
-        ) : null}
-      </TopBar>
+      <TopBar
+        label={pill}
+        onBack={goHome}
+        onMore={() => setMenuOpen(true)}
+        onLayout={(e) => setTopHeight(e.nativeEvent.layout.height)}
+        syncing={actions.retrying}
+        farFromCampus={farFromCampus}
+      />
 
       <View
-        style={[styles.card, { paddingBottom: insets.bottom + spacing.lg }]}
+        style={[styles.card, { paddingBottom: insets.bottom + spacing[4] }]}
         onLayout={(e) => setCardHeight(e.nativeEvent.layout.height)}
       >
+        <View style={styles.handle} />
         {refusal ? (
-          <View style={styles.refusal} accessibilityLiveRegion="polite">
-            <Ionicons name="alert-circle" size={18} color={colors.danger} />
-            <Text variant="bodySmall" style={styles.refusalText}>
-              {refusal}
-            </Text>
-            <Pressable onPress={() => setRefusal(null)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Dismiss">
-              <Text variant="bodySmall" style={styles.refusalOk}>OK</Text>
-            </Pressable>
-          </View>
-        ) : null}
-
-        {previewing && (!autoOffer || previewData) ? (
-          // The new rider, plainly: where from, where to, and Add. Never
-          // taller than it needs to be, so the NEXT STOP card and its slider
-          // below always stay in view.
-          <View style={styles.previewCard} accessibilityLiveRegion="polite">
-            {autoOffer && offerClock ? (
-              <CountdownBar deadline={offerClock.deadline} totalMs={offerClock.deadline - offerClock.shownAt} />
-            ) : null}
-            <Pressable
-              onPress={() => {
-                tapFeedback();
-                passOnOffer("DECLINED");
-              }}
-              disabled={committing}
-              accessibilityRole="button"
-              accessibilityLabel={autoOffer ? "Decline this rider" : "Close"}
-              hitSlop={10}
-              style={styles.previewClose}
-            >
-              <Ionicons name="close" size={20} color={colors.ink2} />
-            </Pressable>
-            <View
-              style={styles.previewRoute}
-              accessible
-              accessibilityLabel={`New rider, from ${previewing.suggestion.pickupPlaceName ?? previewing.suggestion.pickupZoneName} to ${previewing.suggestion.dropoffPlaceName ?? previewing.suggestion.dropoffZoneName}`}
-            >
-              <View style={styles.previewMarkers}>
-                <View style={styles.previewPickupDot} />
-                <View style={styles.previewConnector} />
-                <View style={styles.previewDropoffSquare} />
-              </View>
-              <View style={styles.previewPlaces}>
-                <Text style={styles.previewPlace}>
-                  {previewing.suggestion.pickupPlaceName ?? previewing.suggestion.pickupZoneName}
-                </Text>
-                <Text style={styles.previewPlace}>
-                  {previewing.suggestion.dropoffPlaceName ?? previewing.suggestion.dropoffZoneName}
-                </Text>
-              </View>
-            </View>
-            <Pressable
-              onPress={() => {
-                tapFeedback();
-                acceptPreview();
-              }}
-              disabled={!previewData || committing}
-              accessibilityRole="button"
-              accessibilityLabel="Add this rider"
-              style={({ pressed }) => [
-                styles.previewAdd,
-                (pressed || committing) && styles.previewAddPressed,
-                !previewData && styles.previewAddWaiting,
-              ]}
-            >
-              <Text style={[styles.previewAddText, !previewData && styles.previewAddWaitingText]}>
-                {previewData ? "Add" : "Checking the route…"}
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => setRefusal(null)}
+            accessibilityRole="button"
+            accessibilityHint="Dismiss"
+          >
+            <Notice tone="error" icon="alert-circle-outline" message={refusal} />
+          </Pressable>
         ) : null}
 
         {next ? (
           <NextStopCard
             ride={ride}
             stop={next}
+            stopNumber={plan.doneCount + 1}
+            stopCount={plan.totalCount}
             etaMinutes={etaMinutes}
+            distanceMeters={position ? haversineDistanceMeters(position, next.point) : null}
             atStop={atNextStop}
             now={now}
+            canNoShow={canNoShow}
             onStep={onStep}
+            onTellHere={tellHere}
+            onNoShow={confirmNoShow}
+            onStops={() => setStopsOpen(true)}
           />
         ) : (
-          <Text variant="bodySmall" color="muted">Finishing up…</Text>
+          <Text variant="subhead" color="secondary">
+            Finishing up…
+          </Text>
         )}
+      </View>
 
-        <View style={styles.footerRow}>
-          {plan.upcoming.length > 1 ? (
-            <Pressable
-              onPress={() => setStopsOpen(true)}
-              style={styles.moreStops}
-              accessibilityRole="button"
-              accessibilityLabel={`${plan.upcoming.length - 1} more stops. Show all stops.`}
-            >
-              <Ionicons name="list" size={16} color={colors.ink} />
-              <Text variant="bodySmall" style={styles.moreStopsText}>
-                {plan.upcoming.length - 1} more stop{plan.upcoming.length - 1 === 1 ? "" : "s"}
-              </Text>
-            </Pressable>
-          ) : (
-            <View />
-          )}
-          {ride.type === "SHARED" ? (
-            <View style={styles.seatsAndAdd}>
-              {canAddRiders && freeSeats > 0 ? (
-                <Pressable
-                  onPress={() => setAddOpen(true)}
-                  style={styles.addChip}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Add a rider. ${suggestions.length} waiting nearby.`}
-                >
-                  <Ionicons name="person-add-outline" size={14} color={colors.primary[600]} />
-                  <Text variant="caption" style={styles.addChipText}>
-                    Add rider{suggestions.length > 0 ? ` (${suggestions.length})` : ""}
-                  </Text>
-                </Pressable>
-              ) : null}
-            </View>
+      {/* The ⋯ menu: everything that isn't the one thing to do now. */}
+      <BottomSheet modal visible={menuOpen} onDismiss={() => setMenuOpen(false)} accessibilityLabel="Trip actions">
+        <View>
+          {nextPickup?.passengerStatus === "WAITING" ? (
+            <ListRow
+              title="I'm here"
+              subtitle={`Tell ${nextName} you've arrived`}
+              leading={<ListRow.Icon name="flag-outline" />}
+              onPress={() => closeMenuThen(tellHere)}
+            />
+          ) : null}
+          {canAddRiders && freeSeats > 0 ? (
+            <ListRow
+              divider={nextPickup?.passengerStatus === "WAITING"}
+              title="Add a rider"
+              subtitle={`${freeSeats} free seat${freeSeats === 1 ? "" : "s"} · ${suggestions.length} waiting near you`}
+              leading={<ListRow.Icon name="person-add-outline" />}
+              onPress={() => closeMenuThen(() => setAddOpen(true))}
+            />
+          ) : null}
+          <ListRow
+            divider={nextPickup?.passengerStatus === "WAITING" || (canAddRiders && freeSeats > 0)}
+            title="Stops"
+            subtitle={`${plan.upcoming.length} to go`}
+            leading={<ListRow.Icon name="list-outline" />}
+            onPress={() => closeMenuThen(() => setStopsOpen(true))}
+          />
+          {nextPickup?.passengerStatus === "WAITING" ? (
+            <ListRow
+              divider
+              tone="danger"
+              title="Cancel pickup"
+              subtitle={`${nextName} is told their pickup was cancelled`}
+              leading={<ListRow.Icon name="close-circle-outline" tone="danger" />}
+              showChevron={false}
+              onPress={() => closeMenuThen(confirmCancelPickup)}
+            />
+          ) : null}
+          {nextPickup?.passengerStatus === "ARRIVED" ? (
+            <ListRow
+              divider
+              tone="danger"
+              title="Rider didn't show"
+              subtitle={canNoShow ? `Cancel ${nextName}'s pickup` : `After ${formatWait(NO_SHOW_AFTER_MS)} of waiting`}
+              leading={<ListRow.Icon name="person-remove-outline" tone="danger" />}
+              showChevron={false}
+              disabled={!canNoShow}
+              onPress={() => closeMenuThen(confirmNoShow)}
+            />
+          ) : null}
+          {location.isFake && location.fake && next ? (
+            <ListRow
+              divider
+              title={location.fake.driving ? "Stop the fake drive" : "Drive (fake)"}
+              subtitle="Developer: move the fake position to the next stop"
+              leading={<ListRow.Icon name={location.fake.driving ? "stop-outline" : "play-outline"} />}
+              showChevron={false}
+              onPress={() =>
+                closeMenuThen(() =>
+                  location.fake!.driving
+                    ? location.fake!.driveAlong(null)
+                    : location.fake!.driveAlong(position ? pathToNext : null),
+                )
+              }
+            />
           ) : null}
         </View>
-      </View>
+      </BottomSheet>
 
       <StopListSheet
         visible={stopsOpen}
@@ -830,7 +790,6 @@ export default function TripScreen() {
         passengers={passengers}
         nextEtaMinutes={etaMinutes}
       />
-      {toast}
       <AddRiderSheet
         visible={addOpen}
         onClose={() => setAddOpen(false)}
@@ -842,162 +801,210 @@ export default function TripScreen() {
           setAddOpen(false);
         }}
       />
+
+      {previewing && (!autoOffer || previewData) ? (
+        <AddRiderTakeover
+          key={previewing.suggestion.requestRideId}
+          suggestion={previewing.suggestion}
+          preview={previewData}
+          car={position}
+          zones={zones}
+          path={previewPath}
+          countdown={
+            autoOffer && offerClock
+              ? {
+                  deadline: offerClock.deadline,
+                  totalMs: offerClock.deadline - offerClock.shownAt,
+                  frozenAt: committing ? offerClock.heldAt : undefined,
+                }
+              : null
+          }
+          sharedFarePesewas={getSharedFarePerRider(1)}
+          freeSeats={freeSeats}
+          committing={committing}
+          onAdd={acceptPreview}
+          onDecline={() => passOnOffer("DECLINED")}
+        />
+      ) : null}
+
+      {/* Last, so it sits on top of everything, under the status bar. */}
+      {toast}
     </View>
   );
 }
 
 // ─── Next stop ───────────────────────────────────────────────────────────────
 
+/**
+ * The sheet (docs/mockups/11-driver-trip.png): what's next and where, the
+ * rider's note, round Navigate · Call · Message · Stops, and ONE slide at the
+ * bottom — "Slide when Kwame is in" at a pickup, the dark cash slide at a
+ * drop-off with the amount large above it. Near the pickup, "I'm here ·
+ * tell Kwame"; once there, how long the driver has been waiting.
+ */
 function NextStopCard({
   ride,
   stop,
+  stopNumber,
+  stopCount,
   etaMinutes,
+  distanceMeters,
   atStop,
   now,
+  canNoShow,
   onStep,
+  onTellHere,
+  onNoShow,
+  onStops,
 }: {
   ride: RideWithZones;
   stop: TripStop;
+  stopNumber: number;
+  stopCount: number;
   etaMinutes: number | null;
+  /** Straight-line, from the driver to the stop; null without a position. */
+  distanceMeters: number | null;
   atStop: boolean;
   now: number;
+  /** "Rider didn't show" is open (NO_SHOW_AFTER_MS after arriving). */
+  canNoShow: boolean;
   onStep: (stop: TripStop, step: "arrived" | "pickup" | "dropoff") => void;
+  onTellHere: () => void;
+  onNoShow: () => void;
+  onStops: () => void;
 }) {
   const name = riderName(stop);
-  const where =
-    atStop || (stop.kind === "PICKUP" && stop.passengerStatus === "ARRIVED")
-      ? "you're here"
-      : etaMinutes !== null
-        ? `${etaMinutes} min away`
-        : null;
   const act = (action: Parameters<typeof runPassengerAction>[2]) => runPassengerAction(ride.id, stop.passengerId, action);
-
-  const arrived = stop.kind === "PICKUP" && stop.passengerStatus === "ARRIVED";
+  const pickup = stop.kind === "PICKUP";
+  const arrived = pickup && stop.passengerStatus === "ARRIVED";
   const arrivedAt = stop.arrivedAt ? Date.parse(stop.arrivedAt) : null;
-  const noShowAt = noShowAvailableAt(stop.arrivedAt);
-  const canNoShow = noShowAt !== null && now >= noShowAt;
   const cash = ride.paymentMethod === "CASH";
+  const fare = stop.farePesewas !== null ? formatCedis(stop.farePesewas) : null;
+
+  const where = [
+    stop.label,
+    ...(atStop || arrived
+      ? ["you're here"]
+      : [
+          etaMinutes !== null ? `${etaMinutes} min` : null,
+          distanceMeters !== null ? formatDistance(distanceMeters) : null,
+        ]),
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <View style={styles.nextStop}>
       <View style={styles.nextHeader}>
-        <Text variant="label" color="muted">
-          NEXT STOP · {stop.kind === "PICKUP" ? "PICKUP" : "DROP-OFF"}
+        <Text variant="eyebrow" color="secondary">
+          Next stop · {pickup ? "Pickup" : "Drop-off"}
+        </Text>
+        <Text variant="subhead" color="secondary" tabular>
+          Stop {stopNumber} of {stopCount}
         </Text>
       </View>
-      {/* What to do now, in plain words. */}
-      <Text variant="h3" numberOfLines={2} accessibilityRole="header">
-        {nextStopInstruction(stop, { cash, formatFare: formatCedis })}
-      </Text>
-      {where ? (
-        <Text variant="bodySmall" color="muted" numberOfLines={1}>
-          {where === "you're here" ? "You're here" : where}
+      <View style={styles.nextTitle}>
+        {/* What to do now, in plain words. */}
+        <Text style={styles.instruction} numberOfLines={2} accessibilityRole="header">
+          {pickup ? "Pick up" : "Drop off"} {name}
         </Text>
-      ) : null}
+        <Text variant="subhead" color="secondary" numberOfLines={2}>
+          {where}
+        </Text>
+      </View>
 
       {stop.note ? (
         <View style={styles.noteRow} accessible accessibilityLabel={`Note from ${name}: ${stop.note}`}>
-          <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.ink2} />
-          <Text variant="bodySmall" style={styles.noteText} numberOfLines={3}>
+          <Ionicons name="chatbox-outline" size={18} color={colors.ink2} />
+          <Text variant="body" style={styles.noteText} numberOfLines={3}>
             “{stop.note}”
           </Text>
         </View>
       ) : null}
 
-      {arrived && arrivedAt !== null ? (
-        <View style={styles.waitRow}>
-          <Ionicons name="checkmark-circle" size={18} color={colors.primary[500]} />
-          <Text variant="bodySmall" style={styles.waitText}>
-            {name} knows you&apos;re here
-          </Text>
-          <Text variant="bodySmall" color="muted">
-            Waiting {formatWait(now - arrivedAt)}
-          </Text>
-        </View>
-      ) : null}
-
-      {stop.kind === "DROPOFF" && stop.farePesewas !== null ? (
-        <View style={styles.cashBox} accessible accessibilityLabel={`${cash ? "Collect cash" : "Fare"}: ${formatCedis(stop.farePesewas)}`}>
-          <Text variant="bodySmall" style={styles.cashLabel}>
-            {cash ? "Collect cash" : "Fare (paid by MoMo)"}
-          </Text>
-          <Text variant="h1" style={styles.cashAmount}>
-            {formatCedis(stop.farePesewas)}
-          </Text>
-        </View>
-      ) : null}
-
-      {/* Navigate + Call. Each takes half the width and may shrink; nothing runs off the edge. */}
-      <View style={styles.actionRow}>
-        <View style={styles.actionCell}>
-          <Button
+      <View style={styles.actions}>
+        <View style={styles.action}>
+          <IconButton
+            variant="brand"
+            icon="navigate-outline"
             label="Navigate"
-            variant="secondary"
+            accessibilityLabel={`Navigate to ${stop.label}`}
             onPress={() => void openDirections({ latitude: stop.point.latitude, longitude: stop.point.longitude, label: stop.label })}
           />
         </View>
-        {stop.riderPhone ? (
-          <View style={styles.actionCell}>
-            <Button label={`Call ${name}`} variant="secondary" onPress={() => void callPhone(stop.riderPhone, name)} />
-          </View>
-        ) : null}
+        <View style={styles.action}>
+          <IconButton
+            icon="call-outline"
+            label="Call"
+            accessibilityLabel={`Call ${name}`}
+            disabled={!stop.riderPhone}
+            onPress={() => void callPhone(stop.riderPhone, name)}
+          />
+        </View>
+        <View style={styles.action}>
+          <IconButton
+            icon="chatbox-outline"
+            label="Message"
+            accessibilityLabel={`Text ${name}`}
+            disabled={!stop.riderPhone}
+            onPress={() => void textPhone(stop.riderPhone, name)}
+          />
+        </View>
+        <View style={styles.action}>
+          <IconButton icon="list-outline" label="Stops" accessibilityLabel="Show all stops" onPress={onStops} />
+        </View>
       </View>
 
-      {stop.kind === "PICKUP" ? (
-        <>
-          {/* Keyed by stop: every stop gets a fresh slider, so it can never
-              stay stuck at the end when two stops share a label. */}
-          <SlideToConfirm
-            key={stop.key}
-            label={`${name} picked up`}
-            doneLabel="Picked up"
-            onConfirm={() => {
-              if (stop.passengerStatus === "WAITING") act("arrived");
-              act("pickup");
-              onStep(stop, "pickup");
-            }}
-          />
-          <View style={styles.smallLinks}>
-            {stop.passengerStatus === "WAITING" ? (
-              <>
-                <SmallLink
-                  label="I'm here"
-                  onPress={() => {
-                    act("arrived");
-                    onStep(stop, "arrived");
-                  }}
-                  hint="Tell the rider you've arrived"
-                />
-                <SmallLink
-                  label="Cancel pickup"
-                  danger
-                  onPress={() =>
-                    Alert.alert(`Remove ${name}?`, "They'll be told their pickup was cancelled.", [
-                      { text: "Keep", style: "cancel" },
-                      { text: "Remove", style: "destructive", onPress: () => act("cancel") },
-                    ])
-                  }
-                />
-              </>
-            ) : (
-              <SmallLink
-                label={canNoShow || noShowAt === null ? "Rider didn't show" : `Rider didn't show (at ${formatWait(NO_SHOW_AFTER_MS)})`}
-                danger
-                disabled={!canNoShow}
-                onPress={() =>
-                  Alert.alert(`${name} didn't show?`, "Their pickup is cancelled and they're told why.", [
-                    { text: "Keep waiting", style: "cancel" },
-                    { text: "Cancel pickup", style: "destructive", onPress: () => act("no-show") },
-                  ])
-                }
-              />
-            )}
+      {pickup && stop.passengerStatus === "WAITING" && atStop ? (
+        <Button
+          label={`I'm here · tell ${name}`}
+          variant="secondary"
+          size="md"
+          onPress={onTellHere}
+          accessibilityHint="Tell the rider you've arrived"
+        />
+      ) : null}
+
+      {arrived && arrivedAt !== null ? (
+        <View style={styles.waitRow}>
+          <View style={styles.waitChip} accessible accessibilityLabel={`Waiting for ${formatWait(now - arrivedAt)}`}>
+            <Ionicons name="time-outline" size={16} color={colors.ink2} />
+            <Text variant="subhead" style={styles.waitText} tabular>
+              Waiting · {formatWait(now - arrivedAt)}
+            </Text>
           </View>
-        </>
+          {canNoShow ? <Button label="Rider didn't show" variant="danger" size="pill" onPress={onNoShow} /> : null}
+        </View>
+      ) : null}
+
+      {!pickup && cash && fare ? (
+        <View style={styles.collect} accessible accessibilityLabel={`Collect ${fare} cash`}>
+          <Text variant="title3">Collect</Text>
+          <Text variant="display" tabular>
+            {fare}
+          </Text>
+          <Text variant="title3">cash</Text>
+        </View>
+      ) : null}
+
+      {/* Keyed by stop: every stop gets a fresh slider, so it can never stay
+          stuck at the end when two stops share a label. It buzzes (medium)
+          as it completes. */}
+      {pickup ? (
+        <SlideToConfirm
+          key={stop.key}
+          label={`Slide when ${name} is in`}
+          doneLabel="Picked up"
+          onConfirm={() => {
+            if (stop.passengerStatus === "WAITING") act("arrived");
+            act("pickup");
+            onStep(stop, "pickup");
+          }}
+        />
       ) : (
         <SlideToConfirm
           key={stop.key}
-          label={cash ? `Cash collected from ${name}` : `${name} dropped off`}
+          label={cash ? `Slide when you have ${fare ?? "the fare"}` : `Slide when ${name} is out`}
           doneLabel={cash ? "Cash collected" : "Dropped off"}
           tone="dark"
           onConfirm={() => {
@@ -1012,76 +1019,50 @@ function NextStopCard({
 
 // ─── Small pieces ────────────────────────────────────────────────────────────
 
+/** Back · "Ride alone · GH₵15" · ⋯, floating on the map. */
 function TopBar({
+  label,
   onBack,
+  onMore,
   onLayout,
   syncing,
-  children,
+  farFromCampus,
 }: {
+  label: string;
   onBack: () => void;
+  onMore: () => void;
   onLayout: (e: LayoutChangeEvent) => void;
   syncing: boolean;
-  children: React.ReactNode;
+  farFromCampus: boolean;
 }) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]} onLayout={onLayout} pointerEvents="box-none">
-      {/* Minimise: the trip carries on; the banner on every tab brings the driver back. */}
-      <Pressable onPress={onBack} accessibilityRole="button" accessibilityLabel="Go to Home. Your trip continues." hitSlop={6} style={styles.roundButton}>
-        <Ionicons name="arrow-back" size={22} color={colors.ink} />
-      </Pressable>
-      <View style={styles.chips}>{children}</View>
-      {syncing ? (
-        <View style={styles.syncing} accessibilityLiveRegion="polite" accessibilityLabel="Sending. Waiting for a connection.">
-          <Ionicons name="cloud-upload-outline" size={16} color={colors.ink2} />
-          <Text variant="caption" color="muted">Sending…</Text>
+    <View style={[styles.topBar, { paddingTop: insets.top + spacing[2] }]} onLayout={onLayout} pointerEvents="box-none">
+      <View style={styles.topRow} pointerEvents="box-none">
+        {/* Minimise: the trip carries on; the banner on every tab brings the driver back. */}
+        <IconButton variant="map" icon="arrow-back" accessibilityLabel="Go to Home. Your trip continues." onPress={onBack} />
+        <View style={styles.pill} accessible accessibilityLabel={label}>
+          <Text variant="bodyStrong" numberOfLines={1} tabular>
+            {label}
+          </Text>
+        </View>
+        <IconButton variant="map" icon="ellipsis-horizontal" accessibilityLabel="More actions" onPress={onMore} />
+      </View>
+      {syncing || farFromCampus ? (
+        <View style={styles.statusRow} pointerEvents="none">
+          {syncing ? (
+            <StatusChip
+              tone="neutral"
+              icon="cloud-upload-outline"
+              label="Sending…"
+              style={styles.floating}
+              accessibilityLabel="Sending. Waiting for a connection."
+            />
+          ) : null}
+          {farFromCampus ? <StatusChip tone="warn" label="Far from campus" style={styles.floating} /> : null}
         </View>
       ) : null}
     </View>
-  );
-}
-
-function Chip({ label, warn }: { label: string; warn?: boolean }) {
-  return (
-    <View style={[styles.chip, warn && styles.chipWarn]}>
-      <Text variant="caption" style={[styles.chipText, warn && styles.chipWarnText]}>
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-function SmallLink({
-  label,
-  onPress,
-  danger,
-  disabled,
-  hint,
-}: {
-  label: string;
-  onPress: () => void;
-  danger?: boolean;
-  disabled?: boolean;
-  hint?: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      hitSlop={8}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityHint={hint}
-      accessibilityState={{ disabled: Boolean(disabled) }}
-      style={styles.smallLink}
-    >
-      <Text
-        variant="bodySmall"
-        style={[styles.smallLinkText, danger && styles.smallLinkDanger, disabled && styles.smallLinkDisabled]}
-      >
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -1095,180 +1076,69 @@ function CountUpCedis({ pesewas }: { pesewas: number }) {
 }
 
 const styles = StyleSheet.create({
-  noteRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: spacing.xs,
-    padding: spacing.sm,
-    borderRadius: radii.md,
-    backgroundColor: colors.surfaceMuted,
-  },
-  noteText: { flex: 1, color: colors.ink, fontStyle: "italic" },
-  root: { flex: 1, backgroundColor: colors.background },
+  root: { flex: 1, backgroundColor: colors.mapLand },
   center: { flex: 1, alignItems: "center", justifyContent: "center", gap: spacing.lg, paddingHorizontal: spacing.xl },
   centerText: { textAlign: "center" },
   earnCard: { alignItems: "center", paddingVertical: spacing.xl, gap: spacing.sm, width: "100%" },
   earnAmount: { fontWeight: typography.weight.extrabold },
   earnSub: { color: "rgba(255,255,255,0.7)", textAlign: "center" },
-  topBar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-  },
-  roundButton: {
-    width: 44,
+  // ── Top bar
+  topBar: { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: spacing.gutter, paddingBottom: spacing[2], gap: spacing[2] },
+  topRow: { flexDirection: "row", alignItems: "center", gap: spacing[2] },
+  pill: {
+    flex: 1,
     height: 44,
-    borderRadius: 22,
-    backgroundColor: colors.white,
-    alignItems: "center",
     justifyContent: "center",
-    ...shadows.md,
-  },
-  chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing.xs, flexShrink: 1 },
-  chip: {
-    backgroundColor: colors.white,
-    borderRadius: radii.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    ...shadows.sm,
-  },
-  chipText: { fontWeight: typography.weight.bold, color: colors.ink },
-  seatChip: {
-    flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
-    backgroundColor: colors.white,
+    paddingHorizontal: spacing[4],
     borderRadius: radii.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    ...shadows.sm,
+    backgroundColor: colors.surface,
+    ...shadows.float,
   },
-  chipWarn: { backgroundColor: colors.warningSurface },
-  chipWarnText: { color: colors.warning },
-  syncing: {
-    marginLeft: "auto",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: colors.white,
-    borderRadius: radii.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-  },
+  statusRow: { flexDirection: "row", justifyContent: "center", gap: spacing[2] },
+  floating: { ...shadows.float },
+  // ── The sheet
   card: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radii["2xl"],
-    borderTopRightRadius: radii["2xl"],
-    paddingHorizontal: spacing.xl,
-    paddingTop: spacing.lg,
-    gap: spacing.md,
-    ...shadows.lg,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radii.xl,
+    borderTopRightRadius: radii.xl,
+    paddingHorizontal: spacing.gutter,
+    paddingTop: spacing[2],
+    gap: spacing[4],
+    ...shadows.sheet,
   },
-  legend: {
-    position: "absolute",
-    alignSelf: "center",
-    backgroundColor: colors.white,
-    borderRadius: radii.full,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    zIndex: 4,
-    ...shadows.md,
-  },
-  legendText: { color: colors.ink, fontWeight: typography.weight.semibold },
-  previewCard: {
-    gap: spacing.md,
-    backgroundColor: colors.primary[50],
-    borderRadius: radii.lg,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.md + 4,
-    paddingBottom: spacing.md,
-    overflow: "hidden",
-  },
-  previewClose: {
-    position: "absolute",
-    top: spacing.sm,
-    right: spacing.sm,
-    width: 32,
-    height: 32,
-    borderRadius: radii.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.white,
-    zIndex: 1,
-  },
-  previewRoute: { flexDirection: "row", gap: spacing.md, paddingRight: 36 },
-  previewMarkers: { alignItems: "center", paddingTop: 7, width: 12 },
-  previewPickupDot: { width: 11, height: 11, borderRadius: radii.full, backgroundColor: colors.primary[500] },
-  previewConnector: { width: 2, flex: 1, minHeight: 14, backgroundColor: colors.primary[200], marginVertical: 3 },
-  previewDropoffSquare: { width: 11, height: 11, borderRadius: 2, backgroundColor: colors.ink, marginBottom: 7 },
-  previewPlaces: { flex: 1, gap: spacing.sm },
-  previewPlace: { fontSize: 18, lineHeight: 23, fontWeight: typography.weight.bold, color: colors.ink },
-  previewAdd: {
-    height: 52,
-    borderRadius: radii.lg,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.primary[500],
-  },
-  previewAddPressed: { backgroundColor: colors.primary[600] },
-  // Still checking: the disabled look (surface-3, ink-3), so its label stays readable.
-  previewAddWaiting: { backgroundColor: colors.surface3 },
-  previewAddWaitingText: { color: colors.ink3 },
-  previewAddText: { color: colors.white, fontSize: 18, fontWeight: typography.weight.extrabold },
-  refusal: {
+  handle: { alignSelf: "center", width: 36, height: 5, borderRadius: 3, backgroundColor: colors.surface3 },
+  nextStop: { gap: spacing[4] },
+  nextHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing[2] },
+  nextTitle: { gap: spacing[1], marginTop: -spacing[2] },
+  // 24/800 in the spec: between title-2 and title-1, for the one instruction.
+  instruction: { fontSize: 24, lineHeight: 30, fontWeight: "800", color: colors.ink },
+  noteRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.sm,
-    backgroundColor: colors.errorSurface,
+    gap: spacing[3],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
     borderRadius: radii.md,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface2,
   },
-  refusalText: { flex: 1, color: colors.danger },
-  refusalOk: { color: colors.danger, fontWeight: typography.weight.bold },
-  nextStop: { gap: spacing.sm },
-  nextHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  waitRow: { flexDirection: "row", alignItems: "center", gap: spacing.xs, flexWrap: "wrap" },
-  waitText: { fontWeight: typography.weight.semibold, color: colors.primary[600], flexShrink: 1 },
-  cashBox: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: radii.lg,
-    paddingVertical: spacing.md,
-    alignItems: "center",
-  },
-  cashLabel: { color: colors.ink2, fontWeight: typography.weight.semibold },
-  cashAmount: { fontWeight: typography.weight.extrabold, fontSize: 40, lineHeight: 46 },
-  actionRow: { flexDirection: "row", gap: spacing.sm },
-  actionCell: { flex: 1, minWidth: 0 },
-  smallLinks: { flexDirection: "row", justifyContent: "space-between", flexWrap: "wrap", gap: spacing.sm },
-  smallLink: { paddingVertical: spacing.xs, minHeight: 32, justifyContent: "center" },
-  smallLinkText: { color: colors.ink, fontWeight: typography.weight.semibold },
-  smallLinkDanger: { color: colors.danger },
-  smallLinkDisabled: { color: colors.ink3 },
-  footerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
-  moreStops: { flexDirection: "row", alignItems: "center", gap: spacing.xs, paddingVertical: spacing.xs, minHeight: 36 },
-  moreStopsText: { fontWeight: typography.weight.semibold, color: colors.ink },
-  seatsAndAdd: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  addChip: {
+  noteText: { flex: 1 },
+  actions: { flexDirection: "row" },
+  action: { flex: 1, alignItems: "center" },
+  waitRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing[2] },
+  waitChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 4,
-    borderRadius: radii.full,
-    borderWidth: 1,
-    borderColor: colors.primary[200],
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    minHeight: 32,
+    gap: spacing[2],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1],
+    borderRadius: radii.sm,
+    backgroundColor: colors.surface2,
   },
-  addChipText: { color: colors.primary[600], fontWeight: typography.weight.bold },
+  waitText: { color: colors.ink, fontWeight: "700" },
+  collect: { flexDirection: "row", alignItems: "baseline", justifyContent: "center", gap: spacing[2] },
 });

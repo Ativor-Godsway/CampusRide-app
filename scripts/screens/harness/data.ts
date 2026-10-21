@@ -519,3 +519,150 @@ export const sharedOfferQueue: EligibleRideItem[] = [
     pickupMinutes: 2 + n,
   })),
 ];
+
+/** Kwame's seat on the driver's trip, at a given step. */
+function kwameSeat(status: "WAITING" | "ARRIVED" | "PICKED_UP", arrivedSecondsAgo?: number) {
+  return {
+    ...driverTrip.passengers[0]!,
+    status,
+    arrivedAt:
+      arrivedSecondsAgo !== undefined
+        ? new Date(Date.now() - arrivedSecondsAgo * 1000).toISOString()
+        : null,
+  };
+}
+
+/** The driver's Ride-alone trip with Kwame: on the way, waiting at the pickup, or on board. */
+export function driverTripAt(step: "coming" | "waiting" | "onboard"): RideWithZones {
+  return {
+    ...driverTrip,
+    status: step === "onboard" ? "IN_PROGRESS" : step === "waiting" ? "ARRIVED" : "MATCHED",
+    departedAt: step === "onboard" ? new Date(Date.now() - 2 * 60_000) : null,
+    passengers: [
+      step === "coming"
+        ? kwameSeat("WAITING")
+        : step === "waiting"
+          ? kwameSeat("ARRIVED", 102)
+          : kwameSeat("PICKED_UP", 300),
+    ],
+  };
+}
+
+/** Akosua, waiting at Volta Hall for Bush Canteen, on a shared trip. */
+const akosuaSeat = {
+  id: "passenger-akosua",
+  riderId: "rider-akosua",
+  riderName: "Akosua Owusu",
+  riderPhone: "+233241239876",
+  pickupZoneName: "Volta Hall",
+  dropoffZoneName: "Bush Canteen",
+  pickupZoneId: zone("Volta Hall").id,
+  dropoffZoneId: zone("Bush Canteen").id,
+  lockedFare: 500,
+  status: "WAITING" as const,
+  arrivedAt: null,
+  ...pins("Volta Hall", "Bush Canteen"),
+};
+
+/** A shared trip: Kwame on board, Akosua still to pick up (2 of 4 seats, three stops to go). */
+export const driverSharedOnTheWay: RideWithZones = {
+  ...driverTrip,
+  id: "ride-shared-2",
+  type: "SHARED",
+  status: "IN_PROGRESS",
+  fareTotal: 1000,
+  driverShare: 850,
+  occupancy: 2,
+  passengers: [{ ...kwameSeat("PICKED_UP", 300), lockedFare: 500 }, akosuaSeat],
+};
+
+/** A rider who fits the shared trip (GET /rides/:id/fill-suggestions). */
+export const fitSuggestion = {
+  requestRideId: "ride-fit",
+  riderFirstName: "Yaw",
+  pickupZoneName: "Legon Hall",
+  pickupZoneId: zone("Legon Hall").id,
+  dropoffZoneName: "Balme Library",
+  dropoffZoneId: zone("Balme Library").id,
+  pickupPlaceName: "Legon Hall",
+  dropoffPlaceName: "Balme Library",
+  createdAt: minutesAgo(1),
+  compatible: true,
+};
+
+/** GET /rides/:id/add-preview for Yaw: slots in after Kwame's pickup, +2 min. */
+export function fitPreview(trip: RideWithZones) {
+  const at = (name: string) => ({
+    latitude: place(name).latitude,
+    longitude: place(name).longitude,
+  });
+  const stops = [
+    {
+      key: "passenger-kwame:PICKUP",
+      kind: "PICKUP" as const,
+      isNew: false,
+      riderFirstName: "Kwame",
+      zoneId: zone("Maison Française").id,
+      zoneName: "Maison Française",
+      label: "Maison Française",
+      ...at("Maison Française"),
+    },
+    {
+      key: "new:ride-fit:PICKUP",
+      kind: "PICKUP" as const,
+      isNew: true,
+      riderFirstName: "Yaw",
+      zoneId: zone("Legon Hall").id,
+      zoneName: "Legon Hall",
+      label: "Legon Hall",
+      ...at("Legon Hall"),
+    },
+    {
+      key: "new:ride-fit:DROPOFF",
+      kind: "DROPOFF" as const,
+      isNew: true,
+      riderFirstName: "Yaw",
+      zoneId: zone("Balme Library").id,
+      zoneName: "Balme Library",
+      label: "Balme Library",
+      ...at("Balme Library"),
+    },
+    {
+      key: "passenger-kwame:DROPOFF",
+      kind: "DROPOFF" as const,
+      isNew: false,
+      riderFirstName: "Kwame",
+      zoneId: zone("Night Market").id,
+      zoneName: "Night Market",
+      label: "Night Market",
+      ...at("Night Market"),
+    },
+  ];
+  const line = encodePolyline(stops.map((s) => ({ latitude: s.latitude, longitude: s.longitude })));
+  return {
+    requestRideId: "ride-fit",
+    riderFirstName: "Yaw",
+    pickupZoneName: "Legon Hall",
+    dropoffZoneName: "Balme Library",
+    pickupPlaceName: "Legon Hall",
+    dropoffPlaceName: "Balme Library",
+    farePesewas: 500,
+    driverSharePesewas: 425,
+    addedSeconds: 110,
+    addedMinutes: 2,
+    maxOnboardDelayMinutes: 0,
+    expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+    pickupIndex: 1,
+    dropoffIndex: 2,
+    stops,
+    currentPolyline: line,
+    proposedPolyline: line,
+    rideId: trip.id,
+  };
+}
+
+/** A shared trip still filling up, for adding Yaw: Kwame not picked up yet. */
+export const driverSharedFilling: RideWithZones = {
+  ...driverSharedTrip,
+  id: "ride-shared-3",
+};
