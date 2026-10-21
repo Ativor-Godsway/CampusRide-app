@@ -1,26 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StyleSheet, View } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from "react-native-maps";
-import { Ionicons } from "@expo/vector-icons";
-import type { LatLng } from "@rida/shared";
-import { Text, colors, radii, shadows, spacing, typography } from "@rida/mobile-shared";
+import { haversineDistanceMeters, type LatLng } from "@rida/shared";
+import {
+  CarMarker,
+  IconButton,
+  Text,
+  colors,
+  radii,
+  shadows,
+  spacing,
+  withAlpha,
+} from "@rida/mobile-shared";
 
-/** A stop shown on the map; `isNew` marks a previewed rider's pickup or drop-off. */
+/** A stop shown on the map. */
 export interface MapStop {
   key: string;
   kind: "PICKUP" | "DROPOFF";
   riderFirstName: string;
   zone: { name: string; latitude: number; longitude: number };
-  isNew?: boolean;
-}
-
-export interface TripPreviewOverlay {
-  /** Every stop in the proposed order (new ones marked isNew). */
-  stops: readonly MapStop[];
-  /** The proposed route, already trimmed to the driver's position. */
-  path: readonly LatLng[];
-  /** "Add" was tapped: the dotted line turns solid before the trip takes it over. */
-  committing: boolean;
 }
 
 export interface TripMapProps {
@@ -33,44 +31,70 @@ export interface TripMapProps {
   insets: { top: number; bottom: number };
   /** Credit for stored road routes, when any are drawn (required by the routing provider). */
   attribution?: string | null;
-  /** A rider being considered: their route dotted, their pins marked "New". */
-  preview?: TripPreviewOverlay | null;
 }
 
 /**
- * Full-screen trip map: the driver, every remaining stop numbered in order
- * (green = pickup, black = drop-off, as in the stop list), and the route.
- * Re-frames itself when the stops change; the "recenter" control sits just
- * above the bottom card so it can never be clipped by it.
+ * Splits the route where it reaches the next stop: the leg to drive now,
+ * and everything after it.
  */
-export function TripMap({ driver, stops, path, insets, attribution, preview }: TripMapProps) {
+function splitAtNextStop(
+  path: readonly LatLng[],
+  next: LatLng | undefined,
+): { now: LatLng[]; later: LatLng[] } {
+  if (!next || path.length < 2) return { now: [...path], later: [] };
+  let best = path.length - 1;
+  let bestDistance = Infinity;
+  path.forEach((p, i) => {
+    const d = haversineDistanceMeters(p, next);
+    if (d < bestDistance) {
+      bestDistance = d;
+      best = i;
+    }
+  });
+  return { now: path.slice(0, best + 1), later: path.slice(best) };
+}
+
+/**
+ * Full-screen trip map (docs/mockups/11-driver-trip.png): the driver's car
+ * (top-down, turned to its heading), every remaining stop numbered in order
+ * — green circles for pickups, ink rounded squares for drop-offs, as in the
+ * stop list — and the route: the leg to the next stop bold green, later legs
+ * faint. Re-frames itself when the stops change; "Show the whole route"
+ * sits bottom-right, just above the card.
+ */
+export function TripMap({ driver, stops, path, insets, attribution }: TripMapProps) {
   const mapRef = useRef<MapView>(null);
   const [ready, setReady] = useState(false);
-
-  // While previewing, the pins show the proposed order (new ones marked).
-  const shownStops = preview ? preview.stops : stops;
 
   const fit = useCallback(() => {
     const points: LatLng[] = [
       ...(driver ? [driver] : []),
-      ...shownStops.map((s) => ({ latitude: s.zone.latitude, longitude: s.zone.longitude })),
+      ...stops.map((s) => ({ latitude: s.zone.latitude, longitude: s.zone.longitude })),
     ];
     if (points.length === 0) return;
     mapRef.current?.fitToCoordinates(points, {
       edgePadding: { top: insets.top + 40, bottom: insets.bottom + 40, left: 48, right: 48 },
       animated: true,
     });
-  }, [driver, shownStops, insets.top, insets.bottom]);
+  }, [driver, stops, insets.top, insets.bottom]);
 
-  // Re-frame when the set of stops changes — including a preview opening or
-  // closing, so new stops are always in view — but not on every GPS tick.
-  const stopsKey = shownStops.map((s) => s.key).join(",");
+  // Re-frame when the set of stops changes, not on every GPS tick.
+  const stopsKey = stops.map((s) => s.key).join(",");
   useEffect(() => {
     if (ready) fit();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fit on stop changes only
   }, [ready, stopsKey, insets.top, insets.bottom]);
 
-  const first = stops[0]?.zone ?? driver;
+  const next = stops[0]?.zone;
+  const legs = useMemo(
+    () =>
+      splitAtNextStop(
+        path,
+        next ? { latitude: next.latitude, longitude: next.longitude } : undefined,
+      ),
+    [path, next],
+  );
+  const first = next ?? driver;
 
   return (
     <View style={StyleSheet.absoluteFill}>
@@ -80,7 +104,12 @@ export function TripMap({ driver, stops, path, insets, attribution, preview }: T
         style={StyleSheet.absoluteFill}
         initialRegion={
           first
-            ? { latitude: first.latitude, longitude: first.longitude, latitudeDelta: 0.012, longitudeDelta: 0.012 }
+            ? {
+                latitude: first.latitude,
+                longitude: first.longitude,
+                latitudeDelta: 0.012,
+                longitudeDelta: 0.012,
+              }
             : undefined
         }
         showsUserLocation={false}
@@ -92,70 +121,44 @@ export function TripMap({ driver, stops, path, insets, attribution, preview }: T
         onMapReady={() => setReady(true)}
       >
         {/* Stable keys: a new route only changes a line's points, so the map
-            never redraws (no flicker). */}
-        {path.length >= 2 && !preview?.committing ? (
+            never redraws (no flicker). Later legs first, so the leg to drive
+            now is drawn on top where they meet. */}
+        {legs.later.length >= 2 ? (
           <Polyline
-            key="route-main"
-            coordinates={path as LatLng[]}
-            strokeColor={colors.primary[500]}
+            key="route-later"
+            coordinates={legs.later}
+            strokeColor={withAlpha(colors.green500, 0.35)}
             strokeWidth={5}
             lineJoin="round"
             zIndex={1}
           />
         ) : null}
-        {preview && preview.path.length >= 2 ? (
+        {legs.now.length >= 2 ? (
           <Polyline
-            // iOS doesn't restyle a dash pattern in place; a new key swaps just this line.
-            key={preview.committing ? "route-preview-solid" : "route-preview"}
-            coordinates={preview.path as LatLng[]}
-            strokeColor={preview.committing ? colors.primary[500] : colors.primary[300]}
-            strokeWidth={preview.committing ? 5 : 4}
-            lineDashPattern={preview.committing ? undefined : [2, 9]}
-            lineCap="round"
+            key="route-now"
+            coordinates={legs.now}
+            strokeColor={colors.green500}
+            strokeWidth={6}
             lineJoin="round"
-            zIndex={preview.committing ? 2 : 0}
+            zIndex={2}
           />
         ) : null}
 
-        {shownStops.map((stop, i) => (
+        {stops.map((stop, i) => (
           <Marker
             key={stop.key}
-            anchor={{ x: 0.5, y: stop.isNew ? 0.78 : 0.5 }}
+            anchor={{ x: 0.5, y: 0.5 }}
             coordinate={{ latitude: stop.zone.latitude, longitude: stop.zone.longitude }}
             title={`${stop.kind === "PICKUP" ? "Pick up" : "Drop off"} ${stop.riderFirstName}`}
             description={stop.zone.name}
-            zIndex={stops.length - i}
+            zIndex={stops.length - i + 2}
           >
-            <View style={styles.pinColumn}>
-              {stop.isNew ? (
-                <View style={styles.newTag}>
-                  <Text variant="caption" style={styles.newTagText}>
-                    New
-                  </Text>
-                </View>
-              ) : null}
-              <View
-                style={[
-                  styles.stopPin,
-                  stop.kind === "PICKUP" ? styles.pickupPin : styles.dropoffPin,
-                  stop.isNew && styles.newPin,
-                  i === 0 && styles.nextPin,
-                ]}
-              >
-                <Text variant="caption" style={[styles.stopNumber, stop.isNew && styles.newPinNumber]}>
-                  {i + 1}
-                </Text>
-              </View>
-            </View>
+            <StopMarker kind={stop.kind} number={i + 1} />
           </Marker>
         ))}
 
         {driver ? (
-          <Marker coordinate={driver} anchor={{ x: 0.5, y: 0.5 }} zIndex={100} title="You">
-            <View style={styles.driverOuter}>
-              <View style={styles.driverInner} />
-            </View>
-          </Marker>
+          <CarMarker zone={{ id: "car", ...driver, label: "You", role: "driver" }} />
         ) : null}
       </MapView>
 
@@ -165,20 +168,44 @@ export function TripMap({ driver, stops, path, insets, attribution, preview }: T
         </View>
       ) : null}
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Show the whole route"
-        onPress={fit}
-        hitSlop={6}
-        style={[styles.recenter, { bottom: insets.bottom + spacing.md }]}
-      >
-        <Ionicons name="scan-outline" size={20} color={colors.ink} />
-      </Pressable>
+      <View style={[styles.fit, { bottom: insets.bottom + spacing[3] }]}>
+        <IconButton
+          variant="map"
+          icon="scan-outline"
+          accessibilityLabel="Show the whole route"
+          onPress={fit}
+        />
+      </View>
     </View>
   );
 }
 
-const PIN = 30;
+/** A numbered stop: a green circle for a pickup, an ink rounded square for a drop-off, white 3px border. */
+export function StopMarker({
+  kind,
+  number,
+  size = 32,
+}: {
+  kind: "PICKUP" | "DROPOFF";
+  number: number;
+  size?: number;
+}) {
+  return (
+    <View
+      style={[
+        styles.stop,
+        { width: size, height: size },
+        kind === "PICKUP"
+          ? { borderRadius: size / 2, backgroundColor: colors.green500 }
+          : { borderRadius: radii.sm, backgroundColor: colors.ink },
+      ]}
+    >
+      <Text variant="subhead" color="onDark" style={styles.stopNumber} tabular>
+        {number}
+      </Text>
+    </View>
+  );
+}
 
 const styles = StyleSheet.create({
   attribution: {
@@ -190,53 +217,13 @@ const styles = StyleSheet.create({
     paddingVertical: 1,
   },
   attributionText: { fontSize: 9, color: colors.ink2 },
-  stopPin: {
-    width: PIN,
-    height: PIN,
-    borderRadius: PIN / 2,
+  stop: {
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 3,
-    borderColor: colors.white,
-    ...shadows.md,
+    borderColor: colors.surface,
+    ...shadows.float,
   },
-  pickupPin: { backgroundColor: colors.primary[500] },
-  // Drop-offs are squares, as on the rider app and the offer cards.
-  dropoffPin: { backgroundColor: colors.ink, borderRadius: 8 },
-  nextPin: { transform: [{ scale: 1.2 }] },
-  pinColumn: { alignItems: "center" },
-  // A previewed rider's stops keep their pickup/drop-off look, with an orange ring.
-  newPin: { borderColor: colors.accent[500] },
-  newPinNumber: { color: colors.white },
-  newTag: {
-    backgroundColor: colors.accent[500],
-    borderRadius: radii.full,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    marginBottom: 2,
-  },
-  // Text on amber is ink (docs/design-system.md, Colour).
-  newTagText: { color: colors.ink, fontWeight: typography.weight.extrabold, fontSize: 10 },
-  stopNumber: { color: colors.white, fontWeight: typography.weight.extrabold },
-  driverOuter: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-    ...shadows.md,
-  },
-  driverInner: { width: 16, height: 16, borderRadius: 8, backgroundColor: colors.accent[500] },
-  recenter: {
-    position: "absolute",
-    right: spacing.lg,
-    width: 44,
-    height: 44,
-    borderRadius: radii.full,
-    backgroundColor: colors.white,
-    alignItems: "center",
-    justifyContent: "center",
-    ...shadows.md,
-  },
+  stopNumber: { fontWeight: "800" },
+  fit: { position: "absolute", right: spacing.gutter },
 });

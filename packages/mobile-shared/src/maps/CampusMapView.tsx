@@ -273,8 +273,10 @@ function ArtMarker({
  * (worked out from its last two positions) and glides to each new GPS fix
  * instead of jumping; with Reduce Motion on it jumps. The glide moves the
  * native marker, so the image itself stops re-rendering once it has loaded.
+ * Exported for maps of their own (the driver's trip map); give it a
+ * MapView parent.
  */
-function CarMarker({ zone, onPress }: { zone: CampusMapZone; onPress: () => void }) {
+export function CarMarker({ zone, onPress }: { zone: CampusMapZone; onPress?: () => void }) {
   const reduceMotion = useReduceMotion();
   const [ready, setReady] = useState(false);
   const [heading, setHeading] = useState(0);

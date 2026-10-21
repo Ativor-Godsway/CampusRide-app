@@ -1,22 +1,38 @@
-import { Pressable, StyleSheet, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { firstName, formatCedis, riderName, riderStatusWord, type TripStop } from "@rida/shared";
+import { StyleSheet, View } from "react-native";
+import {
+  firstName,
+  riderName,
+  riderStatusWord,
+  type PassengerStatus,
+  type TripStop,
+} from "@rida/shared";
 import {
   BottomSheet,
+  ListRow,
+  StatusChip,
   Text,
   callPhone,
   colors,
-  radii,
   spacing,
-  typography,
   type PassengerInCar,
+  type StatusTone,
 } from "@rida/mobile-shared";
+import { StopMarker } from "./TripMap";
+
+/** Waiting = warn, In car = brand, Done = neutral. */
+const TONE: Record<PassengerStatus, StatusTone> = {
+  WAITING: "warn",
+  ARRIVED: "warn",
+  PICKED_UP: "brand",
+  DROPPED_OFF: "neutral",
+  CANCELLED: "neutral",
+};
 
 /**
- * "Your stops" (sketch 8): every remaining stop in route order, each with
- * the rider's name and where they are in one word (Waiting / Arrived /
- * In car), then the riders already dropped off. Green = pickups, black =
- * drop-offs. Tapping a stop calls that rider.
+ * "Stops" (sketch 8): every remaining stop in route order — the numbered
+ * marker as on the map, "Pick up Akosua", where and (for the next stop) how
+ * long, and the rider's status as a chip — then the riders already dropped
+ * off. Tapping a stop calls that rider.
  */
 export function StopListSheet({
   visible,
@@ -28,7 +44,7 @@ export function StopListSheet({
   visible: boolean;
   onClose: () => void;
   stops: readonly TripStop[];
-  /** Every rider on the trip (for the "Done" list). */
+  /** Every rider on the trip (for the dropped-off rows). */
   passengers: readonly PassengerInCar[];
   nextEtaMinutes: number | null;
 }) {
@@ -40,10 +56,10 @@ export function StopListSheet({
       visible={visible}
       onDismiss={onClose}
       maxHeightRatio={0.8}
-      accessibilityLabel="Your stops"
+      accessibilityLabel="Stops"
     >
-      <Text variant="h3" accessibilityRole="header">
-        Your stops
+      <Text variant="title2" accessibilityRole="header">
+        Stops
       </Text>
       <View style={styles.list}>
         {stops.map((stop, i) => {
@@ -54,105 +70,47 @@ export function StopListSheet({
               ? ` · ${nextEtaMinutes} min`
               : "";
           return (
-            <Pressable
+            <ListRow
               key={stop.key}
-              disabled={!stop.riderPhone}
-              onPress={() => stop.riderPhone && void callPhone(stop.riderPhone, name)}
-              accessibilityRole="button"
+              divider={i > 0}
+              title={`${stop.kind === "PICKUP" ? "Pick up" : "Drop off"} ${name}`}
+              subtitle={`${stop.label}${eta}`}
+              leading={<StopMarker kind={stop.kind} number={i + 1} />}
+              trailing={
+                <StatusChip label={word} tone={TONE[stop.passengerStatus]} style={styles.chip} />
+              }
+              onPress={stop.riderPhone ? () => void callPhone(stop.riderPhone, name) : undefined}
               accessibilityLabel={`Stop ${i + 1}: ${stop.kind === "PICKUP" ? "pick up" : "drop off"} ${name} at ${stop.label}. ${word}.${stop.riderPhone ? " Double-tap to call." : ""}`}
-              style={styles.row}
-            >
-              <View
-                style={[styles.number, stop.kind === "PICKUP" ? styles.pickup : styles.dropoff]}
-              >
-                <Text variant="caption" style={styles.numberText}>
-                  {i + 1}
-                </Text>
-              </View>
-              <View style={styles.text}>
-                <Text variant="bodyMedium" style={styles.title} numberOfLines={1}>
-                  {stop.kind === "PICKUP" ? "Pick up" : "Drop off"} {name}
-                </Text>
-                <Text variant="caption" color="muted" numberOfLines={2}>
-                  {stop.label}
-                  {stop.kind === "DROPOFF" && stop.farePesewas !== null
-                    ? ` · ${formatCedis(stop.farePesewas)}`
-                    : ""}
-                </Text>
-              </View>
-              <Text variant="caption" style={styles.word}>
-                {word}
-                {eta}
-              </Text>
-              {stop.riderPhone ? (
-                <Ionicons name="call-outline" size={18} color={colors.ink3} />
-              ) : null}
-            </Pressable>
+            />
           );
         })}
 
-        {done.length > 0 ? (
-          <>
-            <Text variant="label" color="muted" style={styles.doneHeader}>
-              DONE
-            </Text>
-            {done.map((p) => (
-              <View
-                key={p.id}
-                style={styles.row}
-                accessible
-                accessibilityLabel={`${firstName(p.riderName) || "Rider"}: dropped off at ${p.dropoffLabel ?? p.dropoffZoneName}`}
-              >
-                <View style={[styles.number, styles.doneDot]}>
-                  <Ionicons name="checkmark" size={14} color={colors.white} />
-                </View>
-                <View style={styles.text}>
-                  <Text variant="bodyMedium" style={styles.doneTitle} numberOfLines={1}>
-                    {firstName(p.riderName) || "Rider"}
-                  </Text>
-                  <Text variant="caption" color="muted" numberOfLines={1}>
-                    {p.dropoffLabel ?? p.dropoffZoneName}
-                  </Text>
-                </View>
-                <Text variant="caption" color="muted">
-                  {riderStatusWord("DROPPED_OFF")}
-                </Text>
-              </View>
-            ))}
-          </>
-        ) : null}
+        {done.map((p) => (
+          <ListRow
+            key={p.id}
+            divider
+            title={firstName(p.riderName) || "Rider"}
+            subtitle={p.dropoffLabel ?? p.dropoffZoneName}
+            leading={<View style={styles.doneMarker} />}
+            trailing={<StatusChip label="Done" tone="neutral" style={styles.chip} />}
+          />
+        ))}
       </View>
-      <Text variant="caption" color="muted" style={styles.footnote}>
-        Order follows the route. Tap a rider to call them.
+      <Text variant="caption" color="secondary" style={styles.footnote}>
+        Order follows the route.
       </Text>
     </BottomSheet>
   );
 }
 
 const styles = StyleSheet.create({
-  list: { marginTop: spacing.md, gap: spacing.xs },
-  row: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    paddingVertical: spacing.sm,
-    minHeight: 52,
+  list: { marginTop: spacing[2] },
+  chip: { alignSelf: "center" },
+  doneMarker: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.surface3,
   },
-  number: {
-    width: 28,
-    height: 28,
-    borderRadius: radii.full,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  pickup: { backgroundColor: colors.primary[500] },
-  dropoff: { backgroundColor: colors.ink },
-  doneDot: { backgroundColor: colors.ink3 },
-  numberText: { color: colors.white, fontWeight: typography.weight.extrabold },
-  text: { flex: 1, gap: 1, minWidth: 0 },
-  title: { fontWeight: typography.weight.bold },
-  doneTitle: { color: colors.ink2 },
-  word: { color: colors.ink, fontWeight: typography.weight.semibold },
-  doneHeader: { marginTop: spacing.md },
-  footnote: { marginTop: spacing.md },
+  footnote: { marginTop: spacing[3] },
 });
