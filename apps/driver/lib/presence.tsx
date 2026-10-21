@@ -12,13 +12,14 @@ import { Alert, Linking } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DRIVER_OUTSIDE_AREA_MESSAGE,
-  LOCATION_SETTINGS_MESSAGE,
   WHILE_USING_ONLY_MESSAGE,
   isOutsideServiceArea,
   isTransientRequestFailure,
   planZoneUpdate,
+  resolveGoOnlineAccess,
   zoneInServiceArea,
   type LatLng,
+  type LocationProblem,
   type ZoneUpdateState,
 } from "@rida/shared";
 import {
@@ -60,6 +61,11 @@ interface DriverPresence {
   outsideServiceArea: boolean;
   /** The latest position while online (for distances), or null. Real GPS, or the dev-only fake. */
   position: LatLng | null;
+  /**
+   * Why the last "go online" stopped at the location step (Home shows it
+   * with an "Open Settings" button), or null. Cleared by the next try.
+   */
+  locationProblem: LocationProblem | null;
   toggle: () => void;
 }
 
@@ -95,6 +101,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   // True once the server has agreed with `isOnline` (zone tracking waits for it).
   const [confirmed, setConfirmed] = useState(true);
   const [waking, setWaking] = useState(false);
+  const [locationProblem, setLocationProblem] = useState<LocationProblem | null>(null);
   const location = useDriverLocation();
   const askDisclosure = useLocationDisclosure();
 
@@ -119,6 +126,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     applyOnline(id !== null && Boolean(user?.driver?.isOnline));
     setConfirmed(true);
     setWaking(false);
+    setLocationProblem(null);
     zoneStateRef.current = { lastSentZoneId: null, lastSentAt: null };
   }, [isDriver, user, applyOnline]);
 
@@ -180,6 +188,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     const seq = (seqRef.current += 1);
     applyOnline(next);
     setConfirmed(false);
+    setLocationProblem(null);
 
     if (!next) {
       sendAvailability(seq, false, undefined);
@@ -189,25 +198,23 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     void (async () => {
       // Location is asked for here, when going online, never at install: the
       // full-screen disclosure first, then the system prompts. Usually it is
-      // already allowed and nothing is shown.
-      const plan = await currentLocationAccessPlan();
-      let access: "always" | "whileUsing" | "none" = plan === "always" || plan === "whileUsing" ? plan : "none";
-      if (plan === "disclose") {
-        const accepted = await askDisclosure();
-        if (accepted) access = await requestDriverLocationAccess();
-        else access = (await currentLocationAccessPlan()) === "whileUsing" ? "whileUsing" : "none";
-      }
+      // already allowed and nothing is shown. If it isn't allowed, or asking
+      // fails (e.g. the "Always" request throws in a store build), the switch
+      // goes back to offline and the server is never asked: the app and the
+      // server both say offline, and Home says what to do.
+      const result = await resolveGoOnlineAccess({
+        currentPlan: currentLocationAccessPlan,
+        askDisclosure,
+        requestAccess: requestDriverLocationAccess,
+      });
       if (seq !== seqRef.current) return;
-      if (access === "none") {
+      if (result.kind === "stop") {
         applyOnline(false);
         setConfirmed(true);
-        Alert.alert("Location needed to go online", LOCATION_SETTINGS_MESSAGE, [
-          { text: "Not now", style: "cancel" },
-          { text: "Open Settings", onPress: () => void Linking.openSettings() },
-        ]);
+        setLocationProblem(result.problem);
         return;
       }
-      if (access === "whileUsing" && plan === "disclose") {
+      if (result.explainWhileUsing) {
         // They allowed "while using" but not "all the time": online, and say what that means once.
         Alert.alert("Location only while the app is open", WHILE_USING_ONLY_MESSAGE, [
           { text: "OK", style: "cancel" },
@@ -302,8 +309,8 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   const outsideServiceArea = Boolean(isDriver && isOnline && zones && isOutsideServiceArea(location.position, zones));
 
   const value = useMemo(
-    () => ({ isOnline: isDriver && isOnline, waking, outsideServiceArea, position, toggle }),
-    [isDriver, isOnline, waking, outsideServiceArea, position, toggle],
+    () => ({ isOnline: isDriver && isOnline, waking, outsideServiceArea, position, locationProblem, toggle }),
+    [isDriver, isOnline, waking, outsideServiceArea, position, locationProblem, toggle],
   );
 
   return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>;

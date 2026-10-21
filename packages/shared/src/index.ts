@@ -47,3 +47,4 @@ export * from "./redact";
 export * from "./account/deletion";
 export * from "./account/terms";
 export * from "./driver/locationAccess";
+export * from "./driver/todayEarnings";

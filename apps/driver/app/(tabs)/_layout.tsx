@@ -1,10 +1,10 @@
-import { View } from "react-native";
-import { Redirect, Tabs, useRouter } from "expo-router";
+import { StyleSheet, View } from "react-native";
+import { Redirect, Tabs, usePathname, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import {
   RoleMismatchScreen,
   colors,
-  shadows,
+  fonts,
   useAuth,
   usePushPermissionPrompt,
   SessionRestoringScreen,
@@ -13,14 +13,15 @@ import { driverSetupRoute } from "../../lib/driverGate";
 import { ActiveTripBanner } from "../../components/ActiveTripBanner";
 import { useDriverActiveTrip } from "../../lib/activeTrip";
 
-/** Bottom tab shell — Home / Rides / Account. Re-checks auth, role, onboarding and approval so a signed-out, mismatched-role, not-yet-onboarded or not-yet-approved user can't land here directly. */
+/** Bottom tab shell — Home / Earnings / Account. Re-checks auth, role, onboarding and approval so a signed-out, mismatched-role, not-yet-onboarded or not-yet-approved user can't land here directly. */
 export default function TabsLayout() {
   const { isLoading, isAuthenticated, user, signOut } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const { data: activeTrip, isFetched: tripChecked } = useDriverActiveTrip();
-  // The trip banner is on every tab, Home included — the one way back to the
-  // trip, identical wherever the driver is.
-  const showTripBanner = Boolean(activeTrip);
+  // The trip banner is on Earnings and Account — the way back to the trip.
+  // Home shows the trip as the dark first row of its sheet instead.
+  const showTripBanner = Boolean(activeTrip) && pathname !== "/";
 
   // Once, after login and approval, and never mid-trip: explain
   // notifications (ride requests reach a closed app through them), then ask.
@@ -45,26 +46,28 @@ export default function TabsLayout() {
   }
 
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={{ flex: 1, backgroundColor: colors.surface }}>
       {/* Above the tabs, so a trip is one tap away from every tab. */}
       {showTripBanner && activeTrip ? <ActiveTripBanner ride={activeTrip} /> : null}
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: colors.primary[500],
+        tabBarActiveTintColor: colors.green500,
         tabBarInactiveTintColor: colors.ink3,
+        // As the rider app: white, a hairline on top, no shadow
+        // (docs/design-system.md), and no fixed height, so the tab bar adds
+        // the phone's bottom safe-area inset itself.
         tabBarStyle: {
-          backgroundColor: colors.white,
-          borderTopColor: colors.border,
-          borderTopWidth: 1,
-          height: 64,
-          paddingTop: 8,
-          paddingBottom: 10,
-          ...shadows.sm,
+          backgroundColor: colors.surface,
+          borderTopColor: colors.line,
+          borderTopWidth: StyleSheet.hairlineWidth,
+          paddingTop: 6,
+          elevation: 0,
+          shadowOpacity: 0,
         },
         tabBarLabelStyle: {
+          fontFamily: fonts.semibold,
           fontSize: 12,
-          fontWeight: "600",
         },
       }}
     >
@@ -77,12 +80,13 @@ export default function TabsLayout() {
           ),
         }}
       />
+      {/* The route stays "rides"; it shows the driver's earnings and completed trips. */}
       <Tabs.Screen
         name="rides"
         options={{
-          title: "Rides",
+          title: "Earnings",
           tabBarIcon: ({ color, size, focused }) => (
-            <Ionicons name={focused ? "time" : "time-outline"} size={size} color={color} />
+            <Ionicons name={focused ? "cash" : "cash-outline"} size={size} color={color} />
           ),
         }}
       />

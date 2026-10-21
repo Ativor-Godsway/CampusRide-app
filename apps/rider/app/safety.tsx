@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import {
+  BackButton,
   Button,
   Illustration,
   Input,
@@ -110,6 +111,7 @@ export default function SafetyScreen() {
 
   return (
     <Screen scroll style={styles.content}>
+      <BackButton />
       <Illustration name="safetyShield" width={120} style={styles.hero} />
       <View style={styles.heading}>
         <Text variant="title1" accessibilityRole="header">

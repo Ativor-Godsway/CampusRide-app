@@ -9,8 +9,9 @@ import { Text } from "./Text";
  *   Share trip, Safety), with its label underneath.
  * - `brand`: the same disc in green, for the one action that leads (Navigate).
  * - `map`: a 44px white disc floating on the map (recentre, back), no label.
+ * - `compact`: a 44px surface-2 disc on a white page (Back, Close), no label.
  */
-export type IconButtonVariant = "default" | "brand" | "map";
+export type IconButtonVariant = "default" | "brand" | "map" | "compact";
 
 export interface IconButtonProps extends Omit<
   PressableProps,
@@ -36,7 +37,9 @@ export function IconButton({
 }: IconButtonProps) {
   const { scale, pressIn, pressOut } = usePressScale();
   const isMap = variant === "map";
-  const discSize = isMap ? sizes.mapButton : sizes.iconButton;
+  // The two 44px discs: no label, and a 48px target.
+  const isSmall = isMap || variant === "compact";
+  const discSize = isSmall ? sizes.mapButton : sizes.iconButton;
   const iconColor = disabled ? colors.ink4 : variant === "brand" ? colors.onBrand : colors.ink;
 
   return (
@@ -45,8 +48,8 @@ export function IconButton({
       accessibilityLabel={accessibilityLabel}
       accessibilityState={{ disabled: Boolean(disabled) }}
       disabled={disabled}
-      // The 44px map disc still gets a 48px target.
-      hitSlop={isMap ? 2 : undefined}
+      // The 44px discs still get a 48px target.
+      hitSlop={isSmall ? 2 : undefined}
       onPressIn={(e) => {
         pressIn();
         onPressIn?.(e);
@@ -64,7 +67,7 @@ export function IconButton({
             style={[
               styles.disc,
               { width: discSize, height: discSize },
-              variant === "default" && {
+              (variant === "default" || variant === "compact") && {
                 backgroundColor: pressed ? colors.surface3 : colors.surface2,
               },
               variant === "brand" && {
@@ -73,9 +76,13 @@ export function IconButton({
               isMap && [styles.map, pressed && { backgroundColor: colors.surface2 }],
             ]}
           >
-            <Ionicons name={icon} size={isMap ? sizes.iconSm + 2 : sizes.icon} color={iconColor} />
+            <Ionicons
+              name={icon}
+              size={isSmall ? sizes.iconSm + 2 : sizes.icon}
+              color={iconColor}
+            />
           </View>
-          {label && !isMap ? (
+          {label && !isSmall ? (
             <Text
               variant="caption"
               color={variant === "brand" ? "brand" : "secondary"}

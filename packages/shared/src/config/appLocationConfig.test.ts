@@ -78,8 +78,9 @@ describe("the driver app's background location", () => {
   });
 
   it("asks for location only when going online, never at start-up", () => {
+    // Called, or handed to resolveGoOnlineAccess: either way, only the go-online flow.
     const callers = sourceFiles("apps/driver").filter((f) =>
-      /requestDriverLocationAccess\(/.test(read(f)),
+      /\brequestDriverLocationAccess\b/.test(read(f)),
     );
     expect(callers.sort()).toEqual([
       "apps/driver/lib/backgroundLocation.ts",

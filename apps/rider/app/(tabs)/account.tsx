@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { PRIVACY_URL, TERMS_URL, WEBSITE_URL, stopLabel } from "@rida/shared";
+import { PRIVACY_URL, TERMS_URL, WEBSITE_URL, formatGhanaPhone, stopLabel } from "@rida/shared";
 import { Alert, StyleSheet, View } from "react-native";
 import {
   ListRow,
@@ -55,7 +55,7 @@ export default function AccountTab() {
             {user?.name ?? "Rider"}
           </Text>
           <Text variant="subhead" color="secondary">
-            {user?.phone}
+            {user?.phone ? formatGhanaPhone(user.phone) : null}
           </Text>
         </View>
       </View>

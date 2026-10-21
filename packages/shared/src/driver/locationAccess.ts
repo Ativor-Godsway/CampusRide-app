@@ -13,12 +13,14 @@
 export const DRIVER_LOCATION_DISCLOSURE = {
   title: "Share your location while you're online",
   body: "CampusRide Driver collects location data to share your position with riders and match you with nearby ride requests while you are online, even when the app is closed or not in use.",
+  /** Three short lines (the screen gives each an icon). */
   details: [
-    "Riders on your trip see where you are, so they know when you'll arrive.",
+    "Riders on your trip see where you are.",
     "Ride requests near you reach you first.",
-    "Location sharing stops as soon as you go offline.",
-    "On the next screen, choose “Allow all the time” (Android) or “Always” (iPhone) so riders still see you when you switch to another app.",
+    "Sharing stops as soon as you go offline.",
   ],
+  /** Under the lines: what to choose on the system prompt that follows. */
+  hint: "On the next screen, choose “Allow all the time” (Android) or “Always” (iPhone) so riders still see you when you switch to another app.",
   accept: "Continue",
   decline: "Not now",
 } as const;
@@ -60,6 +62,63 @@ export function planLocationAccess(p: LocationPermissions): LocationAccessPlan {
 
 export const LOCATION_SETTINGS_MESSAGE =
   "CampusRide Driver needs your location to go online. Allow it in Settings, then try again.";
+
+/**
+ * Why going online stopped before the server was asked, shown on Home with
+ * an "Open Settings" button:
+ * - `refused`: location isn't allowed (refused, or "Not now" with nothing allowed);
+ * - `failed`: asking the phone for location failed outright (a store build
+ *   whose "Always" request threw, location services off, …).
+ */
+export type LocationProblem = "refused" | "failed";
+
+export const LOCATION_PROBLEM_MESSAGE: Record<LocationProblem, string> = {
+  refused: LOCATION_SETTINGS_MESSAGE,
+  failed:
+    "We couldn't turn on location for CampusRide Driver. Allow location “Always” in Settings, then go online again.",
+};
+
+/** What going online may do, once the location steps are done. */
+export type GoOnlineAccess =
+  /** Go online; `explainWhileUsing`: the driver just declined "all the time", say what that means once. */
+  | { kind: "go"; access: "always" | "whileUsing"; explainWhileUsing: boolean }
+  /** Stay offline: the server is never asked, so the app and the server agree. */
+  | { kind: "stop"; problem: LocationProblem; error?: unknown };
+
+/**
+ * The location part of going online, in order: what's allowed now; if
+ * needed, the disclosure and then the system prompts. Any step that throws
+ * (e.g. the "Always" request in a store build, for any reason but Expo Go's
+ * missing key, which requestAccess answers as "whileUsing" itself) means
+ * staying offline with `failed` — never online on a guess.
+ */
+export async function resolveGoOnlineAccess(steps: {
+  currentPlan: () => Promise<LocationAccessPlan>;
+  /** The disclosure: true for Continue, false for Not now. */
+  askDisclosure: () => Promise<boolean>;
+  /** The system prompts, after Continue. */
+  requestAccess: () => Promise<"always" | "whileUsing" | "none">;
+}): Promise<GoOnlineAccess> {
+  try {
+    const plan = await steps.currentPlan();
+    if (plan === "always" || plan === "whileUsing") {
+      return { kind: "go", access: plan, explainWhileUsing: false };
+    }
+    if (plan === "settings") return { kind: "stop", problem: "refused" };
+
+    if (await steps.askDisclosure()) {
+      const access = await steps.requestAccess();
+      if (access === "none") return { kind: "stop", problem: "refused" };
+      return { kind: "go", access, explainWhileUsing: access === "whileUsing" };
+    }
+    // "Not now": online anyway if "while using" was already allowed.
+    return (await steps.currentPlan()) === "whileUsing"
+      ? { kind: "go", access: "whileUsing", explainWhileUsing: false }
+      : { kind: "stop", problem: "refused" };
+  } catch (error) {
+    return { kind: "stop", problem: "failed", error };
+  }
+}
 
 export const WHILE_USING_ONLY_MESSAGE =
   "You're online. While CampusRide Driver is in the background, riders won't see you move. To keep sharing your location, allow location “All the time” in Settings.";
