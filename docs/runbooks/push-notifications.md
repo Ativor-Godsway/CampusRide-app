@@ -161,7 +161,8 @@ Push notifications **do not work in Expo Go**, on an emulator without Google
 Play, or on a simulator. The apps simply don't offer them there.
 
 (iOS needs an Apple Developer account. On the first iOS build, EAS asks whether
-to set up push notifications for you. Answer yes.)
+to set up push notifications for you. Answer yes. Step by step:
+[ios-first-build.md](ios-first-build.md#3-first-build-which-also-sets-up-signing-and-push-on-your-mac).)
 
 ---
 
