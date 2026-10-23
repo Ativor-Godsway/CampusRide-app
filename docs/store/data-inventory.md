@@ -207,7 +207,16 @@ permissions** declaration in Play Console:
 
 ### Apple: App Privacy
 
-Data linked to the user: Contact info (Name, Phone number), Location (Precise,
-Coarse), User content (Photos, Other user content), Purchases (Purchase
-history), Identifiers (User ID: account id; Device ID: push token). Not
-linked: Diagnostics (Crash data, Performance data). Tracking: **No**.
+Per app, all for App functionality, none for tracking. These match the
+privacy manifest in each `app.json` (`ios.privacyManifests`); see
+[ios-first-build.md](../runbooks/ios-first-build.md#privacy-manifest-privacyinfoxcprivacy).
+
+- **Both apps, linked to the user:** Contact info (Name, Phone number),
+  Location (Precise, Coarse), User content (Other user content: notes, rating
+  comments, the rider's emergency contact), Identifiers (User ID: account id;
+  Device ID: push token).
+- **Rider only:** Purchases (Purchase history: fares).
+- **Driver only:** User content (Photos: profile photo), Financial info (Other
+  financial info: earnings, commission owed), Other data (car and plate).
+- **Not linked:** Diagnostics (Crash data, Performance data).
+- Tracking: **No**.
