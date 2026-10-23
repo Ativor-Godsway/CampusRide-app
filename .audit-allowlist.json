@@ -23,20 +23,25 @@
     "gate's threshold. They sit in @expo/* build tooling and expo-router's",
     "query-string/decode-uri-component chain at the latest published SDK, so",
     "there is no version to upgrade to; npm's suggested 'fixes' for them are",
-    "downgrades to expo@46 / expo-router@5 and are not real."
+    "downgrades to expo@46 / expo-router@5 and are not real.",
+    "",
+    "2026-10-23: braces (GHSA-vfj7-8cjw-p6xm) is no longer reported and was removed",
+    "as stale. zod GHSA-mrhx-c7xc-m3w5 (fixed in 4.6.6): the zod 4 copy used by",
+    "eslint-plugin-react-hooks was updated to 4.6.7 (lockfile only); the zod 3 copy",
+    "inside @expo/cli has no patched 3.x release, so it is allowlisted below."
   ],
   "allow": [
-    {
-      "id": "GHSA-vfj7-8cjw-p6xm",
-      "package": "braces",
-      "reason": "Stack-exhaustion DoS from deeply nested brace patterns. No patched version exists (<=3.0.3 = latest). Reached only via micromatch in Expo/Metro's file watcher and chokidar under ts-node-dev (local dev server); patterns come from our own config, never from users, and none of it runs in the deployed server (node dist/) or the apps.",
-      "reviewBy": "2027-01-12"
-    },
     {
       "id": "GHSA-86w9-cpqp-85rv",
       "package": "node-forge",
       "reason": "RSA PKCS#1 v1.5 signature forgery with low-exponent keys. No patched version exists (<=1.4.0 = latest). Reached only via @expo/cli and @expo/code-signing-certificates (Expo Updates code signing on a developer machine); we don't use Expo Updates code signing, and nothing at runtime loads node-forge.",
       "reviewBy": "2027-01-12"
+    },
+    {
+      "id": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "reason": "Memory exhaustion when validating an oversized collection against a size-constrained schema. Fixed only in zod 4.6.6; the copy left is zod 3.25.76 (latest 3.x, no patched release) nested in expo/node_modules, used by @expo/cli's local dev server to validate dev-tools plugin settings from our own project config. It never sees user input and never runs in the deployed server (node dist/) or the apps. The zod 4 copy (eslint-plugin-react-hooks) is updated to 4.6.7.",
+      "reviewBy": "2027-01-23"
     }
   ]
 }
