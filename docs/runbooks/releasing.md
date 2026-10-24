@@ -265,6 +265,39 @@ Good to know:
 
 ---
 
+### Swapping in the final icons and splash
+
+The app icons and splash images are **temporary** (added 2026-10-24) until the
+designer's final art arrives. The driver app has its own temporary icon (dark
+background) so the two apps look different on a phone. The final art is a
+**file swap**, then a new store build. An OTA update can't change icons or the
+splash.
+
+Replace these files, keeping the same names and sizes:
+
+| File | What it is | Size and rules |
+| --- | --- | --- |
+| `apps/rider/assets/icon.png` | Rider icon (iPhone, and the fallback) | 1024 x 1024, **no transparency** |
+| `apps/rider/assets/adaptive-icon.png` | Rider Android icon, foreground layer | 1024 x 1024, transparent background, art inside the central two-thirds |
+| `apps/rider/assets/splash-icon.png` | Rider splash image (shown 160 wide on white) | Transparent background |
+| `apps/driver/assets/icon.png` | Driver icon (iPhone, and the fallback) | 1024 x 1024, **no transparency** |
+| `apps/driver/assets/adaptive-icon.png` | Driver Android icon, foreground layer | 1024 x 1024, transparent background, art inside the central two-thirds |
+| `apps/driver/assets/splash-icon.png` | Driver splash image (shown 160 wide on white) | Transparent background |
+
+If the new Android icons need a different background colour, it's
+`android.adaptiveIcon.backgroundColor` in each `apps/<app>/app.json` (rider
+`#F6F7F6`, driver `#0F1311` today). The notification icons
+(`assets/notification-icon.png`) are not part of the swap.
+`storeBuildConfig.test.ts` checks the icon sizes, the missing transparency,
+and that the two apps' icons differ.
+
+Then make a new store build ([section 4](#4-releasing-a-new-store-build)):
+
+- **Before the first public release:** keep `"version"` at **1.0.0**. EAS
+  raises the build number by itself, so the stores accept the new build.
+- **After the first public release:** bump `"version"` to **1.0.1** first
+  (Step 1 above).
+
 ## 5. Rolling back a bad update
 
 If a production update causes problems:

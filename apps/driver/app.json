@@ -140,7 +140,7 @@
       "package": "com.campusride.driver",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F6F7F6"
+        "backgroundColor": "#0F1311"
       }
     },
     "plugins": [

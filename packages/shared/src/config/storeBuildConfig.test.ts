@@ -59,3 +59,28 @@ describe.each(["rider", "driver"])("the %s app's store build", (app) => {
     }
   });
 });
+
+/** Width, height and colour type from a PNG's header (colour type 2 = RGB, no alpha). */
+function pngHeader(p: string): { width: number; height: number; colourType: number } {
+  const bytes = readFileSync(path.join(ROOT, p));
+  expect(bytes.subarray(12, 16).toString("latin1"), p).toBe("IHDR");
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20), colourType: bytes[25]! };
+}
+
+describe("the app icons (temporary art until the designer's: docs/runbooks/releasing.md)", () => {
+  it.each(["rider", "driver"])("%s: 1024 x 1024, and the iOS icon has no transparency", (app) => {
+    const expo = json(`apps/${app}/app.json`).expo;
+    const icon = pngHeader(path.join("apps", app, expo.icon));
+    expect(icon).toEqual({ width: 1024, height: 1024, colourType: 2 });
+    const adaptive = pngHeader(path.join("apps", app, expo.android.adaptiveIcon.foregroundImage));
+    expect([adaptive.width, adaptive.height]).toEqual([1024, 1024]);
+  });
+
+  it("the rider and driver apps have different icons", () => {
+    for (const file of ["icon.png", "adaptive-icon.png"]) {
+      const rider = readFileSync(path.join(ROOT, "apps/rider/assets", file));
+      const driver = readFileSync(path.join(ROOT, "apps/driver/assets", file));
+      expect(rider.equals(driver), file).toBe(false);
+    }
+  });
+});
