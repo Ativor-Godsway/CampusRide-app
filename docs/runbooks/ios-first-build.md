@@ -28,6 +28,12 @@ visible alert (title, text, sound). That mode is only for silent background
 pushes, which the server never sends, and Apple asks about background modes
 an app doesn't use.
 
+**Icons and splash are temporary.** The driver app has its own temporary icon
+(dark background), so the two apps look different on a phone. The designer's
+final art is a file swap followed by a new build. The exact files, and when
+to keep 1.0.0 or bump to 1.0.1, are in
+[releasing.md](releasing.md#swapping-in-the-final-icons-and-splash).
+
 ### Privacy manifest (PrivacyInfo.xcprivacy)
 
 Written into each build from `ios.privacyManifests` in `apps/<app>/app.json`.
