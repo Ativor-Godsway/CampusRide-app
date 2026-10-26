@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AppState, Linking, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import type { PushApp } from "@rida/shared";
+import { useAuth } from "../auth/AuthContext";
 import { BackButton, Button, Screen, Text, colors, spacing } from "../design";
 import {
   getPushPermission,
@@ -33,14 +34,15 @@ export function NotificationPermissionScreen({
   onDone,
   backButton = false,
 }: NotificationPermissionScreenProps) {
+  const userId = useAuth().user?.id ?? null;
   const [permission, setPermission] = useState<PushPermission | null>(null);
   const [asking, setAsking] = useState(false);
 
   const refresh = useCallback(async () => {
     const next = await getPushPermission();
     setPermission(next);
-    if (next === "granted") void registerForPush(app);
-  }, [app]);
+    if (next === "granted" && userId) void registerForPush(app, userId);
+  }, [app, userId]);
 
   useEffect(() => {
     // Seeing this screen counts as asked: it never opens by itself again.
@@ -56,7 +58,7 @@ export function NotificationPermissionScreen({
   const turnOn = async () => {
     setAsking(true);
     try {
-      const result = await requestPushPermission(app);
+      const result = await requestPushPermission(app, userId);
       setPermission(result);
       if (result === "granted") onDone();
     } finally {

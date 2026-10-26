@@ -13,11 +13,14 @@ import { clientIpForLimits, logClientIpCheckOnce, sendRateLimited } from "./repl
  *   and /health (Render and UptimeRobot poll it).
  * - `{ user: [...] }`: extra per-account limits on a signed-in route, on top
  *   of the per-account default.
+ * - `{ user: [...], userDefault: false }`: those limits INSTEAD of the
+ *   default, for a route an app calls by itself (not the person) — so an
+ *   app bug that floods it uses up that route's allowance and nothing else.
  *
  * Limits keyed by something only the handler knows (a phone number in the
  * body, a refresh token's login) are applied inside the handler.
  */
-export type RouteLimits = false | { user?: readonly LimitRule[] };
+export type RouteLimits = false | { user?: readonly LimitRule[]; userDefault?: false };
 
 declare module "fastify" {
   interface FastifyContextConfig {
@@ -54,6 +57,7 @@ export function installRateLimits(app: FastifyInstance): void {
     const existing = route.onRequest === undefined ? [] : [route.onRequest].flat();
     const signedIn = existing.includes(requireAuth as onRequestHookHandler);
     const extra = limits?.user ?? [];
+    const countDefault = limits?.userDefault !== false;
 
     const limit: onRequestHookHandler = async (request, reply) => {
       if (isDevLoopbackExempt(request.ip, config.nodeEnv)) return;
@@ -61,7 +65,7 @@ export function installRateLimits(app: FastifyInstance): void {
       if (signedIn) {
         const userId = request.user?.userId;
         if (!userId) return; // requireAuth has already answered
-        checks.push({ rule: RULES.userDefault, subject: userId });
+        if (countDefault) checks.push({ rule: RULES.userDefault, subject: userId });
         for (const rule of extra) checks.push({ rule, subject: userId });
       } else {
         const ip = clientIpForLimits(request);

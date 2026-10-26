@@ -184,7 +184,8 @@ export const config = {
     driverDeclinePer15Min: positive("RATE_LIMIT_DRIVER_DECLINE_15M", 120),
     ratingPerHour: positive("RATE_LIMIT_RATING_HOUR", 20),
     profilePerHour: positive("RATE_LIMIT_PROFILE_HOUR", 20),
-    pushTokenPer15Min: positive("RATE_LIMIT_PUSH_TOKEN_15M", 30),
+    /** A healthy app sends its token once per install, then only when it changes. */
+    pushTokenPer15Min: positive("RATE_LIMIT_PUSH_TOKEN_15M", 10),
     /** Each authorizes a write into our Cloudinary account. */
     uploadPerHour: positive("RATE_LIMIT_UPLOAD_HOUR", 10),
     accountDeletePerHour: positive("RATE_LIMIT_ACCOUNT_DELETE_HOUR", 5),

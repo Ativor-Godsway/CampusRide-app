@@ -18,7 +18,7 @@ import {
 } from "./storage";
 import { getAccessToken, setAccessToken } from "./tokenStore";
 import { refreshSessionOrSignOut, setSessionRejectedHandler } from "./apiClient";
-import { getCurrentPushToken, setCurrentPushToken } from "../push/currentToken";
+import { forgetPushRegistration, getCurrentPushToken } from "../push/currentToken";
 import { resetRideSocket } from "../realtime/socket";
 
 interface AuthContextValue {
@@ -185,7 +185,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     const storedRefreshToken = await getStoredRefreshToken();
     const pushToken = getCurrentPushToken();
-    setCurrentPushToken(null);
+    // The logout below drops this install's token on the server, so the next
+    // sign-in sends it again.
+    await forgetPushRegistration();
     await clearLocalSession();
     if (storedRefreshToken) {
       // Best effort, not awaited: apiLogout already swallows its own errors.
@@ -201,7 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // signed in.
     await apiDeleteAccount(code);
     // The server deleted every push token of the account.
-    setCurrentPushToken(null);
+    await forgetPushRegistration();
     await clearLocalSession();
   }, [clearLocalSession]);
 

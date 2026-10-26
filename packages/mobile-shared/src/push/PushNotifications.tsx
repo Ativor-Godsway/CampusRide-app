@@ -9,6 +9,7 @@ import {
   markAskedForPush,
   pushSupported,
   registerForPush,
+  stopPushRegistration,
 } from "./registration";
 
 export interface PushNotificationsProps {
@@ -62,12 +63,21 @@ export function PushNotifications({ app, showInForeground, onOpen }: PushNotific
   }, []);
 
   // Register on each signed-in launch, and again if the phone's token changes.
+  // The listener also fires after every fetch of the token, unchanged or not,
+  // so it hands over the token it got: fetching it again from here would fire
+  // it again, forever (registerForPush ignores a token it has just used).
+  const userId = signedIn ? user.id : null;
   useEffect(() => {
-    if (!signedIn || !pushSupported()) return;
-    void registerForPush(app);
-    const subscription = Notifications.addPushTokenListener(() => void registerForPush(app));
-    return () => subscription.remove();
-  }, [signedIn, app]);
+    if (!userId || !pushSupported()) return;
+    void registerForPush(app, userId);
+    const subscription = Notifications.addPushTokenListener(
+      (devicePushToken) => void registerForPush(app, userId, { devicePushToken }),
+    );
+    return () => {
+      subscription.remove();
+      stopPushRegistration();
+    };
+  }, [userId, app]);
 
   // Taps. The app is ready once it has left its start screen ("/" before
   // sign-in loads) and isn't on the sign-in screens.
