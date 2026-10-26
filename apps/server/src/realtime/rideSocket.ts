@@ -13,7 +13,7 @@ import {
   type DriverLocationUpdatePayload,
   type OfferClosedPayload,
 } from "@rida/shared";
-import { verifyAccessToken } from "../services/auth/tokens";
+import { ExpiredAccessTokenError, verifyAccessToken } from "../services/auth/tokens";
 import { loadActiveAccount } from "../services/auth/accountStatus";
 import { checkDriverArriving } from "../services/push/notify";
 import { limiter } from "../rateLimit/limiter";
@@ -64,7 +64,7 @@ export async function authenticateSocket(prisma: PrismaClient, token: unknown): 
   try {
     userId = verifyAccessToken(token).userId;
   } catch (err) {
-    if ((err as Error).name !== "TokenExpiredError") alerts.socketAuthFailures.record({ reason: "invalid" });
+    if (!(err instanceof ExpiredAccessTokenError)) alerts.socketAuthFailures.record({ reason: "invalid" });
     return null;
   }
   const account = await loadActiveAccount(prisma, userId);

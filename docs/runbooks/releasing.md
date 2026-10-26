@@ -127,8 +127,9 @@ bash scripts/eas-update.sh rider preview "Fix pickup pin jumping on small phones
 ```
 
 The message is what you'll see later in the update list, so make it say what
-changed. When it finishes, the output shows an **Update group ID** (and a link to
-the update on expo.dev). Copy the group ID: you need it in step 4.
+changed. The script publishes iOS first, then Android (never web: the apps
+don't support it), so the output shows **two Update group IDs**, one per
+platform, each with a link to expo.dev. Copy both: you need them in step 4.
 
 > The script sets the server address from `eas.json` itself, so whatever is in your
 > local `apps/<app>/.env` file can't leak into a release.
@@ -149,11 +150,12 @@ problem, merge the fix and start again from step 1.
 ### Step 4 — promote the exact same update to production
 
 ```bash
-npx -y eas-cli@24 update:republish --group <GROUP_ID_FROM_STEP_2> --destination-channel production -m "Fix pickup pin jumping on small phones"
+npx -y eas-cli@24 update:republish --group <IOS_GROUP_ID_FROM_STEP_2> --destination-channel production -m "Fix pickup pin jumping on small phones"
+npx -y eas-cli@24 update:republish --group <ANDROID_GROUP_ID_FROM_STEP_2> --destination-channel production -m "Fix pickup pin jumping on small phones"
 ```
 
-This copies the update you just tested to production, byte for byte, instead of
-rebuilding it. Users get it the next time they open the app (two launches, as in
+This copies the updates you just tested to production, byte for byte, instead of
+rebuilding them. Users get it the next time they open the app (two launches, as in
 section 1).
 
 > If you skipped preview and want to publish straight to production (not
@@ -327,7 +329,9 @@ cd apps/rider    # or apps/driver
 npx -y eas-cli@24 update:list --branch production
 ```
 
-The newest group is at the top. Copy its group ID.
+The newest groups are at the top: since each release publishes iOS and Android
+separately, there is one group per platform. Copy the bad one's group ID — or
+both, if both platforms are affected, and roll back each in step 2.
 
 ### Step 2 — roll it back
 

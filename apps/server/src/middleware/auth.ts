@@ -1,6 +1,10 @@
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { prisma } from "../db/prisma";
-import { verifyAccessToken, type AccessTokenPayload } from "../services/auth/tokens";
+import {
+  ExpiredAccessTokenError,
+  verifyAccessToken,
+  type AccessTokenPayload,
+} from "../services/auth/tokens";
 import { loadActiveAccount } from "../services/auth/accountStatus";
 import { adminPhoneAllowed } from "../services/auth/adminAccess";
 import { config } from "../config";
@@ -19,12 +23,26 @@ const INVALID_TOKEN = "Invalid or expired access token";
 
 /**
  * A refused token counts toward the caller's IP backstop, exactly like a
- * request to a public route: someone hammering signed-in routes with junk
- * tokens is bounded, while a real user's occasional expired token (the app
- * refreshes it and retries) is nowhere near the limit.
+ * request to a public route, so someone hammering signed-in routes with
+ * missing, junk or forged tokens is bounded.
+ *
+ * Not an expired one (`countTowardIp: false`): one of our own tokens whose
+ * 30 minutes are up. A phone sending many of those is a real person's app,
+ * stuck or mid-refresh, and the IP is shared by everyone on that Wi-Fi or
+ * mobile network; counting them once used up the IP's allowance for
+ * /auth/refresh and log-in, which locked the driver app on the same phone
+ * out (2026-10-26).
  */
-async function refuse(request: FastifyRequest, reply: FastifyReply, error: string): Promise<void> {
-  const ip = isDevLoopbackExempt(request.ip, config.nodeEnv) ? null : clientIpForLimits(request);
+async function refuse(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  error: string,
+  countTowardIp = true,
+): Promise<void> {
+  const ip =
+    !countTowardIp || isDevLoopbackExempt(request.ip, config.nodeEnv)
+      ? null
+      : clientIpForLimits(request);
   if (ip) {
     const outcome = await limiter.consume([{ rule: RULES.ipPublic, subject: ip }]);
     if (!outcome.ok) {
@@ -61,8 +79,8 @@ export async function requireAuth(request: FastifyRequest, reply: FastifyReply):
   let payload: AccessTokenPayload;
   try {
     payload = verifyAccessToken(token);
-  } catch {
-    return refuse(request, reply, INVALID_TOKEN);
+  } catch (err) {
+    return refuse(request, reply, INVALID_TOKEN, !(err instanceof ExpiredAccessTokenError));
   }
 
   // Same answer as a bad token: a deleted account looks exactly like an

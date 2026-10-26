@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import jwt from "jsonwebtoken";
 import { config } from "../../config";
 import {
+  ExpiredAccessTokenError,
   signAccessToken,
   signDeletionConfirmToken,
   signVerificationToken,
@@ -65,6 +66,43 @@ describe("verifyAccessToken", () => {
       ].join("."),
     ];
     for (const token of bad) expect(() => verifyAccessToken(token)).toThrow();
+  });
+});
+
+describe("an expired access token", () => {
+  /** Expired a minute ago. */
+  const past = () => Math.floor(Date.now() / 1000) - 60;
+
+  it("is told apart only when it is ours: signed with our secret, an access token's shape", () => {
+    const ours = [
+      jwt.sign({ userId: "u1", role: "RIDER", typ: "access", exp: past() }, config.jwtSecret),
+      // Issued before `typ` existed.
+      jwt.sign({ userId: "u1", role: "DRIVER", exp: past() }, config.jwtSecret),
+    ];
+    for (const token of ours) expect(() => verifyAccessToken(token)).toThrow(ExpiredAccessTokenError);
+  });
+
+  it("forged, malformed or not an access token: a plain refusal, even when expired", () => {
+    const exp = past();
+    const others = [
+      jwt.sign({ userId: "u1", role: "RIDER", typ: "access", exp }, "another-secret"),
+      jwt.sign({ userId: "u1", role: "RIDER", typ: "access", exp }, config.jwtSecret, {
+        algorithm: "HS512",
+      }),
+      jwt.sign({ userId: "u1", role: "SUPERUSER", typ: "access", exp }, config.jwtSecret),
+      jwt.sign({ userId: "", role: "RIDER", typ: "access", exp }, config.jwtSecret),
+      jwt.sign({ phone: PHONE, purpose: "LOGIN", typ: "otp-verified", exp }, config.jwtSecret),
+      [
+        Buffer.from('{"alg":"none","typ":"JWT"}').toString("base64url"),
+        Buffer.from(`{"userId":"u1","role":"ADMIN","exp":${exp}}`).toString("base64url"),
+        "",
+      ].join("."),
+      "junk",
+    ];
+    for (const token of others) {
+      expect(() => verifyAccessToken(token), token).toThrow();
+      expect(() => verifyAccessToken(token), token).not.toThrow(ExpiredAccessTokenError);
+    }
   });
 });
 
