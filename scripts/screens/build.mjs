@@ -22,6 +22,7 @@ const STAND_INS = {
   "@expo/vector-icons": "vector-icons.tsx",
   "expo-router": "expo-router.tsx",
   "expo-image": "expo-image.tsx",
+  "lottie-react-native": "lottie.tsx",
   "expo-font": "expo-modules.ts#font",
   "expo-haptics": "expo-modules.ts#haptics",
   "expo-secure-store": "expo-modules.ts#secureStore",

@@ -21,6 +21,6 @@ Guidelines:
 | pin-pickup.png / pin-dropoff.png | Map pickup / drop-off markers |
 | no-drivers.png | Rider "No drivers available" (opaque white background: white surfaces only) |
 | safety-shield.png | Rider Safety screen |
-| logo-mark.png | Logo on the sign-in screens and the loading screen (both apps) |
+| logo-mark.png (+ @2x, @3x) | The green CampusRide mark on the white loading screen (both apps), 72 pt. Made by `scripts/brand/generate.py` from `assets/brand/logo-green.png`: re-run it rather than editing by hand |
 
 App icons live separately in `apps/driver/assets/` and `apps/rider/assets/` (`icon.png`, `adaptive-icon.png`).

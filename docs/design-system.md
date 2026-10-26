@@ -350,7 +350,7 @@ What the mockups didn't say, or what changed once real data and real phones were
 
 | file | screen | key points |
 |---|---|---|
-| 01-rider-welcome.png | Welcome (both apps; driver adds the amber DRIVER badge) | green hero + realistic car, ONE button "Continue with phone number", terms line |
+| 01-rider-welcome.png | Welcome (both apps; driver adds the amber DRIVER badge) | green hero, now the CampusRide animation (`assets/welcome/`, played once, last frame still with Reduce Motion) instead of the car, ONE button "Continue with phone number", terms line |
 | 02-rider-phone.png | Phone | fixed Ghana flag + "+233" prefix, digits formatted as typed, accepts pasted 054…/+233…, "Send code" above keyboard |
 | 03-rider-code.png | OTP | 6 boxes, iOS "From Messages" / Android sms-otp autofill, auto-submit on 6th digit, no Continue button, "Resend in 0:41" |
 | 04-rider-home.png | Rider home | full map, "Where to?" sheet, recent-place chips, slim "Food and courier · Soon" row, tabs Home/Rides/Account |

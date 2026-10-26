@@ -31,6 +31,12 @@ jest.mock("react-native-maps", () => {
   };
 });
 
+// Lottie draws natively; in tests the welcome animation is an empty view.
+jest.mock("lottie-react-native", () => {
+  const { View } = jest.requireActual<typeof import("react-native")>("react-native");
+  return { __esModule: true, default: View };
+});
+
 // Crash reporting is off in tests; the real module starts a timer on import
 // that would keep jest from exiting.
 jest.mock("@sentry/react-native", () => ({

@@ -8,7 +8,7 @@ designer's logo files in assets/brand/. Re-run after changing those files:
 
 Sources (assets/brand/, copied as they came from the designer):
 - logo-white.png  the mark alone, white on transparent
-- logo-green.png  the mark alone, green (kept for reference; not used here)
+- logo-green.png  the mark alone, brand green
 - logo-name.png   the mark with "CampusRide" stacked under it, grey + green
 
 Writes, for each app (rider on brand green, driver on near-black):
@@ -17,6 +17,10 @@ Writes, for each app (rider on brand green, driver on near-black):
 - apps/<app>/assets/notification-icon.png  96 x 96, white on transparent
 - apps/<app>/assets/splash-icon.png     1024 x 1024, the logo with its name, all white
 - store-assets/<app>/play-icon-512.png  512 x 512, as icon.png (Google Play listing)
+
+and, inside the apps (packages/mobile-shared, both apps):
+- assets/illustrations/logo-mark.png (+ @2x, @3x)  the green mark at 72 pt, for
+  the white loading screen (LoadingState)
 
 The background colours must match each app.json (icon background is baked in
 here; the adaptive-icon and splash backgrounds are set there).
@@ -48,6 +52,9 @@ NOTIFICATION_LIVE_SHARE = 22 / 24
 # Space left around the logo on the splash image ("cropped close").
 SPLASH_MARGIN = 8
 PLAY_ICON = 512
+# LoadingState draws the mark 72 pt square, on white.
+IN_APP_MARK = 72
+IN_APP_MARK_DIR = ROOT / "packages" / "mobile-shared" / "assets" / "illustrations"
 
 
 def load(name: str) -> Image.Image:
@@ -121,6 +128,15 @@ def main() -> None:
         for path, image in outputs.items():
             image.save(path, optimize=True)
             print(f"{path.relative_to(ROOT)}  {image.width}x{image.height} {image.mode}")
+
+    green = load("logo-green.png")
+    for density in (1, 2, 3):
+        size = IN_APP_MARK * density
+        art = scaled(green, size / max(green.width, green.height))
+        suffix = "" if density == 1 else f"@{density}x"
+        path = IN_APP_MARK_DIR / f"logo-mark{suffix}.png"
+        centred(clear(size), art).save(path, optimize=True)
+        print(f"{path.relative_to(ROOT)}  {size}x{size} RGBA")
 
 
 if __name__ == "__main__":

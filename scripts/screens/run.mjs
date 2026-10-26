@@ -7,6 +7,7 @@
  *   npm run screens -- pr-03 --app driver    one app
  *   npm run screens -- pr-03 --only home,trip
  *   npm run screens -- pr-03 --out ~/somewhere
+ *   npm run screens -- pr-03 --device se     another phone size (see DEVICES)
  *
  * PNGs (390 px wide, 2x) go to ~/Desktop/CampusRide UI audit/pr-screens/<name>/
  * unless --out says otherwise. They are NOT committed.
@@ -56,6 +57,22 @@ for (const app of apps) {
     console.error(`--app must be one of: ${APPS.join(", ")}`);
     process.exit(1);
   }
+}
+/**
+ * Phone sizes in points, with their status bar and home indicator. The
+ * default is an iPhone 15; the others check small and large screens.
+ */
+const DEVICES = {
+  iphone: { width: 390, height: 844, insets: { top: 47, bottom: 34 } },
+  se: { width: 375, height: 667, insets: { top: 20, bottom: 0 } },
+  promax: { width: 430, height: 932, insets: { top: 59, bottom: 34 } },
+  "android-small": { width: 360, height: 640, insets: { top: 24, bottom: 0 } },
+};
+const deviceName = flag("device") ?? "iphone";
+const device = DEVICES[deviceName];
+if (!device) {
+  console.error(`--device must be one of: ${Object.keys(DEVICES).join(", ")}`);
+  process.exit(1);
 }
 const only = flag("only")
   ?.split(",")
@@ -131,8 +148,8 @@ async function build(app) {
 
 // ─── Capture ─────────────────────────────────────────────────────────────────
 
-const WIDTH = 390;
-const HEIGHT = 844;
+const WIDTH = device.width;
+const HEIGHT = device.height;
 
 /** The element with this accessibility label, or else this visible text. */
 async function find(tab, label) {
@@ -195,6 +212,10 @@ async function captureScene(browser, app, index, scene) {
   });
   tab.on("pageerror", (err) => errors.push(String(err)));
   await tab.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 2 });
+  // Read by stubs/safe-area-context.tsx before the bundle runs.
+  await tab.evaluateOnNewDocument((d) => {
+    window.__screensDevice = d;
+  }, device);
   await tab.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
   await tab.goto(`${index}#${scene.name}`, { waitUntil: "load" });
   await tab
@@ -232,7 +253,8 @@ async function captureScene(browser, app, index, scene) {
     }
   }
 
-  const file = path.join(outDir, `${app}-${scene.name}.png`);
+  const suffix = deviceName === "iphone" ? "" : `-${deviceName}`;
+  const file = path.join(outDir, `${app}-${scene.name}${suffix}.png`);
   await tab.screenshot({ path: file });
   await tab.close();
   return { file, scene, errors: [...errors] };

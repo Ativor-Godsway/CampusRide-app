@@ -1,9 +1,19 @@
-/** An iPhone 15-ish frame: 47pt status bar, 34pt home indicator. */
+/**
+ * The phone's frame: an iPhone 15 (47pt status bar, 34pt home indicator)
+ * unless run.mjs --device picked another size.
+ */
 import type { ReactNode } from "react";
 import { View, type ViewProps } from "react-native";
 
-export const INSETS = { top: 47, bottom: 34, left: 0, right: 0 };
-const FRAME = { x: 0, y: 0, width: 390, height: 844 };
+type Device = { width: number; height: number; insets: { top: number; bottom: number } };
+const DEVICE: Device = (globalThis as { __screensDevice?: Device }).__screensDevice ?? {
+  width: 390,
+  height: 844,
+  insets: { top: 47, bottom: 34 },
+};
+
+export const INSETS = { ...DEVICE.insets, left: 0, right: 0 };
+export const FRAME = { x: 0, y: 0, width: DEVICE.width, height: DEVICE.height };
 export type Edge = "top" | "bottom" | "left" | "right";
 
 export const initialWindowMetrics = { insets: INSETS, frame: FRAME };
