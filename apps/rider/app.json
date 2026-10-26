@@ -124,7 +124,7 @@
       "package": "com.campusride.rider",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#F6F7F6"
+        "backgroundColor": "#19743C"
       }
     },
     "plugins": [
@@ -173,13 +173,18 @@
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",
-          "imageWidth": 160,
+          "imageWidth": 210,
           "resizeMode": "contain",
-          "backgroundColor": "#FFFFFF",
+          "backgroundColor": "#19743C",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#19743C"
+          },
           "android": {
+            "imageWidth": 160,
             "dark": {
               "image": "./assets/splash-icon.png",
-              "backgroundColor": "#FFFFFF"
+              "backgroundColor": "#19743C"
             }
           }
         }
