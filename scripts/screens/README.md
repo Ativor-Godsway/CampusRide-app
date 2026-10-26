@@ -4,6 +4,7 @@
 npm run screens -- pr-03                  # every scene, both apps
 npm run screens -- pr-03 --app driver     # one app
 npm run screens -- pr-03 --only home,trip # some scenes
+npm run screens -- pr-03 --device se      # iPhone SE size (also promax, android-small)
 ```
 
 PNGs, 390 px wide at 2x, are saved to

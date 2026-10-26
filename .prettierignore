@@ -7,3 +7,6 @@ coverage/
 *.tsbuildinfo
 package-lock.json
 apps/server/prisma/migrations/
+
+# The designer's Lottie file, kept byte for byte.
+packages/mobile-shared/assets/welcome/welcome.json

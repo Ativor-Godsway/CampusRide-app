@@ -14,8 +14,9 @@ import {
   type StyleProp,
   type ViewStyle,
 } from "react-native";
+import { FRAME } from "./safe-area-context";
 
-const SCREEN_HEIGHT = 844;
+const SCREEN_HEIGHT = FRAME.height;
 const noop = () => undefined;
 
 interface SheetProps {
