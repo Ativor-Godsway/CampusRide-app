@@ -18,7 +18,6 @@ import PlanYourRide from "../../../apps/rider/app/ride/location";
 import ChooseRide from "../../../apps/rider/app/ride/type";
 import PickOnMap from "../../../apps/rider/app/ride/pick";
 import DeleteAccountRoute from "../../../apps/rider/app/delete-account";
-import DesignGallery from "../../../apps/rider/app/dev/design-gallery";
 import { boot, refuse, type Routes, type Scene } from "./core";
 import {
   appMinVersions,
@@ -128,15 +127,6 @@ const ended = (
 });
 
 const scenes: Scene[] = [
-  {
-    name: "design-gallery",
-    full: true,
-    dev: true,
-    user: rider,
-    routes: signedIn,
-    chain: [RootLayout, DesignGallery],
-    pathname: "/dev/design-gallery",
-  },
   {
     name: "welcome",
     user: null,

@@ -15,7 +15,6 @@ import OnboardingRoute from "../../../apps/driver/app/onboarding";
 import PendingRoute from "../../../apps/driver/app/pending";
 import LicensesRoute from "../../../apps/driver/app/licenses";
 import TripScreen from "../../../apps/driver/app/ride/[id]";
-import DesignGallery from "../../../apps/driver/app/dev/design-gallery";
 import { boot, refuse, type Routes, type Scene } from "./core";
 import {
   appMinVersions,
@@ -173,15 +172,6 @@ const atPickup = {
 const midTrip = { latitude: 5.6462, longitude: -0.1868 };
 
 const scenes: Scene[] = [
-  {
-    name: "design-gallery",
-    full: true,
-    dev: true,
-    user: driver(false),
-    routes: signedIn(),
-    chain: [RootLayout, DesignGallery],
-    pathname: "/dev/design-gallery",
-  },
   {
     name: "welcome",
     user: null,

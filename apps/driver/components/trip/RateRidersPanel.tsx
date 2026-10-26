@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Alert, Pressable, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { firstName } from "@rida/shared";
+import { firstName, initialsOf } from "@rida/shared";
 import {
   Text,
   colors,
@@ -68,7 +68,7 @@ export function RateRidersPanel({ rideId }: { rideId: string }) {
           <View key={rider.riderId} style={styles.row}>
             <View style={styles.avatar}>
               <Text variant="title3" color="brand">
-                {name.charAt(0).toUpperCase()}
+                {initialsOf(name, 1) || "?"}
               </Text>
             </View>
             <Text variant="bodyStrong" style={styles.name} numberOfLines={1}>

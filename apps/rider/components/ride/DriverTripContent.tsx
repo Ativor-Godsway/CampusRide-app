@@ -2,7 +2,7 @@ import { useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import { clockTime, cloudinaryAvatar } from "@rida/shared";
+import { clockTime, cloudinaryAvatar, initialsOf } from "@rida/shared";
 import {
   Button,
   IconButton,
@@ -37,13 +37,7 @@ function etaLabel(minutes: number): string {
 
 export function DriverAvatar({ driver, size }: { driver: RideDriverInfo; size: number }) {
   const [failed, setFailed] = useState(false);
-  const initials = driver.name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0] ?? "")
-    .join("")
-    .toUpperCase();
+  const initials = initialsOf(driver.name) || "?";
   const round = { width: size, height: size, borderRadius: size / 2 };
   return (
     <View style={[styles.avatar, round]}>

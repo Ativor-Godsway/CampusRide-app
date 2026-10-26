@@ -1,5 +1,5 @@
 import { useRouter } from "expo-router";
-import { PRIVACY_URL, TERMS_URL, WEBSITE_URL, formatGhanaPhone, stopLabel } from "@rida/shared";
+import { PRIVACY_URL, TERMS_URL, WEBSITE_URL, formatGhanaPhone, initialsOf, stopLabel } from "@rida/shared";
 import { Alert, StyleSheet, View } from "react-native";
 import {
   ListRow,
@@ -47,7 +47,7 @@ export default function AccountTab() {
       <View style={styles.header}>
         <View style={styles.avatar}>
           <Text variant="title2" color="brand">
-            {user?.name?.trim().charAt(0).toUpperCase() || "?"}
+            {initialsOf(user?.name, 1) || "?"}
           </Text>
         </View>
         <View style={styles.profileInfo}>
@@ -128,16 +128,6 @@ export default function AccountTab() {
           showChevron={false}
         />
       </View>
-
-      {/* Dev builds only: every design-system component, to compare with docs/design-system.md. */}
-      {__DEV__ ? (
-        <ListRow
-          title="Design gallery"
-          subtitle="Dev only: components and text styles"
-          leading={<ListRow.Icon name="color-palette-outline" />}
-          onPress={() => router.push("/dev/design-gallery")}
-        />
-      ) : null}
 
       {/* Which build/update this phone runs — docs/runbooks/releasing.md. Long-press: About this app. */}
       <Text

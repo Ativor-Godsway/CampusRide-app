@@ -84,11 +84,39 @@ export function BottomSheet({
   const [footerHeight, setFooterHeight] = useState(0);
   const bottomPad = Math.max(insets.bottom, spacing[5]);
 
+  // A modal sheet is mounted only while it is open or closing, and always
+  // mounts at index 0: gorhom opens a sheet at its mount index once its layout
+  // is measured, whereas snapToIndex (and close) called before then do nothing.
+  // A sheet that mounted closed and was opened with snapToIndex too early —
+  // or one that mounted already visible, like the trip-complete sheet — stayed
+  // shut, with nothing on screen to open it.
+  const [mounted, setMounted] = useState(visible);
+  if (modal && visible && !mounted) setMounted(true);
+  /** Whether the sheet has reached its open position since it mounted. */
+  const opened = useRef(false);
+
   useEffect(() => {
-    if (!modal) return;
+    if (!modal || !mounted) return;
+    // Reopened while still closing: the layout is measured by now.
     if (visible) ref.current?.snapToIndex(0);
+    // Closed before it finished opening, when close() would do nothing.
+    else if (!opened.current) setMounted(false);
     else ref.current?.close();
-  }, [modal, visible]);
+  }, [modal, mounted, visible]);
+
+  const handleChange = useCallback(
+    (at: number, position: number) => {
+      if (at >= 0) opened.current = true;
+      onChange?.(at, position);
+    },
+    [onChange],
+  );
+
+  const handleClose = useCallback(() => {
+    opened.current = false;
+    setMounted(false);
+    onDismiss?.();
+  }, [onDismiss]);
 
   const renderBackdrop = useCallback(
     (props: BottomSheetBackdropProps) => (
@@ -118,22 +146,26 @@ export function BottomSheet({
     [footer, bottomPad],
   );
 
-  const padding = [
+  // One flat style: gorhom merges a style array with StyleSheet.compose, which
+  // takes two styles and drops the rest — contentStyle (the third) was lost.
+  const padding = StyleSheet.flatten([
     styles.content,
     { paddingBottom: footer ? footerHeight + spacing[3] : bottomPad },
     contentStyle,
-  ];
+  ]);
+
+  if (modal && !mounted) return null;
 
   return (
     <GorhomSheet
       ref={ref}
-      index={modal ? -1 : index}
+      index={modal ? 0 : index}
       snapPoints={snapPoints}
       enableDynamicSizing={!snapPoints}
       maxDynamicContentSize={height * maxHeightRatio}
       enablePanDownToClose={modal && dismissible}
-      onClose={modal ? onDismiss : undefined}
-      onChange={onChange}
+      onClose={modal ? handleClose : undefined}
+      onChange={handleChange}
       backdropComponent={modal ? renderBackdrop : undefined}
       footerComponent={footer ? renderFooter : undefined}
       backgroundStyle={styles.background}

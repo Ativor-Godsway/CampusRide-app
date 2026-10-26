@@ -100,6 +100,8 @@ interface RideOption {
 const PILL_TOP_GAP = spacing.sm;
 /** A first guess at the options sheet's height, until it reports its real one. */
 const OPTIONS_SHEET_ESTIMATE = 360;
+/** Sheet height changes smaller than this (a line of text) don't move the map's controls. */
+const SHEET_HEIGHT_SLOP = 16;
 
 /** HTTP status of an axios error, if any. */
 function httpStatus(error: unknown): number | undefined {
@@ -611,15 +613,20 @@ export default function RideTypeScreen() {
   // ── Map framing ─────────────────────────────────────────────────────────────
   // Fit pickup + drop-off (and the driver, once there is one) into the map
   // area the rider can actually see: below the route pill, above the sheet.
-  // The sheet reports its height whenever it settles, so the map re-fits
-  // when the sheet grows or shrinks.
+  // The map re-fits only when the phase changes (driver assigned, arrived,
+  // picked up) or the rider taps recentre — not each time the sheet settles
+  // at a new height, which re-zoomed the map every few seconds. Each fit uses
+  // the sheet's latest height.
   const [sheetHeight, setSheetHeight] = useState(inOptions ? OPTIONS_SHEET_ESTIMATE : windowHeight * 0.55);
   const onSheetChange = useCallback(
     (_index: number, position: number) => {
-      if (position > 0) setSheetHeight(Math.round(windowHeight - position));
+      if (position <= 0) return;
+      const next = Math.round(windowHeight - position);
+      setSheetHeight((prev) => (Math.abs(next - prev) < SHEET_HEIGHT_SLOP ? prev : next));
     },
     [windowHeight],
   );
+  const framePhase = inOptions ? "choosing" : isSearching ? "searching" : `driver-${myLegStatus}`;
   const hasDriverPin = driverLocation !== null;
   // Framed on where the pickup STARTED while choosing, so dragging the pin
   // doesn't swing the map; on the moved pin once the ride is requested.
@@ -677,6 +684,7 @@ export default function RideTypeScreen() {
         pulseZoneId={isSearching ? "pickup" : undefined}
         fitTo={fitTo}
         fitPadding={fitPadding}
+        refitKey={framePhase}
         controlsBottomInset={sheetHeight}
         draggableZoneId={inOptions && adjusting ? "pickup" : undefined}
         onZoneDragEnd={(_id, point) => onPickupDragged(point)}
@@ -698,7 +706,8 @@ export default function RideTypeScreen() {
 
       <RoutePill
         top={insets.top + PILL_TOP_GAP}
-        pickupZoneName={driverComing ? (pickupWhere?.name ?? pickupEnd.label) : pickupEnd.label}
+        // Once requested, a real place ("Alexander Kwapong Hall"), never "Current location".
+        pickupZoneName={inOptions ? pickupEnd.label : (pickupWhere?.name ?? pickupEnd.label)}
         dropoffZoneName={dropoffEnd.label}
         onBack={goBack}
         // A requested ride's route can't change, so Edit only exists before.
