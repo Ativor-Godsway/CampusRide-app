@@ -63,6 +63,13 @@ export interface CampusMapViewProps {
   fitTo?: LatLng[];
   /** Points of map covered by overlays (pill, sheet) plus margin; see mapFitPadding. */
   fitPadding?: EdgePadding;
+  /**
+   * The screen's phase (e.g. "searching", "driver arrived"). When set, the map
+   * re-fits only when this or `fitTo` changes — a moment later, once the
+   * sheet has settled — and on recentre; a new `fitPadding` alone is used by
+   * the next fit but doesn't move the map.
+   */
+  refitKey?: string;
   /** Lifts the recenter button above a bottom sheet covering this many points. */
   controlsBottomInset?: number;
   /** Id of a zone the rider may drag ("Move pin to the exact spot"); reported through onZoneDragEnd. */
@@ -94,6 +101,7 @@ export function CampusMapView({
   pulseZoneId,
   fitTo,
   fitPadding,
+  refitKey,
   controlsBottomInset = 0,
   draggableZoneId,
   onZoneDragEnd,
@@ -104,10 +112,14 @@ export function CampusMapView({
   const [mapReady, setMapReady] = useState(false);
   const pulseZone = pulseZoneId ? zones.find((z) => z.id === pulseZoneId) : undefined;
 
-  // Stable key: re-fit only when the points or padding really change, not on
-  // every render that builds a new (equal) array.
+  // Stable key: re-fit only when the points or padding (or, with refitKey,
+  // the phase) really change, not on every render that builds a new (equal) array.
+  const settles = refitKey !== undefined;
   const fitKey = fitTo?.length
-    ? JSON.stringify([fitTo.map((p) => [p.latitude.toFixed(6), p.longitude.toFixed(6)]), fitPadding ?? null])
+    ? JSON.stringify([
+        fitTo.map((p) => [p.latitude.toFixed(6), p.longitude.toFixed(6)]),
+        settles ? refitKey : (fitPadding ?? null),
+      ])
     : null;
   const fitRef = useRef({ fitTo, fitPadding });
   fitRef.current = { fitTo, fitPadding };
@@ -120,8 +132,14 @@ export function CampusMapView({
   }, []);
 
   useEffect(() => {
-    if (mapReady && fitKey) fit(!reduceMotion);
-  }, [mapReady, fitKey, fit, reduceMotion]);
+    if (!mapReady || !fitKey) return;
+    if (!settles) {
+      fit(!reduceMotion);
+      return;
+    }
+    const timer = setTimeout(() => fit(!reduceMotion), FIT_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [mapReady, fitKey, fit, reduceMotion, settles]);
 
   return (
     <View style={[styles.container, { height }, !rounded && styles.unrounded]}>
@@ -232,6 +250,8 @@ const CAR_SIZE = 44;
  * hiding the jump.
  */
 const GLIDE_MS = 1000;
+/** With refitKey: how long a phase change waits for the sheet to settle before fitting. */
+const FIT_SETTLE_MS = 450;
 
 /** Map marker drawn with a 3D pin. Stops re-rendering once the image has loaded, which keeps Android smooth. */
 function ArtMarker({

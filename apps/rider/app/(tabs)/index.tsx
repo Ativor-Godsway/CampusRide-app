@@ -1,13 +1,21 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+  useWindowDimensions,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { TripEnd } from "@rida/shared";
 import {
   POPULAR_PLACE_NAMES,
   SERVICE_AREA_POLYGON,
+  initialsOf,
   isSameSpot,
   placeEnd,
   recentTripEnds,
@@ -99,7 +107,7 @@ export default function HomeTab() {
   const suggestions = recent.length > 0 ? recent : popular;
 
   const firstName = user?.name?.split(" ")[0] ?? "";
-  const initial = user?.name?.trim().charAt(0).toUpperCase() || "?";
+  const initial = initialsOf(user?.name, 1) || "?";
   const region =
     location.state === "here"
       ? { ...location.coords, latitudeDelta: NEARBY_DELTA, longitudeDelta: NEARBY_DELTA }
@@ -213,15 +221,19 @@ export default function HomeTab() {
           />
         ) : null}
 
+        {/* One row that scrolls sideways, edge to edge, starting on the gutter. */}
         {ridesLoading ? (
-          <SkeletonGroup label="Loading your recent places" style={styles.chips}>
+          <SkeletonGroup label="Loading your recent places" style={[styles.chipRow, styles.chips]}>
             <Skeleton width={128} height={36} radius={radii.full} />
             <Skeleton width={150} height={36} radius={radii.full} />
             <Skeleton width={112} height={36} radius={radii.full} />
           </SkeletonGroup>
         ) : suggestions.length > 0 ? (
-          <View
-            style={styles.chips}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.chipRow}
+            contentContainerStyle={styles.chips}
             accessibilityLabel={recent.length > 0 ? "Recent places" : "Popular places"}
           >
             {suggestions.map((end) => (
@@ -235,7 +247,7 @@ export default function HomeTab() {
                 accessibilityLabel={`Ride to ${end.label}`}
               />
             ))}
-          </View>
+          </ScrollView>
         ) : null}
 
         <View style={styles.divider} />
@@ -314,10 +326,16 @@ const styles = StyleSheet.create({
   notice: {
     gap: spacing[2],
   },
+  // Bleeds past the sheet's padding so chips scroll to the screen edge.
+  chipRow: {
+    flexGrow: 0,
+    marginHorizontal: -spacing.gutter,
+    overflow: "hidden",
+  },
   chips: {
     flexDirection: "row",
-    flexWrap: "wrap",
     gap: spacing[2],
+    paddingHorizontal: spacing.gutter,
   },
   soon: {
     alignSelf: "center",

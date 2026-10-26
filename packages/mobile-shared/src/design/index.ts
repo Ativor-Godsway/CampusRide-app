@@ -29,4 +29,3 @@ export * from "./components/PulseRings";
 export * from "./components/RouteStops";
 export * from "./components/RoleMismatchScreen";
 export * from "./components/Toast";
-export * from "./DesignGalleryScreen";

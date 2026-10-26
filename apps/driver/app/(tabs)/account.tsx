@@ -7,6 +7,7 @@ import {
   WEBSITE_URL,
   cloudinaryAvatar,
   formatGhanaPhone,
+  initialsOf,
 } from "@rida/shared";
 import {
   Button,
@@ -276,16 +277,6 @@ export default function AccountTab() {
         />
       </View>
 
-      {/* Dev builds only: every design-system component, to compare with docs/design-system.md. */}
-      {__DEV__ ? (
-        <ListRow
-          title="Design gallery"
-          subtitle="Dev only: components and text styles"
-          leading={<ListRow.Icon name="color-palette-outline" />}
-          onPress={() => router.push("/dev/design-gallery")}
-        />
-      ) : null}
-
       {/* Which build/update this phone runs — docs/runbooks/releasing.md. Long-press: About this app. */}
       <Text
         variant="caption"
@@ -327,7 +318,7 @@ function Avatar({
       ) : (
         <View style={[round, styles.initial]}>
           <Text variant="title2" color="brand">
-            {name.trim().charAt(0).toUpperCase() || "?"}
+            {initialsOf(name, 1) || "?"}
           </Text>
         </View>
       )}

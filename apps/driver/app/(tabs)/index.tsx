@@ -22,6 +22,7 @@ import {
   filterRequestsByType,
   getSharedFarePerRider,
   sortRequestsNearestFirst,
+  initialsOf,
   todayEarnings,
   type LatLng,
   type RequestTypeFilter,
@@ -612,7 +613,7 @@ function AccountButton({
         />
       ) : (
         <Text variant="title3" color="brand">
-          {name?.trim().charAt(0).toUpperCase() || "?"}
+          {initialsOf(name, 1) || "?"}
         </Text>
       )}
     </Pressable>
