@@ -23,8 +23,14 @@ const SCHEMAS = {
   remove: { body: object({ token: pushToken }, ["token"]), querystring: empty },
 };
 
-/** Per account: an app registers on each launch, rarely more. */
+/** Per account: an app sends its token once, then only when it changes. */
 const perUser = { limits: { user: [RULES.pushToken] } };
+/**
+ * The app calls this by itself, never the person: counted against its own
+ * limit only, so a phone stuck re-sending it (the first TestFlight builds did,
+ * many times a second) can't use up the account's allowance for everything else.
+ */
+const ownLimitOnly = { limits: { user: [RULES.pushToken], userDefault: false as const } };
 
 /**
  * Push notification tokens (services/push).
@@ -32,7 +38,8 @@ const perUser = { limits: { user: [RULES.pushToken] } };
  * - PUT /me/push-token    { token, app: "rider"|"driver", platform: "android"|"ios" }
  *   Saves this install's Expo push token for the signed-in user (moving it
  *   from whoever had it before). The apps call it after the user allows
- *   notifications and on each launch while signed in.
+ *   notifications, and when the token or the person changes. Sending the
+ *   same token again writes nothing.
  * - DELETE /me/push-token { token }
  *   Stops this install getting the user's notifications. Log out does the
  *   same through POST /auth/logout's optional pushToken.
@@ -41,7 +48,7 @@ export function registerPushRoutes(app: FastifyInstance, prisma: PrismaClient): 
   useRequestValidation(app);
   app.put(
     "/me/push-token",
-    { onRequest: requireAuth, schema: SCHEMAS.register, config: perUser },
+    { onRequest: requireAuth, schema: SCHEMAS.register, config: ownLimitOnly },
     async (request, reply) => {
       const body = (request.body ?? {}) as { token?: unknown; app?: unknown; platform?: unknown };
       try {

@@ -318,6 +318,22 @@ describe("one person's limit never touches another, even on the same IP", () => 
     }
   });
 
+  it("PUT /me/push-token flooded by an app bug: refused on its own limit, the account's other requests unaffected", async () => {
+    const a = await person();
+    const register = () =>
+      call("PUT", "/me/push-token", {
+        token: a.token,
+        payload: { token: "ExponentPushToken[flood-test-0000000001]", app: "rider", platform: "ios" },
+      });
+    for (let i = 0; i < RULES.pushToken.max; i++) expect((await register()).statusCode).toBe(200);
+    for (let i = 0; i < 50; i++) expect429(await register());
+
+    // None of it was counted against the account's general allowance.
+    expect((await limiter.status({ rule: RULES.userDefault, subject: a.user.id })).used).toBe(0);
+    expect((await call("GET", "/service-area", { token: a.token })).statusCode).toBe(200);
+    await prisma.pushToken.deleteMany({ where: { userId: a.user.id } });
+  });
+
   it("the per-account default refuses A and not B", async () => {
     const a = await person();
     const b = await person();

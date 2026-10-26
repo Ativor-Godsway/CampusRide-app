@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../../db/prisma";
 import { createTestUser } from "../ride/testFixtures";
@@ -8,6 +8,7 @@ import { generateRefreshTokenValue, sha256 } from "../auth/hash";
 import {
   InvalidPushTokenError,
   MAX_TOKENS_PER_USER,
+  PUSH_TOKEN_TOUCH_AFTER_MS,
   checkPushReceipts,
   registerPushToken,
   resetPushStateForTests,
@@ -78,6 +79,40 @@ describe("registerPushToken", () => {
       ).rejects.toBeInstanceOf(InvalidPushTokenError);
     }
     expect(await prisma.pushToken.count({ where: { userId: rider.id } })).toBe(0);
+  });
+
+  it("the same token sent again writes nothing; a day later it is touched once", async () => {
+    const rider = await user("RIDER");
+    const me = { userId: rider.id, role: "RIDER" };
+    const input = { token: newToken(), app: "rider", platform: "ios" };
+    await registerPushToken(prisma, me, input);
+    const saved = await prisma.pushToken.findUniqueOrThrow({ where: { token: input.token } });
+
+    const upsert = vi.spyOn(prisma.pushToken, "upsert");
+    try {
+      for (let i = 0; i < 20; i++) await registerPushToken(prisma, me, input);
+      expect(upsert).not.toHaveBeenCalled();
+      expect(
+        (await prisma.pushToken.findUniqueOrThrow({ where: { token: input.token } })).updatedAt,
+      ).toEqual(saved.updatedAt);
+
+      const tomorrow = new Date(Date.now() + PUSH_TOKEN_TOUCH_AFTER_MS + 60_000);
+      await registerPushToken(prisma, me, input, tomorrow);
+      expect(upsert).toHaveBeenCalledTimes(1);
+    } finally {
+      upsert.mockRestore();
+    }
+  });
+
+  it("the same token for another person or platform is written", async () => {
+    const a = await user("RIDER");
+    const b = await user("RIDER");
+    const token = newToken();
+    await registerPushToken(prisma, { userId: a.id, role: "RIDER" }, { token, app: "rider", platform: "ios" });
+    await registerPushToken(prisma, { userId: a.id, role: "RIDER" }, { token, app: "rider", platform: "android" });
+    expect((await prisma.pushToken.findUniqueOrThrow({ where: { token } })).platform).toBe("android");
+    await registerPushToken(prisma, { userId: b.id, role: "RIDER" }, { token, app: "rider", platform: "android" });
+    expect((await prisma.pushToken.findUniqueOrThrow({ where: { token } })).userId).toBe(b.id);
   });
 
   it(`keeps only the newest ${MAX_TOKENS_PER_USER} installs per person`, async () => {

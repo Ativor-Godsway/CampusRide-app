@@ -270,6 +270,12 @@ export function resetPushStateForTests(): void {
 
 /** Most installs one person keeps registered; older ones are dropped. */
 export const MAX_TOKENS_PER_USER = 5;
+/**
+ * The same install sending the same token again within this long writes
+ * nothing. After it, the row is touched, so "most recently sent" (which
+ * installs are kept) stays true for a phone that keeps its token for months.
+ */
+export const PUSH_TOKEN_TOUCH_AFTER_MS = 24 * 60 * 60_000;
 
 const ROLE_FOR_APP: Record<PushApp, string> = { rider: "RIDER", driver: "DRIVER" };
 
@@ -289,12 +295,14 @@ export interface RegisterPushTokenInput {
 /**
  * Saves (or moves to this user) the push token of the app install they're
  * signed in on. Validates everything; throws InvalidPushTokenError with a
- * plain message on bad input.
+ * plain message on bad input. Idempotent: the same token, for the same
+ * person and app, sent again costs one indexed read and no write.
  */
 export async function registerPushToken(
   prisma: PrismaClient,
   user: { userId: string; role: string },
   input: RegisterPushTokenInput,
+  now: Date = new Date(),
 ): Promise<void> {
   const { token, app, platform } = input;
   if (typeof token !== "string" || token.length > 255 || !Expo.isExpoPushToken(token)) {
@@ -306,6 +314,18 @@ export async function registerPushToken(
     throw new InvalidPushTokenError("platform must be android or ios");
   if (ROLE_FOR_APP[app] !== user.role)
     throw new InvalidPushTokenError(`a ${user.role} account can't use the ${app} app`);
+
+  const existing = await prisma.pushToken.findUnique({
+    where: { token },
+    select: { userId: true, app: true, platform: true, updatedAt: true },
+  });
+  if (
+    existing?.userId === user.userId &&
+    existing.app === app &&
+    existing.platform === platform &&
+    now.getTime() - existing.updatedAt.getTime() < PUSH_TOKEN_TOUCH_AFTER_MS
+  )
+    return;
 
   await prisma.pushToken.upsert({
     where: { token },

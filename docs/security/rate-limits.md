@@ -74,7 +74,7 @@ site's tighter limits can't be dodged by logging in through the rider app.
 | Driver declines (incl. offers timing out) | 120 / 15 min | `RATE_LIMIT_DRIVER_DECLINE_15M` |
 | Ratings | 20 / hour | `RATE_LIMIT_RATING_HOUR` |
 | Profile and emergency-contact changes | 20 / hour | `RATE_LIMIT_PROFILE_HOUR` |
-| Notification sign-ups (push tokens) | 30 / 15 min | `RATE_LIMIT_PUSH_TOKEN_15M` |
+| Notification sign-ups (push tokens) | 10 / 15 min; `PUT /me/push-token` counts against this one only, not the default above, so an app stuck re-sending its token can't use up the account's allowance | `RATE_LIMIT_PUSH_TOKEN_15M` |
 | Photo upload tickets (each allows a Cloudinary write) | 10 / hour | `RATE_LIMIT_UPLOAD_HOUR` |
 | Account deletion attempts | 5 / hour | `RATE_LIMIT_ACCOUNT_DELETE_HOUR` |
 | Route drawings (each may call OSRM) | 120 / 15 min | `RATE_LIMIT_ROUTE_LEGS` |
