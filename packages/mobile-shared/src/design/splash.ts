@@ -2,7 +2,8 @@ import * as SplashScreen from "expo-splash-screen";
 
 /**
  * The native splash (each app's app.json → expo-splash-screen plugin: the
- * pin from assets/splash-icon.png on white) stays up until the fonts are in
+ * white CampusRide logo and name from assets/splash-icon.png, on green for
+ * the rider app and near-black for the driver app) stays up until the fonts are in
  * and the first screen is laid out under it, so it gives way straight to the
  * app with no blank frame between.
  */

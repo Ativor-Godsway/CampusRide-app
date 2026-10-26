@@ -265,31 +265,49 @@ Good to know:
 
 ---
 
-### Swapping in the final icons and splash
+### App icons and splash
 
-The app icons and splash images are **temporary** (added 2026-10-24) until the
-designer's final art arrives. The driver app has its own temporary icon (dark
-background) so the two apps look different on a phone. The final art is a
-**file swap**, then a new store build. An OTA update can't change icons or the
-splash.
+The final CampusRide logo (2026-10-26). Every icon and splash image is
+**generated** from the designer's files in `assets/brand/` by one script, so
+they never drift apart or get edited by hand:
 
-Replace these files, keeping the same names and sizes:
+```sh
+python3 -m pip install Pillow   # once
+python3 scripts/brand/generate.py
+```
 
-| File | What it is | Size and rules |
-| --- | --- | --- |
-| `apps/rider/assets/icon.png` | Rider icon (iPhone, and the fallback) | 1024 x 1024, **no transparency** |
-| `apps/rider/assets/adaptive-icon.png` | Rider Android icon, foreground layer | 1024 x 1024, transparent background, art inside the central two-thirds |
-| `apps/rider/assets/splash-icon.png` | Rider splash image (shown 160 wide on white) | Transparent background |
-| `apps/driver/assets/icon.png` | Driver icon (iPhone, and the fallback) | 1024 x 1024, **no transparency** |
-| `apps/driver/assets/adaptive-icon.png` | Driver Android icon, foreground layer | 1024 x 1024, transparent background, art inside the central two-thirds |
-| `apps/driver/assets/splash-icon.png` | Driver splash image (shown 160 wide on white) | Transparent background |
+| Source in `assets/brand/` | What it is |
+| --- | --- |
+| `logo-white.png` | The mark alone, white on transparent: the icons |
+| `logo-name.png` | The mark with "CampusRide" under it: the splash, recoloured all white |
+| `logo-green.png` | The mark in green (reference; not used by the script) |
 
-If the new Android icons need a different background colour, it's
-`android.adaptiveIcon.backgroundColor` in each `apps/<app>/app.json` (rider
-`#F6F7F6`, driver `#0F1311` today). The notification icons
-(`assets/notification-icon.png`) are not part of the swap.
-`storeBuildConfig.test.ts` checks the icon sizes, the missing transparency,
-and that the two apps' icons differ.
+What it writes, for each app:
+
+| File | What it is | Rider | Driver |
+| --- | --- | --- | --- |
+| `apps/<app>/assets/icon.png` | iPhone icon and the fallback. 1024 x 1024, **no transparency**, mark 60% wide | White mark on green `#19743C` | White mark on near-black `#0F1311` |
+| `apps/<app>/assets/adaptive-icon.png` | Android icon, foreground layer. 1024 x 1024, transparent, mark inside the centre 60% circle (the safe zone) | White mark | White mark |
+| `apps/<app>/assets/notification-icon.png` | Android notification icon. 96 x 96, white on transparent | White mark | White mark |
+| `apps/<app>/assets/splash-icon.png` | Splash image. 1024 x 1024, transparent, the logo with its name in white, cropped close | White logo + name | White logo + name |
+| `store-assets/<app>/play-icon-512.png` | Google Play listing icon (upload by hand; not bundled in the app) | As icon.png, 512 x 512 | As icon.png, 512 x 512 |
+
+The colours behind the transparent files are in each `apps/<app>/app.json`:
+
+- `android.adaptiveIcon.backgroundColor`: rider `#19743C`, driver `#0F1311`.
+- The `expo-splash-screen` plugin: the splash is the **white logo with the
+  "CampusRide" name on green** (rider) or **on near-black** (driver), the
+  same in light and dark mode (the apps are light-only). On iPhone it shows
+  **210 pt wide** (checked on a small iPhone SE and a large Pro Max). On
+  Android it's `android.imageWidth` **160 dp**: Android 12+ crops the splash to
+  a 192 dp circle, and any wider would cut off the ends of the name.
+
+`storeBuildConfig.test.ts` checks the sizes, that the icons have no
+transparency, the background colours, the Android splash width, and that the
+two apps' icons differ.
+
+Icons and the splash are part of the native build: an OTA update can't change
+them, so a change needs a new store build.
 
 Then make a new store build ([section 4](#4-releasing-a-new-store-build)):
 
