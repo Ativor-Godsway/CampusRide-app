@@ -50,9 +50,37 @@ export function signAccessToken(payload: AccessTokenPayload, expiresInSeconds?: 
  *
  * Tokens issued before `typ` existed have none; they are accepted on shape
  * alone and are all expired within ACCESS_TOKEN_TTL_MINUTES of deploying.
+ *
+ * Throws ExpiredAccessTokenError only for a real access token of ours whose
+ * time is up (signature good, shape good); anything else throws a plain error.
  */
 export function verifyAccessToken(token: string): AccessTokenPayload {
-  const decoded = jwt.verify(token, config.jwtSecret, { algorithms: JWT_ALGORITHMS });
+  let decoded: string | jwt.JwtPayload;
+  try {
+    decoded = jwt.verify(token, config.jwtSecret, { algorithms: JWT_ALGORITHMS });
+  } catch (err) {
+    // jsonwebtoken checks the signature before the expiry, so this is our token.
+    if (!(err instanceof jwt.TokenExpiredError)) throw err;
+    accessPayload(
+      jwt.verify(token, config.jwtSecret, { algorithms: JWT_ALGORITHMS, ignoreExpiration: true }),
+    );
+    throw new ExpiredAccessTokenError();
+  }
+  return accessPayload(decoded);
+}
+
+/**
+ * An access token we signed, for a real account shape, past its expiry: the
+ * routine end of every 30-minute token, which the apps answer by refreshing.
+ */
+export class ExpiredAccessTokenError extends Error {
+  constructor() {
+    super("access token expired");
+    this.name = "ExpiredAccessTokenError";
+  }
+}
+
+function accessPayload(decoded: string | jwt.JwtPayload): AccessTokenPayload {
   if (typeof decoded !== "object" || decoded === null) throw new Error("malformed access token");
   const { userId, role, typ } = decoded as Record<string, unknown>;
   if (typ !== undefined && typ !== ACCESS_TYP) throw new Error("not an access token");

@@ -6,6 +6,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
+import jwt from "jsonwebtoken";
 import { randomBytes } from "node:crypto";
 import { prisma } from "../db/prisma";
 import { config, rateLimitMultiplier } from "../config";
@@ -403,6 +404,53 @@ describe("the IP backstop", () => {
     await exhaust(RULES.ipPublic, HOSTEL_IP);
     expect429(await call("GET", "/me", { token: "junk" }));
     expect((await call("GET", "/me", { token: "junk", ip: "102.176.65.3" })).statusCode).toBe(401);
+  });
+
+  /** One of our access tokens, its 30 minutes up. */
+  const expiredToken = (userId: string, secret = config.jwtSecret) =>
+    jwt.sign(
+      { userId, role: "RIDER", typ: "access", exp: Math.floor(Date.now() / 1000) - 60 },
+      secret,
+    );
+  const ipUsed = async () => (await limiter.status({ rule: RULES.ipPublic, subject: HOSTEL_IP })).used;
+
+  it("never counts an expired token of ours: a phone stuck on one leaves refresh and log-in open for its IP", async () => {
+    const stuck = await person();
+    const expired = expiredToken(stuck.user.id);
+    for (let i = 0; i < 200; i++) {
+      const res = await call("PUT", "/me/push-token", {
+        token: expired,
+        payload: { token: "ExponentPushToken[expired-test-00000001]", app: "rider", platform: "ios" },
+      });
+      // Still the 401 the app answers by refreshing.
+      expect(res.statusCode).toBe(401);
+    }
+    expect(await ipUsed()).toBe(0);
+    expect(
+      (await call("POST", "/auth/request-otp", { payload: { phone: uniqueGhanaPhone(), purpose: "SIGNUP" } }))
+        .statusCode,
+    ).toBe(200);
+  });
+
+  it("an expired token is answered 401, not 429, even when the IP is full", async () => {
+    const stuck = await person();
+    await exhaust(RULES.ipPublic, HOSTEL_IP);
+    expect((await call("GET", "/me", { token: expiredToken(stuck.user.id) })).statusCode).toBe(401);
+  });
+
+  it("still counts missing, junk and forged tokens — expired or not", async () => {
+    const someone = await person();
+    const counted = [
+      undefined,
+      "junk",
+      expiredToken(someone.user.id, "another-secret"),
+      jwt.sign(
+        { phone: uniqueGhanaPhone(), purpose: "LOGIN", typ: "otp-verified", exp: Math.floor(Date.now() / 1000) - 60 },
+        config.jwtSecret,
+      ),
+    ];
+    for (const token of counted) expect((await call("GET", "/me", { token })).statusCode).toBe(401);
+    expect(await ipUsed()).toBe(counted.length);
   });
 });
 

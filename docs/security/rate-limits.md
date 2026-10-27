@@ -92,12 +92,24 @@ the default leaves four times that.
 | SOS | **never limited**; a repeat press within 2 minutes of one that reached someone doesn't text the same people again | `RATE_LIMIT_SOS_REPEAT_MINUTES` |
 | An SOS tracking page | 120 / 15 min per link (it refreshes every 15 s) | `RATE_LIMIT_TRACK_15M` |
 | USSD keypresses (dormant) | 30 / minute per subscriber | `RATE_LIMIT_USSD_MINUTE` |
-| **IP backstop**: any route nobody is signed in to | 1,000 / 15 min per IP | `RATE_LIMIT_IP_PUBLIC_15M` |
+| **IP backstop**: any route nobody is signed in to, and signed-in routes refused for a missing, junk or forged token (not an expired one, below) | 1,000 / 15 min per IP | `RATE_LIMIT_IP_PUBLIC_15M` |
 | Login codes from one IP to any numbers | 200 / 15 min per IP | `RATE_LIMIT_IP_OTP_SEND_15M` |
 
 The second IP limit is about money: without it, one machine could text a
 code to every number in Ghana on our SMS credit, 5 per number. 200 per
 15 minutes is far more sign-ups than a hostel produces.
+
+**Expired tokens don't count toward the IP backstop.** An access token lasts
+30 minutes; a request carrying one of ours that has simply run out (signed
+with our secret, an access token's shape, past its expiry) still gets a 401 —
+even when the IP is full, so the app knows to refresh — but isn't counted.
+A phone sending many of those is a real person's app, stuck or mid-refresh,
+and its IP is shared with everyone on the same Wi-Fi or mobile network.
+Counting them once let one looping phone use up its IP's allowance, which
+`/auth/refresh` and log-in share, and lock the driver app on the same phone
+out (2026-10-26). Missing, junk and forged tokens — and other kinds of token,
+such as an expired login-code token — still count, expired or not. A refusal
+for an expired token costs no database lookup.
 
 When one request meets several limits, either all of them count or none
 does, so being turned away by the IP backstop never spends a person's own

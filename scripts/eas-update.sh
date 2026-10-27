@@ -14,6 +14,12 @@
 #    branch but an up-to-date main.
 #  - It lives outside apps/<app>/, so it is not part of the apps' fingerprint
 #    (editing an app's package.json scripts would force a new store build).
+#  - It publishes iOS and Android only, one after the other. A bare
+#    `eas update` means --platform all, which includes web: react-native-web
+#    is installed in this repo (so Expo counts web as a platform), but the
+#    apps don't support it, and the export fails. Saying so in app.json
+#    ("platforms") instead would change both apps' fingerprints.
+#    Each platform gets its own update group ID.
 # Compatible with macOS bash 3.2.
 
 set -euo pipefail
@@ -66,19 +72,31 @@ fi
 api_url="$(node -p 'require("./eas.json").build.production.env.EXPO_PUBLIC_API_URL')"
 export EXPO_PUBLIC_API_URL="$api_url"
 
-echo "Publishing $app to channel '$channel' (server: $EXPO_PUBLIC_API_URL)…"
-$EAS update --channel "$channel" --environment production --message "$message"
-
 # Optional: the update's source maps to Sentry, so errors from it show real
 # file names and lines (DEPLOY.md, "Monitoring"). Only when SENTRY_AUTH_TOKEN
 # is set in this shell; without it nothing happens. The Sentry projects are
-# named campusride-rider and campusride-driver.
-if [[ -n "${SENTRY_AUTH_TOKEN:-}" ]]; then
+# named campusride-rider and campusride-driver. Run after each platform's
+# publish: the next one's export replaces dist/.
+upload_source_maps() {
+  [[ -n "${SENTRY_AUTH_TOKEN:-}" ]] || return 0
   if [[ -z "${SENTRY_ORG:-}" ]]; then
     echo "Skipping the Sentry source map upload: set SENTRY_ORG (your Sentry organization's slug) too." >&2
-  else
-    echo "Uploading source maps to Sentry (campusride-$app)…"
-    SENTRY_PROJECT="campusride-$app" npx sentry-expo-upload-sourcemaps dist ||
-      echo "The update is published; only the Sentry source map upload failed." >&2
+    return 0
   fi
-fi
+  echo "Uploading $1 source maps to Sentry (campusride-$app)…"
+  SENTRY_PROJECT="campusride-$app" npx sentry-expo-upload-sourcemaps dist ||
+    echo "The $1 update is published; only the Sentry source map upload failed." >&2
+}
+
+for platform in ios android; do
+  echo "Publishing $app ($platform) to channel '$channel' (server: $EXPO_PUBLIC_API_URL)…"
+  if ! $EAS update --channel "$channel" --environment production --platform "$platform" --message "$message"; then
+    if [[ "$platform" == "android" ]]; then
+      echo "Error: the iOS update was published, but Android failed. Fix the problem and run this again (iOS is simply published once more)." >&2
+    fi
+    exit 1
+  fi
+  upload_source_maps "$platform"
+done
+
+echo "Done: $app is published for iOS and Android. Each has its own update group ID (shown above)."
