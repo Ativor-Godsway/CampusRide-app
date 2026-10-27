@@ -10,6 +10,7 @@ import {
   radii,
   shadows,
   spacing,
+  useMapHeading,
   withAlpha,
 } from "@rida/mobile-shared";
 
@@ -65,6 +66,7 @@ function splitAtNextStop(
 export function TripMap({ driver, stops, path, insets, attribution }: TripMapProps) {
   const mapRef = useRef<MapView>(null);
   const [ready, setReady] = useState(false);
+  const { mapHeading, onCameraMove } = useMapHeading(mapRef);
 
   const fit = useCallback(() => {
     const points: LatLng[] = [
@@ -119,6 +121,8 @@ export function TripMap({ driver, stops, path, insets, attribution }: TripMapPro
         userInterfaceStyle="light"
         mapPadding={{ top: insets.top, bottom: insets.bottom, left: 0, right: 0 }}
         onMapReady={() => setReady(true)}
+        onRegionChange={onCameraMove}
+        onRegionChangeComplete={onCameraMove}
       >
         {/* Stable keys: a new route only changes a line's points, so the map
             never redraws (no flicker). Later legs first, so the leg to drive
@@ -158,7 +162,11 @@ export function TripMap({ driver, stops, path, insets, attribution }: TripMapPro
         ))}
 
         {driver ? (
-          <CarMarker zone={{ id: "car", ...driver, label: "You", role: "driver" }} />
+          <CarMarker
+            zone={{ id: "car", ...driver, label: "You", role: "driver" }}
+            route={path}
+            mapHeading={mapHeading}
+          />
         ) : null}
       </MapView>
 
