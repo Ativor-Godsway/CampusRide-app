@@ -265,6 +265,7 @@ describe("add-rider route preview", () => {
     const res = await preview(car.id, token, request.id, `&lat=${zones[0]!.latitude}&lng=${zones[0]!.longitude}`);
     expect(res.statusCode).toBe(200);
     const body = res.json();
+    // The request's own fare (booked at the old GH₵5), not today's.
     expect(body).toMatchObject({ requestRideId: request.id, farePesewas: 500, driverSharePesewas: 425 });
     expect(body.addedMinutes).toBeGreaterThanOrEqual(1);
     expect(body.stops).toHaveLength(4);
@@ -338,6 +339,7 @@ describe("adding a rider while the car is moving (IN_PROGRESS)", () => {
     expect(after.departedAt).toEqual(new Date("2026-10-02T09:00:00Z"));
     expect(after.passengers.find((p) => p.id === seats[0]!.id)!.lockedFare).toBe(450); // frozen
     const newcomer = after.passengers.find((p) => p.id !== seats[0]!.id)!;
+    // The fare on their own request (GH₵5, from before the price change) comes with them.
     expect(newcomer).toMatchObject({ status: "WAITING", lockedFare: 500 });
 
     const notice = notices.mock.calls.find(([, event]) => event === "ride:car_notice");
@@ -485,6 +487,8 @@ describe("a full two-rider shared trip, end to end", () => {
     ]);
     await vi.waitFor(async () => {
       const ledger = await prisma.commissionLedger.findUnique({ where: { rideId: ama.id } });
+      // Booked at the old GH₵5 (the fixtures): commission on what was collected,
+      // not on today's GH₵7.
       expect(ledger?.amountPesewas).toBe(150); // 15% of 2 × GH₵5
     });
     expect((await call("GET", "/driver/rides/active")).json().ride).toBeNull();

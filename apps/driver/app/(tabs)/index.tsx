@@ -224,7 +224,7 @@ export default function DriverHomeScreen() {
           rideId: s.requestRideId,
           type: "SHARED" as const,
           seats: 1,
-          farePesewas: sharedFare,
+          farePesewas: s.farePesewas ?? sharedFare,
           pickupZoneId: s.pickupZoneId,
           pickupZoneName: s.pickupZoneName,
           dropoffZoneName: s.dropoffZoneName,
@@ -325,7 +325,7 @@ export default function DriverHomeScreen() {
   const add = (item: HomeRequest) => {
     const suggestion = fill.data?.suggestions.find((s) => s.requestRideId === item.rideId);
     if (!sharedTrip || !suggestion) return;
-    runAddRider(sharedTrip.id, suggestion, sharedFare, position);
+    runAddRider(sharedTrip.id, suggestion, suggestion.farePesewas ?? sharedFare, position);
   };
   const goOnline = () => {
     haptics.impactMedium();

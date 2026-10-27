@@ -119,8 +119,8 @@ function ride(
     pickupZone: zone(from),
     dropoffZone: zone(to),
     occupancy: 1,
-    fareTotal: 500,
-    driverShare: 425,
+    fareTotal: 700,
+    driverShare: 595,
     paymentStatus: "COLLECTED",
     paymentMethod: "CASH",
     cancelReason: null,
@@ -251,7 +251,7 @@ export const riderSearching = (() => {
           pickupZoneId: base.pickupZoneId,
           dropoffZoneId: base.dropoffZoneId,
           fareCharged: null,
-          lockedFare: 500,
+          lockedFare: 700,
           status: "WAITING" as const,
           ...pins("Akuafo Hall", "Balme Library"),
         },
@@ -319,7 +319,7 @@ export function riderTrip(stage: "coming" | "arrived" | "onboard") {
     pickupZoneId: base.pickupZoneId,
     dropoffZoneId: base.dropoffZoneId,
     fareCharged: null,
-    lockedFare: 500,
+    lockedFare: 700,
     status: stage === "coming" ? "WAITING" : stage === "arrived" ? "ARRIVED" : "PICKED_UP",
     ...pins("Akuafo Hall", "Balme Library"),
   };
@@ -330,7 +330,7 @@ export function riderTrip(stage: "coming" | "arrived" | "onboard") {
     pickupZoneId: zone("Legon Hall").id,
     dropoffZoneId: zone("Main Gate").id,
     fareCharged: null,
-    lockedFare: 500,
+    lockedFare: 700,
     status: "WAITING",
   };
   return {
@@ -362,8 +362,8 @@ export function riderTripCompleted() {
     },
     driver: riderDriver,
     fareSummary: {
-      yourFarePesewas: 500,
-      totalFarePesewas: 1000,
+      yourFarePesewas: 700,
+      totalFarePesewas: 1400,
       paymentMethod: "CASH",
       paymentStatus: "PENDING",
     },
@@ -410,7 +410,7 @@ function earning(
   hoursAgo: number,
   type: "SHARED" | "LONE",
 ) {
-  const face = type === "LONE" ? 1500 : 500;
+  const face = type === "LONE" ? 1500 : 700;
   return {
     rideId,
     pickupZoneName: from,
@@ -427,7 +427,7 @@ function earning(
 
 /**
  * GET /driver/rides/history. `today`: two trips completed in the last half
- * hour (GH₵4.25 + GH₵12.75 = GH₵17.00), so they're today at any clock time.
+ * hour (GH₵5.95 + GH₵12.75 = GH₵18.70), so they're today at any clock time.
  */
 export function driverHistory(today: boolean) {
   const rides = [
@@ -470,8 +470,8 @@ export const driverRequests: EligibleRideItem[] = [
     dropoffZoneId: zone("Balme Library").id,
     dropoffPlaceName: "Balme Library",
     type: "SHARED",
-    farePesewas: 500,
-    driverSharePesewas: 425,
+    farePesewas: 700,
+    driverSharePesewas: 595,
     createdAt: minutesAgo(2),
     bestFit: false,
     pickupDistanceMeters: 650,
@@ -484,9 +484,9 @@ export const driverSharedTrip: RideWithZones = {
   ...driverTrip,
   id: "ride-shared",
   type: "SHARED",
-  fareTotal: 500,
-  driverShare: 425,
-  passengers: driverTrip.passengers.map((p) => ({ ...p, lockedFare: 500 })),
+  fareTotal: 700,
+  driverShare: 595,
+  passengers: driverTrip.passengers.map((p) => ({ ...p, lockedFare: 700 })),
 };
 
 /** The Ride-alone offer from a rider nobody has rated yet. */
@@ -500,8 +500,8 @@ export const sharedOfferQueue: EligibleRideItem[] = [
     riderFirstName: "Ama",
     type: "SHARED",
     seats: 1,
-    farePesewas: 500,
-    driverSharePesewas: 425,
+    farePesewas: 700,
+    driverSharePesewas: 595,
     riderRating: 4.8,
     pickupZoneName: "Legon Hall",
     pickupZoneId: zone("Legon Hall").id,
@@ -560,7 +560,7 @@ const akosuaSeat = {
   dropoffZoneName: "Bush Canteen",
   pickupZoneId: zone("Volta Hall").id,
   dropoffZoneId: zone("Bush Canteen").id,
-  lockedFare: 500,
+  lockedFare: 700,
   status: "WAITING" as const,
   arrivedAt: null,
   ...pins("Volta Hall", "Bush Canteen"),
@@ -572,10 +572,10 @@ export const driverSharedOnTheWay: RideWithZones = {
   id: "ride-shared-2",
   type: "SHARED",
   status: "IN_PROGRESS",
-  fareTotal: 1000,
-  driverShare: 850,
+  fareTotal: 1400,
+  driverShare: 1190,
   occupancy: 2,
-  passengers: [{ ...kwameSeat("PICKED_UP", 300), lockedFare: 500 }, akosuaSeat],
+  passengers: [{ ...kwameSeat("PICKED_UP", 300), lockedFare: 700 }, akosuaSeat],
 };
 
 /** A rider who fits the shared trip (GET /rides/:id/fill-suggestions). */
@@ -648,8 +648,8 @@ export function fitPreview(trip: RideWithZones) {
     dropoffZoneName: "Balme Library",
     pickupPlaceName: "Legon Hall",
     dropoffPlaceName: "Balme Library",
-    farePesewas: 500,
-    driverSharePesewas: 425,
+    farePesewas: 700,
+    driverSharePesewas: 595,
     addedSeconds: 110,
     addedMinutes: 2,
     maxOnboardDelayMinutes: 0,

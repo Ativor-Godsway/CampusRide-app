@@ -1,14 +1,9 @@
 import type { PrismaClient } from "@prisma/client";
-import {
-  getLoneFare,
-  getSharedFarePerRider,
-  splitFare,
-  type PaymentMethod,
-  type RideSource,
-} from "@rida/shared";
+import { splitFare, type PaymentMethod, type RideSource } from "@rida/shared";
 import { emitToRider } from "../../realtime/rideSocket";
 import { getRidePaymentSummary } from "../payment/paymentFlow";
 import { notifyUssdRiders } from "../sms/notifyUssdRiders";
+import { paidFareTotal } from "./fares";
 
 /**
  * Finalizes a COMPLETED ride's payment side: a CASH CommissionLedger upsert,
@@ -34,23 +29,30 @@ export async function finalizeRideCompletion(
   },
   driverUserId: string,
   /** The ride's passengers, when the caller already has them (saves reading them again). */
-  passengers?: ReadonlyArray<{ riderId: string; status: string; lockedFare: number | null }>,
+  passengersIfKnown?: ReadonlyArray<{
+    riderId: string;
+    status: string;
+    lockedFare: number | null;
+    fareCharged?: number | null;
+  }>,
 ): Promise<void> {
   const paymentMethod = ride.paymentMethod as PaymentMethod;
+  const passengers =
+    passengersIfKnown ??
+    (paymentMethod === "CASH"
+      ? await prisma.ridePassenger.findMany({
+          where: { rideId: ride.id },
+          select: { riderId: true, status: true, lockedFare: true, fareCharged: true },
+        })
+      : undefined);
 
-  if (paymentMethod === "CASH") {
-    // A shared car's fare is per rider actually carried. occupancy is not
-    // that: it drops as seats are cancelled, and a trip that ends by
-    // cancelling its last waiting rider completes with occupancy 0 (which
-    // getSharedFarePerRider rejects). Same count the ride history uses.
-    const carried = passengers?.filter((p) => p.status === "DROPPED_OFF").length ?? ride.occupancy;
-    const farePesewasForLedger =
-      ride.type === "LONE"
-        ? getLoneFare()
-        : carried > 0
-          ? getSharedFarePerRider(carried) * carried
-          : 0;
-    const { commission } = splitFare(farePesewasForLedger);
+  if (paymentMethod === "CASH" && passengers) {
+    // The fares the carried riders were quoted and paid (services/ride/fares),
+    // never today's price list: a trip booked before a price change owes
+    // commission on what was actually collected. Shared: the riders dropped
+    // off (occupancy drops as seats are cancelled, and can be 0 at the end);
+    // a trip that dropped nobody off owes nothing. Same rule as the history.
+    const { commission } = splitFare(paidFareTotal(ride.type, passengers));
     // createMany + skipDuplicates is a single INSERT … ON CONFLICT DO NOTHING
     // (an upsert is two round trips); repeating it is harmless.
     await prisma.commissionLedger.createMany({

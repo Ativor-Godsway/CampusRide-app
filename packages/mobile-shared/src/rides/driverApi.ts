@@ -348,6 +348,12 @@ export interface FillSuggestion {
   createdAt: string;
   /** True for requests ranked compatible by the existing Phase-2c scoring — badge-eligible, sorted first. */
   compatible: boolean;
+  /**
+   * The fare this rider was quoted on their request, and pays if added
+   * (a request made before a price change keeps its price). Absent from
+   * older servers: today's shared fare then.
+   */
+  farePesewas?: number;
 }
 
 export interface FillSuggestionsResult {

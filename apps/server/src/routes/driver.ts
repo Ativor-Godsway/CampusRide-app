@@ -8,10 +8,6 @@ import {
   designateBestFit,
   encodePolyline,
   firstName,
-  getDriverGrossForRide,
-  getLoneFare,
-  getSharedFarePerRider,
-  getSharedTotalFare,
   indexRoutes,
   onboardAddNotice,
   previewAddRider,
@@ -28,6 +24,7 @@ import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
 import { claimIfOpen, closeOffer } from "../services/ride/dispatch";
+import { paidFareTotal, requestFare } from "../services/ride/fares";
 import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
@@ -368,15 +365,15 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
   /**
    * Read-only completed-ride history for the authenticated driver, newest
-   * first. Earnings are DERIVED from the fixed fare model (no stored per-ride
-   * driver share exists, and the CommissionLedger stores the platform's cut,
-   * not the driver's). Per ride: `facePesewas` is the FARE riders paid, and
+   * first. Per ride: `facePesewas` is the FARE riders paid — the fares stored
+   * on the seats they were carried in (services/ride/fares), so a trip keeps
+   * the price it was booked at after the price list changes — and
    * `driverGrossPesewas` (an older name) is the driver's 85% SHARE of it.
    *
-   * SHARED gross is derived from the count of riders who actually completed
-   * (DROPPED_OFF passengers), not the ride's raw `occupancy`: occupancy is
-   * recomputed on cancels and can understate completers when a rider cancels
-   * after another has already been dropped off.
+   * SHARED counts the riders who actually completed (DROPPED_OFF), not the
+   * ride's raw `occupancy`: occupancy is recomputed on cancels and can
+   * understate completers when a rider cancels after another has already
+   * been dropped off.
    */
   app.get("/driver/rides/history", { onRequest: requireAuth, schema: SCHEMAS.history }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
@@ -388,22 +385,14 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       include: {
         pickupZone: { select: { name: true } },
         dropoffZone: { select: { name: true } },
-        passengers: { select: { status: true } },
+        passengers: { select: { status: true, lockedFare: true, fareCharged: true } },
       },
       orderBy: { completedAt: "desc" },
     });
 
     const items = rides.map((ride) => {
-      // LONE: always exactly 1 rider (its ride-level /complete never marks the
-      // passenger DROPPED_OFF). SHARED: count the riders who actually finished.
-      // Clamp to the valid 1–4 seat range purely defensively — completion
-      // guarantees at least one DROPPED_OFF, and seats cap at 4.
-      const droppedOff = ride.passengers.filter((p) => p.status === "DROPPED_OFF").length;
-      const riders =
-        ride.type === "LONE" ? 1 : Math.min(PRICING.MAX_SHARED_OCCUPANCY, Math.max(1, droppedOff));
-
-      const facePesewas = ride.type === "LONE" ? getLoneFare() : getSharedTotalFare(riders);
-      const driverGrossPesewas = getDriverGrossForRide(ride.type, riders);
+      const facePesewas = paidFareTotal(ride.type, ride.passengers);
+      const driverGrossPesewas = splitFare(facePesewas).driverShare;
 
       return {
         rideId: ride.id,
@@ -797,8 +786,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         rejections: { none: { driverUserId: userId } },
       },
       // First name only, so the trip can say "Pick up Ama" from the moment
-      // the driver accepts.
-      include: { rider: { select: { name: true } } },
+      // the driver accepts; the seat for the fare the rider was quoted.
+      include: {
+        rider: { select: { name: true } },
+        passengers: { select: { riderId: true, status: true, lockedFare: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
 
@@ -853,8 +845,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
       const myResult = bestFitResults.find((r) => r.driverUserId === userId);
 
-      const farePesewas =
-        ride.type === "LONE" ? getLoneFare() : getSharedFarePerRider(ride.occupancy);
+      const farePesewas = requestFare(ride.type, ride.passengers, ride.riderId);
       const { driverShare } = splitFare(farePesewas);
       const pickupZoneName = zoneMap.get(ride.pickupZoneId)?.name ?? "";
       const dropoffZoneName = zoneMap.get(ride.dropoffZoneId)?.name ?? "";
@@ -915,7 +906,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       prisma.ride.findMany({
         // Not ones this driver declined or let time out: never offered twice.
         where: { status: "REQUESTED", driverId: null, type: "SHARED", rejections: { none: { driverUserId: userId } } },
-        include: { rider: { select: { name: true } } },
+        include: {
+          rider: { select: { name: true } },
+          passengers: { select: { riderId: true, status: true, lockedFare: true } },
+        },
         orderBy: { createdAt: "desc" },
       }),
       getZoneAdjacency(prisma),
@@ -955,6 +949,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         ...requestPlaceNames(r, pickupZoneName, dropoffZoneName),
         createdAt: r.createdAt.toISOString(),
         compatible,
+        /** What this rider was quoted, and pays if added (services/ride/fares). */
+        farePesewas: requestFare("SHARED", r.passengers, r.riderId),
       };
     };
 
@@ -1024,7 +1020,13 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           },
         },
       }),
-      prisma.ride.findUnique({ where: { id: query.requestRideId }, include: { rider: { select: { name: true } } } }),
+      prisma.ride.findUnique({
+        where: { id: query.requestRideId },
+        include: {
+          rider: { select: { name: true } },
+          passengers: { select: { riderId: true, status: true, lockedFare: true } },
+        },
+      }),
       getZoneMap(prisma),
       getStoredZoneRoutes(prisma),
     ]);
@@ -1052,7 +1054,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     // Only a request with pins needs the places (to approximate them); from memory once warm.
     const places = requestRide.pickupLat != null || requestRide.dropoffLat != null ? await getActivePlaces(prisma) : [];
-    const farePesewas = getSharedFarePerRider(1);
+    // The rider keeps the fare they were quoted (services/ride/fares).
+    const farePesewas = requestFare("SHARED", requestRide.passengers, requestRide.riderId);
     const preview = previewAddRider({
       // The car's own riders: this driver's, so their exact pins.
       passengers: car.passengers.map((p) => ({
@@ -1172,7 +1175,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
               requestRideId,
               pickupZoneId: candidate.pickupZoneId,
               dropoffZoneId: candidate.dropoffZoneId,
-              farePesewas: getSharedFarePerRider(1),
+              farePesewas: candidate.quotedFare,
               ...approximatePins(candidate, zones, places),
             },
             zones: [...zones.values()],
@@ -1265,13 +1268,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
       await finalizeRideCompletion(prisma, updated, userId);
 
-      // Compute driver's earnings from the completed ride
-      const farePesewas =
-        ride.type === "LONE"
-          ? getLoneFare()
-          : getSharedFarePerRider(ride.occupancy);
-      const totalFare = ride.type === "LONE" ? farePesewas : farePesewas * ride.occupancy;
-      const { driverShare } = splitFare(totalFare);
+      // The driver's share of the fare this trip was booked at.
+      const { driverShare } = splitFare(paidFareTotal(ride.type, ride.passengers));
 
       return reply.code(200).send({ ride: updated, driverSharePesewas: driverShare });
     } catch (err) {
