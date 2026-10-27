@@ -11,9 +11,10 @@
  * because `npm test` never runs the db:guard script and a check that lives
  * only in a setup file protects only the paths that load it.
  */
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import {
   assertNotProdDatabase,
+  assertProductionOptIn,
   assertDatabaseAllowedForEnv,
   dbHostFromUrl,
   KNOWN_PROD_DB_HOSTS,
@@ -174,5 +175,63 @@ describe("assertDatabaseAllowedForEnv", () => {
     it("allows production to connect to production", () => {
       expect(() => assertDatabaseAllowedForEnv(neonProd, "production", CTX)).not.toThrow();
     });
+  });
+});
+
+describe("assertProductionOptIn (zones:check, zones:link)", () => {
+  const frankfurt = "postgresql://user:secret-pw@ep-empty-violet-bay5yr3y-pooler.eu-central-1.aws.neon.tech/neondb";
+
+  it("refuses every known production host without ALLOW_PRODUCTION_DB=1", () => {
+    for (const prod of KNOWN_PROD_DB_HOSTS) {
+      const url = `postgresql://u:p@${prod}-xyz-pooler.c-7.us-east-1.aws.neon.tech/neondb`;
+      expect(() => assertProductionOptIn(url, CTX)).toThrow(/known PRODUCTION host/);
+    }
+  });
+
+  it("refuses production even with NODE_ENV=production, unlike the server's own check", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    try {
+      expect(() => assertDatabaseAllowedForEnv(frankfurt, "production", CTX)).not.toThrow();
+      expect(() => assertProductionOptIn(frankfurt, CTX)).toThrow(/ALLOW_PRODUCTION_DB=1/);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("allows production with exactly ALLOW_PRODUCTION_DB=1, and says so", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    process.env.ALLOW_PRODUCTION_DB = "true";
+    expect(() => assertProductionOptIn(frankfurt, CTX)).toThrow(/REFUSING TO RUN/);
+    process.env.ALLOW_PRODUCTION_DB = "1";
+    expect(() => assertProductionOptIn(frankfurt, CTX)).not.toThrow();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("PRODUCTION"));
+    warn.mockRestore();
+  });
+
+  it("lets local and other remote databases through", () => {
+    expect(() => assertProductionOptIn(local, CTX)).not.toThrow();
+    expect(() => assertProductionOptIn(neonTest, CTX)).not.toThrow();
+  });
+
+  it("fails closed on a missing URL", () => {
+    expect(() => assertProductionOptIn("", CTX)).toThrow(/REFUSING TO RUN/);
+  });
+
+  it("never puts the connection string (or its password) in what it prints", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let message = "";
+    try {
+      assertProductionOptIn(frankfurt, CTX);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    process.env.ALLOW_PRODUCTION_DB = "1";
+    assertProductionOptIn(frankfurt, CTX);
+    for (const text of [message, ...warn.mock.calls.map((c) => String(c[0]))]) {
+      expect(text).toContain("ep-empty-violet-bay5yr3y");
+      expect(text).not.toContain("secret-pw");
+      expect(text).not.toContain("postgresql://");
+    }
+    warn.mockRestore();
   });
 });

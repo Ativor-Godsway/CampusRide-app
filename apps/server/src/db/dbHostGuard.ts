@@ -162,3 +162,30 @@ export function assertDatabaseAllowedForEnv(
     );
   }
 }
+
+/**
+ * For operator scripts that may be pointed at production on purpose
+ * (zones:check, zones:link): a known production host is refused unless the
+ * person running the command says ALLOW_PRODUCTION_DB=1 — whatever NODE_ENV
+ * is. (assertDatabaseAllowedForEnv lets NODE_ENV=production through without
+ * the flag, which is right for the server on Render but not for a script run
+ * by hand.) Any other host is let through; the prisma client's own check
+ * still applies when it connects. Messages name the host only, never the URL.
+ */
+export function assertProductionOptIn(url: string, context: string): void {
+  const host = dbHostFromUrl(url);
+  if (!host) {
+    throw new Error(`[${context}] REFUSING TO RUN: DATABASE_URL is missing or not a valid URL.`);
+  }
+  const prodMatch = KNOWN_PROD_DB_HOSTS.find((prod) => host.includes(prod));
+  if (!prodMatch) return;
+  if (process.env.ALLOW_PRODUCTION_DB === "1") {
+    // eslint-disable-next-line no-console
+    console.warn(`[${context}] ALLOW_PRODUCTION_DB=1 — running against the PRODUCTION database ("${host}").`);
+    return;
+  }
+  throw new Error(
+    `[${context}] REFUSING TO RUN against "${host}", which matches the known PRODUCTION host ` +
+      `"${prodMatch}". If you mean to, re-run with ALLOW_PRODUCTION_DB=1. See docs/environments.md.`,
+  );
+}
