@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Animated, Easing, Image, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Animated, Easing, Image, Platform, StyleSheet, Text, View } from "react-native";
 import MapView, { Circle, Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
-import type { EdgePadding } from "@rida/shared";
+import { carHeading, continueAngle, routeBearingAt, type EdgePadding } from "@rida/shared";
 import { useReduceMotion } from "../design/components/Illustration";
 import { colors, radii, spacing, withAlpha } from "../design/tokens";
 import { IconButton } from "../design/components/IconButton";
@@ -110,6 +110,7 @@ export function CampusMapView({
   const mapRef = useRef<MapView>(null);
   const reduceMotion = useReduceMotion();
   const [mapReady, setMapReady] = useState(false);
+  const { mapHeading, onCameraMove } = useMapHeading(mapRef);
   const pulseZone = pulseZoneId ? zones.find((z) => z.id === pulseZoneId) : undefined;
 
   // Stable key: re-fit only when the points or padding (or, with refitKey,
@@ -153,6 +154,8 @@ export function CampusMapView({
         toolbarEnabled={false}
         userInterfaceStyle={light ? "light" : undefined}
         onMapReady={() => setMapReady(true)}
+        onRegionChange={onCameraMove}
+        onRegionChangeComplete={onCameraMove}
       >
         {pulseZone ? <ZonePulse center={pulseZone} /> : null}
 
@@ -175,6 +178,8 @@ export function CampusMapView({
               key={`${zone.id}:${zone.version ?? 0}`}
               zone={zone}
               onPress={() => onZonePress?.(zone.id)}
+              route={routeIsRoad ? routeLine : undefined}
+              mapHeading={mapHeading}
             />
           ) : (
             <ArtMarker
@@ -229,15 +234,52 @@ export function CampusMapView({
   );
 }
 
-/** Compass bearing in degrees (0 = north) from `a` to `b`. */
-function bearingBetween(a: LatLng, b: LatLng): number {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLon = toRad(b.longitude - a.longitude);
-  const y = Math.sin(dLon) * Math.cos(toRad(b.latitude));
-  const x =
-    Math.cos(toRad(a.latitude)) * Math.sin(toRad(b.latitude)) -
-    Math.sin(toRad(a.latitude)) * Math.cos(toRad(b.latitude)) * Math.cos(dLon);
-  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+/**
+ * The map's own heading (the compass direction at the top of the screen),
+ * for CarMarker. Apple Maps keeps markers upright on screen when the rider
+ * turns the map, so on iOS the car takes the map's heading off its own;
+ * pass `onCameraMove` to the MapView's onRegionChange and
+ * onRegionChangeComplete. Google Maps turns a flat marker with the map by
+ * itself, so on Android this stays 0 and `onCameraMove` is undefined (no
+ * events sent across).
+ */
+export function useMapHeading(mapRef: RefObject<MapView | null>): {
+  mapHeading: Animated.Value;
+  onCameraMove: (() => void) | undefined;
+} {
+  const mapHeading = useRef(new Animated.Value(0)).current;
+  const reading = useRef(false);
+  const readAgain = useRef(false);
+
+  // One camera read at a time: moves that arrive meanwhile ask for one more
+  // read when it finishes, so a turning gesture costs a read per frame at most.
+  const read = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) {
+      reading.current = false;
+      return;
+    }
+    reading.current = true;
+    map
+      .getCamera()
+      .then((camera) => mapHeading.setValue(camera.heading ?? 0))
+      .catch(() => undefined)
+      .finally(() => {
+        if (readAgain.current) {
+          readAgain.current = false;
+          read();
+        } else {
+          reading.current = false;
+        }
+      });
+  }, [mapRef, mapHeading]);
+
+  const onCameraMove = useCallback(() => {
+    if (reading.current) readAgain.current = true;
+    else read();
+  }, [read]);
+
+  return { mapHeading, onCameraMove: Platform.OS === "ios" ? onCameraMove : undefined };
 }
 
 /** The 3D pins at 44pt, tip on the point (anchor y 0.94). */
@@ -250,6 +292,11 @@ const CAR_SIZE = 44;
  * hiding the jump.
  */
 const GLIDE_MS = 1000;
+/**
+ * The car's glide, for its position and its turn alike. Map coordinates and
+ * marker rotation aren't native-driver capable: small JS animations, one per fix.
+ */
+const GLIDE = { duration: GLIDE_MS, easing: Easing.inOut(Easing.quad), useNativeDriver: false } as const;
 /** With refitKey: how long a phase change waits for the sheet to settle before fitting. */
 const FIT_SETTLE_MS = 450;
 
@@ -289,31 +336,71 @@ function ArtMarker({
 }
 
 /**
- * The driver's top-down car. It turns to face its direction of travel
- * (worked out from its last two positions) and glides to each new GPS fix
- * instead of jumping; with Reduce Motion on it jumps. The glide moves the
- * native marker, so the image itself stops re-rendering once it has loaded.
+ * The driver's top-down car (car-topdown.png: nose up, so 0° = north). It
+ * faces its direction of travel — the road's direction where it is on
+ * `route`, otherwise the way it moved between its last two fixes (see
+ * carHeading) — and glides to each new GPS fix instead of jumping, turning
+ * the short way round over the same glide; with Reduce Motion on it jumps.
+ *
+ * How it turns differs by platform. Apple Maps ignores a Marker's
+ * `rotation`, so on iOS the image itself is rotated, minus the map's own
+ * heading (`mapHeading`, from useMapHeading) since Apple Maps keeps markers
+ * upright on screen. On Android the image is a bitmap that stops updating
+ * once loaded (tracksViewChanges off, which keeps Android smooth), so the
+ * turn goes to the native marker's `rotation` instead, which Google Maps
+ * applies to the bitmap as it is; `flat` makes it turn with the map.
+ *
  * Exported for maps of their own (the driver's trip map); give it a
  * MapView parent.
  */
-export function CarMarker({ zone, onPress }: { zone: CampusMapZone; onPress?: () => void }) {
+export function CarMarker({
+  zone,
+  onPress,
+  route,
+  mapHeading,
+}: {
+  zone: CampusMapZone;
+  onPress?: () => void;
+  /** The road route the car is driving, when there is one: the car follows its direction. */
+  route?: readonly LatLng[] | null;
+  /** The map's heading (useMapHeading); used on iOS only. */
+  mapHeading?: Animated.Value;
+}) {
   const reduceMotion = useReduceMotion();
+  const ios = Platform.OS === "ios";
   const [ready, setReady] = useState(false);
-  const [heading, setHeading] = useState(0);
   const last = useRef<LatLng | null>(null);
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  /** Compass heading the car is turning to; null until known (it shows nose-north). */
+  const heading = useRef<number | null>(null);
+  /** The drawn angle. Not kept to [0, 360): it counts on past a full turn so each turn goes the short way. */
+  const angle = useRef(new Animated.Value(0)).current;
+  const northUp = useRef(new Animated.Value(0)).current;
   const latitude = useRef(new Animated.Value(zone.latitude)).current;
   const longitude = useRef(new Animated.Value(zone.longitude)).current;
   const coordinate = useRef({ latitude, longitude }).current;
+
+  /** `appear`: the car's first fix, where it shows up already facing its way rather than turning to it. */
+  const turnTo = useCallback(
+    (facing: number | null, appear = false) => {
+      if (facing === null || facing === heading.current) return;
+      heading.current = facing;
+      angle.stopAnimation((now) => {
+        const toValue = continueAngle(now, facing);
+        if (reduceMotion || appear) angle.setValue(toValue);
+        else Animated.timing(angle, { ...GLIDE, toValue }).start();
+      });
+    },
+    [angle, reduceMotion],
+  );
 
   useEffect(() => {
     const prev = last.current;
     const next = { latitude: zone.latitude, longitude: zone.longitude };
     last.current = next;
+    turnTo(carHeading({ previous: prev, current: next, route: routeRef.current, heading: heading.current }), !prev);
     if (!prev) return;
-    // Ignore GPS jitter under ~3 m so the car doesn't spin while parked.
-    if (Math.abs(prev.latitude - next.latitude) + Math.abs(prev.longitude - next.longitude) > 0.00003) {
-      setHeading(bearingBetween(prev, next));
-    }
     latitude.stopAnimation();
     longitude.stopAnimation();
     if (reduceMotion) {
@@ -321,13 +408,27 @@ export function CarMarker({ zone, onPress }: { zone: CampusMapZone; onPress?: ()
       longitude.setValue(next.longitude);
       return;
     }
-    // Map coordinates aren't native-driver capable: one small JS animation per fix.
-    const glide = { duration: GLIDE_MS, easing: Easing.inOut(Easing.quad), useNativeDriver: false };
     Animated.parallel([
-      Animated.timing(latitude, { ...glide, toValue: next.latitude }),
-      Animated.timing(longitude, { ...glide, toValue: next.longitude }),
+      Animated.timing(latitude, { ...GLIDE, toValue: next.latitude }),
+      Animated.timing(longitude, { ...GLIDE, toValue: next.longitude }),
     ]).start();
-  }, [zone.latitude, zone.longitude, reduceMotion, latitude, longitude]);
+  }, [zone.latitude, zone.longitude, reduceMotion, latitude, longitude, turnTo]);
+
+  // A route that arrives after the first fix still turns a car that hasn't
+  // moved yet to face along the road.
+  useEffect(() => {
+    if (heading.current === null && last.current) turnTo(routeBearingAt(last.current, route));
+  }, [route, turnTo]);
+
+  const rotate = useMemo(
+    () =>
+      Animated.subtract(angle, mapHeading ?? northUp).interpolate({
+        inputRange: [0, 360],
+        outputRange: ["0deg", "360deg"],
+        extrapolate: "extend",
+      }),
+    [angle, mapHeading, northUp],
+  );
 
   return (
     <Marker.Animated
@@ -335,14 +436,15 @@ export function CarMarker({ zone, onPress }: { zone: CampusMapZone; onPress?: ()
       title={zone.label}
       onPress={onPress}
       anchor={{ x: 0.5, y: 0.5 }}
-      rotation={heading}
-      flat
+      rotation={ios ? undefined : angle}
+      flat={!ios}
       tracksViewChanges={!ready}
       zIndex={3}
     >
-      <Image
+      <Animated.Image
+        testID="car-marker-image"
         source={illustrations.carTopdown}
-        style={{ width: CAR_SIZE, height: CAR_SIZE }}
+        style={[{ width: CAR_SIZE, height: CAR_SIZE }, ios && { transform: [{ rotate }] }]}
         resizeMode="contain"
         onLoad={() => setReady(true)}
       />

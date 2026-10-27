@@ -338,7 +338,7 @@ What the mockups didn't say, or what changed once real data and real phones were
 - Onboarding: two steps with a progress bar, one primary button pinned at the bottom, and ONE "Use a different number" at the bottom of the page. Plates are formatted as typed ("GR 1234-24").
 
 **Maps**
-- The driver's car is `car-topdown.png` at 44px, turned to its heading, gliding about a second to each GPS fix (it jumps with Reduce Motion on).
+- The driver's car is `car-topdown.png` at 44px (nose up = north), facing its direction of travel: along the road where it is on the drawn route, otherwise the way it moved since the last GPS fix, and it stays put for moves under 3 m. It glides about a second to each fix and turns the short way round over the same glide (with Reduce Motion on it jumps and turns in one step). On iPhone the image itself is turned, minus the map's own rotation (Apple Maps ignores a marker's rotation); on Android the native marker is rotated. Logic in [`heading.ts`](../packages/shared/src/geo/heading.ts), drawn by `CarMarker`.
 - The searching / online pulse is PulseRings' look drawn as map circles, so it stays on the point as the map moves.
 - On the trip map only the leg to the next stop is bold green-500 (6px); later legs are green at 35%. Before Accept, places are drawn at their campus zones: the server sends no exact pins or rider notes then.
 
