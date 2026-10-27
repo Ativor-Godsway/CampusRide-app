@@ -123,8 +123,10 @@ every route between moved zones needs refreshing).
 
 ## Production order
 
-`migrate → places:seed → zones:realign → routes:precompute`, each safe to
-repeat. From the repo root, with `PROD_URL` exported in this shell only:
+`migrate → places:seed → zones:realign → routes:precompute → zones:check`,
+each safe to repeat. From the repo root, with `PROD_URL` exported in this
+shell only (check its host first: `node -e 'console.log(new URL(process.env.PROD_URL).hostname)'`
+prints the host and nothing secret; production is `ep-empty-violet-bay5yr3y…`):
 
 ```bash
 # 1. Migrations (status first: it lists what will be applied)
@@ -143,4 +145,32 @@ ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zo
 
 # 4. Zone routes (~4 minutes; no dry run — it only writes ZoneRoute rows)
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:precompute --workspace apps/server -- --provider osrm
+
+# 5. Zone adjacency: every zone in service next to every other (read-only check;
+#    then, only if it reports missing rows, a dry run and --apply)
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zones:check --workspace apps/server
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zones:link --workspace apps/server
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zones:link --workspace apps/server -- --apply
 ```
+
+### Zone adjacency
+
+Dispatch offers a ride to online drivers in the pickup zone **and the zones
+adjacent to it** (ZoneAdjacency, read in either direction; rows touching a
+retired zone don't count). `prisma/seed.ts` makes a full mesh: every zone next
+to every other, both directions — 210 rows for the 15 seeded zones. With
+Accra Mall Junction retired, 14 zones are in service and a full mesh between
+them is 182 rows (the 28 rows touching Accra Mall may still be there; they are
+harmless and counted separately).
+
+- `zones:check` only reads, inside a READ ONLY transaction. It prints the
+  zones in service, the rows, the rows a full mesh is missing, the pairs not
+  linked either way (those are the ones dispatch actually misses) and any zone
+  with no neighbours.
+- `zones:link` lists the missing rows; with `--apply` it INSERTs them (skipping
+  any that exist) and never deletes or changes a row. A second run adds
+  nothing.
+
+Both refuse a production host without `ALLOW_PRODUCTION_DB=1`, even with
+`NODE_ENV=production`, and print the database host only — never the URL. Code:
+[zoneAdjacency.ts](../apps/server/src/scripts/zoneAdjacency.ts).
