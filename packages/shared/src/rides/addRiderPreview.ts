@@ -161,7 +161,7 @@ export function onboardAddNotice(delaySeconds: number): string {
   return `Picking up 1 more rider on the way · ~${Math.max(1, Math.round(delaySeconds / 60))} min`;
 }
 
-/** "+1 rider · adds ~3 min · +GH₵5" */
+/** "+1 rider · adds ~3 min · +GH₵7" */
 export function addRiderPreviewLabel(addedMinutes: number, fareText: string): string {
   return `+1 rider · adds ~${addedMinutes} min · +${fareText}`;
 }

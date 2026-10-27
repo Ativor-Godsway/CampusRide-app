@@ -9,6 +9,7 @@ import {
 } from "./errors";
 import type { Ride, RidePassenger } from "@prisma/client";
 import { applyRideTransition, joinLoadedSharedRideTx } from "./rideService";
+import { currentSeatFare } from "./fares";
 import { isActivePassengerStatus } from "./stateMachine";
 
 /**
@@ -30,6 +31,8 @@ export interface AddCandidate extends RidePinFields {
   riderId: string;
   pickupZoneId: string;
   dropoffZoneId: string;
+  /** The fare on the rider's own request (services/ride/fares): it comes with them. */
+  quotedFare: number;
 }
 
 export interface AddRiderOptions {
@@ -101,13 +104,24 @@ export async function addRiderToCar(
     const fillable = (FILLABLE_STATUSES as readonly string[]).includes(anchor.status);
     const seated = passengers.filter((p) => isActivePassengerStatus(p.status)).length;
 
+    // Closes the request and, in the same round trip, reads the fare its
+    // rider was quoted (their seat's lockedFare, services/ride/fares).
     const [request] = fillable && seated < PRICING.MAX_SHARED_OCCUPANCY
-      ? await tx.$queryRaw<Ride[]>`
-          UPDATE "Ride"
-          SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId}
-          WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
-            AND "isReviewDemo" = ${anchor.isReviewDemo}
-          RETURNING *`
+      ? await tx.$queryRaw<(Ride & { quotedFare: number | null })[]>`
+          WITH closed AS (
+            UPDATE "Ride"
+            SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId}
+            WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
+              AND "isReviewDemo" = ${anchor.isReviewDemo}
+            RETURNING *
+          )
+          SELECT closed.*, (
+            SELECT seat."lockedFare" FROM "RidePassenger" seat
+            WHERE seat."rideId" = closed.id AND seat.status <> 'CANCELLED'
+            ORDER BY (seat."riderId" = closed."riderId") DESC, seat."createdAt" ASC
+            LIMIT 1
+          ) AS "quotedFare"
+          FROM closed`
       : [];
 
     if (!request) {
@@ -124,8 +138,9 @@ export async function addRiderToCar(
       throw new RequestRideUnavailableError(requestRideId);
     }
 
-    // The rider's own pins and note travel with them onto their new seat.
+    // The rider's own pins, note and quoted fare travel with them onto their new seat.
     const candidate: AddCandidate = {
+      quotedFare: request.quotedFare ?? currentSeatFare("SHARED"),
       riderId: request.riderId,
       pickupZoneId: request.pickupZoneId,
       dropoffZoneId: request.dropoffZoneId,

@@ -5,6 +5,7 @@ import {
   getSharedFarePerRider,
   getSharedTotalFare,
   splitFare,
+  getDriverGrossForRide,
   priceLoneRide,
   priceSharedRide,
   validateLoneOccupancy,
@@ -43,20 +44,20 @@ describe("LONE fare", () => {
 // ─── SHARED per-rider fare ────────────────────────────────────────────────────
 
 describe("SHARED per-rider fare", () => {
-  it("occupancy 1 → 500 pesewas (flat)", () => {
-    expect(getSharedFarePerRider(1)).toBe(500);
+  it("occupancy 1 → 700 pesewas (flat)", () => {
+    expect(getSharedFarePerRider(1)).toBe(700);
   });
 
-  it("occupancy 2 → 500 pesewas (flat)", () => {
-    expect(getSharedFarePerRider(2)).toBe(500);
+  it("occupancy 2 → 700 pesewas (flat)", () => {
+    expect(getSharedFarePerRider(2)).toBe(700);
   });
 
-  it("occupancy 3 → 500 pesewas (flat)", () => {
-    expect(getSharedFarePerRider(3)).toBe(500);
+  it("occupancy 3 → 700 pesewas (flat)", () => {
+    expect(getSharedFarePerRider(3)).toBe(700);
   });
 
-  it("occupancy 4 → 500 pesewas (flat)", () => {
-    expect(getSharedFarePerRider(4)).toBe(500);
+  it("occupancy 4 → 700 pesewas (flat)", () => {
+    expect(getSharedFarePerRider(4)).toBe(700);
   });
 
   it("throws InvalidOccupancyError for occupancy 0", () => {
@@ -75,20 +76,20 @@ describe("SHARED per-rider fare", () => {
 // ─── SHARED total fare ────────────────────────────────────────────────────────
 
 describe("SHARED total fare", () => {
-  it("occupancy 1 → 500  (500 × 1)", () => {
-    expect(getSharedTotalFare(1)).toBe(500);
+  it("occupancy 1 → 700  (700 × 1)", () => {
+    expect(getSharedTotalFare(1)).toBe(700);
   });
 
-  it("occupancy 2 → 1000  (500 × 2)", () => {
-    expect(getSharedTotalFare(2)).toBe(1000);
+  it("occupancy 2 → 1400  (700 × 2)", () => {
+    expect(getSharedTotalFare(2)).toBe(1400);
   });
 
-  it("occupancy 3 → 1500  (500 × 3)", () => {
-    expect(getSharedTotalFare(3)).toBe(1500);
+  it("occupancy 3 → 2100  (700 × 3)", () => {
+    expect(getSharedTotalFare(3)).toBe(2100);
   });
 
-  it("occupancy 4 → 2000  (500 × 4)", () => {
-    expect(getSharedTotalFare(4)).toBe(2000);
+  it("occupancy 4 → 2800  (700 × 4)", () => {
+    expect(getSharedTotalFare(4)).toBe(2800);
   });
 
   it("throws for occupancy 0", () => {
@@ -110,18 +111,18 @@ describe("haul-climbs invariant", () => {
     }
   });
 
-  it("exact values at each occupancy are 500/1000/1500/2000", () => {
-    expect(getSharedTotalFare(1)).toBe(500);
-    expect(getSharedTotalFare(2)).toBe(1000);
-    expect(getSharedTotalFare(3)).toBe(1500);
-    expect(getSharedTotalFare(4)).toBe(2000);
+  it("exact values at each occupancy are 700/1400/2100/2800", () => {
+    expect(getSharedTotalFare(1)).toBe(700);
+    expect(getSharedTotalFare(2)).toBe(1400);
+    expect(getSharedTotalFare(3)).toBe(2100);
+    expect(getSharedTotalFare(4)).toBe(2800);
   });
 });
 
 // ─── Fare split ───────────────────────────────────────────────────────────────
 
 describe("fare split — commission + driverShare === total (exact invariant)", () => {
-  const allTotals = [1000, 1400, 1500, 1800, 2000] as const;
+  const allTotals = [700, 1000, 1400, 1500, 1800, 2000, 2100, 2800] as const;
 
   for (const total of allTotals) {
     it(`total ${total}: commission + driverShare === ${total}`, () => {
@@ -174,14 +175,25 @@ describe("fare split — spot-checks", () => {
 // ─── Competitive guarantees ───────────────────────────────────────────────────
 
 describe("competitive guarantees", () => {
-  it("every shared rider pays exactly 500 pesewas, regardless of occupancy", () => {
+  it("every shared rider pays exactly 700 pesewas, regardless of occupancy", () => {
     for (const occ of [1, 2, 3, 4] as const) {
-      expect(getSharedFarePerRider(occ)).toBe(500);
+      expect(getSharedFarePerRider(occ)).toBe(700);
+    }
+  });
+
+  it("a shared rider gives the driver GH₵5.95 and CampusRide GH₵1.05", () => {
+    expect(splitFare(getSharedFarePerRider(1))).toEqual({ commission: 105, driverShare: 595 });
+    expect(getDriverGrossForRide("SHARED", 1)).toBe(595);
+  });
+
+  it("sharing always costs a rider less than riding alone", () => {
+    for (const occ of [1, 2, 3, 4] as const) {
+      expect(getSharedFarePerRider(occ)).toBeLessThan(getLoneFare());
     }
   });
 
   // The old "≥1000 minimum driver haul" guarantee is intentionally removed:
-  // a solo SHARED rider now nets the driver 500 total, not 1000.
+  // a solo SHARED rider now nets the driver 700 total, not 1000.
 });
 
 // ─── Convenience combiners ────────────────────────────────────────────────────
@@ -200,28 +212,28 @@ describe("priceLoneRide", () => {
 describe("priceSharedRide", () => {
   it("occupancy 2: flat farePerRider, total scales with headcount", () => {
     const result = priceSharedRide(2);
-    expect(result.farePerRider).toBe(500);
-    expect(result.total).toBe(1000);
-    expect(result.commission).toBe(150);
-    expect(result.driverShare).toBe(850);
+    expect(result.farePerRider).toBe(700);
+    expect(result.total).toBe(1400);
+    expect(result.commission).toBe(210);
+    expect(result.driverShare).toBe(1190);
     expect(result.commission + result.driverShare).toBe(result.total);
   });
 
   it("occupancy 3: flat farePerRider, total scales with headcount", () => {
     const result = priceSharedRide(3);
-    expect(result.farePerRider).toBe(500);
-    expect(result.total).toBe(1500);
-    expect(result.commission).toBe(225);
-    expect(result.driverShare).toBe(1275);
+    expect(result.farePerRider).toBe(700);
+    expect(result.total).toBe(2100);
+    expect(result.commission).toBe(315);
+    expect(result.driverShare).toBe(1785);
     expect(result.commission + result.driverShare).toBe(result.total);
   });
 
   it("occupancy 4: flat farePerRider, total scales with headcount", () => {
     const result = priceSharedRide(4);
-    expect(result.farePerRider).toBe(500);
-    expect(result.total).toBe(2000);
-    expect(result.commission).toBe(300);
-    expect(result.driverShare).toBe(1700);
+    expect(result.farePerRider).toBe(700);
+    expect(result.total).toBe(2800);
+    expect(result.commission).toBe(420);
+    expect(result.driverShare).toBe(2380);
     expect(result.commission + result.driverShare).toBe(result.total);
   });
 

@@ -21,7 +21,7 @@ import { cleanupDriver, createTestDriver, createTestRide, createTestUser, getTes
 import * as rideSocket from "../realtime/rideSocket";
 import { broadcastRide } from "../services/ride/dispatch";
 import { processTimeouts } from "../services/ride/timeouts";
-import { DISPATCH_WINDOW_MS } from "@rida/shared";
+import { DISPATCH_WINDOW_MS, getSharedFarePerRider, splitFare } from "@rida/shared";
 
 vi.mock("../services/sms/sendSms", () => ({ sendSms: vi.fn().mockResolvedValue({ success: true }) }));
 
@@ -292,5 +292,28 @@ describe("withdrawn offers reach drivers at once", () => {
     await prisma.ride.update({ where: { id: expired.ride.id }, data: { broadcastStartedAt: new Date(Date.now() - DISPATCH_WINDOW_MS - 1000) } });
     await processTimeouts(prisma, new Date(), { rideIds: [expired.ride.id], logger: { info: () => {}, warn: () => {} } });
     await vi.waitFor(() => expect(closed.find((c) => c.payload.rideId === expired.ride.id)?.payload.reason).toBe("EXPIRED"));
+  });
+});
+
+describe("a request made before a price change", () => {
+  it("is offered at the fare its rider was quoted, in the list and in the broadcast", async () => {
+    const { ride } = await request("SHARED"); // its seat is locked at the old GH₵5
+    const a = await driver(ride.pickupZoneId);
+
+    const listed = (await eligible(a.auth)).find((r) => r.rideId === ride.id);
+    expect(listed).toMatchObject({ farePesewas: 500, driverSharePesewas: splitFare(500).driverShare });
+
+    const sent: Array<{ rideId: string; farePesewas: number; driverSharePesewas: number }> = [];
+    vi.spyOn(rideSocket, "emitDriverBroadcast").mockImplementation((_ids, p) => void sent.push(p));
+    await broadcastRide(prisma, ride.id);
+    expect(sent.find((p) => p.rideId === ride.id)).toMatchObject({ farePesewas: 500, driverSharePesewas: 425 });
+  });
+
+  it("a request quoted at today's fare is offered at today's", async () => {
+    const { ride } = await request("SHARED");
+    await prisma.ridePassenger.updateMany({ where: { rideId: ride.id }, data: { lockedFare: getSharedFarePerRider(1) } });
+    const a = await driver(ride.pickupZoneId);
+    const listed = (await eligible(a.auth)).find((r) => r.rideId === ride.id);
+    expect(listed).toMatchObject({ farePesewas: 700, driverSharePesewas: 595 });
   });
 });

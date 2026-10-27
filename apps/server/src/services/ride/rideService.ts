@@ -292,6 +292,12 @@ export interface JoinSharedRideInput extends Partial<RidePinFields> {
   riderId: string;
   pickupZoneId: string;
   dropoffZoneId: string;
+  /**
+   * The fare this rider was quoted on their own request (its seat's
+   * lockedFare), when they come from one: they keep it — or the car's rate,
+   * if that is lower — however the price list changed since.
+   */
+  quotedFare?: number | null;
 }
 
 /**
@@ -357,7 +363,11 @@ export async function joinLoadedSharedRideTx(
       status: p.status,
       lockedFare: p.lockedFare ?? newRate,
     })),
-    { id: "__new__", status: "WAITING" as const, lockedFare: newRate },
+    {
+      id: "__new__",
+      status: "WAITING" as const,
+      lockedFare: input.quotedFare != null ? Math.min(input.quotedFare, newRate) : newRate,
+    },
   ];
 
   const recomputed = options.freezeExistingFares

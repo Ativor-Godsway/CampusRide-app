@@ -171,6 +171,35 @@ npx -y eas-cli@24 update:list --branch production
 Your update should be at the top. Then repeat steps 2–5 with `driver` if the change
 also touches the driver app.
 
+### Changing a price
+
+Prices live in one place, `PRICING` in
+[packages/shared/src/pricing/pricing.ts](../../packages/shared/src/pricing/pricing.ts).
+The server and both apps read from it, so a price change ships as a server deploy
+plus an over-the-air update of both apps. It changes nothing native.
+
+What already exists is safe: each rider's fare is stored on their seat when they
+request (`lockedFare`). Offers, the trip, the cash commission and the driver's
+history all read those stored fares
+([apps/server/src/services/ride/fares.ts](../../apps/server/src/services/ride/fares.ts)),
+so a ride requested before the change keeps its price. That includes a waiting
+request a driver later adds to their car.
+
+What isn't covered yet is the moment of the switch. Merging deploys the server
+straight away (Render deploys `main`), and the app update can only be published
+after the merge, and reaches each phone two launches later. So for a while a
+phone still shows the old price on Choose a ride while the server charges the
+new one. Before launch (October 2026, testers only) that was accepted: merge,
+then publish `rider` and `driver` straight after.
+
+> **For any price change after launch, build "honor the shown price" first.**
+> The app sends the price it showed with each request (and with a switch of ride
+> type). The server charges exactly that price, or refuses a stale one so the
+> app refreshes. A request from an older app that sends no price keeps the old
+> fare until a cutoff date (changeable on Render), then pays the new one. With
+> that in place, no rider is ever charged more than they were shown, whatever the
+> release order.
+
 ---
 
 ## 4. Releasing a new store build

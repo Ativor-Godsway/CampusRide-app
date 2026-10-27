@@ -93,7 +93,7 @@ interface RideOption {
   /** One short, TRUE line: "up to 4 riders" / "just you". */
   subtitle: string;
   farePesewas: number;
-  /** Formatted with formatCedis, e.g. "GH₵5". */
+  /** Formatted with formatCedis, e.g. "GH₵7". */
   priceLabel: string;
   badge?: string;
 }
@@ -244,9 +244,9 @@ export default function RideTypeScreen() {
   }, [legSeen]);
 
   // ── Fares ───────────────────────────────────────────────────────────────────
-  // The same @rida/shared pricing functions the server locks fares with
-  // (createRide / switchRideType), so the prices shown here are the prices
-  // charged. Shared is flat per rider regardless of occupancy.
+  // Before a ride exists: the same @rida/shared pricing functions the server
+  // locks fares with (createRide / switchRideType), so the prices shown are
+  // the prices charged. Shared is flat per rider regardless of occupancy.
   const sharedFare = useMemo(() => getSharedFarePerRider(1), []);
   const loneFare = useMemo(() => priceLoneRide().fare, []);
   const fareFor = useCallback((type: RideType) => (type === "SHARED" ? sharedFare : loneFare), [sharedFare, loneFare]);
@@ -275,10 +275,11 @@ export default function RideTypeScreen() {
   );
   const selectedOption = options.find((o) => o.type === selectedType) ?? options[0]!;
 
-  // Once a ride exists, the SERVER's type is the truth (it may have been
-  // switched, or this may be a resumed ride of either type).
+  // Once a ride exists, the SERVER's type and this rider's locked fare are the
+  // truth (it may have been switched, or be a resumed ride booked before a
+  // price change: it keeps the price it was booked at).
   const rideType: RideType = ride?.type ?? selectedType;
-  const priceLabel = formatCedis(fareFor(rideType));
+  const priceLabel = formatCedis(myPassenger?.lockedFare ?? fareFor(rideType));
 
   // ── Map coords & region ─────────────────────────────────────────────────────
   const pickupCoord = useMemo(

@@ -102,7 +102,7 @@ describe("the time a new rider adds", () => {
   });
 
   it("is never below a minute on the label", () => {
-    expect(addRiderPreviewLabel(1, "GH₵5")).toBe("+1 rider · adds ~1 min · +GH₵5");
+    expect(addRiderPreviewLabel(1, "GH₵7")).toBe("+1 rider · adds ~1 min · +GH₵7");
   });
 });
 

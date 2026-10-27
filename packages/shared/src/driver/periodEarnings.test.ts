@@ -12,17 +12,17 @@ const trip = (d: number, h: number, fare: number) => ({
   driverGrossPesewas: splitFare(fare).driverShare,
 });
 
-// The owner's example: a GH₵5 shared trip and a GH₵15 private trip today.
-const shared = trip(21, 9, 500); // You earn GH₵4.25
+// The owner's example: a GH₵7 shared trip and a GH₵15 private trip today.
+const shared = trip(21, 9, 700); // You earn GH₵5.95
 const lone = trip(21, 17, 1500); // You earn GH₵12.75
 
 describe("earningsTotals: the one rule", () => {
   it("gross is the fares, commission 15% of them, after commission the sum of 'You earn'", () => {
     expect(earningsTotals([shared, lone])).toEqual({
       trips: 2,
-      grossPesewas: 2000,
-      commissionPesewas: 300,
-      netPesewas: 1700,
+      grossPesewas: 2200,
+      commissionPesewas: 330,
+      netPesewas: 1870,
     });
   });
 
@@ -54,14 +54,14 @@ describe("weekEarnings", () => {
   });
 
   it("puts each trip on its day, by the same rule", () => {
-    const days = weekEarnings([shared, lone, trip(19, 8, 500), trip(18, 23, 500)], now);
+    const days = weekEarnings([shared, lone, trip(19, 8, 700), trip(18, 23, 700)], now);
     expect(days[2]).toMatchObject({
       trips: 2,
-      grossPesewas: 2000,
-      commissionPesewas: 300,
-      netPesewas: 1700,
+      grossPesewas: 2200,
+      commissionPesewas: 330,
+      netPesewas: 1870,
     });
-    expect(days[0]).toMatchObject({ trips: 1, grossPesewas: 500, netPesewas: 425 });
+    expect(days[0]).toMatchObject({ trips: 1, grossPesewas: 700, netPesewas: 595 });
   });
 
   it("a Sunday belongs to the week that started the Monday before", () => {
@@ -72,35 +72,35 @@ describe("weekEarnings", () => {
 });
 
 describe("periodEarnings", () => {
-  const trips = [shared, lone, trip(20, 9, 500), trip(12, 9, 500)];
+  const trips = [shared, lone, trip(20, 9, 700), trip(12, 9, 700)];
 
-  it("Today is the owner's example: 20 / −3 / 17", () => {
+  it("Today is the owner's example: 22 / −3.30 / 18.70", () => {
     expect(periodEarnings(trips, "today", now)).toEqual({
       trips: 2,
-      grossPesewas: 2000,
-      commissionPesewas: 300,
-      netPesewas: 1700,
+      grossPesewas: 2200,
+      commissionPesewas: 330,
+      netPesewas: 1870,
     });
   });
 
   it("This week adds the days the same way", () => {
     const week = periodEarnings(trips, "week", now);
     expect(week).toEqual(earningsTotals([shared, lone, trips[2]!]));
-    expect(week.netPesewas).toBe(1700 + 425);
+    expect(week.netPesewas).toBe(1870 + 595);
   });
 });
 
 describe("todayEarnings: Home pill and trip-complete card", () => {
   it("is the Earnings tab's Today, after commission", () => {
-    const trips = [shared, lone, trip(20, 9, 500)];
-    expect(todayEarnings(trips, now)).toEqual({ pesewas: 1700, trips: 2 });
+    const trips = [shared, lone, trip(20, 9, 700)];
+    expect(todayEarnings(trips, now)).toEqual({ pesewas: 1870, trips: 2 });
     expect(todayEarnings(trips, now).pesewas).toBe(periodEarnings(trips, "today", now).netPesewas);
   });
 
   it("ignores other days and years", () => {
     expect(
       todayEarnings(
-        [trip(20, 23, 500), { ...shared, completedAt: new Date(2025, 9, 21, 12).toISOString() }],
+        [trip(20, 23, 700), { ...shared, completedAt: new Date(2025, 9, 21, 12).toISOString() }],
         now,
       ),
     ).toEqual({

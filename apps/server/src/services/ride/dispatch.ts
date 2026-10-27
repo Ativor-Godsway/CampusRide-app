@@ -1,5 +1,6 @@
 import type { PrismaClient, Ride } from "@prisma/client";
-import { getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
+import { splitFare } from "@rida/shared";
+import { requestFare } from "./fares";
 import { emitDriverBroadcast, emitOfferClosed } from "../../realtime/rideSocket";
 import { logger } from "../../lib/logger";
 import type { OfferClosedReason } from "@rida/shared";
@@ -89,7 +90,11 @@ export function closeOffer(
 export async function broadcastRide(prisma: PrismaClient, rideId: string) {
   const ride = await prisma.ride.findUniqueOrThrow({
     where: { id: rideId },
-    include: { pickupZone: true, dropoffZone: true },
+    include: {
+      pickupZone: true,
+      dropoffZone: true,
+      passengers: { select: { riderId: true, status: true, lockedFare: true } },
+    },
   });
   // A review demo rider's request goes to the demo's simulated driver, never
   // to anyone else (services/reviewDemo).
@@ -100,8 +105,8 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
   const eligible = await getEligibleDrivers(prisma, { id: ride.id, pickupZoneId: ride.pickupZoneId, isReviewDemo: ride.isReviewDemo });
 
   if (eligible.length > 0) {
-    const farePesewas =
-      ride.type === "LONE" ? getLoneFare() : getSharedFarePerRider(ride.occupancy);
+    // The fare the rider was quoted, stored on their seat (services/ride/fares).
+    const farePesewas = requestFare(ride.type, ride.passengers, ride.riderId);
     const { driverShare } = splitFare(farePesewas);
     const expiresAt = (ride.broadcastStartedAt?.getTime() ?? Date.now()) + 90_000;
     const placeNames = requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name);

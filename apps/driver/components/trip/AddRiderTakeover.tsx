@@ -31,7 +31,7 @@ export function AddRiderTakeover({
   /** The proposed route, already trimmed to the driver's position. */
   path: LatLng[];
   countdown: TakeoverCountdown | null;
-  /** The fare to show until the preview gives the real one. */
+  /** Today's shared fare: shown until the preview (or the suggestion) gives the rider's own. */
   sharedFarePesewas: number;
   freeSeats: number;
   committing: boolean;
@@ -40,7 +40,7 @@ export function AddRiderTakeover({
 }) {
   const from = preview?.pickupPlaceName ?? suggestion.pickupPlaceName ?? suggestion.pickupZoneName;
   const to = preview?.dropoffPlaceName ?? suggestion.dropoffPlaceName ?? suggestion.dropoffZoneName;
-  const fare = preview?.farePesewas ?? sharedFarePesewas;
+  const fare = preview?.farePesewas ?? suggestion.farePesewas ?? sharedFarePesewas;
   const earn = preview?.driverSharePesewas ?? splitFare(fare).driverShare;
 
   // The new rider's two stops: where the server slots them in, else their zones.

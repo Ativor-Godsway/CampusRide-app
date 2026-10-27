@@ -181,12 +181,12 @@ describe("stop helpers", () => {
 
 describe("plain words for the driver", () => {
   const cedis = (p: number) => `GH₵${p / 100}`;
-  const ama = { kind: "PICKUP" as const, riderFirstName: "Ama", zone: { id: "B", name: "Balme Library", latitude: 0, longitude: 0 }, farePesewas: 500 };
-  const kofi = { kind: "DROPOFF" as const, riderFirstName: "Kofi", zone: { id: "M", name: "Main Gate", latitude: 0, longitude: 0 }, farePesewas: 500 };
+  const ama = { kind: "PICKUP" as const, riderFirstName: "Ama", zone: { id: "B", name: "Balme Library", latitude: 0, longitude: 0 }, farePesewas: 700 };
+  const kofi = { kind: "DROPOFF" as const, riderFirstName: "Kofi", zone: { id: "M", name: "Main Gate", latitude: 0, longitude: 0 }, farePesewas: 700 };
 
   it("says what to do at the next stop", () => {
     expect(nextStopInstruction(ama, { cash: true, formatFare: cedis })).toBe("Pick up Ama at Balme Library");
-    expect(nextStopInstruction(kofi, { cash: true, formatFare: cedis })).toBe("Drop off Kofi at Main Gate · collect GH₵5");
+    expect(nextStopInstruction(kofi, { cash: true, formatFare: cedis })).toBe("Drop off Kofi at Main Gate · collect GH₵7");
     expect(nextStopInstruction(kofi, { cash: false, formatFare: cedis })).toBe("Drop off Kofi at Main Gate");
     expect(nextStopInstruction({ ...ama, riderFirstName: "" }, { cash: true, formatFare: cedis })).toBe("Pick up the rider at Balme Library");
   });

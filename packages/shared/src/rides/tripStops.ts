@@ -96,7 +96,7 @@ export function riderName(stop: Pick<TripStop, "riderFirstName">): string {
 
 /**
  * What to do at the next stop, in plain words:
- * "Pick up Ama at Balme Library" / "Drop off Kofi at Main Gate · collect GH₵5".
+ * "Pick up Ama at Balme Library" / "Drop off Kofi at Main Gate · collect GH₵7".
  * Without a name: "Pick up the rider at …".
  */
 export function nextStopInstruction(

@@ -20,7 +20,7 @@ export interface RideOptionCardProps extends Omit<PressableProps, "style" | "chi
   title: string;
   /** "3 min · up to 4 riders". */
   subtitle?: string;
-  /** "GH₵5". */
+  /** "GH₵7". */
   price: string;
   selected?: boolean;
   /** Optional status chip beside the title, e.g. "Best value". */

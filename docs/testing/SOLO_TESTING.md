@@ -201,13 +201,13 @@ CampusRide fake-rider simulator  (local / development only)
 
 11:40:47  👥  10 fake riders ready (Ama, Kofi, Akosua, Kwame, …)
 11:40:47  🚗  Godsway is online in Balme Library — requests will come from there and nearby
-11:40:47  📍  Test Ama requested Shared (GH₵5), Balme Library → School of Business
+11:40:47  📍  Test Ama requested Shared (GH₵7), Balme Library → School of Business
 11:40:51  ✅  Test Ama's request was accepted by Godsway
-11:40:53  📍  Test Kwame requested Shared (GH₵5), Balme Library → School of Business  — going the same way as Test Ama
+11:40:53  📍  Test Kwame requested Shared (GH₵7), Balme Library → School of Business  — going the same way as Test Ama
 11:40:55  🤝  Test Kwame was added to Test Ama's shared car (driver Godsway)
 11:40:57  📌  Driver is at Balme Library for Test Ama
 11:41:00  🚕  Test Ama got in — heading to School of Business
-11:41:03  🏁  Test Ama was dropped off at School of Business (GH₵5)
+11:41:03  🏁  Test Ama was dropped off at School of Business (GH₵7)
 11:41:25  ✗  Test Kofi gave up waiting and cancelled — "Found another ride"
 ```
 
@@ -456,7 +456,7 @@ the server says no, the screen goes back and a red line says why.
    (named, not "Your rider").
 8. **Add a rider from the trip screen:** tap **Add rider** → **See route** on a
    third rider (say Yaw). ✔ dotted route, **New** pins, "+1 rider · adds ~N
-   min · +GH₵5". Tap **Add**. ✔ the dotted line turns solid, seat dots "3 of
+   min · +GH₵7". Tap **Add**. ✔ the dotted line turns solid, seat dots "3 of
    4", the stop list shows Yaw.
 9. **▶ Drive (fake)** to the first pickup. ✔ About 10 seconds after stopping
    there, the card shows "Ama knows you're here · Waiting 0:05" on its own.
@@ -466,7 +466,7 @@ the server says no, the screen goes back and a red line says why.
 11. Pick up Kofi and Yaw the same way (Drive, then slide). Each slide advances
     at once. Open **N more stops** — ✔ each rider has one word: Waiting /
     Arrived / In car.
-12. Drive to each drop-off. The card says "Drop off Ama at … · collect GH₵5"
+12. Drive to each drop-off. The card says "Drop off Ama at … · collect GH₵7"
     with the amount large. **Slide "Cash collected from Ama"**. ✔ instant;
     toast "Ama dropped off · next: drop off Kofi"; the stop list has a
     **Done** section with Ama.

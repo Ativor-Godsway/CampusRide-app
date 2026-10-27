@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, afterEach, afterAll, beforeAll } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
-import { earningsTotals, getLoneFare, splitFare } from "@rida/shared";
+import { earningsTotals, getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
 import { prisma } from "../db/prisma";
 import { config } from "../config";
 import { registerAuthRoutes } from "./auth";
@@ -948,6 +948,30 @@ describe("GET /driver/rides/history — commission and net", () => {
     });
     expect(summary.totalGrossPesewas).toBe(2 * getLoneFare());
     expect(summary.netPesewas).toBe(rides.reduce((sum, r) => sum + r.driverGrossPesewas, 0));
+  });
+
+  it("a shared trip shows the fares its riders were booked at, across a price change", async () => {
+    const driver = await authedDriver();
+    const [early, late, gone] = await Promise.all([
+      createTestUser("RIDER"),
+      createTestUser("RIDER"),
+      createTestUser("RIDER"),
+    ]);
+    const { ride } = await createTestRide({
+      type: "SHARED",
+      status: "COMPLETED",
+      driverId: driver.user.id,
+      passengers: [
+        { riderId: early.id, status: "DROPPED_OFF", lockedFare: 500 }, // booked at the old GH₵5
+        { riderId: late.id, status: "DROPPED_OFF", lockedFare: getSharedFarePerRider(1) },
+        { riderId: gone.id, status: "CANCELLED", lockedFare: 500 }, // not carried: not paid
+      ],
+    });
+    createdRideIds.push(ride.id);
+
+    const { rides } = await history(driver.token);
+    const face = 500 + getSharedFarePerRider(1);
+    expect(rides[0]).toMatchObject({ facePesewas: face, driverGrossPesewas: splitFare(face).driverShare });
   });
 
   it("nothing owed on file: the share is still after commission", async () => {

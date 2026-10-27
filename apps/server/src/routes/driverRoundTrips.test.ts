@@ -35,15 +35,19 @@ import {
  * it reads the owner separately. add-preview (added later) runs its reads
  * in parallel: the car, its seats, their names, the request, its rider.
  * eligible / fill-suggestions / add-preview each gained one read (2026-10-03)
- * for the requesting rider's first name, so the trip never says "Your rider".
+ * for the requesting rider's first name, so the trip never says "Your rider",
+ * and one more (2026-10-27) for the request's seat: the fare its rider was
+ * quoted, so a request made before a price change is offered at its own
+ * price (services/ride/fares). add-passenger reads that fare inside the
+ * UPDATE that closes the request, so it costs no extra trip.
  */
 const BUDGET = {
   "GET /driver/rides/active": 4,
   // 5 since ride offers (2026-10): + riders' ratings for the offer card
   // (read in parallel with the drivers query, so no extra latency).
-  "GET /driver/rides/eligible": 5,
-  "GET /rides/:id/fill-suggestions": 4,
-  "GET /rides/:id/add-preview": 5,
+  "GET /driver/rides/eligible": 6,
+  "GET /rides/:id/fill-suggestions": 5,
+  "GET /rides/:id/add-preview": 6,
   "POST /rides/:id/claim": 2,
   "POST /rides/:id/add-passenger": 7,
   "POST passenger arrived": 6,
