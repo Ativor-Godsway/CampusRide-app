@@ -50,6 +50,8 @@ export default tseslint.config(
       "**/web-build/**",
       "**/*.d.ts",
       "apps/*/expo-env.d.ts",
+      // Third-party builds shipped as they come (the website's lottie-web).
+      "apps/web/public/vendor/**",
     ],
   },
 
@@ -175,6 +177,16 @@ export default tseslint.config(
       "react/prop-types": "off",
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "warn",
+    },
+  },
+
+  // ── The website's one script (apps/web/public/app.js) ──────────────────────
+  // Plain JavaScript loaded by the browser as it is: no build, no modules.
+  {
+    files: ["apps/web/public/**/*.js"],
+    languageOptions: {
+      globals: { ...globals.browser },
+      sourceType: "script",
     },
   },
 

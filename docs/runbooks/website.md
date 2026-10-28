@@ -38,7 +38,7 @@ You can do this before the pull request merges, by deploying the branch.
 
    | Name | Value |
    |---|---|
-   | `Content-Security-Policy` | `default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` |
+   | `Content-Security-Policy` | `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'` |
    | `X-Content-Type-Options` | `nosniff` |
    | `Referrer-Policy` | `strict-origin-when-cross-origin` |
    | `Strict-Transport-Security` | `max-age=15552000` |
@@ -173,6 +173,21 @@ usually within a few weeks.
 ## Changing the website later
 
 - Text: edit `apps/web/src/pages/*.html`.
-- Operator name, address, support phone, draft banners: `apps/web/site.config.mjs`.
-- Logo: replace `apps/web/public/logo.svg` (and `favicon.svg`, `og-image.png`).
+- Operator name, address, support phone, draft banners, **store links**:
+  `apps/web/site.config.mjs`. Paste an app's App Store or Google Play address
+  into `stores` and its official badge replaces "Coming soon".
+- Prices, pickup areas, the welcome animation: nothing to do on the website.
+  The build reads them from the code; after a price change, re-run
+  `python3 apps/web/tools/screenshots.py` (the tests say so).
+- Logo, icons, link preview picture: change the files in `assets/brand/` and
+  run `python3 scripts/brand/generate.py`.
 - Merge to `main`; Render redeploys. `apps/web/README.md` has the details.
+
+### Headers
+
+The headers in `render.yaml` reach the live site only through the Render
+dashboard (**campusride-web → Settings → Headers**, path `/*`). Whenever the
+`Content-Security-Policy` in `render.yaml` changes, paste the new value there
+too. Since the October 2026 home page it must allow the site's own script,
+fonts and animation file (`script-src`, `font-src`, `connect-src`); with the
+older value the page still works but shows system fonts and no animation.

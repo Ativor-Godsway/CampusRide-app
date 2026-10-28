@@ -2,7 +2,7 @@
 
 Source: CampusRide design system and mockups (Claude).
 
-Mockups: `docs/mockups/*.png` (390×844 @2x).
+Mockups: `docs/mockups/*.png` (390×844 @2x). Their prices are from before 2026-10-27 (05 and 07 show a GH₵5 shared fare, and "You saved GH₵10"): the shared fare is GH₵7 (`PRICING` in `packages/shared/src/pricing/pricing.ts`).
 
 ## Brand book
 
