@@ -1,69 +1,220 @@
-<section class="hero">
-  <div class="wrap">
-    <span class="badge">University of Ghana, Legon</span>
-    <h1>Rides around campus, at a fixed fare.</h1>
-    <p>
-      CampusRide connects students and staff with approved local drivers for short trips around
-      the University of Ghana and the areas close to it. Share a car to pay less, or take one to
-      yourself. You see the fare before you book and pay the driver in cash.
-    </p>
-    <div class="store-note">
-      Coming soon to Google Play
-      <small>Rider and driver apps for Android</small>
+<section class="hero" aria-labelledby="hero-title">
+  <div class="wrap hero-inner">
+    <div class="hero-copy">
+      <p class="eyebrow">University of Ghana, Legon</p>
+      <h1 id="hero-title">Rides around Legon, at a fare you know.</h1>
+      <p class="lede">
+        Share a car for {{sharedFare}} or have one to yourself for {{loneFare}}. You see the fare
+        before you book, and pay your driver in cash.
+      </p>
+      {{riderStores}}
+    </div>
+    <div class="hero-phones">
+      <div class="hero-phone hero-phone-back">{{phoneHome}}</div>
+      <div class="hero-phone hero-phone-front">{{phoneWelcome}}</div>
     </div>
   </div>
 </section>
 
-<section class="section">
+<section class="section" id="how" aria-labelledby="how-title">
   <div class="wrap">
-    <h2>How it works</h2>
-    <ol class="steps">
-      <li><strong>Pick your pickup and destination.</strong> Choose a hall, faculty, gate or landmark, or drop a pin.</li>
-      <li><strong>Choose shared or private.</strong> The fare is fixed and shown before you book.</li>
-      <li><strong>Watch your driver arrive.</strong> See the car on the map, with the driver's name, photo and plate.</li>
-      <li><strong>Pay in cash at the end.</strong> Then rate your trip.</li>
+    <div class="section-head">
+      <p class="eyebrow">How it works</p>
+      <h2 id="how-title">Three steps, and you're on your way.</h2>
+    </div>
+    <ol class="how-steps">
+      <li class="how-step">
+        {{phonePlan}}
+        <div class="how-step-text">
+          <span class="how-step-number" aria-hidden="true">1</span>
+          <h3>Say where you're going</h3>
+          <p>Search a hall, faculty, gate or landmark by name, or drop a pin on the map.</p>
+        </div>
+      </li>
+      <li class="how-step">
+        {{phoneChoose}}
+        <div class="how-step-text">
+          <span class="how-step-number" aria-hidden="true">2</span>
+          <h3>Choose Shared or Ride alone</h3>
+          <p>Both fares are on the screen before you book. Tap request and we find a driver nearby.</p>
+        </div>
+      </li>
+      <li class="how-step">
+        {{phoneDriverComing}}
+        <div class="how-step-text">
+          <span class="how-step-number" aria-hidden="true">3</span>
+          <h3>Meet your driver</h3>
+          <p>Watch the car come to you, check the name and number plate, and pay in cash when you arrive.</p>
+        </div>
+      </li>
     </ol>
   </div>
 </section>
 
-<section class="section">
+<section class="section section-tint" id="prices" aria-labelledby="prices-title">
   <div class="wrap">
-    <h2>Built for campus</h2>
-    <div class="cards">
-      <div class="card">
-        <span class="dot" aria-hidden="true">1</span>
-        <h3>Shared rides</h3>
-        <p>Ride with up to three other people going your way and pay a lower fare each.</p>
-      </div>
-      <div class="card">
-        <span class="dot" aria-hidden="true">2</span>
-        <h3>Approved drivers</h3>
-        <p>Every driver's details and car are checked by CampusRide before they can take trips.</p>
-      </div>
-      <div class="card">
-        <span class="dot" aria-hidden="true">3</span>
-        <h3>SOS on every trip</h3>
-        <p>One tap texts your emergency contact a live link to your trip and alerts CampusRide.</p>
-      </div>
-      <div class="card">
-        <span class="dot" aria-hidden="true">4</span>
-        <h3>Sign in with your phone</h3>
-        <p>No passwords. We text you a one-time code to sign in.</p>
-      </div>
+    <div class="section-head">
+      <p class="eyebrow">Prices</p>
+      <h2 id="prices-title">Two fares. No surprises.</h2>
+      <p>Fixed fares, not a meter: what you see when you book is what you pay.</p>
     </div>
+    <div class="prices">
+      <article class="price-card price-card-shared">
+        <div class="price-top">
+          <h3>Shared</h3>
+          <span class="tag">Best value</span>
+        </div>
+        <p class="price"><span class="price-amount">{{sharedFare}}</span> <span class="price-unit">per rider</span></p>
+        <p>Up to {{maxSharedRiders}} riders going your way share the car. Your fare never goes up when others join.</p>
+      </article>
+      <article class="price-card">
+        <div class="price-top">
+          <h3>Ride alone</h3>
+        </div>
+        <p class="price"><span class="price-amount">{{loneFare}}</span> <span class="price-unit">per ride</span></p>
+        <p>The car to yourself, straight to where you're going.</p>
+      </article>
+    </div>
+    <ul class="checks">
+      <li>Pay the driver in cash at the end of the trip</li>
+      <li>The fare is shown before you book</li>
+      <li>No fee to cancel before the trip starts</li>
+    </ul>
   </div>
 </section>
 
-<section class="section">
-  <div class="wrap">
-    <h2>Drive with CampusRide</h2>
-    <div class="callout">
+<section class="section section-dark" id="safety" aria-labelledby="safety-title">
+  <div class="wrap split">
+    <div class="split-copy">
+      <p class="eyebrow">Safety</p>
+      <h2 id="safety-title">Help is one tap away on every trip.</h2>
+      <ul class="features">
+        <li>
+          <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 5 6v5c0 4.5 3 8.3 7 9.5 4-1.2 7-5 7-9.5V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></svg>
+          <div>
+            <h3>Approved drivers</h3>
+            <p>CampusRide checks every driver's details, photo and car before they can take trips.</p>
+          </div>
+        </li>
+        <li>
+          <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 8v4M12 16h.01" /><circle cx="12" cy="12" r="9" /></svg>
+          <div>
+            <h3>SOS to your emergency contact</h3>
+            <p>One tap texts your emergency contact and CampusRide where you are, who your driver is and a live link to follow your trip.</p>
+          </div>
+        </li>
+        <li>
+          <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3v12M7 8l5-5 5 5" /><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" /></svg>
+          <div>
+            <h3>Share your trip</h3>
+            <p>Send a friend your route and the car you're in, straight from the trip screen.</p>
+          </div>
+        </li>
+        <li>
+          <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18h2" /></svg>
+          <div>
+            <h3>Sign in with your phone</h3>
+            <p>No passwords. We text you a one-time code to sign in.</p>
+          </div>
+        </li>
+      </ul>
+      <p class="fine">In an emergency, call 112. The Safety button in the app can call it for you.</p>
+    </div>
+    <div class="split-media">{{phoneSafety}}</div>
+  </div>
+</section>
+
+<section class="section" id="drive" aria-labelledby="drive-title">
+  <div class="wrap split split-reverse">
+    <div class="split-copy">
+      <p class="eyebrow">Drive with CampusRide</p>
+      <h2 id="drive-title">Earn on your own schedule.</h2>
+      <ul class="features features-light">
+        <li>
+          <span class="feature-figure">{{driverSharePct}}%</span>
+          <div>
+            <h3>Keep {{driverSharePct}}% of every fare</h3>
+            <p>CampusRide's commission is {{commissionPct}}%. On a {{loneFare}} ride you earn {{driverShareOfLoneFare}}, and the app shows what you earn before you accept.</p>
+          </div>
+        </li>
+        <li>
+          <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="6" width="19" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></svg>
+          <div>
+            <h3>Paid in cash</h3>
+            <p>Riders pay you at the end of each trip.</p>
+          </div>
+        </li>
+        <li>
+          <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+          <div>
+            <h3>Choose your hours</h3>
+            <p>Go online when it suits you and offline when you're done.</p>
+          </div>
+        </li>
+        <li>
+          <svg class="feature-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM2 21a7 7 0 0 1 14 0" /><path d="m16 11 2 2 4-4" /></svg>
+          <div>
+            <h3>Get approved</h3>
+            <p>Sign up in the CampusRide Driver app with your phone number, add your car and a photo of yourself, and go online once we've checked your details.</p>
+          </div>
+        </li>
+      </ul>
+      {{driverStores}}
+    </div>
+    <div class="split-media">{{phoneDriverOffer}}</div>
+  </div>
+</section>
+
+<section class="section section-tint" id="where" aria-labelledby="where-title">
+  <div class="wrap where">
+    <div class="where-copy">
+      <p class="eyebrow">Where we operate</p>
+      <h2 id="where-title">Legon campus and the areas next to it.</h2>
       <p>
-        Have a car and know the campus? The CampusRide Driver app is coming to Google Play too. Sign
-        up in the app, add your car and a photo, and start taking trips once you're approved. Riders
-        pay you in cash; CampusRide's commission is shown in the app.
+        Pick up and drop off anywhere in these {{zoneCount}} areas. The app tells you if a place is
+        outside them.
       </p>
-      <p>Questions? See <a href="/support">Support</a> or email {{supportEmailLink}}.</p>
+      <ol class="zones">
+        {{zoneList}}
+      </ol>
+    </div>
+    <figure class="where-map">
+      <img src="/where.svg" width="1000" height="1300" loading="lazy" decoding="async" alt="A map of the University of Ghana, Legon, with the {{zoneCount}} CampusRide areas as numbered dots, in the same order as the list." />
+    </figure>
+  </div>
+</section>
+
+<section class="section" id="faq" aria-labelledby="faq-title">
+  <div class="wrap faq">
+    <div class="section-head">
+      <p class="eyebrow">FAQ</p>
+      <h2 id="faq-title">Questions, answered.</h2>
+    </div>
+    <div class="faq-list">
+      <details name="faq">
+        <summary>How do I pay?</summary>
+        <p>In cash, to your driver, at the end of the trip. A shared ride is {{sharedFare}} per rider and Ride alone is {{loneFare}}; the app shows the fare before you book. Please carry small change.</p>
+      </details>
+      <details name="faq">
+        <summary>How do shared rides work?</summary>
+        <p>Other riders going your way can join your car, up to {{maxSharedRiders}} riders in total. Each pays {{sharedFare}}, and your fare never goes up because others join. If you'd rather not share, choose Ride alone.</p>
+      </details>
+      <details name="faq">
+        <summary>How do you keep riders safe?</summary>
+        <p>Every driver is approved by CampusRide before they can take trips, and the app shows their name, photo, car and number plate so you can check them before you get in. During a trip, the Safety button alerts your emergency contact and CampusRide with a live link to your trip, or calls 112.</p>
+      </details>
+      <details name="faq">
+        <summary>Can I cancel a ride?</summary>
+        <p>Yes, in the app, any time before the trip starts, and there's no fee. If you don't come out within a few minutes of the driver arriving, the driver may cancel your pickup.</p>
+      </details>
+      <details name="faq">
+        <summary>How do I delete my account?</summary>
+        <p>In the app: Account → Delete account. Without the app, email {{deleteEmailLink}}. The <a href="/delete-account">account deletion page</a> says exactly what is deleted and what is kept.</p>
+      </details>
+      <details name="faq">
+        <summary>How do I contact support?</summary>
+        <p>Email {{supportEmailLink}} or call {{supportPhoneLink}}. We aim to reply within two working days. More answers are on the <a href="/support">Support page</a>.</p>
+      </details>
     </div>
   </div>
 </section>

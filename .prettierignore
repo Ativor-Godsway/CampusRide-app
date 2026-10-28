@@ -10,3 +10,9 @@ apps/server/prisma/migrations/
 
 # The designer's Lottie file, kept byte for byte.
 packages/mobile-shared/assets/welcome/welcome.json
+
+# OpenStreetMap extract, written by scripts/map/fetch-legon.mjs.
+assets/map/legon-osm.json
+
+# Third-party builds, kept as they come.
+apps/web/public/vendor/

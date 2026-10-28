@@ -8,7 +8,10 @@
     <meta name="robots" content="{{robots}}" />
     <link rel="canonical" href="{{canonical}}" />
     <meta name="theme-color" content="#19743C" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="preload" href="/fonts/figtree-latin.woff2" as="font" type="font/woff2" crossorigin />
     <link rel="stylesheet" href="/styles.css" />
 
     <meta property="og:type" content="website" />
@@ -17,26 +20,36 @@
     <meta property="og:description" content="{{description}}" />
     <meta property="og:url" content="{{canonical}}" />
     <meta property="og:image" content="{{ogImage}}" />
+    <meta property="og:image:type" content="image/png" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
-    <meta property="og:image:alt" content="CampusRide: rides around the University of Ghana" />
+    <meta property="og:image:alt" content="The CampusRide logo and a green car at the Balme Library: rides around the University of Ghana, Legon" />
     <meta property="og:locale" content="en_GH" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="{{title}}" />
     <meta name="twitter:description" content="{{description}}" />
     <meta name="twitter:image" content="{{ogImage}}" />
+    {{pageHead}}
   </head>
-  <body>
+  <body class="{{bodyClass}}">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <div class="wrap header-inner">
         <a class="brand" href="/" aria-label="CampusRide home">
-          <!-- The logo is this one file: replace public/logo.svg to change it everywhere. -->
-          <img src="/logo.svg" alt="CampusRide" width="168" height="32" />
+          <!-- Made from assets/brand by scripts/brand/generate.py. -->
+          <img src="/brand/logo@2x.png" srcset="/brand/logo@2x.png 2x, /brand/logo@3x.png 3x" alt="CampusRide" width="163" height="32" />
         </a>
         <nav class="site-nav" aria-label="Main">
-          {{nav}}
+            {{nav}}
         </nav>
+        <details class="menu">
+          <summary aria-label="Menu">
+            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" /></svg>
+          </summary>
+          <nav class="menu-panel" aria-label="Main, small screens">
+            {{nav}}
+          </nav>
+        </details>
       </div>
     </header>
 
@@ -46,20 +59,40 @@
     </main>
 
     <footer class="site-footer">
-      <div class="wrap footer-inner">
-        <p>
-          <img src="/logo.svg" alt="CampusRide" width="126" height="24" class="footer-logo" />
-        </p>
-        <nav aria-label="Footer">
-          <a href="/support">Support</a>
-          <a href="/privacy">Privacy Policy</a>
-          <a href="/terms">Terms of Service</a>
-          <a href="/delete-account">Delete your account</a>
-        </nav>
-        <p class="footer-note">
-          &copy; {{year}} CampusRide, operated by {{operatorName}}, Ghana.
-          {{supportEmailLink}}
-        </p>
+      <div class="wrap">
+        <div class="footer-top">
+          <div class="footer-brand">
+            <img src="/brand/logo-white@2x.png" srcset="/brand/logo-white@2x.png 2x, /brand/logo-white@3x.png 3x" alt="CampusRide" width="163" height="32" loading="lazy" />
+            <p>Rides around the University of Ghana, Legon.</p>
+            <p>{{supportEmailLink}}</p>
+          </div>
+          <nav class="footer-links" aria-label="Footer">
+            <div>
+              <h2>CampusRide</h2>
+              <a href="/#how">How it works</a>
+              <a href="/#prices">Prices</a>
+              <a href="/#safety">Safety</a>
+              <a href="/#drive">Drive with CampusRide</a>
+            </div>
+            <div>
+              <h2>Help</h2>
+              <a href="/support">Support</a>
+              <a href="/#faq">FAQ</a>
+              <a href="/delete-account">Delete your account</a>
+            </div>
+            <div>
+              <h2>Legal</h2>
+              <a href="/privacy">Privacy Policy</a>
+              <a href="/terms">Terms of Service</a>
+            </div>
+          </nav>
+        </div>
+        <div class="footer-legal">
+          <p>&copy; {{year}} CampusRide, operated by {{operatorName}}, Ghana.</p>
+          <p>CampusRide is independent and is not affiliated with or endorsed by the University of Ghana.</p>
+          <p>Map data &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>.</p>
+          {{storeTrademarks}}
+        </div>
       </div>
     </footer>
   </body>

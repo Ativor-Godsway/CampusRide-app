@@ -5,7 +5,16 @@ npm run screens -- pr-03                  # every scene, both apps
 npm run screens -- pr-03 --app driver     # one app
 npm run screens -- pr-03 --only home,trip # some scenes
 npm run screens -- pr-03 --device se      # iPhone SE size (also promax, android-small)
+npm run screens -- web --map-art          # a drawn map instead of the grey box
 ```
+
+`--map-art` is for pictures meant for people (the website's screenshots,
+`apps/web/tools/screenshots.py`): the map shows the real roads around Legon
+(`assets/map/legon-osm.json`, from OpenStreetMap, credited in the corner) with
+the app's own pins, route lines and car at their coordinates, framed the way
+the app frames them, and the fake server's routes follow those roads. Leave
+it off when reviewing layout: the grey box is the honest stand-in for a map
+the web can't show.
 
 PNGs, 390 px wide at 2x, are saved to
 `~/Desktop/CampusRide UI audit/pr-screens/<name>/` as `<app>-<scene>.png`.

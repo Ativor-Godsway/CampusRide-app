@@ -359,12 +359,15 @@ services:
       - campusride.app
       - www.campusride.app
 
-    # A public, script-free site: nothing may run, and it may load only its
-    # own files. Unlike the admin site it IS indexed (no X-Robots-Tag).
+    # A public site that may load only its own files. Its one script (the home
+    # page's welcome animation) and fonts are its own; the animation fetches
+    # its JSON (connect-src). Unlike the admin site it IS indexed (no
+    # X-Robots-Tag). Render applies these only when set in the dashboard too:
+    # docs/runbooks/website.md, "Headers".
     headers:
       - path: /*
         name: Content-Security-Policy
-        value: "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        value: "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
       - path: /*
         name: X-Content-Type-Options
         value: nosniff

@@ -8,6 +8,7 @@
  *   npm run screens -- pr-03 --only home,trip
  *   npm run screens -- pr-03 --out ~/somewhere
  *   npm run screens -- pr-03 --device se     another phone size (see DEVICES)
+ *   npm run screens -- web --map-art         draw the real Legon roads instead of a grey box
  *
  * PNGs (390 px wide, 2x) go to ~/Desktop/CampusRide UI audit/pr-screens/<name>/
  * unless --out says otherwise. They are NOT committed.
@@ -44,10 +45,14 @@ const flag = (name) => {
   const i = args.indexOf(`--${name}`);
   return i === -1 ? undefined : args[i + 1];
 };
-const name = args.find((a, i) => !a.startsWith("--") && !args[i - 1]?.startsWith("--"));
+/** Flags that take no value, so the word after one can be the folder name. */
+const SWITCHES = ["--map-art"];
+const name = args.find(
+  (a, i) => !a.startsWith("--") && !(args[i - 1]?.startsWith("--") && !SWITCHES.includes(args[i - 1])),
+);
 if (!name) {
   console.error(
-    "Usage: npm run screens -- <folder name, e.g. pr-03> [--app rider|driver] [--only a,b] [--out dir]",
+    "Usage: npm run screens -- <folder name, e.g. pr-03> [--app rider|driver] [--only a,b] [--out dir] [--map-art]",
   );
   process.exit(1);
 }
@@ -74,6 +79,8 @@ if (!device) {
   console.error(`--device must be one of: ${Object.keys(DEVICES).join(", ")}`);
   process.exit(1);
 }
+/** --map-art: draw the roads around Legon (stubs/maps.tsx) instead of a grey box. */
+const mapArt = args.includes("--map-art");
 const only = flag("only")
   ?.split(",")
   .map((s) => s.trim());
@@ -212,10 +219,15 @@ async function captureScene(browser, app, index, scene) {
   });
   tab.on("pageerror", (err) => errors.push(String(err)));
   await tab.setViewport({ width: WIDTH, height: HEIGHT, deviceScaleFactor: 2 });
-  // Read by stubs/safe-area-context.tsx before the bundle runs.
-  await tab.evaluateOnNewDocument((d) => {
-    window.__screensDevice = d;
-  }, device);
+  // Read by stubs/safe-area-context.tsx and stubs/maps.tsx before the bundle runs.
+  await tab.evaluateOnNewDocument(
+    (d, art) => {
+      window.__screensDevice = d;
+      window.__screensMapArt = art;
+    },
+    device,
+    mapArt,
+  );
   await tab.emulateMediaFeatures([{ name: "prefers-reduced-motion", value: "reduce" }]);
   await tab.goto(`${index}#${scene.name}`, { waitUntil: "load" });
   await tab
@@ -286,7 +298,8 @@ try {
     const dir = await build(app);
     const results = await capture(browser, app, dir);
     for (const { file, scene, errors } of results) {
-      const note = scene.note ? `  (${scene.note})` : "";
+      const said = mapArt ? scene.note?.replace("map: grey box", "map: drawn") : scene.note;
+      const note = said ? `  (${said})` : "";
       console.log(`  ✓ ${path.basename(file)}${note}`);
       for (const e of errors) console.log(`      ! ${e.split("\n")[0].slice(0, 300)}`);
       if (errors.some((e) => !e.startsWith("[screens]"))) failed = true;

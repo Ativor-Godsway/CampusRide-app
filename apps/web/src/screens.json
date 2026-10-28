@@ -1,0 +1,61 @@
+{
+  "about": "The app screenshots on the home page. tools/screenshots.py renders each scene with the screenshot harness (scripts/screens, --map-art) into public/screens/ and records the prices they show under madeWith; the tests fail when today's prices differ, so the pictures can't show an old fare.",
+  "screens": [
+    {
+      "name": "welcome",
+      "app": "rider",
+      "scene": "welcome",
+      "status": "light",
+      "alt": "The CampusRide app's welcome screen: a green car parked at the Balme Library, under the CampusRide logo."
+    },
+    {
+      "name": "home",
+      "app": "rider",
+      "scene": "home",
+      "status": "dark",
+      "alt": "The rider app's home screen: a map of campus and a Where to? search with recent places."
+    },
+    {
+      "name": "plan",
+      "app": "rider",
+      "scene": "plan-your-ride-results",
+      "status": "dark",
+      "alt": "Planning a ride: pickup at the current location, and Balme Library found by typing its name."
+    },
+    {
+      "name": "choose",
+      "app": "rider",
+      "scene": "choose-a-ride",
+      "status": "dark",
+      "alt": "Choosing a ride: the route on the map, with the Shared and Ride alone fares shown before booking."
+    },
+    {
+      "name": "driver-coming",
+      "app": "rider",
+      "scene": "driver-on-the-way",
+      "status": "dark",
+      "alt": "Driver on the way: the car on the map, the minutes until it arrives, and the driver's name, car and number plate."
+    },
+    {
+      "name": "safety",
+      "app": "rider",
+      "scene": "safety-sheet",
+      "status": "dark",
+      "alt": "The Safety sheet during a trip: share the trip with a contact, alert an emergency contact, or call emergency services on 112."
+    },
+    {
+      "name": "driver-offer",
+      "app": "driver",
+      "scene": "offer-ride-alone-new-rider",
+      "status": "dark",
+      "alt": "The driver app showing a new ride request: the fare, what the driver earns, the pickup and the drop-off."
+    }
+  ],
+  "madeWith": {
+    "sharedFare": 700,
+    "loneFare": 1500,
+    "maxSharedRiders": 4,
+    "commissionPct": 15,
+    "date": "2026-10-27"
+  }
+}

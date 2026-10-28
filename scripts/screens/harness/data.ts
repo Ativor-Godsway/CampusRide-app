@@ -10,6 +10,7 @@ import {
   type Zone,
 } from "@rida/shared";
 import type { AuthUser, EligibleRideItem, RideSummary, RideWithZones } from "@rida/mobile-shared";
+import { roadPath } from "../map/roads";
 
 const PLACES: [string, PlaceCategory, number, number][] = [
   ["Main Gate", "GATE", 5.65017, -0.17896],
@@ -146,8 +147,24 @@ export const riderRides: RideSummary[] = [
   }),
 ];
 
-/** A road route between two points (a straight-ish line: the map is a grey box anyway). */
+/**
+ * A road route through the points: a straight line while the map is a grey
+ * box, along the real roads (and their real length) with `--map-art`.
+ */
 export function roadRoute(points: { latitude: number; longitude: number }[]) {
+  if ((globalThis as { __screensMapArt?: boolean }).__screensMapArt) {
+    const { points: road, legMetres } = roadPath(points);
+    const total = legMetres.reduce((a, b) => a + b, 0);
+    // About 20 km/h on campus roads.
+    const seconds = (m: number) => Math.round(m / 5.5);
+    return {
+      polyline: encodePolyline(road),
+      distanceMeters: Math.round(total),
+      durationSeconds: seconds(total),
+      legs: legMetres.map((m) => ({ distanceMeters: Math.round(m), durationSeconds: seconds(m) })),
+      source: "osrm" as const,
+    };
+  }
   return {
     polyline: encodePolyline(points),
     distanceMeters: 1600,
