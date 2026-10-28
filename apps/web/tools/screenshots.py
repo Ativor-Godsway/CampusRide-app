@@ -20,7 +20,7 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageStat
 
 ROOT = Path(__file__).resolve().parents[3]
 WEB = ROOT / "apps" / "web"
@@ -57,6 +57,9 @@ def main() -> None:
             if not source.exists():
                 sys.exit(f"The harness made no {source.name}: is the scene name right?")
             image = Image.open(source).convert("RGB")
+            # A scene that failed to render is one flat colour: never ship an empty phone.
+            if max(ImageStat.Stat(image).stddev) < 8:
+                sys.exit(f"{source.name} came out blank: check the scene in scripts/screens/harness")
             for width in WIDTHS:
                 height = round(image.height * width / image.width)
                 path = OUT / f"{screen['name']}-{width}.webp"

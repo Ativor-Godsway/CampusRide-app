@@ -287,6 +287,50 @@ export function readScreens() {
   return JSON.parse(readFileSync(join(here, "src/screens.json"), "utf8"));
 }
 
+/** The widths each screenshot is saved at (tools/screenshots.py), for srcset. */
+const SCREEN_WIDTHS = [320, 640];
+
+/** A WebP file's pixel size, from its header (lossy, lossless or extended), or null. */
+export function webpSize(bytes) {
+  if (bytes.toString("ascii", 0, 4) !== "RIFF" || bytes.toString("ascii", 8, 12) !== "WEBP") return null;
+  const chunk = bytes.toString("ascii", 12, 16);
+  if (chunk === "VP8 ") return { width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff };
+  if (chunk === "VP8L") {
+    const bits = bytes.readUInt32LE(21);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+  }
+  if (chunk === "VP8X") return { width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 };
+  return null;
+}
+
+/**
+ * Every phone frame's picture, checked before anything is written: each
+ * screenshot in src/screens.json must exist at every width, be a WebP of a
+ * 390 x 844 phone screen, and have something in it (a blank screen compresses
+ * to almost nothing). A missing or broken one fails the build rather than
+ * shipping an empty phone.
+ */
+export function checkScreens(screens, dir = join(here, "public", "screens")) {
+  const fix = "run python3 apps/web/tools/screenshots.py";
+  for (const { name } of screens) {
+    for (const width of SCREEN_WIDTHS) {
+      const file = join(dir, `${name}-${width}.webp`);
+      let bytes;
+      try {
+        bytes = readFileSync(file);
+      } catch {
+        throw new Error(`Missing app screenshot public/screens/${name}-${width}.webp: ${fix}`);
+      }
+      const size = webpSize(bytes);
+      if (!size || size.width !== width || Math.abs(size.height / size.width - 844 / 390) > 0.01) {
+        throw new Error(`public/screens/${name}-${width}.webp isn't a ${width} px wide phone screenshot: ${fix}`);
+      }
+      // Real screens are 5 KB and up at 320 px; an empty white one is under 1 KB.
+      if (bytes.length < 2048) throw new Error(`public/screens/${name}-${width}.webp looks blank: ${fix}`);
+    }
+  }
+}
+
 /** Signal, Wi-Fi and battery, as an iPhone's status bar draws them. */
 const STATUS_ICONS = `<svg viewBox="0 0 68 12" width="68" height="12" aria-hidden="true" focusable="false"><g fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="4.5" y="6" width="3" height="6" rx="1"/><rect x="9" y="3.5" width="3" height="8.5" rx="1"/><rect x="13.5" y="1" width="3" height="11" rx="1"/><path d="M29 2.2c2.3 0 4.4.9 6 2.4l1.2-1.2A10 10 0 0 0 29 .5a10 10 0 0 0-7.2 2.9L23 4.6a8.3 8.3 0 0 1 6-2.4Zm0 3.3c1.4 0 2.7.5 3.6 1.4l1.2-1.2A6.8 6.8 0 0 0 29 3.8c-1.9 0-3.6.7-4.8 1.9l1.2 1.2c1-.9 2.2-1.4 3.6-1.4Zm0 3.3c-.6 0-1.1.2-1.4.6L29 11l1.4-1.6c-.3-.4-.8-.6-1.4-.6Z"/><rect x="42.5" y="1" width="21" height="10" rx="3" fill="none" stroke="currentColor" stroke-opacity="0.45"/><rect x="44.5" y="3" width="17" height="6" rx="1.6"/><path d="M65 4.2c.8.3 1.3.9 1.3 1.8s-.5 1.5-1.3 1.8Z" fill-opacity="0.5"/></g></svg>`;
 
@@ -296,10 +340,11 @@ const STATUS_ICONS = `<svg viewBox="0 0 68 12" width="68" height="12" aria-hidde
  */
 function phone(screen, { size = 260, eager = false, extra = "" } = {}) {
   const src = (w) => `/screens/${screen.name}-${w}.webp`;
+  const srcset = SCREEN_WIDTHS.map((w) => `${src(w)} ${w}w`).join(", ");
   const loading = eager ? 'fetchpriority="high"' : 'loading="lazy"';
   return `<div class="phone">
   <div class="phone-screen">
-    <img src="${src(320)}" srcset="${src(320)} 320w, ${src(640)} 640w" sizes="${size}px" width="390" height="844" alt="${escapeHtml(screen.alt)}" ${loading} decoding="async" />${extra}
+    <img src="${src(SCREEN_WIDTHS[0])}" srcset="${srcset}" sizes="${size}px" width="390" height="844" alt="${escapeHtml(screen.alt)}" ${loading} decoding="async" />${extra}
     <div class="phone-status phone-status-${screen.status}" aria-hidden="true"><span>9:41</span>${STATUS_ICONS}</div>
   </div>
 </div>`;
@@ -509,6 +554,7 @@ export function build(outDir = join(here, "dist")) {
     screens: readScreens(),
     year: new Date().getFullYear(),
   };
+  checkScreens(config.screens.screens);
   const layout = readFileSync(join(here, "src/layout.html"), "utf8");
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });

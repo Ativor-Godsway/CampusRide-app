@@ -12,6 +12,7 @@ import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   build,
+  checkScreens,
   formatCedis,
   pages,
   pageUrl,
@@ -21,6 +22,7 @@ import {
   readTermsDate,
   readZones,
   storeButtons,
+  webpSize,
 } from "../build.mjs";
 import { site } from "../site.config.mjs";
 
@@ -319,6 +321,49 @@ describe("the home page matches the code", () => {
     for (const { name, alt } of screens) {
       assert.ok(alt.length > 20, `${name} needs real alt text`);
       for (const width of [320, 640]) assert.ok(existsSync(join(out, "screens", `${name}-${width}.webp`)), name);
+    }
+  });
+
+  it("puts a real app screenshot in every phone frame", () => {
+    const html = home();
+    const frames = html.split('<div class="phone">').slice(1);
+    assert.equal(frames.length, 7, "the home page has 7 phones");
+    for (const frame of frames) {
+      const img = frame.match(/<div class="phone-screen">\s*<img src="([^"]+)" srcset="([^"]+)"/);
+      assert.ok(img, "a phone frame without a screenshot");
+      const files = [img[1], ...img[2].split(",").map((c) => c.trim().split(" ")[0])];
+      for (const path of files) {
+        assert.match(path, /^\/screens\/[a-z-]+-\d+\.webp$/);
+        const bytes = readFileSync(join(out, path.slice(1)));
+        const size = webpSize(bytes);
+        assert.ok(size, `${path} isn't a WebP`);
+        assert.ok(Math.abs(size.height / size.width - 844 / 390) < 0.01, `${path} isn't a phone screen`);
+        assert.ok(bytes.length >= 2048, `${path} looks blank`);
+      }
+    }
+    // The Safety and Drive sections show the screens they talk about.
+    const section = (id) => html.slice(html.indexOf(`id="${id}"`), html.indexOf("</section>", html.indexOf(`id="${id}"`)));
+    assert.ok(section("safety").includes('src="/screens/safety-320.webp"'));
+    assert.ok(section("drive").includes('src="/screens/driver-offer-320.webp"'));
+  });
+
+  it("refuses to build with a missing or blank phone screenshot", () => {
+    const dir = mkdtempSync(join(tmpdir(), "campusride-screens-"));
+    try {
+      const real = (name, width) => readFileSync(join(out, "screens", `${name}-${width}.webp`));
+      assert.throws(() => checkScreens([{ name: "safety" }], dir), /Missing app screenshot public\/screens\/safety-320\.webp/);
+      writeFileSync(join(dir, "safety-320.webp"), real("safety", 320));
+      writeFileSync(join(dir, "safety-640.webp"), real("safety", 320)); // the wrong size
+      assert.throws(() => checkScreens([{ name: "safety" }], dir), /isn't a 640 px wide phone screenshot/);
+      // A header that says 640 x 1385 on a near-empty file: a blank screen.
+      const blank = Buffer.from(real("safety", 640).subarray(0, 1200));
+      blank.writeUInt32LE(blank.length - 8, 4);
+      writeFileSync(join(dir, "safety-640.webp"), blank);
+      assert.throws(() => checkScreens([{ name: "safety" }], dir), /looks blank/);
+      writeFileSync(join(dir, "safety-640.webp"), real("safety", 640));
+      assert.doesNotThrow(() => checkScreens([{ name: "safety" }], dir));
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 

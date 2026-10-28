@@ -61,6 +61,9 @@ the stores' trademark line in the footer.
 `--map-art`: the map is drawn from the real Legon roads) and saves 320 and
 640 px wide WebPs. Re-run it when a screen changes, and after a price change:
 the tests compare the prices it recorded with today's and fail until it's run.
+The build itself fails if any screenshot a phone frame uses is missing, the
+wrong size, or blank (`checkScreens` in `build.mjs`), and the tool refuses a
+scene that rendered as one flat colour.
 Nothing on the page is invented except the harness's sample people (Ama,
 Kwame, Kofi) and trip times.
 
