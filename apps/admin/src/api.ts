@@ -372,3 +372,58 @@ export function deleteAccountByEmail(
     token,
   );
 }
+
+// ── Settings: launch mode and early access ──────────────────────────────────
+
+export type LaunchMode = "OFF" | "COUNTDOWN" | "LIVE";
+
+export interface LaunchStatus {
+  /** In force now: a countdown whose launch time has passed is LIVE. */
+  mode: LaunchMode;
+  launchAt: string | null;
+  serverTime: string;
+}
+
+export interface LaunchSettings {
+  /** As last saved here. */
+  setting: {
+    mode: LaunchMode;
+    launchAt: string | null;
+    updatedAt: string | null;
+    updatedBy: { id: string; name: string } | null;
+  };
+  status: LaunchStatus;
+  /** Rider accounts with early access now. */
+  earlyAccessRiders: number;
+}
+
+export interface EarlyAccessLookup {
+  phone: string;
+  account: { id: string; name: string; role: "RIDER" | "DRIVER" | "ADMIN"; earlyAccessAt: string | null } | null;
+}
+
+export function getLaunchSettings(token: string): Promise<LaunchSettings> {
+  return request("/admin/launch", {}, token);
+}
+
+export function saveLaunchMode(
+  token: string,
+  mode: LaunchMode,
+  launchAt: string | null,
+): Promise<{ status: LaunchStatus }> {
+  return request("/admin/launch", { method: "PUT", body: JSON.stringify({ mode, launchAt }) }, token);
+}
+
+export function lookUpEarlyAccess(token: string, phone: string): Promise<EarlyAccessLookup> {
+  return request(`/admin/early-access?phone=${encodeURIComponent(phone)}`, {}, token);
+}
+
+export function setEarlyAccess(token: string, phone: string, enabled: boolean): Promise<EarlyAccessLookup> {
+  return request("/admin/early-access", { method: "POST", body: JSON.stringify({ phone, enabled }) }, token);
+}
+
+export function giveEarlyAccessToAllRiders(
+  token: string,
+): Promise<{ granted: number; earlyAccessRiders: number }> {
+  return request("/admin/early-access/all-riders", { method: "POST", body: "{}" }, token);
+}

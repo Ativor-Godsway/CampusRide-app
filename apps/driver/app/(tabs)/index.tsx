@@ -33,6 +33,7 @@ import {
   CampusMapView,
   Chip,
   LoadingState,
+  LaunchBanner,
   Notice,
   Screen,
   StatusChip,
@@ -48,6 +49,7 @@ import {
   shadows,
   spacing,
   useAuth,
+  useLaunchView,
   useToast,
   type EligibleRideItem,
   type RideWithZones,
@@ -115,6 +117,8 @@ export default function DriverHomeScreen() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { isLoading: authLoading, user } = useAuth();
+  // Before the public launch: a small reminder (drivers still go online, for early-access riders).
+  const launch = useLaunchView();
   const { isOnline, waking, outsideServiceArea, position, locationProblem, toggle } =
     useDriverPresence();
   const location = useDriverLocation();
@@ -399,6 +403,8 @@ export default function DriverHomeScreen() {
         accessibilityLabel={isOnline ? "Trips near you" : "You're offline"}
       >
         {trip ? <TripRow trip={trip} onPress={() => router.push(tripHref(trip))} /> : null}
+
+        {launch.kind === "countdown" ? <LaunchBanner parts={launch.parts} /> : null}
 
         {!isOnline && locationProblem ? (
           <View style={styles.problem}>
