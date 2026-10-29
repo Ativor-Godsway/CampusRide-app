@@ -14,3 +14,4 @@ export * from "./push";
 export * from "./monitoring";
 export * from "./about";
 export * from "./appUpdate";
+export * from "./errors/AppErrorScreen";

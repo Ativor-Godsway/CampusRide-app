@@ -50,6 +50,12 @@ export function initMonitoring(app: "rider" | "driver"): boolean {
   return true;
 }
 
+/** Reports an error that a screen caught and recovered from (an error boundary); nothing when reporting is off. */
+export function reportError(error: unknown, where: string): void {
+  if (!enabled) return;
+  Sentry.captureException(error, { tags: { caught_by: where } });
+}
+
 /** The app's root component, wrapped so Sentry sees touches and render errors; unchanged when reporting is off. */
 export function withMonitoring<P extends Record<string, unknown>>(
   Root: ComponentType<P>,

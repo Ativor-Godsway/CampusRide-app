@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pressable, StyleSheet, Text } from "react-native";
+import { AppState, Pressable, StyleSheet, Text, type AppStateStatus } from "react-native";
 import { act, fireEvent, render, screen } from "@testing-library/react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { BottomSheet } from "../design/components/BottomSheet";
@@ -25,7 +25,7 @@ type MockStyle = import("react-native").StyleProp<import("react-native").ViewSty
 
 const mockCalls: string[] = [];
 /** The latest props the sheet got, to end its close animation by hand. */
-const mockSheet: { onClose?: () => void } = {};
+const mockSheet: { onClose?: () => void; onChange?: (index: number, position: number) => void } = {};
 
 jest.mock("@gorhom/bottom-sheet", () => {
   const React = jest.requireActual<typeof import("react")>("react");
@@ -35,6 +35,7 @@ jest.mock("@gorhom/bottom-sheet", () => {
     const [open] = React.useState((props.index ?? 0) >= 0);
     const { onChange } = props;
     mockSheet.onClose = props.onClose;
+    mockSheet.onChange = props.onChange;
     React.useEffect(() => {
       if (open) onChange?.(0, 0);
     }, [open, onChange]);
@@ -156,5 +157,60 @@ describe("BottomSheet (modal)", () => {
     expect(StyleSheet.flatten(screen.getByTestId("content").props.style)).toMatchObject({
       gap: 16,
     });
+  });
+});
+
+describe("BottomSheet (map sheet, not modal)", () => {
+  /** Lets the requestAnimationFrame the sheet waits for run. */
+  const frame = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 50)));
+
+  it("goes back to its place if it ever reports itself closed (seen on Android after login)", async () => {
+    await render(
+      inApp(
+        <BottomSheet index={0}>
+          <Text>Where to?</Text>
+        </BottomSheet>,
+      ),
+    );
+    await act(async () => mockSheet.onChange?.(-1, 844));
+    await frame();
+    expect(mockCalls).toContain("snapToIndex(0)");
+  });
+
+  it("goes back to its place when the app returns to the foreground", async () => {
+    const listeners: Array<(state: AppStateStatus) => void> = [];
+    const spy = jest.spyOn(AppState, "addEventListener").mockImplementation((_type, listener) => {
+      listeners.push(listener as (state: AppStateStatus) => void);
+      return { remove: jest.fn() } as unknown as ReturnType<typeof AppState.addEventListener>;
+    });
+    try {
+      await render(
+        inApp(
+          <BottomSheet index={0}>
+            <Text>Where to?</Text>
+          </BottomSheet>,
+        ),
+      );
+      mockCalls.length = 0;
+      await act(async () => listeners.forEach((l) => l("active")));
+      await frame();
+      expect(mockCalls).toEqual(["snapToIndex(0)"]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("a modal sheet is left alone: closing it is how it's dismissed", async () => {
+    await render(
+      inApp(
+        <BottomSheet modal visible>
+          <Text>Cancel ride?</Text>
+        </BottomSheet>,
+      ),
+    );
+    mockCalls.length = 0;
+    await act(async () => mockSheet.onChange?.(-1, 844));
+    await frame();
+    expect(mockCalls).not.toContain("snapToIndex(0)");
   });
 });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  AppState,
   StyleSheet,
   View,
   useWindowDimensions,
@@ -80,7 +81,7 @@ export function BottomSheet({
 }: BottomSheetProps) {
   const ref = useRef<GorhomSheet>(null);
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
+  const { height, width } = useWindowDimensions();
   const [footerHeight, setFooterHeight] = useState(0);
   const bottomPad = Math.max(insets.bottom, spacing[5]);
 
@@ -104,12 +105,45 @@ export function BottomSheet({
     else ref.current?.close();
   }, [modal, mounted, visible]);
 
+  // A map sheet (not modal) is never meant to close. On Android it was seen
+  // gone after login (the location prompt pauses the app, a 3-button nav bar
+  // changes the insets, a slow phone stalls the UI thread while Google Maps
+  // loads), leaving only the map. So it goes back to its place when the app
+  // returns to the foreground, when the window changes size, and if it ever
+  // reports itself closed. snapToIndex before the layout is measured does
+  // nothing, which is harmless here.
+  // Back where it last settled (a sheet the rider pulled up stays up).
+  const settledAt = useRef(index);
+  const restore = useCallback(() => {
+    if (!modal) requestAnimationFrame(() => ref.current?.snapToIndex(settledAt.current));
+  }, [modal]);
+
+  useEffect(() => {
+    if (modal) return;
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") restore();
+    });
+    return () => sub.remove();
+  }, [modal, restore]);
+
+  const firstSize = useRef(true);
+  useEffect(() => {
+    if (firstSize.current) {
+      firstSize.current = false;
+      return;
+    }
+    restore();
+  }, [height, width, restore]);
+
   const handleChange = useCallback(
     (at: number, position: number) => {
-      if (at >= 0) opened.current = true;
+      if (at >= 0) {
+        opened.current = true;
+        settledAt.current = at;
+      } else restore();
       onChange?.(at, position);
     },
-    [onChange],
+    [onChange, restore],
   );
 
   const handleClose = useCallback(() => {

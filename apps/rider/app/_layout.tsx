@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, useRouter } from "expo-router";
+import { Stack, useRouter, type ErrorBoundaryProps } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { RIDER_DEEP_LINK_POLICY, holdUpdateScreen } from "@rida/shared";
 import {
+  AppErrorScreen,
   AppUpdateGate,
   AuthProvider,
   TermsConfirmationGate,
@@ -81,6 +82,11 @@ function RootLayout() {
       </QueryClientProvider>
     </GestureHandlerRootView>
   );
+}
+
+/** A screen that throws shows "Something went wrong" with a retry instead of going blank. */
+export function ErrorBoundary(props: ErrorBoundaryProps) {
+  return <AppErrorScreen {...props} where="rider-root" />;
 }
 
 export default withMonitoring(RootLayout);

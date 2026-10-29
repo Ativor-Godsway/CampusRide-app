@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack, usePathname, useRouter } from "expo-router";
+import { Stack, usePathname, useRouter, type ErrorBoundaryProps } from "expo-router";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { DRIVER_DEEP_LINK_POLICY, holdUpdateScreen } from "@rida/shared";
 import {
+  AppErrorScreen,
   AppUpdateGate,
   AuthProvider,
   TermsConfirmationGate,
@@ -19,8 +20,8 @@ import {
 import { DriverPresenceProvider, useDriverPresence } from "../lib/presence";
 import { DriverLocationProvider } from "../lib/location";
 import { LocationDisclosureProvider } from "../components/LocationDisclosure";
-// Defines the background location task as the app starts (the OS may deliver
-// positions straight away).
+// The background location task is defined by the app's entry (index.ts),
+// before this layout loads; imported here too, harmlessly, for the provider.
 import "../lib/backgroundLocation";
 import { TripRuntime } from "../lib/tripRuntime";
 import { DriverPushNotifications } from "../lib/push";
@@ -107,6 +108,11 @@ function RootLayout() {
       </QueryClientProvider>
     </GestureHandlerRootView>
   );
+}
+
+/** A screen that throws shows "Something went wrong" with a retry instead of going blank. */
+export function ErrorBoundary(props: ErrorBoundaryProps) {
+  return <AppErrorScreen {...props} where="driver-root" />;
 }
 
 export default withMonitoring(RootLayout);
