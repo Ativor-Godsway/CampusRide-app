@@ -4,6 +4,7 @@ import {
   Pressable,
   StyleSheet,
   View,
+  useWindowDimensions,
   type ImageSourcePropType,
   type PressableProps,
 } from "react-native";
@@ -32,6 +33,10 @@ export interface RideOptionCardProps extends Omit<PressableProps, "style" | "chi
  * docs/design-system.md, "Card" › Ride option: car left, name + optional
  * chip, subtitle, price right. Selected: green-50 fill, 2px green-500
  * border, price in green-700. Unselected: no fill, no border.
+ *
+ * Small screens and large text (budget Android phones, 360 pt wide, often
+ * with a bigger default font): the car is drawn smaller, and the chip moves
+ * under the name rather than squeezing it ("Shared" was cut to "Sh…").
  */
 export function RideOptionCard({
   image,
@@ -47,6 +52,8 @@ export function RideOptionCard({
   ...rest
 }: RideOptionCardProps) {
   const { scale, pressIn, pressOut } = usePressScale();
+  const { width, fontScale } = useWindowDimensions();
+  const compact = width < 400 || fontScale > 1.15;
   return (
     <Pressable
       accessibilityRole="radio"
@@ -67,7 +74,7 @@ export function RideOptionCard({
       {...rest}
     >
       <Animated.View style={[styles.card, selected && styles.selected, { transform: [{ scale }] }]}>
-        <Image source={image} style={styles.image} resizeMode="contain" />
+        <Image source={image} style={compact ? styles.imageCompact : styles.image} resizeMode="contain" />
         <View style={styles.body}>
           <View style={styles.titleRow}>
             <Text variant="title3" numberOfLines={1} style={styles.title}>
@@ -124,13 +131,21 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
+  imageCompact: {
+    width: 64,
+    height: 48,
+  },
   titleRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
-    gap: spacing[2],
+    columnGap: spacing[2],
+    rowGap: 2,
   },
+  // Never shortened for the chip: the chip wraps under it instead.
   title: {
-    flexShrink: 1,
+    flexShrink: 0,
+    maxWidth: "100%",
   },
   // 20/800, the spec's ride-option price; tracking off (plate's is for plates).
   price: {

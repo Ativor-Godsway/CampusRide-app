@@ -146,8 +146,9 @@ export default function HomeTab() {
   return (
     <View style={styles.root} onLayout={(e) => setAreaHeight(e.nativeEvent.layout.height)}>
       <CampusMapView
-        // A new view when we learn where the rider is (or that we can't).
-        key={location.state === "here" ? "here" : "campus"}
+        // Moves to the rider once we know where they are; never a second map
+        // (remounting one froze slow Android phones for seconds).
+        followRegion
         initialRegion={region}
         zones={[]}
         userLocation={location.state === "here" ? location.coords : null}

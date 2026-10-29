@@ -39,8 +39,9 @@ export function onDriverLocation(listener: Listener): () => void {
   };
 }
 
-// Defined when this module loads (imported by app/_layout.tsx), as the OS can
-// deliver positions as soon as the app starts.
+// Defined when this module loads: first thing, from the app's entry (index.ts),
+// as the OS can deliver positions as soon as the app starts, even in the
+// background with no screen loaded.
 TaskManager.defineTask(DRIVER_LOCATION_TASK, async ({ data, error }) => {
   if (error || !data) return;
   const locations = (data as { locations?: Location.LocationObject[] }).locations ?? [];
@@ -101,8 +102,25 @@ export async function hasBackgroundLocationAccess(): Promise<boolean> {
   return fg.status === "granted" && bg.status === "granted";
 }
 
+/**
+ * Starts and stops run one after another: going offline while going online
+ * (or a permission re-check restarting updates) used to overlap a stop with a
+ * start, and the stop was rejected ("Call to function
+ * 'ExpoLocation.stopLocationUpdatesAsync' has been rejected").
+ */
+let queue: Promise<unknown> = Promise.resolve();
+function serially<T>(step: () => Promise<T>): Promise<T> {
+  const run = queue.then(step, step);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
 /** Starts background updates (and Android's online notification). Safe to call twice. */
-export async function startDriverLocationUpdates(): Promise<void> {
+export function startDriverLocationUpdates(): Promise<void> {
+  return serially(startNow);
+}
+
+async function startNow(): Promise<void> {
   if (await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK)) return;
   await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, {
     accuracy: Location.Accuracy.Balanced,
@@ -123,10 +141,22 @@ export async function startDriverLocationUpdates(): Promise<void> {
   });
 }
 
-/** Stops background updates and the notification. Safe to call when not running. */
-export async function stopDriverLocationUpdates(): Promise<void> {
-  const running = await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK).catch(
-    () => false,
-  );
-  if (running) await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
+/**
+ * Stops background updates and the notification. Safe to call when not
+ * running: only stops what is registered and started, and a stop the OS
+ * beat us to (the service already gone) is not an error.
+ */
+export function stopDriverLocationUpdates(): Promise<void> {
+  return serially(async () => {
+    const [registered, running] = await Promise.all([
+      TaskManager.isTaskRegisteredAsync(DRIVER_LOCATION_TASK).catch(() => false),
+      Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK).catch(() => false),
+    ]);
+    if (!registered || !running) return;
+    try {
+      await Location.stopLocationUpdatesAsync(DRIVER_LOCATION_TASK);
+    } catch {
+      // Already stopped between the check and the call: nothing left to stop.
+    }
+  });
 }

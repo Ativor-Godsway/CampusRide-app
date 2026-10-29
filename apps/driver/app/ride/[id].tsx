@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Redirect, useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import { Redirect, router as appRouter, useLocalSearchParams, useNavigation, useRouter, type ErrorBoundaryProps } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Alert, Pressable, StyleSheet, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -70,6 +70,7 @@ import {
   type FillSuggestion,
   type PassengerInCar,
   type RideWithZones,
+  AppErrorScreen,
 } from "@rida/mobile-shared";
 import { driverActiveRideQueryKey, useDriverActiveTrip } from "../../lib/activeTrip";
 import { useDriverLocation, useLocationDemand } from "../../lib/location";
@@ -133,6 +134,21 @@ function useNow(on: boolean): number {
  * the request follows in the background and is retried quietly; only a real
  * refusal puts it back, with the server's reason.
  */
+/**
+ * The trip screen hit a JavaScript error: say so, with a retry and a way
+ * Home, instead of a blank screen. The trip itself carries on (the server
+ * has it; Home's active-trip banner brings the driver back).
+ */
+export function ErrorBoundary(props: ErrorBoundaryProps) {
+  return (
+    <AppErrorScreen
+      {...props}
+      where="driver-trip"
+      secondary={{ label: "Go to Home", onPress: () => appRouter.replace("/") }}
+    />
+  );
+}
+
 export default function TripScreen() {
   const { id: rideId, preview: previewParam } = useLocalSearchParams<{ id: string; preview?: string }>();
   const router = useRouter();

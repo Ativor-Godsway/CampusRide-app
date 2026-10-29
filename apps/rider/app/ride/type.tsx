@@ -723,6 +723,9 @@ export default function RideTypeScreen() {
         <BottomSheet
           key="options"
           maxHeightRatio={0.85}
+          // On a short screen (or with large text) the options scroll rather
+          // than being squeezed under the 85% cap.
+          scrollable
           onChange={onSheetChange}
           contentStyle={styles.optionsSheet}
           // The one action, pinned at the bottom (above the keyboard while the

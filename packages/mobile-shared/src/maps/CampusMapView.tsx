@@ -77,6 +77,12 @@ export interface CampusMapViewProps {
   onZoneDragEnd?: (id: string, point: LatLng) => void;
   /** A soft circle on the map, e.g. how far a pin may be moved. */
   circle?: { center: LatLng; radiusMeters: number } | null;
+  /**
+   * Move the camera to `initialRegion` whenever it changes (once the map is
+   * ready), instead of the screen remounting the map with a `key`: a second
+   * Google Maps load blocks a slow Android phone's UI thread for seconds.
+   */
+  followRegion?: boolean;
 }
 
 /**
@@ -106,6 +112,7 @@ export function CampusMapView({
   draggableZoneId,
   onZoneDragEnd,
   circle,
+  followRegion = false,
 }: CampusMapViewProps) {
   const mapRef = useRef<MapView>(null);
   const reduceMotion = useReduceMotion();
@@ -131,6 +138,23 @@ export function CampusMapView({
     mapRef.current?.fitToCoordinates(points, { edgePadding: padding, animated });
     return true;
   }, []);
+
+  // followRegion: the region the camera is at (set when the map is ready, as
+  // the map opened there); a different one later is animated to.
+  const regionKey = `${initialRegion.latitude.toFixed(5)},${initialRegion.longitude.toFixed(5)},${initialRegion.latitudeDelta.toFixed(4)}`;
+  const shownRegion = useRef<string | null>(null);
+  const regionRef = useRef(initialRegion);
+  regionRef.current = initialRegion;
+  useEffect(() => {
+    if (!followRegion || !mapReady) return;
+    if (shownRegion.current === null) {
+      shownRegion.current = regionKey;
+      return;
+    }
+    if (shownRegion.current === regionKey) return;
+    shownRegion.current = regionKey;
+    mapRef.current?.animateToRegion(regionRef.current, reduceMotion ? 0 : 400);
+  }, [followRegion, mapReady, regionKey, reduceMotion]);
 
   useEffect(() => {
     if (!mapReady || !fitKey) return;

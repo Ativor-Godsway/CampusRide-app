@@ -3,14 +3,17 @@ import { StyleSheet, View } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from "react-native-maps";
 import { haversineDistanceMeters, type LatLng } from "@rida/shared";
 import {
+  Button,
   CarMarker,
   IconButton,
   Text,
   colors,
+  paddingWhenReady,
   radii,
   shadows,
   spacing,
   useMapHeading,
+  useMapLaunchGuard,
   withAlpha,
 } from "@rida/mobile-shared";
 
@@ -62,11 +65,46 @@ function splitAtNextStop(
  * stop list — and the route: the leg to the next stop bold green, later legs
  * faint. Re-frames itself when the stops change; "Show the whole route"
  * sits bottom-right, just above the card.
+ *
+ * Crash-safe on Android (maps/mapSafety.ts in @rida/mobile-shared): the
+ * padding is only passed once the map is ready, and if the app stopped while
+ * this map was still loading (a crash), the next launch shows the trip
+ * without it, with a "Show map" button.
  */
-export function TripMap({ driver, stops, path, insets, attribution }: TripMapProps) {
+export function TripMap(props: TripMapProps) {
+  const guard = useMapLaunchGuard("driver-trip");
+  // Until we know (a few milliseconds at launch), nothing: never the map first.
+  if (guard.showMap === null) return <View style={[StyleSheet.absoluteFill, styles.paused]} />;
+  if (!guard.showMap) {
+    return (
+      <View style={[StyleSheet.absoluteFill, styles.paused, { paddingTop: props.insets.top + spacing[4] }]}>
+        <View style={styles.pausedCard}>
+          <Text variant="body" color="secondary" style={styles.pausedText}>
+            The map was turned off after a problem. Your trip works without it.
+          </Text>
+          <Button label="Show map" variant="secondary" size="md" onPress={guard.showAnyway} />
+        </View>
+      </View>
+    );
+  }
+  return <LiveTripMap {...props} onMapLoaded={guard.onMapReady} />;
+}
+
+function LiveTripMap({
+  driver,
+  stops,
+  path,
+  insets,
+  attribution,
+  onMapLoaded,
+}: TripMapProps & { onMapLoaded: () => void }) {
   const mapRef = useRef<MapView>(null);
   const [ready, setReady] = useState(false);
   const { mapHeading, onCameraMove } = useMapHeading(mapRef);
+  const padding = useMemo(
+    () => ({ top: insets.top, bottom: insets.bottom, left: 0, right: 0 }),
+    [insets.top, insets.bottom],
+  );
 
   const fit = useCallback(() => {
     const points: LatLng[] = [
@@ -119,8 +157,12 @@ export function TripMap({ driver, stops, path, insets, attribution }: TripMapPro
         showsCompass={false}
         toolbarEnabled={false}
         userInterfaceStyle="light"
-        mapPadding={{ top: insets.top, bottom: insets.bottom, left: 0, right: 0 }}
-        onMapReady={() => setReady(true)}
+        // Never before the map is ready: that's a native crash on Android.
+        mapPadding={paddingWhenReady(ready, padding)}
+        onMapReady={() => {
+          setReady(true);
+          onMapLoaded();
+        }}
         onRegionChange={onCameraMove}
         onRegionChangeComplete={onCameraMove}
       >
@@ -216,6 +258,16 @@ export function StopMarker({
 }
 
 const styles = StyleSheet.create({
+  paused: { backgroundColor: colors.surface2, alignItems: "center", paddingHorizontal: spacing.gutter },
+  pausedCard: {
+    width: "100%",
+    gap: spacing[3],
+    padding: spacing[4],
+    borderRadius: radii.lg,
+    backgroundColor: colors.surface,
+    ...shadows.float,
+  },
+  pausedText: { textAlign: "center" },
   attribution: {
     position: "absolute",
     left: 6,
