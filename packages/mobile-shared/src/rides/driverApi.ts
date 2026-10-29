@@ -492,7 +492,7 @@ export interface ZoneRoute {
   polyline: string;
   distanceMeters: number;
   durationSeconds: number;
-  /** "osrm" | "ors" — decides the attribution the map shows. */
+  /** "campus" (or "osrm" | "ors" from before 2026-10-29) — decides the attribution the map shows. */
   provider?: string;
 }
 

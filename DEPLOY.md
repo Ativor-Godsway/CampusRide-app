@@ -223,11 +223,10 @@ postgresql://<user>:<password>@<direct-host>.neon.tech/<dbname>?sslmode=require
 `MOOLRE_VAS_KEY`, `MOOLRE_SMS_SENDER_ID`,
 `MNOTIFY_ENABLED`, `MNOTIFY_API_KEY`, `MNOTIFY_SENDER_ID`
 
-Routes between exact pins (defaults are right for now; see
-[docs/routing.md](docs/routing.md#routes-between-exact-pins-per-trip)):
-`OSRM_BASE_URL` (a self-hosted OSRM, once we outgrow the public one),
-`ROUTING_DISABLED`, `ROUTING_TIMEOUT_MS`, `ROUTING_MIN_INTERVAL_MS`,
-`ROUTING_DAILY_WARN_AT`, `RATE_LIMIT_ROUTE_LEGS`
+Routes: worked out on the server by the campus route engine
+([docs/routing.md](docs/routing.md)); nothing to configure but
+`RATE_LIMIT_ROUTE_LEGS`. The old `OSRM_BASE_URL` and `ROUTING_*` variables
+are no longer read: delete them from Render if they were ever set.
 
 Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each

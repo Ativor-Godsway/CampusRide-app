@@ -31,7 +31,7 @@ interface Fetched {
  * The road from a moving point (the driver) through some stops, for a map.
  *
  * Asked of the server once for each set of stops (POST /routes/legs; the
- * server caches and rate-limits OSRM), then trimmed to `from` as it moves.
+ * server's campus route engine), then trimmed to `from` as it moves.
  * A new road is asked for only when the stops change, or when `from` has
  * left the drawn road — and then not more than every 30 s
  * (shouldReroute) — so a trip costs a handful of requests, not one per GPS

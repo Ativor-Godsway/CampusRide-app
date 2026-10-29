@@ -1,0 +1,41 @@
+{
+  "description": "Which barriers (OSM nodes) cars may pass, for the campus road graph (scripts/map/campus-roads.mjs). A gate listed here wins; any other barrier follows its OpenStreetMap tags: closed when it is a bollard, block, chain or the like, or tagged access/motor_vehicle=no or private; open otherwise (an untagged gate, or access=yes, permissive or permit — the UG E-card lift gates). Whatever is decided here, the graph never leaves assets/map/service-area.geojson, so no route reaches the road outside any gate. After an edit, run: node scripts/map/campus-roads.mjs",
+  "gates": [
+    {
+      "osmNode": 5813545126,
+      "open": false,
+      "name": "Main Gate, south lane (Dr. J.B. Danquah Avenue)",
+      "why": "Closed to cars (owner, 2026-10-29)."
+    },
+    {
+      "osmNode": 5813545127,
+      "open": false,
+      "name": "Main Gate, north lane (Dr. J.B. Danquah Avenue)",
+      "why": "Closed to cars (owner, 2026-10-29)."
+    },
+    {
+      "osmNode": 10649363065,
+      "open": false,
+      "name": "Stadium Gate, lift gate (Jubilee Drive)",
+      "why": "A gate to the outside: cars stop at Stadium Gate, inside it."
+    },
+    {
+      "osmNode": 1269621500,
+      "open": false,
+      "name": "Stadium Gate, swing gate (Jubilee Drive)",
+      "why": "A gate to the outside: cars stop at Stadium Gate, inside it."
+    },
+    {
+      "osmNode": 5020636345,
+      "open": true,
+      "name": "TF gate, east lane",
+      "why": "Open so cars reach TF Hall (James Topp Nelson Yankah Hall) (owner, 2026-10-29). The road on from TF Hall to the main road is outside the service area, so no route continues there."
+    },
+    {
+      "osmNode": 5713101589,
+      "open": true,
+      "name": "TF gate, west lane",
+      "why": "Open so cars reach TF Hall (owner, 2026-10-29); see the east lane."
+    }
+  ]
+}

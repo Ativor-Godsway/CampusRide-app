@@ -1,93 +1,115 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { PointRoute, ZoneRoute } from "@prisma/client";
+import { decodePolyline, isInServiceArea } from "@rida/shared";
 import { prisma } from "../db/prisma";
-import { parseOrs, parseOsrm, precomputeZoneRoutes, RoutingHttpError } from "./zoneRoutes";
+import { campusZoneRoute, precomputeZoneRoutes } from "./zoneRoutes";
+import { clearPointRoutes } from "./clearPointRoutes";
 
-afterEach(async () => {
-  await prisma.zoneRoute.deleteMany({ where: { provider: "test" } });
+/**
+ * Runs against the test database's zones and puts ZoneRoute and PointRoute
+ * back afterwards (test files run one at a time: vitest.config.ts).
+ */
+let zoneRoutes: ZoneRoute[] = [];
+let pointRoutes: PointRoute[] = [];
+
+beforeEach(async () => {
+  zoneRoutes = await prisma.zoneRoute.findMany();
+  pointRoutes = await prisma.pointRoute.findMany();
 });
 
-describe("provider responses", () => {
-  it("reads OSRM", () => {
-    expect(parseOsrm({ code: "Ok", routes: [{ geometry: "abc", distance: 812.4, duration: 95.6 }] })).toEqual({
-      polyline: "abc",
-      distanceMeters: 812,
-      durationSeconds: 96,
-    });
-    expect(parseOsrm({ code: "NoRoute", routes: [] })).toBeNull();
-  });
+afterEach(async () => {
+  await prisma.zoneRoute.deleteMany({});
+  if (zoneRoutes.length) await prisma.zoneRoute.createMany({ data: zoneRoutes });
+  await prisma.pointRoute.deleteMany({});
+  if (pointRoutes.length) await prisma.pointRoute.createMany({ data: pointRoutes });
+});
 
-  it("reads openrouteservice", () => {
-    expect(parseOrs({ routes: [{ geometry: "xyz", summary: { distance: 1500, duration: 240 } }] })).toEqual({
-      polyline: "xyz",
-      distanceMeters: 1500,
-      durationSeconds: 240,
-    });
-    expect(parseOrs({ error: "nope" })).toBeNull();
+describe("campusZoneRoute", () => {
+  it("is a road on campus between two zone centres", () => {
+    const balme = { latitude: 5.652012, longitude: -0.187048 };
+    const akuafo = { latitude: 5.649357, longitude: -0.186087 };
+    const route = campusZoneRoute(balme, akuafo)!;
+    expect(route.distanceMeters).toBeGreaterThan(200);
+    expect(decodePolyline(route.polyline).every((p) => isInServiceArea(p))).toBe(true);
   });
 });
 
 describe("precomputeZoneRoutes", () => {
-  it("stores a route for every ordered pair, skips stored ones, retries and reports failures", async () => {
-    const zones = await prisma.zone.findMany({ orderBy: { name: "asc" } });
-    const n = zones.length;
-    expect(n).toBeGreaterThanOrEqual(3);
-    const calls: string[] = [];
-    let flaky = 0;
+  it("dry run: works out every ordered pair and writes nothing", async () => {
+    const n = await prisma.zone.count({ where: { retiredAt: null } });
+    const before = await prisma.zoneRoute.findMany({ orderBy: { id: "asc" } });
 
-    const report = await precomputeZoneRoutes(prisma, {
-      provider: "test" as never,
-      onlyMissing: false,
-      minIntervalMs: 0,
-      sleep: async () => {},
-      fetchOne: async (from, to) => {
-        calls.push(`${from.latitude}>${to.latitude}`);
-        // The first pair fails twice with a 503, then works.
-        if (calls.length <= 2 && flaky++ < 2) throw new RoutingHttpError(503, "busy");
-        // One pair has no route at all (a 4xx is not retried).
-        const same = (a: { latitude: number; longitude: number }, b: { latitude: number; longitude: number }) =>
-          a.latitude === b.latitude && a.longitude === b.longitude;
-        if (same(from, zones[n - 2]!) && same(to, zones[n - 1]!)) throw new RoutingHttpError(400, "no road");
-        return { polyline: "_p~iF~ps|U", distanceMeters: 100, durationSeconds: 30 };
-      },
-    });
+    const report = await precomputeZoneRoutes(prisma, { apply: false });
 
     expect(report.pairs).toBe(n * (n - 1));
-    expect(report.saved).toBe(n * (n - 1) - 1);
-    expect(report.failed).toHaveLength(1);
-    expect(report.failed[0]!.error).toMatch(/HTTP 400/);
-    expect(await prisma.zoneRoute.count({ where: { provider: "test" } })).toBe(n * (n - 1) - 1);
-
-    const again = await precomputeZoneRoutes(prisma, {
-      provider: "test" as never,
-      onlyMissing: true,
-      minIntervalMs: 0,
-      sleep: async () => {},
-      fetchOne: async () => ({ polyline: "x", distanceMeters: 1, durationSeconds: 1 }),
-    });
-    expect(again).toMatchObject({ saved: 1, skipped: n * (n - 1) - 1, failed: [] });
+    expect(report.routed + report.failed.length).toBe(report.pairs);
+    expect(report.applied).toBe(false);
+    expect(await prisma.zoneRoute.findMany({ orderBy: { id: "asc" } })).toEqual(before);
   });
 
-  it("never fetches a route to or from a retired zone", async () => {
+  it("--apply: a campus route for each pair, and an old route removed where there is none", async () => {
+    const zones = await prisma.zone.findMany({ where: { retiredAt: null }, orderBy: { name: "asc" } });
+    const n = zones.length;
+    expect(n).toBeGreaterThanOrEqual(3);
+    // An old OSRM route for the pair the campus roads "can't" join below.
+    const [a, b] = [zones[n - 2]!, zones[n - 1]!];
+    await prisma.zoneRoute.upsert({
+      where: { fromZoneId_toZoneId: { fromZoneId: a.id, toZoneId: b.id } },
+      update: { polyline: "x", distanceMeters: 1, durationSeconds: 1, provider: "osrm" },
+      create: { fromZoneId: a.id, toZoneId: b.id, polyline: "x", distanceMeters: 1, durationSeconds: 1, provider: "osrm" },
+    });
+
+    const report = await precomputeZoneRoutes(prisma, {
+      apply: true,
+      routeOne: (from, to) =>
+        from.latitude === a.latitude && to.latitude === b.latitude && from.longitude === a.longitude && to.longitude === b.longitude
+          ? null
+          : { polyline: "_p~iF~ps|U", distanceMeters: 100, durationSeconds: 30 },
+    });
+
+    expect(report).toMatchObject({ pairs: n * (n - 1), routed: n * (n - 1) - 1, applied: true });
+    expect(report.before.osrm).toBeGreaterThanOrEqual(1);
+    expect(report.failed).toEqual([{ from: a.name, to: b.name }]);
+    expect(await prisma.zoneRoute.count({ where: { provider: "campus" } })).toBe(n * (n - 1) - 1);
+    expect(await prisma.zoneRoute.count({ where: { fromZoneId: a.id, toZoneId: b.id } })).toBe(0);
+  });
+
+  it("never routes to or from a retired zone", async () => {
     const retired = await prisma.zone.create({
       data: { name: `Retired ${Date.now()}`, quadrant: "SOUTH", latitude: 5.6505, longitude: -0.19, retiredAt: new Date() },
     });
     try {
-      const n = await prisma.zone.count({ where: { retiredAt: null } });
-      const touched: string[] = [];
-      const report = await precomputeZoneRoutes(prisma, {
-        provider: "test" as never,
-        onlyMissing: false,
-        minIntervalMs: 0,
-        fetchOne: async (from, to) => {
-          touched.push((from as { id?: string }).id ?? "", (to as { id?: string }).id ?? "");
-          return { polyline: "x", distanceMeters: 1, durationSeconds: 1 };
+      const touched: number[] = [];
+      await precomputeZoneRoutes(prisma, {
+        apply: false,
+        routeOne: (from, to) => {
+          touched.push(from.latitude, to.latitude);
+          return null;
         },
       });
-      expect(report.pairs).toBe(n * (n - 1));
-      expect(touched).not.toContain(retired.id);
+      expect(touched).not.toContain(5.6505);
     } finally {
-      await prisma.zoneRoute.deleteMany({ where: { provider: "test" } });
       await prisma.zone.delete({ where: { id: retired.id } });
     }
+  });
+});
+
+describe("clearPointRoutes", () => {
+  it("counts the stored OSRM routes in a dry run, and deletes them all with --apply", async () => {
+    await prisma.pointRoute.createMany({
+      data: [
+        { key: `test-${Date.now()}-1`, polyline: "x", distanceMeters: 1, durationSeconds: 1, provider: "osrm" },
+        { key: `test-${Date.now()}-2`, polyline: "x", distanceMeters: 1, durationSeconds: 1, provider: "osrm" },
+      ],
+    });
+    const rows = await prisma.pointRoute.count();
+
+    const dry = await clearPointRoutes(prisma, false);
+    expect(dry).toMatchObject({ rows, deleted: 0 });
+    expect(dry.byProvider.osrm).toBeGreaterThanOrEqual(2);
+    expect(await prisma.pointRoute.count()).toBe(rows);
+
+    expect(await clearPointRoutes(prisma, true)).toMatchObject({ rows, deleted: rows });
+    expect(await prisma.pointRoute.count()).toBe(0);
   });
 });

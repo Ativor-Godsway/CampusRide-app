@@ -8,7 +8,7 @@
  * records it with the confirmation, so it's known which wording someone
  * agreed to. Change it whenever either page changes.
  */
-export const TERMS_VERSION = "2026-10-21";
+export const TERMS_VERSION = "2026-10-29";
 
 export const MINIMUM_AGE = 18;
 

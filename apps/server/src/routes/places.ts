@@ -13,7 +13,7 @@ import {
 } from "@rida/shared";
 import { requireAuth } from "../middleware/auth";
 import { getActivePlaces } from "../services/places/placeCache";
-import { MAX_ROUTE_POINTS, routeThroughPoints } from "../services/routing/pointRoutes";
+import { CAMPUS_PROVIDER, MAX_ROUTE_POINTS, routeThroughPoints } from "../services/routing/campusRoutes";
 import { RULES } from "../rateLimit/rules";
 import { MAX, integer, latitude, longitude, noInput, object, text } from "../http/schemas";
 
@@ -113,7 +113,7 @@ export function registerPlaceRoutes(app: FastifyInstance, prisma: PrismaClient):
           ["points"],
         ),
       },
-      // Per account: each call may reach OSRM.
+      // Per account (a route is cheap now, but an endless loop of them isn't).
       config: { limits: { user: [RULES.routeLegs] } },
     },
     async (request, reply) => {
@@ -124,9 +124,12 @@ export function registerPlaceRoutes(app: FastifyInstance, prisma: PrismaClient):
       if (!points.slice(1).every((p) => isInServiceArea(p))) {
         return reply.code(422).send({ error: outsideServiceAreaMessage("pickup"), code: "OUTSIDE_SERVICE_AREA" });
       }
-      const route = await routeThroughPoints(prisma, points);
-      // The fallback draws the stored zone roads, which also came from OSRM.
-      return reply.code(200).send({ ...route, attribution: routeAttribution("osrm") });
+      // On campus roads only (services/routing/campusRoutes.ts). No road near
+      // a point, or no way between two: a clear refusal, never a route off
+      // campus; the apps then draw a dashed straight line.
+      const route = routeThroughPoints(points);
+      if ("code" in route) return reply.code(422).send({ error: route.message, code: route.code });
+      return reply.code(200).send({ ...route, attribution: routeAttribution(CAMPUS_PROVIDER) });
     },
   );
 }

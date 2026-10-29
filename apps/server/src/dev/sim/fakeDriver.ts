@@ -6,7 +6,7 @@
  * It behaves exactly like the driver app, through the real HTTP routes and
  * the real socket, so the rider app sees what it would with a real driver:
  * it goes online at a campus place, accepts YOUR newest ride request, drives
- * the road route (POST /routes/legs — OSRM, or the zone roads) to your
+ * the road route (POST /routes/legs — the campus route engine) to your
  * pickup sending its position about once a second, arrives, waits, picks
  * you up, drives to your drop-off and completes the trip. The database is
  * only read (to find your request) and used to create the fake driver.
@@ -181,7 +181,8 @@ class FakeDriver {
     const road: PathPoint[] =
       route.status === 200 && typeof route.body?.polyline === "string" ? decodePolyline(route.body.polyline) : [];
     const path = road.length >= 2 ? [this.position, ...road.slice(1, -1), to] : [this.position, to];
-    const source = route.body?.source === "osrm" ? "OSRM road" : road.length >= 2 ? "zone roads" : "straight line";
+    // "osrm" is the wire value for "a real road" (the campus route engine).
+    const source = route.body?.source === "osrm" ? "campus road" : road.length >= 2 ? "zone roads" : "straight line";
     const total = pathLengthMeters(path);
     log("🛣", `Driving ${label} — ${shortDistance(total)} by ${source}`);
 

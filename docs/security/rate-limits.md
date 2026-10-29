@@ -77,7 +77,7 @@ site's tighter limits can't be dodged by logging in through the rider app.
 | Notification sign-ups (push tokens) | 10 / 15 min; `PUT /me/push-token` counts against this one only, not the default above, so an app stuck re-sending its token can't use up the account's allowance | `RATE_LIMIT_PUSH_TOKEN_15M` |
 | Photo upload tickets (each allows a Cloudinary write) | 10 / hour | `RATE_LIMIT_UPLOAD_HOUR` |
 | Account deletion attempts | 5 / hour | `RATE_LIMIT_ACCOUNT_DELETE_HOUR` |
-| Route drawings (each may call OSRM) | 120 / 15 min | `RATE_LIMIT_ROUTE_LEGS` |
+| Route drawings (each a campus route on our server) | 120 / 15 min | `RATE_LIMIT_ROUTE_LEGS` |
 | Payment attempts (each calls Moolre) | 15 / 15 min | `RATE_LIMIT_PAYMENT_INIT` |
 | Live-ride subscriptions (socket) | 60 / minute | `RATE_LIMIT_SOCKET_SUBSCRIBE_MINUTE` |
 | Driver GPS (socket) | 1 per 2 s per driver; extras dropped silently, never a disconnect | `RATE_LIMIT_DRIVER_LOCATION_SECONDS` |

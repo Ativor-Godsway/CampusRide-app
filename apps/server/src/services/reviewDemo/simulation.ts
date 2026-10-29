@@ -10,7 +10,7 @@ import {
 import { logger } from "../../lib/logger";
 import { emitRideEvent } from "../../realtime/rideSocket";
 import { checkDriverArriving } from "../push/notify";
-import { routeThroughPoints } from "../routing/pointRoutes";
+import { estimateRoute } from "../routing/campusRoutes";
 import { getZoneMap } from "../zones/zoneCache";
 import { applyPassengerTransition, applyRideTransition } from "../ride/rideService";
 import { createRide } from "../ride/createRide";
@@ -142,8 +142,8 @@ async function drive(
   to: PathPoint,
   steps: number,
 ): Promise<boolean> {
-  const route = await routeThroughPoints(prisma, [from, to]);
-  const path = decodePolyline(route.polyline);
+  const route = estimateRoute([from, to]);
+  const path = route ? decodePolyline(route.polyline) : [];
   const line = path.length >= 2 ? path : [from, to];
   const length = pathLengthMeters(line);
   for (let i = 1; i <= steps; i += 1) {

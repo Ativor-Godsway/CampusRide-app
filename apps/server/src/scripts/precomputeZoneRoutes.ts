@@ -1,66 +1,42 @@
 /**
- * Precompute road routes between every pair of campus zones (~210) and store
- * them in ZoneRoute, so the apps draw real roads instead of straight lines.
- * Run once per database; re-run only if zones change. Provider choice and
- * terms: docs/routing.md.
+ * Zone-to-zone road routes (ZoneRoute) from the campus route engine: one for
+ * every ordered pair of zones in service (~182). A dry run unless --apply.
+ * Re-run after the zones or the campus road graph change (docs/routing.md).
  *
- *   # Dev database (reads apps/server/.env.development):
- *   npm run routes:precompute --workspace apps/server -- --provider osrm
+ *   # What would be written (dry run; any database):
+ *   npm run routes:precompute --workspace apps/server
  *
- *   # Production — deliberately, once, with the URL you export yourself:
+ *   # Dev database:
+ *   npm run routes:precompute:dev --workspace apps/server -- --apply
+ *
+ *   # Production — deliberately, with the URL you export yourself:
  *   ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" \
- *     npm run routes:precompute --workspace apps/server -- --provider osrm
+ *     npm run routes:precompute --workspace apps/server -- --apply
  *
- * Options:
- *   --provider osrm|ors   which routing service (ors needs ORS_API_KEY)
- *   --only-missing        keep routes already stored, fetch the rest
- *   --limit N             fetch at most N routes (a trial run)
- *
- * It only ever WRITES ZoneRoute rows. The production database must already
- * have the 20261001120000_trip_stops_and_zone_routes migration.
+ * --apply writes every route in one transaction (provider "campus") and
+ * removes the stored route of any pair the campus roads can't join. It
+ * touches only ZoneRoute. No network: the routes are worked out here.
  */
 import "../config";
 import { prisma } from "../db/prisma";
 import { dbHostFromUrl } from "../db/dbHostGuard";
-import { fetchRoute, precomputeZoneRoutes, PROVIDER_DEFAULTS, type RoutingProvider } from "./zoneRoutes";
-
-function arg(name: string): string | undefined {
-  const i = process.argv.indexOf(name);
-  return i === -1 ? undefined : process.argv[i + 1];
-}
+import { precomputeZoneRoutes } from "./zoneRoutes";
 
 async function main() {
-  const provider = (arg("--provider") ?? "osrm") as RoutingProvider;
-  if (provider !== "osrm" && provider !== "ors") throw new Error(`--provider must be osrm or ors, got "${provider}"`);
-  const limitRaw = arg("--limit");
-  const limit = limitRaw === undefined ? undefined : Number(limitRaw);
-  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new Error("--limit needs a whole number");
-  const onlyMissing = process.argv.includes("--only-missing");
-  const apiKey = process.env.ORS_API_KEY?.trim();
-  const baseUrl = process.env.ROUTING_BASE_URL?.trim() || undefined;
-
+  const apply = process.argv.includes("--apply");
+  const verbose = process.argv.includes("--verbose");
   const host = dbHostFromUrl(process.env.DATABASE_URL ?? "") ?? "(unknown)";
-  console.log(`\nPrecomputing zone routes with ${provider}`);
-  console.log(`  database: ${host}`);
-  console.log(`  service:  ${baseUrl ?? PROVIDER_DEFAULTS[provider].baseUrl}`);
-  console.log(`  ${onlyMissing ? "only missing routes" : "all routes (existing ones are refreshed)"}${limit ? `, at most ${limit}` : ""}\n`);
+  console.log(`\nZone routes on campus roads  (database: ${host})`);
+  console.log(apply ? "  APPLYING\n" : "  dry run — pass --apply to write them\n");
 
-  const report = await precomputeZoneRoutes(prisma, {
-    provider,
-    onlyMissing,
-    limit,
-    minIntervalMs: PROVIDER_DEFAULTS[provider].minIntervalMs,
-    fetchOne: (from, to) => fetchRoute(provider, from, to, { baseUrl, apiKey }),
-    log: (line) => console.log(line),
-  });
+  const report = await precomputeZoneRoutes(prisma, { apply, log: verbose ? (line) => console.log(line) : undefined });
 
-  console.log(
-    `\nDone: ${report.saved} saved, ${report.skipped} skipped, ${report.failed.length} failed (of ${report.pairs} pairs).`,
-  );
-  if (report.failed.length > 0) {
-    console.log("Re-run with --only-missing to retry the failed ones. Until then those trips draw a straight line.");
-    process.exitCode = 1;
-  }
+  const before = Object.entries(report.before).map(([p, n]) => `${n} from ${p}`).join(", ") || "none";
+  console.log(`Stored now: ${before}.`);
+  console.log(`${report.routed} of ${report.pairs} zone pairs have a campus route${apply ? " — written" : " (would be written)"}.`);
+  for (const f of report.failed) console.log(`  no campus route: ${f.from} → ${f.to}${apply ? " (old route removed)" : ""}`);
+  if (!verbose) console.log("(--verbose lists every route.)");
+  if (apply) console.log("\nDone. The server uses them within a minute (its zone cache).");
 }
 
 main()

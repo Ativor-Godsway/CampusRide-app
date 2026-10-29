@@ -169,12 +169,12 @@ applies the owner's decisions of 2026-10-12, in one transaction:
   rename is now baked into `seed.ts`). USSD lists it under Halls.
 
 It is idempotent: a second run reports 0 m for every zone and changes
-nothing. Re-run `routes:precompute` afterwards (without `--only-missing`:
-every route between moved zones needs refreshing).
+nothing. Re-run `routes:precompute -- --apply` afterwards: every route
+between moved zones needs refreshing.
 
 ## Production order
 
-`migrate → places:seed → zones:realign → places:campus → routes:precompute → zones:check`,
+`migrate → places:seed → zones:realign → places:campus → routes:precompute → routes:clear-point-cache → zones:check`,
 each safe to repeat. Run the migrations **before** deploying a server that
 needs them (the Driver position columns: the server reads them). From the repo root, with `PROD_URL` exported in this
 shell only (check its host first: `node -e 'console.log(new URL(process.env.PROD_URL).hostname)'`
@@ -199,10 +199,15 @@ ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zo
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run places:campus --workspace apps/server
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run places:campus --workspace apps/server -- --apply
 
-# 4. Zone routes (~4 minutes; no dry run — it only writes ZoneRoute rows).
-#    Not until campus-only routing (stage 2): today it asks OSRM's public
-#    server, whose roads leave campus.
-ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:precompute --workspace apps/server -- --provider osrm
+# 4. Zone routes from the campus route engine (seconds; dry run first). Only
+#    after the server with the engine is deployed. Writes only ZoneRoute.
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:precompute --workspace apps/server
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:precompute --workspace apps/server -- --apply
+
+# 4b. Empty PointRoute: routes kept from the public OSRM server, unused since
+#     the campus engine (dry run first; deletes only PointRoute rows)
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:clear-point-cache --workspace apps/server
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:clear-point-cache --workspace apps/server -- --apply
 
 # 5. Zone adjacency: every zone in service next to every other (read-only check;
 #    then, only if it reports missing rows, a dry run and --apply)

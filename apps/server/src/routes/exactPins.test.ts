@@ -10,12 +10,12 @@ import { randomBytes } from "node:crypto";
  *   on the driver's request list, the broadcast and /track, the named place
  *   (not the pin) in the add-rider preview, and never another passenger;
  * - place search, the admin Places screen's API (audit-logged), and road
- *   routes between pins (OSRM, cached, with a fallback).
+ *   routes between pins (the campus route engine, never off campus).
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { Place, Zone } from "@prisma/client";
-import { PINNED_LOCATION_LABEL, decodePolyline, nearestZone } from "@rida/shared";
+import { PINNED_LOCATION_LABEL, decodePolyline, isInServiceArea, nearestZone } from "@rida/shared";
 import { prisma } from "../db/prisma";
 import { registerRideRoutes } from "./rides";
 import { registerDriverRoutes } from "./driver";
@@ -26,7 +26,6 @@ import { signAccessToken } from "../services/auth/tokens";
 import { cleanupDriver, createTestDriver, createTestUser } from "../services/ride/testFixtures";
 import * as rideSocket from "../realtime/rideSocket";
 import { broadcastRide } from "../services/ride/dispatch";
-import { setRouteFetcherForTests } from "../services/routing/pointRoutes";
 
 vi.mock("../services/sms/sendSms", () => ({ sendSms: vi.fn().mockResolvedValue({ success: true }) }));
 
@@ -50,7 +49,6 @@ beforeAll(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  setRouteFetcherForTests(null);
   const rides = await prisma.ride.findMany({
     where: { OR: [{ riderId: { in: userIds } }, { driverId: { in: driverIds } }] },
     select: { id: true },
@@ -68,7 +66,6 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
-  await prisma.pointRoute.deleteMany({ where: { key: { contains: "5.6" } } });
   await app.close();
 });
 
@@ -444,59 +441,26 @@ describe("routes between pins", () => {
   const post = (token: string, points: unknown) =>
     app.inject({ method: "POST", url: "/routes/legs", headers: { authorization: `Bearer ${token}` }, payload: { points } });
 
-  it("asks OSRM once through all the points, then serves the stored route", async () => {
+  it("routes on campus roads through all the points, and every point of it is on campus", async () => {
     const { token } = await rider();
-    const calls: number[] = [];
-    setRouteFetcherForTests(async (points) => {
-      calls.push(points.length);
-      return {
-        polyline: "_p~iF~ps|U_ulLnnqC_mqNvxq`@",
-        distanceMeters: 2500,
-        durationSeconds: 400,
-        legs: [
-          { distanceMeters: 1000, durationSeconds: 150 },
-          { distanceMeters: 1500, durationSeconds: 250 },
-        ],
-      };
-    });
-    const points = [BALME, VOLTA, { latitude: 5.6377, longitude: -0.18 }];
-    const first = await post(token, points);
-    expect(first.statusCode).toBe(200);
-    expect(first.json()).toMatchObject({ source: "osrm", durationSeconds: 400, legs: [{ durationSeconds: 150 }, { durationSeconds: 250 }] });
-    expect(first.json().attribution).toContain("OSRM");
-
-    // Same points (within ~11 m): from memory, then from the table after a restart.
-    const nudged = points.map((p) => ({ latitude: p.latitude + 0.00001, longitude: p.longitude }));
-    expect((await post(token, nudged)).json().source).toBe("osrm");
-    setRouteFetcherForTests(async () => {
-      throw new Error("must not be called");
-    });
-    expect((await post(token, points)).json()).toMatchObject({ source: "osrm", durationSeconds: 400 });
-    expect(calls).toEqual([3]);
-  });
-
-  it("falls back to the stored zone roads, ending at the pins, when OSRM fails — and doesn't keep the fallback", async () => {
-    const { token } = await rider();
-    setRouteFetcherForTests(async () => {
-      throw new Error("timeout");
-    });
-    const points = [NIGHT_MARKET, UGMC];
+    const points = [BALME, VOLTA, NIGHT_MARKET];
     const res = await post(token, points);
     expect(res.statusCode).toBe(200);
     const body = res.json();
-    expect(body.source).toBe("zones");
-    expect(body.legs).toHaveLength(1);
+    // "osrm" is the value apps already installed draw as a real road.
+    expect(body).toMatchObject({ source: "osrm", attribution: "© OpenStreetMap contributors" });
+    expect(body.legs).toHaveLength(2);
+    expect(body.distanceMeters).toBe(body.legs[0].distanceMeters + body.legs[1].distanceMeters);
     const line = decodePolyline(body.polyline);
-    expect(line[0]!.latitude).toBeCloseTo(NIGHT_MARKET.latitude, 5);
-    expect(line.at(-1)!.longitude).toBeCloseTo(UGMC.longitude, 4); // polylines keep 5 decimals
+    expect(line.length).toBeGreaterThan(2);
+    expect(line.every((p) => isInServiceArea(p))).toBe(true);
+  });
 
-    let called = false;
-    setRouteFetcherForTests(async () => {
-      called = true;
-      return null;
-    });
-    await post(token, points);
-    expect(called).toBe(true); // the fallback wasn't cached: OSRM is tried again
+  it("refuses, in plain words, a point no campus road is near — never a route off campus", async () => {
+    const { token } = await rider();
+    const res = await post(token, [{ latitude: 5.69, longitude: -0.18 }, BALME]);
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ code: "NO_ROAD", error: expect.stringMatching(/too far from a campus road/) });
   });
 
   it("refuses too few or too many points, and stops outside the area", async () => {
@@ -504,8 +468,10 @@ describe("routes between pins", () => {
     expect((await post(token, [BALME])).statusCode).toBe(400);
     expect((await post(token, Array(11).fill(BALME))).statusCode).toBe(400);
     expect((await post(token, [BALME, KUMASI])).statusCode).toBe(422);
-    // The first point may be a driver just outside the area.
-    setRouteFetcherForTests(async () => null);
-    expect((await post(token, [{ latitude: 5.68, longitude: -0.18 }, BALME])).statusCode).toBe(200);
+    // The first point may be a driver just outside the area (here on J.J.
+    // Rawlings Avenue at the main gate): the route starts on the nearest campus road.
+    const fromAvenue = await post(token, [{ latitude: 5.65035, longitude: -0.17971 }, BALME]);
+    expect(fromAvenue.statusCode).toBe(200);
+    expect(decodePolyline(fromAvenue.json().polyline).every((p) => isInServiceArea(p))).toBe(true);
   });
 });

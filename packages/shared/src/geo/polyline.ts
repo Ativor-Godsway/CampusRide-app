@@ -6,7 +6,7 @@ export interface PathPoint {
 }
 
 /**
- * Decodes a Google encoded polyline (the format OSRM and openrouteservice
+ * Decodes a Google encoded polyline (the format the campus route engine and OSRM
  * return; precision 5 = 1e-5 degrees). Returns [] for an empty or malformed
  * string rather than throwing: a missing route falls back to a straight line.
  */

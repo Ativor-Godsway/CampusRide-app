@@ -123,9 +123,8 @@
   <h3>Maps and routes (both apps)</h3>
   <p>
     Maps are shown by Google Maps (Android) or Apple Maps (iPhone), which load map images to your
-    phone under their own privacy policies. To draw road routes, our server sends trip points,
-    rounded to about 11 metres and without any name or account, to the OSRM routing service
-    (FOSSGIS e.V., Germany).
+    phone under their own privacy policies. Road routes are worked out on our own server, from
+    campus map data (OpenStreetMap): trip points aren't sent to any routing service.
   </p>
 
   <h2 id="why">5. Why we use it</h2>
@@ -165,7 +164,6 @@
         <li><strong>Neon</strong>: hosts our database (Frankfurt, Germany).</li>
         <li><strong>Cloudinary</strong>: stores drivers' profile photos.</li>
         <li><strong>Sentry</strong> (Functional Software, Inc.): receives crash and error reports, stored in Frankfurt, Germany.</li>
-        <li><strong>FOSSGIS e.V. (OSRM)</strong>: calculates road routes from rounded points without any identity.</li>
       </ul>
     </li>
     <li><strong>Authorities</strong>, such as the Ghana Police Service, when the law requires it or when it's needed to protect someone's life or safety.</li>

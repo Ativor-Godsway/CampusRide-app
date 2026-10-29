@@ -189,7 +189,7 @@ export const config = {
     /** Each authorizes a write into our Cloudinary account. */
     uploadPerHour: positive("RATE_LIMIT_UPLOAD_HOUR", 10),
     accountDeletePerHour: positive("RATE_LIMIT_ACCOUNT_DELETE_HOUR", 5),
-    /** POST /routes/legs — each may call OSRM. */
+    /** POST /routes/legs — each is a campus route (cheap, but not free in a loop). */
     routeLegsPer15Min: positive("RATE_LIMIT_ROUTE_LEGS", 120),
     /** POST /rides/:id/initiate-payment — each hits Moolre. */
     paymentInitPer15Min: positive("RATE_LIMIT_PAYMENT_INIT", 15),
@@ -322,12 +322,6 @@ export const config = {
    */
   driverOfferSeconds: Math.min(60, Math.max(5, Number(process.env.DRIVER_OFFER_SECONDS ?? 15) || 15)),
   /**
-   * Road routes between exact pins (services/routing/pointRoutes.ts). OSRM's
-   * public demo server by default; point OSRM_BASE_URL at a self-hosted OSRM
-   * when we outgrow it (docs/routing.md). ROUTING_DISABLED=true serves only
-   * the stored zone routes. Never contacted under NODE_ENV=test.
-   */
-  /**
    * Push notifications through the Expo push service (services/push). On by
    * default; PUSH_DISABLED=true switches every send off (the rest of the app
    * is unaffected). Never contacted under NODE_ENV=test.
@@ -339,15 +333,5 @@ export const config = {
   push: {
     enabled: process.env.PUSH_DISABLED !== "true" && process.env.NODE_ENV !== "test",
     accessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
-  },
-  routing: {
-    osrmBaseUrl: process.env.OSRM_BASE_URL ?? "https://router.project-osrm.org",
-    disabled: process.env.ROUTING_DISABLED === "true" || process.env.NODE_ENV === "test",
-    /** Give up on OSRM after this long and draw the fallback instead. */
-    timeoutMs: Number(process.env.ROUTING_TIMEOUT_MS ?? 2_500),
-    /** Fewest ms between two calls from this server: OSRM's demo asks for at most 1 a second. */
-    minIntervalMs: Number(process.env.ROUTING_MIN_INTERVAL_MS ?? 1_100),
-    /** Above this many OSRM calls in a UTC day, each further call logs a warning (time to self-host). */
-    dailyWarnAt: Number(process.env.ROUTING_DAILY_WARN_AT ?? 3_000),
   },
 } as const;

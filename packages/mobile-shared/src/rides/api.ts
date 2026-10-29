@@ -47,7 +47,7 @@ export async function getPlaces(): Promise<CampusPlace[]> {
 /** One cache entry for the place list, shared by every screen that searches or labels. */
 export const placesQueryKey = ["places"] as const;
 
-/** The road through 2–10 points (POST /routes/legs): OSRM behind it, or the zone-road fallback. */
+/** The road through 2–10 points (POST /routes/legs): the server's campus route engine; refused (an error) when there's none. */
 export interface RoadRoute {
   /** Encoded polyline (decodePolyline from @rida/shared). */
   polyline: string;
@@ -55,7 +55,7 @@ export interface RoadRoute {
   durationSeconds: number;
   /** Leg i is points[i] → points[i + 1]. */
   legs: { distanceMeters: number; durationSeconds: number }[];
-  /** "osrm": real roads. "zones": the approximate fallback. */
+  /** "osrm": real roads (the wire name for any real road, kept for installed apps). "zones": an approximate line from older servers. */
   source: "osrm" | "zones";
   /** Credit to show under the line. */
   attribution: string;
