@@ -458,7 +458,7 @@ export default function RideTypeScreen() {
     setPinVersion((v) => v + 1);
     const kept = clampToRadius(initialPickup, point);
     if (!isInServiceArea(kept)) {
-      setAdjustHint("That's outside the CampusRide area. Keep the pin on campus.");
+      setAdjustHint("That's outside campus. Keep the pin on campus.");
       return;
     }
     setPickupEnd(movedEnd(initialPickup, kept, places));

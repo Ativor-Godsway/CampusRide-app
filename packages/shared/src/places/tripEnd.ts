@@ -100,8 +100,8 @@ export function isSameSpot(a: TripEnd | null, b: TripEnd | null, meters = 100): 
 export function tripEndProblem(end: TripEnd, which: "pickup" | "dropoff"): string | null {
   if (isInServiceArea(end)) return null;
   return which === "pickup"
-    ? "Your pickup is outside the CampusRide area. We cover the University of Ghana (Legon) campus."
-    : "That drop-off is outside the CampusRide area. We cover the University of Ghana (Legon) campus.";
+    ? "Your pickup is outside campus. CampusRide only works on the University of Ghana (Legon) campus."
+    : "That drop-off is outside campus. CampusRide only works on the University of Ghana (Legon) campus.";
 }
 
 // ─── "Move pin to the exact spot" ────────────────────────────────────────────
@@ -254,7 +254,7 @@ export function recentTripEnds(
 export const POPULAR_PLACE_NAMES = [
   "Balme Library",
   "Night Market",
-  "Main Gate",
+  "Main Gate (inside)",
   "University of Ghana Business School",
   "Central Cafeteria",
   "University of Ghana Sports Stadium",

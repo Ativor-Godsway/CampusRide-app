@@ -28,6 +28,8 @@
     "routes:precompute": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/precomputeZoneRoutes.ts",
     "places:fetch": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/places/fetchOsmPlaces.ts",
     "places:seed": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/places/seedPlaces.ts",
+    "places:campus": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/places/campusOnly.ts",
+    "places:campus:dev": "dotenv -e .env.development.local -e .env.development -- sh -c 'npm run db:guard:dev && ts-node --transpile-only -r tsconfig-paths/register src/scripts/places/campusOnly.ts \"$@\"' --",
     "places:seed:dev": "dotenv -e .env.development.local -e .env.development -- sh -c 'npm run db:guard:dev && ts-node --transpile-only -r tsconfig-paths/register src/scripts/places/seedPlaces.ts \"$@\"' --",
     "zones:realign": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/realignZones.ts",
     "zones:check": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/checkZoneAdjacency.ts",

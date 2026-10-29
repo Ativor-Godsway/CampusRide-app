@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { isInServiceArea } from "@rida/shared";
+import { CAMPUS_GATES, isInServiceArea } from "@rida/shared";
 import {
   MANUAL_PLACES,
   PLACES_CSV,
@@ -89,13 +89,31 @@ describe("the CSV", () => {
     expect(rows.every((r) => isInServiceArea(r))).toBe(true);
     expect(new Set(rows.map((r) => r.source)).size).toBe(rows.length);
     const names = rows.map((r) => r.name);
-    for (const must of ["Balme Library", "Commonwealth Hall", "Night Market", "Main Gate", "University of Ghana Hospital"]) {
+    for (const must of ["Balme Library", "Commonwealth Hall", "Night Market", "Main Gate (inside)", "Stadium Gate", "TF Gate"]) {
       expect(names).toContain(must);
+    }
+    // 2026-10-29: J.J. Rawlings Avenue and everything east of it are not served.
+    for (const gone of ["Main Gate", "Okponglo Gate", "University of Ghana Hospital", "Legon City Mall", "Legon Police Station"]) {
+      expect(names).not.toContain(gone);
     }
     // The owner's review, 2026-10-12: campus only, International House gone, no "West Gate".
     for (const gone of ["Accra Mall", "Accra Mall Roundabout", "Atomic Junction", "Okponglo", "Shiashie", "Tetteh Quarshie Interchange", "UPS Junction", "International House"]) {
       expect(names).not.toContain(gone);
     }
     expect(rows.find((r) => r.name === "Legon Barrier")!.aliases).toEqual(["Barrier"]);
+  });
+
+  it("lists every campus gate at its inside point (CAMPUS_GATES)", () => {
+    const rows = fromCsv(readFileSync(PLACES_CSV, "utf8"));
+    for (const gate of CAMPUS_GATES) {
+      const row = rows.find((r) => r.source === gate.source);
+      expect(row, gate.name).toMatchObject({
+        name: gate.name,
+        category: "GATE",
+        latitude: gate.inside.latitude,
+        longitude: gate.inside.longitude,
+        aliases: [...gate.aliases],
+      });
+    }
   });
 });

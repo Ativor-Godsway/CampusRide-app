@@ -55,8 +55,9 @@ interface DriverPresence {
   /** A retry is under way because the server didn't answer in time. */
   waking: boolean;
   /**
-   * Online but more than 2 km from every campus zone: no zone is set on the
-   * server, so no requests arrive. Home says so.
+   * Online but outside the service area (off campus, or on or east of J.J.
+   * Rawlings Avenue): no zone is set on the server, so no requests arrive.
+   * Home says so.
    */
   outsideServiceArea: boolean;
   /** The latest position while online (for distances), or null. Real GPS, or the dev-only fake. */
@@ -88,6 +89,11 @@ const OUTSIDE_SERVICE_AREA = "__outside__";
 
 function httpStatus(err: unknown): number | undefined {
   return (err as { response?: { status?: number } } | null)?.response?.status;
+}
+
+/** The server refused to put the driver online: their position is off campus. */
+function refusedOffCampus(err: unknown): boolean {
+  return (err as { response?: { data?: { code?: unknown } } } | null)?.response?.data?.code === "OUTSIDE_SERVICE_AREA";
 }
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -143,13 +149,14 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
    * made stale by a newer tap stops retrying and reports nothing.
    */
   const sendAvailability = useCallback(
-    (seq: number, next: boolean, zoneId: string | undefined) => {
+    (seq: number, next: boolean, zoneId: string | undefined, position?: LatLng | null) => {
       const run = async () => {
         const current = () => seq === seqRef.current;
         for (let attempt = 0; ; attempt += 1) {
           if (!current()) return;
           try {
-            await setDriverAvailability(next, zoneId, { timeoutMs: AVAILABILITY_TIMEOUT_MS });
+            // The position goes with going online: the server checks it's on campus.
+            await setDriverAvailability(next, zoneId, { timeoutMs: AVAILABILITY_TIMEOUT_MS, position });
             if (!current()) return;
             setWaking(false);
             setConfirmed(true);
@@ -168,6 +175,10 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
             setWaking(false);
             setConfirmed(true);
             applyOnline(!next);
+            if (refusedOffCampus(err)) {
+              Alert.alert("Outside campus", DRIVER_OUTSIDE_AREA_MESSAGE);
+              return;
+            }
             Alert.alert(
               next ? "Couldn't go online" : "Couldn't go offline",
               transient
@@ -224,6 +235,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
 
       // The current or last known fix is instant; a fresh fix refines the zone later.
       let zoneId: string | undefined;
+      let position: LatLng | null = null;
       try {
         const [allZones, coords] = await Promise.all([
           queryClient.fetchQuery({ queryKey: zonesQueryKey, queryFn: getZones, staleTime: Infinity }),
@@ -233,14 +245,15 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
           if (seq !== seqRef.current) return;
           applyOnline(false);
           setConfirmed(true);
-          Alert.alert("You're outside the CampusRide area", DRIVER_OUTSIDE_AREA_MESSAGE);
+          Alert.alert("Outside campus", DRIVER_OUTSIDE_AREA_MESSAGE);
           return;
         }
         if (coords) zoneId = zoneInServiceArea(coords, allZones)?.id;
+        position = coords ?? null;
       } catch {
         // No zone yet: the first fresh fix sets it.
       }
-      sendAvailability(seq, true, zoneId);
+      sendAvailability(seq, true, zoneId, position);
     })();
   }, [applyOnline, queryClient, sendAvailability, location, askDisclosure]);
 
@@ -251,6 +264,8 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   useLocationDemand("presence", isDriver && isOnline);
   const zoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestZoneIdRef = useRef<string | null>(null);
+  /** The fix the latest zone was worked out from: sent with it, for the server to check. */
+  const latestPositionRef = useRef<LatLng | null>(null);
   const trackZoneRef = useRef(trackZone);
   trackZoneRef.current = trackZone;
 
@@ -259,7 +274,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
       const previous = zoneStateRef.current;
       zoneStateRef.current = { lastSentZoneId: zoneId, lastSentAt: Date.now() };
       try {
-        await updateDriverZone(zoneId === OUTSIDE_SERVICE_AREA ? null : zoneId);
+        await updateDriverZone(zoneId === OUTSIDE_SERVICE_AREA ? null : zoneId, latestPositionRef.current);
         void queryClient.invalidateQueries({ queryKey: eligibleRidesQueryKey });
       } catch (err) {
         if (!trackZoneRef.current) return;
@@ -296,6 +311,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     // Out of the service area, the zone is cleared (no requests) rather than
     // set to whichever zone happens to be nearest, however far away.
     latestZoneIdRef.current = zoneInServiceArea({ latitude: lat, longitude: lng }, zones)?.id ?? OUTSIDE_SERVICE_AREA;
+    latestPositionRef.current = { latitude: lat, longitude: lng };
     scheduleZone();
   }, [trackZone, zones, lat, lng, scheduleZone]);
 

@@ -5,7 +5,9 @@
  * CampusRide area" instead of offering requests 122 km away.
  *
  * Until 2026-10 the area was "within 2 km of a zone centre"; it is now the
- * same polygon riders' pickups and drop-offs are checked against.
+ * same polygon riders' pickups and drop-offs are checked against. Since
+ * 2026-10-29 the server checks it too, from the position the app sends
+ * (apps/server services/zones/driverPosition.ts).
  */
 import { SERVICE_AREA_POLYGON, zoneForPoint, type PolygonPoint } from "../geo/serviceArea";
 

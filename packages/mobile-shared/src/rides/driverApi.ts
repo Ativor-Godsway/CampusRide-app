@@ -1,4 +1,4 @@
-import type { PassengerStatus, Ride, RidePinFields, RideSource, RideType, Zone } from "@rida/shared";
+import type { LatLng, PassengerStatus, Ride, RidePinFields, RideSource, RideType, Zone } from "@rida/shared";
 import { asArray, readList } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
@@ -77,17 +77,23 @@ export async function updateDriverProfile(
   return res.data.profile;
 }
 
-/** Set the driver online/offline and optionally update their current zone. */
+/**
+ * Set the driver online/offline and optionally update their current zone.
+ * With `position`, the server checks it and decides the zone itself; off
+ * campus it refuses to go online (403, code OUTSIDE_SERVICE_AREA).
+ */
 export async function setDriverAvailability(
   isOnline: boolean,
   zoneId?: string,
-  options?: { timeoutMs?: number },
+  options?: { timeoutMs?: number; position?: LatLng | null },
 ): Promise<DriverProfile> {
+  const position = options?.position;
   const res = await api.patch<{ driver: DriverProfile }>(
     "/driver/availability",
     {
       isOnline,
       ...(zoneId !== undefined ? { zoneId } : {}),
+      ...(position ? { latitude: position.latitude, longitude: position.longitude } : {}),
     },
     options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
@@ -97,10 +103,14 @@ export async function setDriverAvailability(
 /**
  * Move an ONLINE driver's current zone as they drive (PATCH /driver/zone).
  * null clears it (outside the service area: no requests). Never changes
- * online status: the server answers 409 if the driver is offline.
+ * online status: the server answers 409 if the driver is offline. With
+ * `position`, the server checks it and decides the zone itself.
  */
-export async function updateDriverZone(zoneId: string | null): Promise<void> {
-  await api.patch("/driver/zone", { zoneId });
+export async function updateDriverZone(zoneId: string | null, position?: LatLng | null): Promise<void> {
+  await api.patch("/driver/zone", {
+    zoneId,
+    ...(position ? { latitude: position.latitude, longitude: position.longitude } : {}),
+  });
 }
 
 /** Returns the driver's currently active ride (MATCHED/ARRIVED/IN_PROGRESS) or null. */
