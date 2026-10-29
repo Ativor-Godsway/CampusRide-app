@@ -90,6 +90,14 @@ describe("the campus road graph", () => {
         expect(nodes.has(barrier.osmNode), `${gate.name} barrier ${barrier.osmNode}`).toBe(expected);
       }
     }
+    // Every gate listed closed in assets/map/campus-gates.json (the Main and
+    // Stadium gates, the UG E-card gates) is out of the graph.
+    const listed = JSON.parse(readFileSync(path.join(ROOT, "assets/map/campus-gates.json"), "utf8")) as {
+      gates: { osmNode: number; open: boolean; name: string }[];
+    };
+    const closed = listed.gates.filter((g) => !g.open);
+    expect(closed.filter((g) => /E-card/.test(g.name))).toHaveLength(4);
+    for (const g of closed) expect(nodes.has(g.osmNode), g.name).toBe(false);
     // Every closed barrier the builder recorded is out of the graph.
     for (const [id, open] of data.barriers ?? []) if (!open) expect(nodes.has(id), `barrier ${id}`).toBe(false);
   });
