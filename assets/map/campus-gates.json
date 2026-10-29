@@ -1,5 +1,5 @@
 {
-  "description": "Which barriers (OSM nodes) cars may pass, for the campus road graph (scripts/map/campus-roads.mjs). A gate listed here wins; any other barrier follows its OpenStreetMap tags: closed when it is a bollard, block, chain or the like, or tagged access/motor_vehicle=no or private; open otherwise (an untagged gate, or access=yes, permissive or permit — the UG E-card lift gates). Whatever is decided here, the graph never leaves assets/map/service-area.geojson, so no route reaches the road outside any gate. After an edit, run: node scripts/map/campus-roads.mjs",
+  "description": "Which barriers (OSM nodes) cars may pass, for the campus road graph (scripts/map/campus-roads.mjs). A gate listed here wins; any other barrier follows its OpenStreetMap tags: closed when it is a bollard, block, chain or the like, or tagged access/motor_vehicle=no or private; open otherwise (an untagged gate, or access=yes, permissive or permit). The UG E-card gates are listed closed. Whatever is decided here, the graph never leaves assets/map/service-area.geojson, so no route reaches the road outside any gate. After an edit, run: node scripts/map/campus-roads.mjs",
   "gates": [
     {
       "osmNode": 5813545126,
@@ -36,6 +36,30 @@
       "open": true,
       "name": "TF gate, west lane",
       "why": "Open so cars reach TF Hall (owner, 2026-10-29); see the east lane."
+    },
+    {
+      "osmNode": 6343193979,
+      "open": false,
+      "name": "UG E-card lift gate, Legon Road west (Legon Barrier), first lane",
+      "why": "UG E-card barrier: CampusRide drivers aren't allowed through (owner, 2026-10-29)."
+    },
+    {
+      "osmNode": 6012830263,
+      "open": false,
+      "name": "UG E-card lift gate, Legon Road west (Legon Barrier), second lane",
+      "why": "UG E-card barrier: CampusRide drivers aren't allowed through (owner, 2026-10-29)."
+    },
+    {
+      "osmNode": 2581150639,
+      "open": false,
+      "name": "UG E-card lift gate, south-east, near J.J. Rawlings Avenue",
+      "why": "UG E-card barrier: CampusRide drivers aren't allowed through (owner, 2026-10-29)."
+    },
+    {
+      "osmNode": 2581150632,
+      "open": false,
+      "name": "UG E-card gate, south-east, near J.J. Rawlings Avenue",
+      "why": "UG E-card barrier: CampusRide drivers aren't allowed through (owner, 2026-10-29)."
     }
   ]
 }

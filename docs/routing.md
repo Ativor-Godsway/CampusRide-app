@@ -45,14 +45,21 @@ Drivers never pass a gate to the outside: those roads aren't in the graph.
 Which barriers inside the area cars may pass is decided in
 [assets/map/campus-gates.json](../assets/map/campus-gates.json):
 
-- **Listed gates win.** The Main Gate (closed to cars) and the Stadium Gate
-  are listed closed; the **TF gate is open**, so cars reach TF Hall (James
-  Topp Nelson Yankah Hall). The road on from TF Hall to the main road is
-  outside the service area, so no route continues there.
+- **Listed gates win.** The Main Gate (closed to cars), the Stadium Gate and
+  the four **UG E-card gates** (two lanes on Legon Road west at Legon
+  Barrier, two in the south-east by J.J. Rawlings Avenue; CampusRide drivers
+  aren't allowed through, 2026-10-29) are listed closed. The **TF gate is
+  open**, so cars reach TF Hall (James Topp Nelson Yankah Hall). The road on
+  from TF Hall to the main road is outside the service area, so no route
+  continues there.
 - **Any other barrier follows its OpenStreetMap tags**: closed if it's a
   bollard, block, chain or the like, or tagged `access`/`motor_vehicle=no` or
   `private`; open otherwise (an untagged gate, `access=yes`, `permissive`, or
-  `permit` — the UG E-card lift gates).
+  `permit`).
+
+Closing the E-card gates changed no route to or from any place: none went
+through them. The road beyond the Legon Barrier gates is no longer driven
+to; the "Legon Barrier" place is on the campus side of them.
 
 The graph script prints every barrier inside the area with its decision and
 a map link. To change one, add it to `campus-gates.json` by its OSM node id
