@@ -240,9 +240,10 @@ export function planSeconds(
 }
 
 /**
- * The credit a map must show when it draws a stored road route. Both
- * providers use OpenStreetMap data (ODbL); OSRM's demo server also asks to be
- * named as the source of the routes.
+ * The credit a map must show when it draws a road route. Every route is
+ * OpenStreetMap data (ODbL): since 2026-10-29 from the campus route engine
+ * ("campus"). Zone routes stored before then name OSRM's demo server or
+ * openrouteservice, which also asked to be credited.
  */
 export function routeAttribution(provider: string | null | undefined): string {
   if (provider === "osrm") return "Routes: OSRM · © OpenStreetMap contributors";

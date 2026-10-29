@@ -28,7 +28,14 @@
     "2026-10-23: braces (GHSA-vfj7-8cjw-p6xm) is no longer reported and was removed",
     "as stale. zod GHSA-mrhx-c7xc-m3w5 (fixed in 4.6.6): the zod 4 copy used by",
     "eslint-plugin-react-hooks was updated to 4.6.7 (lockfile only); the zod 3 copy",
-    "inside @expo/cli has no patched 3.x release, so it is allowlisted below."
+    "inside @expo/cli has no patched 3.x release, so it is allowlisted below.",
+    "",
+    "2026-10-29: decode-uri-component GHSA-qr28-fpjm-wq7f (high) appeared for the",
+    "expo-router -> query-string 7 -> decode-uri-component 0.2.2 chain above. The",
+    "fixed releases (0.5.1) are ESM-only: query-string 7 require()s the package and",
+    "calls it, which then throws 'is not a function' (checked), so an npm override",
+    "would break every route's params in both apps. npm's only real fix is",
+    "expo-router 58 (a new Expo SDK and new store builds). Allowlisted below until then."
   ],
   "allow": [
     {
@@ -42,6 +49,12 @@
       "package": "zod",
       "reason": "Memory exhaustion when validating an oversized collection against a size-constrained schema. Fixed only in zod 4.6.6; the copy left is zod 3.25.76 (latest 3.x, no patched release) nested in expo/node_modules, used by @expo/cli's local dev server to validate dev-tools plugin settings from our own project config. It never sees user input and never runs in the deployed server (node dist/) or the apps. The zod 4 copy (eslint-plugin-react-hooks) is updated to 4.6.7.",
       "reviewBy": "2027-01-23"
+    },
+    {
+      "id": "GHSA-qr28-fpjm-wq7f",
+      "package": "decode-uri-component",
+      "reason": "Denial of service: decoding a long run of percent-encoded characters takes quadratic time. Reached only through expo-router -> query-string 7.1.3 -> decode-uri-component 0.2.2, in the rider and driver apps, where expo-router parses a URL's query string (our own navigation, and deep links). Not in the server, admin site or website. The worst case is a crafted campusride-rider:// or campusride-driver:// link that someone opens on their own phone, freezing that app until it is closed: no data exposed, nothing on the server. The fixed 0.5.1 is ESM-only and breaks query-string 7's require() (an override would break navigation); the real fix is expo-router 58, i.e. the next Expo SDK upgrade, which needs new store builds. Remove this entry then.",
+      "reviewBy": "2027-01-29"
     }
   ]
 }

@@ -1,118 +1,122 @@
-# Road routes between campus zones
+# Road routes on campus
 
-Written for: whoever runs the precompute and chooses the routing provider.
+Written for: whoever maintains routing, the campus road graph and the gates.
 
-Pickups and drop-offs are our 15 campus zones, so there are only 210 possible
-trips (15 × 14 — A→B and B→A are stored separately because one-way roads make
-them differ). Instead of asking a routing service on every trip, we ask **once
-per pair**, store the road as an encoded polyline in `ZoneRoute`, and the apps
-draw it from `GET /zones/routes`. A pair without a stored route is drawn as a
-straight line, so nothing breaks before the precompute has run.
+Since 2026-10-29 every road route CampusRide draws or times comes from **our
+own campus route engine**, on our own server. The public OSRM server is no
+longer used: it routed trips out through the Main Gate and along J.J.
+Rawlings Avenue.
 
-Since exact pins (October 2026) a trip's real road between its pins comes
-from OSRM per trip — see [Routes between exact pins](#routes-between-exact-pins-per-trip)
-below. The zone routes remain the instant fallback and the basis of the
-drive-time maths.
+## How it works
 
-## Which provider
+- **The graph**: [assets/map/campus-roads.json](../assets/map/campus-roads.json),
+  every drivable road **inside the service area**
+  ([assets/map/service-area.geojson](../assets/map/service-area.geojson)), from
+  OpenStreetMap. Built by `node scripts/map/campus-roads.mjs`. It holds no
+  trunk road (J.J. Rawlings Avenue and its ramps are outside the area anyway),
+  no footway, nothing tagged `access`/`motor_vehicle=no` or `private`, and no
+  segment that leaves the area, even briefly. One-ways are kept as tagged:
+  `oneway=yes`, `oneway=-1` (drawn backwards) and roundabouts.
+- **The engine**: `CampusRouter` in
+  [packages/shared/src/routing/campusRouter.ts](../packages/shared/src/routing/campusRouter.ts).
+  Each point is **snapped** to the nearest drivable road of the **main road
+  network** (within 300 m): the largest part of the graph where every road
+  can be driven to and from every other. So a pin is never put on a road cut
+  off from the rest (a compound behind a closed gate, a stub at the edge) or
+  on a one-way dead end (like the loop at the Stadium Gate security post,
+  whose way out was the gate). Then A* finds the **fastest** drive between
+  the snapped points, respecting one-ways (a pin partway along a one-way
+  road included). Every place in the place list routes to and from Balme
+  Library; the farthest is snapped 108 m (Bush Canteen). Speeds by road
+  class (`CAMPUS_ROAD_SPEEDS_KMH`): secondary 40 km/h, tertiary 35,
+  unclassified 30, residential 25, service 20, parking aisles and driveways 10.
+  A route takes a few milliseconds.
+- **No route, no guess**: a point with no main-network road within 300 m
+  (`NO_ROAD`) is refused with a plain sentence. Two snapped points can always
+  be joined, so `NO_ROUTE` is only a safety net. The apps then draw a dashed
+  straight line, as they always did while waiting.
+- **The server**: [apps/server/src/services/routing/campusRoutes.ts](../apps/server/src/services/routing/campusRoutes.ts)
+  builds the router once (about 10 ms) and keeps up to 1,000 recent routes in
+  memory. Nothing is sent to anyone, and nothing is stored in the database.
 
-| | OSRM public demo | openrouteservice (free "Standard") | Mapbox Directions |
-|---|---|---|---|
-| Account / key | **None** | Free HeiGIT account + API key | Account + access token |
-| Free limits | No published number; "no heavy use", blocked if you affect stability | 2,000 directions/day, 40/min | 100,000 requests/month |
-| Storing results | Not restricted by the policy | OSM data (ODbL): allowed with attribution | **Not allowed** — results may not be stored, and only shown on a Mapbox map |
-| Commercial use | Allowed if the app is publicly available (not behind a paywall) and shows attribution | Couldn't confirm from the official pages (they only render in a browser) — check the terms before relying on it | Paid plans |
-| Our 210 requests | ~4 minutes at 1/second | ~6 minutes at 40/minute | — |
+## Gates
 
-Sources: [OSRM API usage policy](https://github.com/Project-OSRM/osrm-backend/wiki/API%20Usage%20Policy),
-[openrouteservice plans](https://openrouteservice.org/plans/),
-[openrouteservice restrictions](https://openrouteservice.org/restrictions/),
-[Mapbox API caching](https://docs.mapbox.com/help/dive-deeper/api-caching/).
+Drivers never pass a gate to the outside: those roads aren't in the graph.
+Which barriers inside the area cars may pass is decided in
+[assets/map/campus-gates.json](../assets/map/campus-gates.json):
 
-**Recommendation: OSRM.** It needs no account or key, 210 requests once is
-nowhere near "heavy use", storing the result isn't restricted, and our app is
-publicly available. In exchange we must show attribution where routes are
-drawn: "© OpenStreetMap contributors · Routes: OSRM". If OSRM's demo is down
-or blocks us, openrouteservice is the fallback (sign up at
-<https://openrouteservice.org/dev/#/signup>, create a key, and pass it as
-`ORS_API_KEY`). Mapbox is ruled out: its terms forbid storing Directions
-results, which is the whole design.
+- **Listed gates win.** The Main Gate (closed to cars) and the Stadium Gate
+  are listed closed; the **TF gate is open**, so cars reach TF Hall (James
+  Topp Nelson Yankah Hall). The road on from TF Hall to the main road is
+  outside the service area, so no route continues there.
+- **Any other barrier follows its OpenStreetMap tags**: closed if it's a
+  bollard, block, chain or the like, or tagged `access`/`motor_vehicle=no` or
+  `private`; open otherwise (an untagged gate, `access=yes`, `permissive`, or
+  `permit` — the UG E-card lift gates).
 
-## Commands
+The graph script prints every barrier inside the area with its decision and
+a map link. To change one, add it to `campus-gates.json` by its OSM node id
+and rebuild.
 
-The production database must have the
-`20261001120000_trip_stops_and_zone_routes` migration first.
+## Rebuilding the graph
+
+After a change to the service area, the gates, or campus roads in
+OpenStreetMap:
 
 ```bash
-# Dev database (apps/server/.env.development), OSRM:
-npm run routes:precompute --workspace apps/server -- --provider osrm
-
-# A trial run of 5 routes first, if you like:
-npm run routes:precompute --workspace apps/server -- --provider osrm --limit 5
-
-# Retry only what failed / is missing:
-npm run routes:precompute --workspace apps/server -- --provider osrm --only-missing
-
-# openrouteservice instead (key you created):
-ORS_API_KEY="…" npm run routes:precompute --workspace apps/server -- --provider ors
-
-# Production — deliberately, once, with the URL you export yourself:
-export PROD_URL="postgresql://…"   # from Render, this shell only
-ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" \
-  npm run routes:precompute --workspace apps/server -- --provider osrm
+node scripts/map/campus-roads.mjs        # fetches OSM; or --osm-file saved.json
+npm test --workspace packages/shared     # campusRouter.test.ts checks the rules
+npm run routes:examples --workspace apps/server   # five routes with map links
 ```
 
-It prints each route as it saves it and a summary. It only writes `ZoneRoute`
-rows. Re-run it only if zones change. Retired zones (`Zone.retiredAt`) are
-skipped.
+Commit the new `assets/map/campus-roads.json`; deploying the server is what
+puts it in use. Then regenerate the zone routes (below).
 
-## Routes between exact pins (per trip)
+The tests check that every point of the graph is inside the service area,
+that none is within 25 m of a trunk road, that no closed gate is in it (and
+the TF gate is), that 200 random routes never take a one-way road the wrong
+way, that every place routes to and from Balme Library, snapping (never to a
+detached road or one-way dead end), the no-road refusal, and that a route
+takes well under 100 ms.
 
-Since exact pickup and drop-off pins (October 2026), a trip no longer goes
-zone centre to zone centre, so its road can't all be precomputed. The apps
-ask the server for the road through a trip's own points —
-`POST /routes/legs` with 2–10 `{ latitude, longitude }` — and the server
-([services/routing/pointRoutes.ts](../apps/server/src/services/routing/pointRoutes.ts)):
+## Zone routes (ZoneRoute)
 
-1. answers from memory, or from the `PointRoute` table, when it has routed
-   those points before (each point rounded to ~11 m, so a place picked twice
-   is one request);
-2. otherwise makes **one** OSRM request through all the points (OSRM returns
-   each leg's time too), with a 2.5 s timeout, and keeps the answer;
-3. never calls OSRM more than once a second from one server. A request that
-   would come sooner, times out or fails gets the **fallback** at once: the
-   stored zone routes above with their ends moved to the pins. The fallback
-   is not kept, so the next request for those points tries OSRM again.
+A route for every ordered pair of zones in service (A→B and B→A apart:
+one-way roads make them differ), stored in `ZoneRoute`. The shared-ride
+**detour rule** (5 minutes) and the driver's trip planning use their times
+zone to zone; old app builds draw them before an exact route arrives.
 
-Drive-time maths for dispatch and the 5-minute detour rule still uses the
-zone routes, unchanged.
+```bash
+npm run routes:precompute --workspace apps/server              # dry run: what would be written
+npm run routes:precompute:dev --workspace apps/server -- --apply   # dev database
+```
 
-### How busy we are, and when we'd outgrow the free server
+With `--apply` it writes them all in one transaction (provider `campus`) and
+removes the stored route of any pair the campus roads can't join (rather
+than keep an old OSRM one). Re-run it after the zones or the graph change.
+Production commands: [docs/places.md](places.md#production-order).
 
-Every OSRM call is logged as `osrm_call` with the day's running count, and
-every fallback as `osrm_fallback`; past `ROUTING_DAILY_WARN_AT` (3,000) in a
-UTC day each further call logs at **warn** level. Search the Render logs
-for `osrm_call` to see the number.
+## What uses the engine, and what is still a straight line
 
-A trip costs roughly **3–8 calls**: the rider's preview (pickup → drop-off,
-often cached), the driver's way to each pickup (it starts at the driver's
-live position, so it's rarely cached, and it's re-asked only when the driver
-leaves the drawn road), and the trip's stops. At 100 trips a day that is
-about 300–800 calls, which is light use by OSRM's policy.
+| | Source |
+|---|---|
+| Every drawn route (`POST /routes/legs`): the rider's trip preview, the driver's way to the pickup and the trip's stops, ride offers | Campus engine |
+| Ride offer "trip 6 min · 2.3 km" | Campus engine |
+| Ride offer "pickup 3 min · 900 m" (driver → named pickup place) | Campus engine; straight line × 1.3 only when the driver is too far from any campus road |
+| Detour rule and trip planning, zone to zone | Zone routes, from the campus engine once regenerated |
+| The short bits between a pin and its zone centre inside those plans | Straight line × 1.3 (as before) |
+| Rider's "driver is N min away" in the app | Straight line × 1.3, worked out in the app (changing it needs an app update) |
+| "Driver almost there" push, automatic arrival, minimum trip length | Straight-line distance (they are about how near, not how long) |
+| App Store review demo car | Campus engine |
 
-Move to our own OSRM when any of these happens:
+## Response the apps get
 
-- the daily count is regularly over **~3,000** (the warnings start), or
-- `osrm_fallback` is more than ~10% of `osrm_call` at busy times (the
-  one-a-second limit is being hit, so riders see the approximate road), or
-- OSRM answers 429 or blocks us.
+`POST /routes/legs` answers as it always has: `polyline`, `distanceMeters`,
+`durationSeconds`, `legs`, `source: "osrm"` and `attribution`
+("© OpenStreetMap contributors"). `"osrm"` is kept as the wire value for "a
+real road": apps already installed draw it solid. A refusal is `422` with
+`{ error, code }` (`NO_ROAD`, `NO_ROUTE`, or `OUTSIDE_SERVICE_AREA` for a stop
+outside the area).
 
-Self-hosting is cheap: OSRM's Docker image with the Ghana extract from
-Geofabrik (about 100 MB) runs on a 2 GB VPS (~US$6–12 a month). Point
-`OSRM_BASE_URL` at it and set `ROUTING_MIN_INTERVAL_MS=0`; nothing else
-changes.
-
-Settings (all optional): `OSRM_BASE_URL`, `ROUTING_DISABLED=true` (serve
-the fallback only), `ROUTING_TIMEOUT_MS`, `ROUTING_MIN_INTERVAL_MS`,
-`ROUTING_DAILY_WARN_AT`, `RATE_LIMIT_ROUTE_LEGS` (per user per 15 minutes,
-default 120). Under the test suite OSRM is never contacted.
+Map data © OpenStreetMap contributors, under the Open Database Licence: every
+map that draws a route shows the credit.

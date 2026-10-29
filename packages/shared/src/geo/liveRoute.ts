@@ -1,9 +1,9 @@
 /**
  * Following a road route as the car moves, without asking for a new one on
- * every GPS fix. A route is asked for once (POST /routes/legs, OSRM behind
- * it) and then trimmed to the car's position as it drives; a new one is
- * asked for only when the car has left the drawn road — and not more often
- * than REROUTE_MIN_INTERVAL_MS — which keeps OSRM calls to a few per trip.
+ * every GPS fix. A route is asked for once (POST /routes/legs, the campus
+ * route engine behind it) and then trimmed to the car's position as it
+ * drives; a new one is asked for only when the car has left the drawn road —
+ * and not more often than REROUTE_MIN_INTERVAL_MS — so a trip asks a few times.
  */
 import { haversineDistanceMeters } from "./distance";
 import { pathLengthMeters, type PathPoint } from "./polyline";

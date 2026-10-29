@@ -51,7 +51,7 @@ import { notifyRider } from "../services/push/notify";
 import { getActivePlaces } from "../services/places/placeCache";
 import { approximatePins } from "../services/places/approximatePins";
 import { pinFieldsOf, requestPlaceNames } from "./ridePins";
-import { estimateRoute } from "../services/routing/pointRoutes";
+import { estimateRoute } from "../services/routing/campusRoutes";
 import { RULES } from "../rateLimit/rules";
 import { checkDriverPosition, hasActiveTrip, lastPositionData, parseDriverPoint } from "../services/zones/driverPosition";
 import {
@@ -191,6 +191,10 @@ function passengerForApp(
  * driver → pickup is measured to the named place the pin is at or near
  * (approximatePins), rounded to 50 m; the trip is the road between the
  * ride's own pins (or zone centres), rounded to 100 m. Numbers only.
+ *
+ * Both are campus-road routes (services/routing/campusRoutes.ts). Driver →
+ * pickup falls back to the straight-line estimate when there's no road
+ * route (the driver far from any campus road); the trip then shows none.
  */
 async function offerDistances(
   prisma: PrismaClient,
@@ -210,12 +214,15 @@ async function offerDistances(
     approx.pickupLat != null && approx.pickupLng != null
       ? { latitude: approx.pickupLat, longitude: approx.pickupLng }
       : pickupZone ?? null;
-  const pickupSeconds = from && meetAt ? straightLineSeconds(from, meetAt) : null;
-  const pickupMeters = from && meetAt ? haversineDistanceMeters(from, meetAt) * ROAD_CIRCUITY_FACTOR : null;
+  const pickupRoad = from && meetAt ? estimateRoute([from, meetAt]) : null;
+  const pickupSeconds =
+    pickupRoad?.durationSeconds ?? (from && meetAt ? straightLineSeconds(from, meetAt) : null);
+  const pickupMeters =
+    pickupRoad?.distanceMeters ?? (from && meetAt ? haversineDistanceMeters(from, meetAt) * ROAD_CIRCUITY_FACTOR : null);
 
   const start = pickupPin(ride) ?? pickupZone ?? null;
   const end = dropoffPin(ride) ?? dropoffZone ?? null;
-  const trip = start && end ? await estimateRoute(prisma, [start, end]) : null;
+  const trip = start && end ? estimateRoute([start, end]) : null;
   return {
     pickupDistanceMeters: pickupMeters === null ? null : Math.max(50, Math.round(pickupMeters / 50) * 50),
     pickupMinutes: pickupSeconds === null ? null : Math.max(1, Math.round(pickupSeconds / 60)),

@@ -47,7 +47,7 @@ hosting.
 | **Ride offers to drivers** | Database (declines in `RideRejection`); the 15-second countdown runs in the driver app | Nothing lost. | Works, given the Socket.io adapter above. |
 | **Account check cache**: whether an account still exists and its role, 10 seconds | `services/auth/accountStatus.ts` | Empty; refilled on the next request. | Works: each server caches separately, each at most 10 s stale. |
 | **Zones and places cache**, 60 seconds | `services/zones/zoneCache.ts`, `services/places/placeCache.ts` | Empty; refilled on first use. | Works: an admin's place edit shows up on each server within 60 s. |
-| **Route cache** (OSRM), up to 1,000 routes, plus the spacing between calls and today's count | `services/routing/pointRoutes.ts` | Empty: the first trips after a restart ask OSRM again. The daily count starts again. | Works, but each server spaces its own calls, so together they call the public OSRM server more often than its fair-use limit expects. Use a self-hosted OSRM first (`OSRM_BASE_URL`). |
+| **Route cache** (campus routes), up to 1,000, and the campus road graph | `services/routing/campusRoutes.ts` | Empty: the first trips after a restart are routed again (a few ms each; the graph builds in ~10 ms). | Works: each server routes on its own copy of the graph. |
 | **Push dedupe**: "don't send the same notification twice within a few minutes" | `services/push/rateLimit.ts` | Forgotten: one notification already sent just before the restart (say, "driver arriving") could be sent once more. | A notification triggered on two servers could arrive twice. Move to Redis with the rate limits. |
 | **Push receipts waiting to be checked**, about 15 minutes after each send | `services/push/pushService.ts` (`pendingReceipts`) | Lost: delivery results for the last ~15 minutes' pushes aren't checked. Dead tokens among them are still removed the next time a push to them fails. | Works: each server checks its own sends. |
 | **"Driver arriving" check spacing**, 15 seconds per ride | `services/push/notify.ts` | Forgotten: one extra check, no extra notification (the push dedupe and the database decide that). | Works. |
@@ -73,6 +73,4 @@ if it ever is:
    request of a connection to reach the same server).
 3. **Background jobs → one server.** Elect one with a Postgres advisory lock
    (`pg_try_advisory_lock`) at each run, or move them to a Render cron job.
-4. **OSRM → self-hosted**, so combined route requests don't exceed the
-   public server's fair use.
-5. **USSD sessions → Redis**, before USSD is switched on.
+4. **USSD sessions → Redis**, before USSD is switched on.

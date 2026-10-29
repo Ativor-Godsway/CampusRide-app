@@ -36,6 +36,7 @@ export * from "./driver/autoArrival";
 export * from "./driver/serviceArea";
 export * from "./driver/slideToConfirm";
 export * from "./geo/serviceArea";
+export * from "./routing/campusRouter";
 export * from "./geo/reviewDemoPosition";
 export * from "./places/campusPlaces";
 export * from "./places/campusGates";

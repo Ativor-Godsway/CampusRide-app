@@ -83,7 +83,7 @@ repeat; see [docs/places.md](../places.md)):
 ```bash
 npm run places:seed:dev --workspace apps/server
 npm run zones:realign:dev --workspace apps/server -- --apply
-npm run routes:precompute --workspace apps/server -- --provider osrm   # ~4 min
+npm run routes:precompute:dev --workspace apps/server -- --apply   # a few seconds
 ```
 
 With places in the database the simulator's riders book **real campus places
@@ -496,9 +496,9 @@ E3. ✔ The trip screen's map pin sits on the exact spot (zoom in: it's on the
     building or the moved pin, not at a zone centre); the card says "Pick up
     Kwame at Cedi Conference Centre"; a rider who left a note shows it in
     quotes under the instruction.
-E4. ✔ The blue line follows real roads to that pin ("Routes: OSRM ·
-    © OpenStreetMap contributors" in the corner). Before OSRM answers, or if
-    it can't, the zone road shows instead — that's expected.
+E4. ✔ The blue line follows campus roads to that pin ("© OpenStreetMap
+    contributors" in the corner), never J.J. Rawlings Avenue or a closed gate.
+    Until the route arrives, or if there's none, a dashed straight line shows.
 E5. Tap **Navigate**. ✔ Google Maps opens with directions to the exact point
     (a pin, not a search for the name). Come back to the app.
 E6. **▶ Drive (fake)**. ✔ The car follows the line and stops on the pin;
@@ -619,7 +619,7 @@ createdb -h localhost rida_dev
 printf 'DATABASE_URL="postgresql://%s@localhost:5432/rida_dev"\nDIRECT_URL="postgresql://%s@localhost:5432/rida_dev"\n' "$(whoami)" "$(whoami)" > apps/server/.env.development.local
 npm run db:deploy:dev                              # create the tables
 npm run db:seed:dev --workspace apps/server        # the 15 campus zones
-npm run routes:precompute --workspace apps/server -- --provider osrm   # optional: real roads
+npm run routes:precompute:dev --workspace apps/server -- --apply   # optional: zone roads
 ```
 
 That file, `apps/server/.env.development.local`, is the switch. While it
