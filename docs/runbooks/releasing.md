@@ -86,6 +86,9 @@ run the code on your Mac.
   (anything named `expo-…` or `react-native-…`, and the Expo SDK itself). When in
   doubt, assume a dependency change needs a build.
 - the app icon or adaptive icon images
+- an EAS variable the app config reads: `GOOGLE_SERVICES_JSON`
+  ([push-notifications.md](push-notifications.md)) or
+  `GOOGLE_MAPS_ANDROID_API_KEY` ([google-maps-android.md](google-maps-android.md))
 
 Changes to the **server** (`apps/server`) or the **admin** site never need either.
 They deploy on their own (see `DEPLOY.md`). If an app change needs a new server
@@ -97,8 +100,12 @@ production build (the ID is in the page URL and on the page), then:
 
 ```bash
 cd apps/rider    # or apps/driver
-npx -y eas-cli@24 fingerprint:compare --build-id <BUILD_ID>
+npx -y eas-cli@24 fingerprint:compare --build-id <BUILD_ID> --environment production
 ```
+
+`--environment production` gives the comparison the same EAS variables the
+build had (the Google Maps key is part of the fingerprint). Without it, the two
+always differ.
 
 "Fingerprints are identical" means OTA is fine. Anything else means a new build.
 
@@ -455,6 +462,15 @@ Use the preview → republish route in section 3, or switch to an up-to-date `ma
 Firebase file in place (see [push-notifications.md](push-notifications.md),
 step 1). It's part of the fingerprint, so an update made without it would
 reach no phone.
+
+**A build fails with "GOOGLE_MAPS_ANDROID_API_KEY is not set".** The app's EAS
+project has no Google Maps key in the `production` environment. Without one, the
+Android app would crash as soon as a map opens. Follow
+[google-maps-android.md](google-maps-android.md), then build again.
+
+**The Android app crashes when a map opens, or the map is a blank beige grid.**
+The Google Maps key is missing (crash) or rejected (blank grid). See
+[google-maps-android.md](google-maps-android.md), steps 2 and 4.
 
 **`eas` asks you to log in.** Run `npx -y eas-cli@24 login` with the Expo account
 that belongs to the `campusride-gh` organisation.

@@ -286,6 +286,10 @@ touching the ride flow. `EXPO_ACCESS_TOKEN` is needed only if "Enhanced
 Security for Push Notifications" is turned on for the Expo account — it is a
 secret, so set it in the dashboard only.
 
+The Android apps' maps need a Google Maps key, an EAS variable rather than a
+server one: [docs/runbooks/google-maps-android.md](docs/runbooks/google-maps-android.md).
+Without it, an EAS build fails rather than ship an app that crashes on the map.
+
 ---
 
 ## Login codes in development
