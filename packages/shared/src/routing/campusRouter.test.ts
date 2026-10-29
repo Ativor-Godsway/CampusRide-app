@@ -113,6 +113,20 @@ describe("CampusRouter.route", () => {
     }
   });
 
+  it("reaches every campus place, and back (prisma/data/campus-places.csv)", () => {
+    const rows = readFileSync(path.join(ROOT, "apps/server/prisma/data/campus-places.csv"), "utf8").trim().split("\n").slice(1);
+    expect(rows.length).toBeGreaterThan(100);
+    const failed: string[] = [];
+    for (const row of rows) {
+      const cells = row.match(/("([^"]|"")*"|[^,]*)(,|$)/g)!.map((c) => c.replace(/,$/, "").replace(/^"|"$/g, ""));
+      const place = { latitude: Number(cells[2]), longitude: Number(cells[3]) };
+      for (const r of [router.route([place, PLACES.balme]), router.route([PLACES.balme, place])]) {
+        if (isCampusRouteError(r)) failed.push(`${cells[0]}: ${r.code}`);
+      }
+    }
+    expect(failed).toEqual([]);
+  });
+
   it("drives through the TF gate to TF Hall (the one gate cars may pass)", () => {
     const r = routeOrThrow(PLACES.balme, PLACES.tfHall);
     const tfBarriers = CAMPUS_GATES.find((g) => g.source === "manual:tf-gate")!.barriers.map((b) => b.osmNode);
@@ -170,19 +184,48 @@ describe("snapping", () => {
     expect(router.route([kumasi, PLACES.balme])).toMatchObject({ code: "NO_ROAD", index: 0 });
   });
 
-  it("says when two points have no way between them (a detached road)", () => {
-    // A node outside the main network: union-find over the graph.
+  it("snaps to the main road network, not a short road cut off from it", () => {
+    // Points on detached pieces (a compound behind a closed gate, a stub at the
+    // edge) that have a main-network road within reach: each must route.
     const parent = Array.from({ length: router.nodeCount }, (_, i) => i);
     const find = (x: number): number => (parent[x] === x ? x : (parent[x] = find(parent[x]!)));
     for (const [, , , , idx] of data.ways) for (let i = 1; i < idx.length; i++) parent[find(idx[i]!)] = find(idx[i - 1]!);
-    const balme = router.snap(PLACES.balme)!;
-    const mainRoot = find(data.ways[0]![4][0]!);
-    const detached = Array.from({ length: router.nodeCount }, (_, i) => i).find(
-      (i) => find(i) !== find(mainRoot) && find(i) !== mainRoot && haversineDistanceMeters(router.nodePoint(i), balme.point) > 50,
-    );
-    expect(detached).toBeDefined();
-    const r = router.route([PLACES.balme, router.nodePoint(detached!)]);
-    expect(r).toMatchObject({ code: "NO_ROUTE", leg: 0 });
+    const counts = new Map<number, number>();
+    for (let i = 0; i < router.nodeCount; i++) counts.set(find(i), (counts.get(find(i)) ?? 0) + 1);
+    const mainRoot = [...counts.entries()].reduce((a, b) => (b[1] > a[1] ? b : a))[0];
+    const detached = Array.from({ length: router.nodeCount }, (_, i) => i)
+      .filter((i) => find(i) !== mainRoot)
+      .map((i) => router.nodePoint(i))
+      .filter((p) => router.snap(p) !== null);
+    expect(detached.length).toBeGreaterThan(10);
+    for (const p of detached) {
+      const r = router.route([p, PLACES.balme]);
+      expect(isCampusRouteError(r) ? r.code : "routed", `${p.latitude},${p.longitude}`).toBe("routed");
+    }
+  });
+});
+
+describe("a one-way dead end", () => {
+  // A one-way road (0 → 1) you can't drive back out of, and a two-way road (2 – 3).
+  const tiny: CampusRoadData = {
+    classes: ["residential"],
+    nodes: [5_650_000, -187_000, 5_650_500, -187_000, 5_650_000, -186_800, 5_650_500, -186_800],
+    osmNodes: [1, 2, 3, 4],
+    ways: [
+      [10, 0, 1, -1, [0, 1]],
+      [11, 0, 0, -1, [2, 3]],
+    ],
+    names: [],
+  };
+  const small = new CampusRouter(tiny);
+
+  it("is never snapped to: a pin beside it goes to the nearest road you can drive in and out of", () => {
+    const onDeadEnd = { latitude: 5.6502, longitude: -0.187 };
+    const snap = small.snap(onDeadEnd)!;
+    expect(snap.point.longitude).toBeCloseTo(-0.1868, 6);
+    const r = small.route([onDeadEnd, { latitude: 5.6505, longitude: -0.187 }]);
+    expect(isCampusRouteError(r)).toBe(false);
+    if (!isCampusRouteError(r)) expect(r.osmWays).toEqual([11]);
   });
 });
 

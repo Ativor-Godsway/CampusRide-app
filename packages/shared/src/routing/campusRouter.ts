@@ -7,8 +7,12 @@
  *   gates taken out: a route can't leave campus, use J.J. Rawlings Avenue or
  *   pass a closed gate, because those roads aren't there.
  * - One-ways are respected, including a pin partway along a one-way road.
- * - Each point is snapped to the nearest drivable road (within
- *   MAX_SNAP_METERS); the route runs between the snapped points.
+ * - Each point is snapped to the nearest drivable road of the main road
+ *   network (within MAX_SNAP_METERS): the largest part of the graph where
+ *   every road can be driven to and from every other. A road cut off from
+ *   the rest (a private compound, a stub at the edge of the area) or a
+ *   one-way dead end (a loop whose way out was a closed gate) would leave a
+ *   pin with no way anywhere. The route runs between the snapped points.
  * - No road near a point, or no way between two: an error, never a guess.
  *
  * Pure and synchronous: build one CampusRouter per graph and reuse it. A
@@ -176,8 +180,12 @@ export class CampusRouter {
         this.segments.push(seg);
         if (seg.forward) this.out[a]!.push(b, s);
         if (seg.backward) this.out[b]!.push(a, s);
-        this.index(s);
       }
+    });
+    // Only roads of the main network are snapped to.
+    const main = this.mainNetwork();
+    this.segments.forEach((seg, s) => {
+      if (main[seg.a] && main[seg.b]) this.index(s);
     });
     this.maxSpeed = (fastest * 1000) / 3600;
   }
@@ -262,6 +270,67 @@ export class CampusRouter {
   }
 
   // ─── Internals ─────────────────────────────────────────────────────────────
+
+  /**
+   * The largest strongly connected part of the road graph (Kosaraju,
+   * iterative): true for each node in it.
+   */
+  private mainNetwork(): Uint8Array {
+    const n = this.lat.length;
+    const back: number[][] = Array.from({ length: n }, () => []);
+    for (let u = 0; u < n; u++) {
+      const arcs = this.out[u]!;
+      for (let k = 0; k < arcs.length; k += 2) back[arcs[k]!]!.push(u);
+    }
+    // 1. Finish order on the forward graph.
+    const seen = new Uint8Array(n);
+    const order: number[] = [];
+    for (let start = 0; start < n; start++) {
+      if (seen[start]) continue;
+      seen[start] = 1;
+      const stack: Array<[number, number]> = [[start, 0]];
+      while (stack.length) {
+        const top = stack[stack.length - 1]!;
+        const [u, k] = top;
+        const arcs = this.out[u]!;
+        if (k < arcs.length) {
+          top[1] = k + 2;
+          const v = arcs[k]!;
+          if (!seen[v]) {
+            seen[v] = 1;
+            stack.push([v, 0]);
+          }
+        } else {
+          order.push(u);
+          stack.pop();
+        }
+      }
+    }
+    // 2. Components on the reversed graph, latest finish first.
+    const comp = new Int32Array(n).fill(-1);
+    const sizes: number[] = [];
+    for (let i = order.length - 1; i >= 0; i--) {
+      const root = order[i]!;
+      if (comp[root] !== -1) continue;
+      const c = sizes.length;
+      let count = 0;
+      const stack = [root];
+      comp[root] = c;
+      while (stack.length) {
+        const u = stack.pop()!;
+        count += 1;
+        for (const v of back[u]!) {
+          if (comp[v] === -1) {
+            comp[v] = c;
+            stack.push(v);
+          }
+        }
+      }
+      sizes.push(count);
+    }
+    const biggest = sizes.indexOf(Math.max(...sizes));
+    return Uint8Array.from(comp, (c) => (c === biggest ? 1 : 0));
+  }
 
   private metersBetween(a: number, b: number): number {
     return haversineDistanceMeters(this.nodePoint(a), this.nodePoint(b));

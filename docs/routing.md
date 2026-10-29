@@ -19,15 +19,22 @@ Rawlings Avenue.
   `oneway=yes`, `oneway=-1` (drawn backwards) and roundabouts.
 - **The engine**: `CampusRouter` in
   [packages/shared/src/routing/campusRouter.ts](../packages/shared/src/routing/campusRouter.ts).
-  Each point is **snapped** to the nearest drivable road (within 300 m), then
-  A* finds the **fastest** drive between the snapped points, respecting
-  one-ways (a pin partway along a one-way road included). Speeds by road
+  Each point is **snapped** to the nearest drivable road of the **main road
+  network** (within 300 m): the largest part of the graph where every road
+  can be driven to and from every other. So a pin is never put on a road cut
+  off from the rest (a compound behind a closed gate, a stub at the edge) or
+  on a one-way dead end (like the loop at the Stadium Gate security post,
+  whose way out was the gate). Then A* finds the **fastest** drive between
+  the snapped points, respecting one-ways (a pin partway along a one-way
+  road included). Every place in the place list routes to and from Balme
+  Library; the farthest is snapped 108 m (Bush Canteen). Speeds by road
   class (`CAMPUS_ROAD_SPEEDS_KMH`): secondary 40 km/h, tertiary 35,
   unclassified 30, residential 25, service 20, parking aisles and driveways 10.
   A route takes a few milliseconds.
-- **No route, no guess**: a point with no road within 300 m (`NO_ROAD`), or two
-  points the roads don't join (`NO_ROUTE`), is refused with a plain sentence.
-  The apps then draw a dashed straight line, as they always did while waiting.
+- **No route, no guess**: a point with no main-network road within 300 m
+  (`NO_ROAD`) is refused with a plain sentence. Two snapped points can always
+  be joined, so `NO_ROUTE` is only a safety net. The apps then draw a dashed
+  straight line, as they always did while waiting.
 - **The server**: [apps/server/src/services/routing/campusRoutes.ts](../apps/server/src/services/routing/campusRoutes.ts)
   builds the router once (about 10 ms) and keeps up to 1,000 recent routes in
   memory. Nothing is sent to anyone, and nothing is stored in the database.
@@ -68,8 +75,9 @@ puts it in use. Then regenerate the zone routes (below).
 The tests check that every point of the graph is inside the service area,
 that none is within 25 m of a trunk road, that no closed gate is in it (and
 the TF gate is), that 200 random routes never take a one-way road the wrong
-way, snapping, the no-route refusal, and that a route takes well under
-100 ms.
+way, that every place routes to and from Balme Library, snapping (never to a
+detached road or one-way dead end), the no-road refusal, and that a route
+takes well under 100 ms.
 
 ## Zone routes (ZoneRoute)
 
