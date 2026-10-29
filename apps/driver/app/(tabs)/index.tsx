@@ -482,7 +482,7 @@ export default function DriverHomeScreen() {
               <Notice
                 tone="warning"
                 icon="navigate-outline"
-                message="You're outside the CampusRide area. Requests reach drivers within 2 km of campus: head back towards campus."
+                message="You're outside campus. Requests only reach drivers on the University of Ghana (Legon) campus: head back onto campus."
               />
             ) : null}
 

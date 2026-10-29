@@ -40,7 +40,7 @@ describe("trip ends", () => {
 
   it("refuses ends outside the campus area, in words", () => {
     expect(tripEndProblem(placeEnd(balme), "pickup")).toBeNull();
-    expect(tripEndProblem({ ...placeEnd(balme), latitude: 5.62218, longitude: -0.17326 }, "dropoff")).toMatch(/outside the CampusRide area/);
+    expect(tripEndProblem({ ...placeEnd(balme), latitude: 5.62218, longitude: -0.17326 }, "dropoff")).toMatch(/outside campus/);
   });
 
   it("knows two ends at the same spot", () => {

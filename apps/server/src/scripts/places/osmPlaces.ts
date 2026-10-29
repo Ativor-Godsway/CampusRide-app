@@ -9,7 +9,7 @@
  * the apps show that credit (PLACES_ATTRIBUTION).
  */
 import path from "node:path";
-import { haversineDistanceMeters, isInServiceArea, normalizeSearchText, type PlaceCategory } from "@rida/shared";
+import { CAMPUS_GATES, haversineDistanceMeters, isInServiceArea, normalizeSearchText, type PlaceCategory } from "@rida/shared";
 
 /** The reviewed list: written by fetchOsmPlaces.ts, read by seedPlaces.ts. */
 export const PLACES_CSV = path.resolve(__dirname, "../../../prisma/data/campus-places.csv");
@@ -48,30 +48,22 @@ export const UG_CAMPUS_WAY_ID = 308668766;
 export const OFF_CAMPUS_ALLOWLIST: Record<string, { name: string; category: PlaceCategory; aliases?: string[] }> = {};
 
 /**
- * Places OSM doesn't name as such (the gates are unnamed barriers or bus
- * stops). Positions are OSM features at the gate; `note` says which.
+ * Places OSM doesn't name as such. The gates come from CAMPUS_GATES in
+ * @rida/shared (drivers never pass a gate: each is pinned on its INSIDE);
+ * Legon Barrier is between the two 'Legon Barrier' bus stops (OSM nodes
+ * 4981090364, 5028768235), inside the UG E-card lift gates, kept by the
+ * owner 2026-10-12.
  */
 export const MANUAL_PLACES: PlaceRow[] = [
-  {
-    name: "Main Gate",
-    category: "GATE",
-    latitude: 5.65017,
-    longitude: -0.17896,
-    aliases: ["Legon Main Gate", "Legon Station", "Main Entrance"],
-    source: "manual:main-gate",
-    // At the Legon Station bus stop (OSM node 4981090362). Confirmed by the owner, 2026-10-12.
+  ...CAMPUS_GATES.map((g) => ({
+    name: g.name,
+    category: "GATE" as const,
+    latitude: g.inside.latitude,
+    longitude: g.inside.longitude,
+    aliases: [...g.aliases],
+    source: g.source,
     note: "",
-  },
-  {
-    name: "Okponglo Gate",
-    category: "GATE",
-    latitude: 5.63773,
-    longitude: -0.17738,
-    aliases: ["Okponglo Second Gate", "Second Gate"],
-    source: "manual:okponglo-gate",
-    // At the 'Okponglo Second Gate' bus stop (OSM node 6521403261). Confirmed by the owner, 2026-10-12.
-    note: "",
-  },
+  })),
   {
     name: "Legon Barrier",
     category: "GATE",
@@ -79,7 +71,6 @@ export const MANUAL_PLACES: PlaceRow[] = [
     longitude: -0.19768,
     aliases: ["Barrier"],
     source: "manual:legon-barrier",
-    // Between the two 'Legon Barrier' bus stops (OSM nodes 4981090364, 5028768235). Kept by the owner, 2026-10-12.
     note: "",
   },
 ];

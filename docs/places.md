@@ -27,13 +27,64 @@ on booking, dispatch or the trip maps.
 
 ## The service area
 
-A polygon in [packages/shared/src/geo/serviceArea.ts](../packages/shared/src/geo/serviceArea.ts):
-the OSM campus boundary pushed out 200 m — the Legon campus only. Off-campus
-service (Accra Mall and the like) is a future feature, and means extending
-this polygon. Pickups and drop-offs outside it are refused (`422 OUTSIDE_SERVICE_AREA`, with a sentence the app shows
-as-is), and since October 2026 a driver outside it gets no zone and can't go
-online (it used to be "within 2 km of a zone centre"). The server serves it
-at `GET /service-area`. To change it, edit the list there.
+Campus only, since 2026-10-29: the University of Ghana (Legon) campus **west
+of J.J. Rawlings Avenue**. The Avenue (30 m either side of its westernmost
+carriageway, ramps included) and everything east of it are not served, and
+neither are the Main and Stadium gates' approach roads: drivers never pass a
+gate. Off-campus service (Accra Mall and the like) is a future feature.
+
+- **Source**: [assets/map/service-area.geojson](../assets/map/service-area.geojson),
+  one polygon. Edit it at <https://geojson.io> (open the file, move points,
+  save it back), then run `node scripts/map/service-area.mjs`. That writes
+  [packages/shared/src/geo/serviceAreaPolygon.ts](../packages/shared/src/geo/serviceAreaPolygon.ts),
+  which everything uses. `node scripts/map/service-area.mjs --from-osm`
+  rebuilds the GeoJSON from OpenStreetMap (campus way 308668766, no buffer,
+  the Avenue cut out) and **replaces hand edits**.
+- **Tests** ([serviceArea.test.ts](../packages/shared/src/geo/serviceArea.test.ts))
+  check that every gate's inside point is in the area, that no point of the
+  Avenue (or any trunk road) is in it or within 25 m, and that the generated
+  file matches the GeoJSON.
+- **Who checks it**: the server refuses pickups and drop-offs outside it
+  (`422 OUTSIDE_SERVICE_AREA`, with a sentence the app shows as-is). The rider
+  app blocks pins outside it ("Outside campus") on the map, when dragging a
+  pin and for home GPS. A driver outside it can't go online and gets no zone,
+  so no requests: the app checks, and since 2026-10-29 the **server** checks
+  the position the app sends ([services/zones/driverPosition.ts](../apps/server/src/services/zones/driverPosition.ts)):
+  - going online off campus: `403 OUTSIDE_SERVICE_AREA`, unless the driver is
+    on a trip (it keeps working, with no zone, so no new requests);
+  - a zone update off campus clears the zone; the request list is empty for
+    an off-campus position;
+  - the last position while online is kept on `Driver` (`lastLat`, `lastLng`,
+    `lastSeenAt`), for the admin live map;
+  - apps from before 2026-10-29 send no position and keep the old behaviour;
+    review demo drivers are exempt.
+- **Where the apps get it**: built into the apps, the admin site and the
+  server (`@rida/shared`), so a change reaches the apps with an update (OTA)
+  and the server with a deploy. `GET /service-area` serves the server's copy
+  to other clients; the apps don't call it.
+
+### Gates
+
+`CAMPUS_GATES` in [packages/shared/src/places/campusGates.ts](../packages/shared/src/places/campusGates.ts).
+A gate is only a pickup and drop-off point, on its **inside**, on a campus road
+where a car can stop and turn; drivers never pass one. Each is a place (by
+`source`), with its OSM barrier nodes:
+
+| Place | Inside point | Notes |
+|---|---|---|
+| Main Gate (inside) | [5.6503, -0.18139](https://www.google.com/maps?q=5.6503,-0.18139) | Closed to cars. On La Road behind the gate. Shown with "Cars can't pass the main gate". |
+| Stadium Gate | [5.640669, -0.18105](https://www.google.com/maps?q=5.640669,-0.18105) | Was "Okponglo Gate" (same `source`, same id). On Jubilee Drive behind the security post's lift gate. |
+| TF Gate | [5.66485, -0.18256](https://www.google.com/maps?q=5.66485,-0.18256) | South of the gate's lift barriers. In OSM, TF Hall is on the other side of this gate; the area still includes it. |
+
+To put an existing database's places right (gates moved inside, every other
+place outside the area deactivated; a dry run unless `--apply`):
+
+```bash
+npm run places:campus --workspace apps/server            # what would change
+npm run places:campus:dev --workspace apps/server -- --apply
+```
+
+Production: see [Production order](#production-order).
 
 ## The place list
 
@@ -123,8 +174,9 @@ every route between moved zones needs refreshing).
 
 ## Production order
 
-`migrate → places:seed → zones:realign → routes:precompute → zones:check`,
-each safe to repeat. From the repo root, with `PROD_URL` exported in this
+`migrate → places:seed → zones:realign → places:campus → routes:precompute → zones:check`,
+each safe to repeat. Run the migrations **before** deploying a server that
+needs them (the Driver position columns: the server reads them). From the repo root, with `PROD_URL` exported in this
 shell only (check its host first: `node -e 'console.log(new URL(process.env.PROD_URL).hostname)'`
 prints the host and nothing secret; production is `ep-empty-violet-bay5yr3y…`):
 
@@ -143,7 +195,13 @@ ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run pl
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zones:realign --workspace apps/server
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zones:realign --workspace apps/server -- --apply
 
-# 4. Zone routes (~4 minutes; no dry run — it only writes ZoneRoute rows)
+# 3b. Campus only: gates inside, places outside the area deactivated (dry run first)
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run places:campus --workspace apps/server
+ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run places:campus --workspace apps/server -- --apply
+
+# 4. Zone routes (~4 minutes; no dry run — it only writes ZoneRoute rows).
+#    Not until campus-only routing (stage 2): today it asks OSRM's public
+#    server, whose roads leave campus.
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:precompute --workspace apps/server -- --provider osrm
 
 # 5. Zone adjacency: every zone in service next to every other (read-only check;

@@ -32,6 +32,8 @@ export interface CampusPlace {
   longitude: number;
   category: PlaceCategory;
   zoneId: string;
+  /** Something riders must know about the spot ("Cars can't pass the main gate"); servers before 2026-10-29 don't send it. */
+  note?: string | null;
 }
 
 // ─── Labels for a pin ────────────────────────────────────────────────────────

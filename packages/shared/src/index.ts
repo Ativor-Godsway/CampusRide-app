@@ -38,6 +38,7 @@ export * from "./driver/slideToConfirm";
 export * from "./geo/serviceArea";
 export * from "./geo/reviewDemoPosition";
 export * from "./places/campusPlaces";
+export * from "./places/campusGates";
 export * from "./rides/ridePins";
 export * from "./places/tripEnd";
 export * from "./geo/liveRoute";

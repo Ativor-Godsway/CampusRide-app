@@ -212,7 +212,7 @@ describe("booking with exact pins", () => {
     const pickupOut = await book(token, { type: "LONE", pickup: KUMASI, dropoff: BALME });
     expect(pickupOut.statusCode).toBe(422);
     expect(pickupOut.json()).toMatchObject({ code: "OUTSIDE_SERVICE_AREA", end: "pickup" });
-    expect(pickupOut.json().error).toMatch(/^That pickup is outside the CampusRide area/);
+    expect(pickupOut.json().error).toMatch(/^That pickup is outside campus/);
 
     const dropoffOut = await book(token, { type: "LONE", pickup: BALME, dropoff: KUMASI });
     expect(dropoffOut.json()).toMatchObject({ code: "OUTSIDE_SERVICE_AREA", end: "dropoff" });

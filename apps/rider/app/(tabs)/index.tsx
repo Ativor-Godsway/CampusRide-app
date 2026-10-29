@@ -216,7 +216,7 @@ export default function HomeTab() {
           <Notice
             tone="warning"
             icon="navigate-outline"
-            message="You're outside the CampusRide area. Pickups are inside UG Legon."
+            message="You're outside campus. Pickups are on the University of Ghana (Legon) campus."
             style={styles.notice}
           />
         ) : null}

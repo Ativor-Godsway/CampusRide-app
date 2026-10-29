@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Zone } from "@prisma/client";
+import { isInServiceArea } from "@rida/shared";
 import { prisma } from "../db/prisma";
 import { REAL_ZONE_CENTRES, RENAMED_ZONES, RETIRED_ZONES, isAlreadyAligned, realignZones } from "./realignZones";
 import { createTestDriver, cleanupDriver } from "../services/ride/testFixtures";
@@ -143,5 +144,13 @@ describe("realignZones", () => {
     // Changed zones + at most one updateMany per target zone for places and for drivers.
     expect(statements).toBeLessThanOrEqual(zonesChanged + 2 * zoneCount);
     expect(statements).toBeLessThan(report.placesRezoned);
+  });
+});
+
+describe("REAL_ZONE_CENTRES", () => {
+  it("are all inside the service area (the Main Gate zone sits inside the gate)", () => {
+    for (const [name, centre] of Object.entries(REAL_ZONE_CENTRES)) {
+      expect(isInServiceArea(centre), name).toBe(true);
+    }
   });
 });

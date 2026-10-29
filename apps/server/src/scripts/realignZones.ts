@@ -47,7 +47,8 @@ export const RENAMED_ZONES: Record<string, string> = {};
 
 /** Zone (by its name AFTER renaming) → real position, from OpenStreetMap. */
 export const REAL_ZONE_CENTRES: Record<string, { latitude: number; longitude: number; from: string }> = {
-  "Main Gate": { latitude: 5.65017, longitude: -0.17896, from: "Legon Station bus stop at the main gate (node 4981090362)" },
+  // Inside the gate since 2026-10-29 (it was the Legon Station bus stop on J.J. Rawlings Avenue, now outside the area).
+  "Main Gate": { latitude: 5.6503, longitude: -0.18139, from: "Main Gate (inside), on La Road behind the closed gate" },
   "Legon Hall": { latitude: 5.649374, longitude: -0.187998, from: "Legon Hall (way 427645339)" },
   "Commonwealth Hall": { latitude: 5.650804, longitude: -0.192672, from: "Commonwealth Hall (way 497853937)" },
   "Volta Hall": { latitude: 5.651496, longitude: -0.189693, from: "Volta Hall (node 5734242918)" },
@@ -196,7 +197,7 @@ async function main() {
     if (isAlreadyAligned(report)) console.log("\nEverything is already in place: nothing to change.");
     if (apply) {
       console.log(`\n${report.placesRezoned} places changed zone; ${report.driversMoved} drivers moved out of a retired zone.`);
-      console.log("Now re-run the zone routes: npm run routes:precompute --workspace apps/server -- --provider osrm");
+      console.log("Zone routes: re-run routes:precompute only once campus-only routing is in (docs/places.md, Production order).");
     }
   } finally {
     await prisma.$disconnect();

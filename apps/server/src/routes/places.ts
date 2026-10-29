@@ -6,6 +6,7 @@ import {
   SERVICE_AREA_POLYGON,
   isInServiceArea,
   outsideServiceAreaMessage,
+  placeNote,
   routeAttribution,
   searchPlaces,
   type PathPoint,
@@ -25,6 +26,7 @@ function placeForApp(p: {
   longitude: number;
   category: string;
   zoneId: string;
+  source: string | null;
 }) {
   return {
     id: p.id,
@@ -34,6 +36,7 @@ function placeForApp(p: {
     longitude: p.longitude,
     category: p.category,
     zoneId: p.zoneId,
+    note: placeNote(p.source),
   };
 }
 

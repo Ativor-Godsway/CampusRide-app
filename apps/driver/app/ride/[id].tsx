@@ -1049,7 +1049,7 @@ function TopBar({
               accessibilityLabel="Sending. Waiting for a connection."
             />
           ) : null}
-          {farFromCampus ? <StatusChip tone="warn" label="Far from campus" style={styles.floating} /> : null}
+          {farFromCampus ? <StatusChip tone="warn" label="Outside campus" style={styles.floating} /> : null}
         </View>
       ) : null}
     </View>

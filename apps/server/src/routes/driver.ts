@@ -4,6 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { PassengerStatus } from "@rida/shared";
 import {
   DISPATCH_WINDOW_MS,
+  DRIVER_OUTSIDE_AREA_MESSAGE,
   PRICING,
   designateBestFit,
   encodePolyline,
@@ -16,6 +17,7 @@ import {
   ROAD_CIRCUITY_FACTOR,
   dropoffPin,
   haversineDistanceMeters,
+  isInServiceArea,
   pickupPin,
   straightLineSeconds,
   type RidePinFields,
@@ -51,6 +53,7 @@ import { approximatePins } from "../services/places/approximatePins";
 import { pinFieldsOf, requestPlaceNames } from "./ridePins";
 import { estimateRoute } from "../services/routing/pointRoutes";
 import { RULES } from "../rateLimit/rules";
+import { checkDriverPosition, hasActiveTrip, lastPositionData, parseDriverPoint } from "../services/zones/driverPosition";
 import {
   MAX,
   bodyOptional,
@@ -69,8 +72,9 @@ import {
 
 /** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
 const SCHEMAS = {
-  availability: { body: object({ isOnline: boolean, zoneId: nullableId }, ["isOnline"]) },
-  zone: { body: object({ zoneId: nullableId }, ["zoneId"]) },
+  // latitude/longitude: the driver's position (apps from 2026-10-29); the server checks it.
+  availability: { body: object({ isOnline: boolean, zoneId: nullableId, latitude, longitude }, ["isOnline"]) },
+  zone: { body: object({ zoneId: nullableId, latitude, longitude }, ["zoneId"]) },
   activeRide: noInput,
   history: noInput,
   profile: {
@@ -225,14 +229,21 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   /**
    * Set the driver's online/offline status and current zone.
    * Going online makes the driver eligible for ride broadcasts.
+   *
+   * With the driver's position (latitude/longitude), the server works out
+   * the zone itself (services/zones/driverPosition.ts) and refuses to put a
+   * driver outside the service area online — unless they're on a trip,
+   * which keeps working (with no zone, so no new requests).
    */
   app.patch("/driver/availability", { onRequest: requireAuth, schema: SCHEMAS.availability }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
-    const body = request.body as { isOnline?: unknown; zoneId?: unknown };
+    const body = request.body as { isOnline?: unknown; zoneId?: unknown; latitude?: unknown; longitude?: unknown };
     if (typeof body.isOnline !== "boolean") {
       return reply.code(400).send({ error: "isOnline (boolean) is required" });
     }
+    const point = parseDriverPoint(body);
+    if (point && "error" in point) return reply.code(400).send({ error: point.error });
 
     const userId = request.user!.userId;
 
@@ -252,10 +263,18 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       ? body.zoneId
       : undefined;
 
-    // A retired zone (sent by an app with an old zone list) counts as the
-    // in-service zone nearest it: a driver is never in a retired zone.
-    let zoneId: string | undefined;
-    if (requestedZoneId) {
+    // A position decides the zone (null outside the area); without one, the
+    // app's zone is used as before.
+    const position = await checkDriverPosition(prisma, userId, point);
+    let zoneId: string | null | undefined;
+    if (position.kind === "checked") {
+      zoneId = position.zoneId;
+      if (body.isOnline && zoneId === null && !(await hasActiveTrip(prisma, userId))) {
+        return refuse(reply, 403, "OUTSIDE_SERVICE_AREA", DRIVER_OUTSIDE_AREA_MESSAGE);
+      }
+    } else if (requestedZoneId) {
+      // A retired zone (sent by an app with an old zone list) counts as the
+      // in-service zone nearest it: a driver is never in a retired zone.
       zoneId = (await servedZoneId(prisma, requestedZoneId)) ?? undefined;
       if (!zoneId) return reply.code(404).send({ error: "Zone not found" });
     }
@@ -266,6 +285,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         isOnline: body.isOnline,
         ...(zoneId !== undefined ? { currentZoneId: zoneId } : {}),
         ...(!body.isOnline ? { currentZoneId: null } : {}),
+        // Only an online driver's position is kept.
+        ...(body.isOnline ? lastPositionData(position) : {}),
       },
     });
 
@@ -278,25 +299,36 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * once every 30s — see planZoneUpdate in @rida/shared). Separate from
    * /driver/availability so a zone update can never flip a driver online: an
    * offline driver gets 409 and nothing changes.
+   *
+   * With the driver's position, the server works out the zone itself: none
+   * outside the service area (so no new requests; a trip under way carries on).
    */
   app.patch("/driver/zone", { onRequest: requireAuth, schema: SCHEMAS.zone }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
-    const body = (request.body ?? {}) as { zoneId?: unknown };
+    const body = (request.body ?? {}) as { zoneId?: unknown; latitude?: unknown; longitude?: unknown };
     // null = "I'm outside the service area": no zone, so no requests.
     if (body.zoneId !== null && (typeof body.zoneId !== "string" || body.zoneId.length === 0)) {
       return reply.code(400).send({ error: "zoneId (string, or null to clear it) is required" });
     }
+    const point = parseDriverPoint(body);
+    if (point && "error" in point) return reply.code(400).send({ error: point.error });
     const userId = request.user!.userId;
-    // A retired zone counts as the in-service zone nearest it (see /driver/availability).
-    const zoneId = body.zoneId === null ? null : await servedZoneId(prisma, body.zoneId);
-    if (body.zoneId !== null && !zoneId) return reply.code(404).send({ error: "Zone not found" });
+    const position = await checkDriverPosition(prisma, userId, point);
+    let zoneId: string | null;
+    if (position.kind === "checked") {
+      zoneId = position.zoneId;
+    } else {
+      // A retired zone counts as the in-service zone nearest it (see /driver/availability).
+      zoneId = body.zoneId === null ? null : await servedZoneId(prisma, body.zoneId as string);
+      if (body.zoneId !== null && !zoneId) return reply.code(404).send({ error: "Zone not found" });
+    }
 
     // Conditional update: only an online driver's zone moves, decided in the
     // same statement as the write so a concurrent "go offline" always wins.
     const { count } = await prisma.driver.updateMany({
       where: { userId, isOnline: true },
-      data: { currentZoneId: zoneId },
+      data: { currentZoneId: zoneId, ...lastPositionData(position) },
     });
     if (count === 0) {
       const exists = await prisma.driver.findUnique({ where: { userId }, select: { id: true } });
@@ -758,6 +790,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       FROM "Driver" d WHERE d."userId" = ${userId}`;
     // A review demo driver sees demo requests wherever they are (services/reviewDemo).
     if (!driver || !driver.isOnline || !driver.isApproved || (!driver.currentZoneId && !driver.isReviewDemo) || driver.busy) {
+      return reply.code(200).send({ rides: [] });
+    }
+    // Off campus by its own position: no offers, even before the zone update lands.
+    if (driverPoint && !driver.isReviewDemo && !isInServiceArea(driverPoint)) {
       return reply.code(200).send({ rides: [] });
     }
 

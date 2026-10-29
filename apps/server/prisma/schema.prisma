@@ -179,8 +179,8 @@ model AccountDeletion {
 }
 
 model Driver {
-  id            String   @id @default(cuid())
-  userId        String   @unique
+  id            String    @id @default(cuid())
+  userId        String    @unique
   /// Nullable until the driver completes their profile (Phase 3:
   /// completeDriverProfile) — a Driver row is created at signup with these
   /// fields empty and isApproved=false.
@@ -189,11 +189,17 @@ model Driver {
   carColor      String?
   plate         String?
   photoUrl      String?
-  isApproved    Boolean  @default(false)
-  isOnline      Boolean  @default(false)
+  isApproved    Boolean   @default(false)
+  isOnline      Boolean   @default(false)
   currentZoneId String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  /// Where the driver's app last said they were (sent with going online and
+  /// with zone updates; apps from before 2026-10-29 send none). The server
+  /// checks it against the service area; also for the admin live map.
+  lastLat       Float?
+  lastLng       Float?
+  lastSeenAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   user        User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   currentZone Zone? @relation(fields: [currentZoneId], references: [id], onDelete: SetNull)

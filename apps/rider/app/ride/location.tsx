@@ -255,7 +255,12 @@ export default function PlanRideScreen() {
   const rowFor = (end: TripEnd, fallbackIcon: IconName): PlaceRow => {
     const place = end.placeId ? places?.find((p) => p.id === end.placeId) : undefined;
     return place
-      ? { end, icon: placeIcon(place), subtitle: PLACE_CATEGORY_LABELS[place.category] }
+      ? {
+          end,
+          icon: placeIcon(place),
+          // A note riders must see ("Cars can't pass the main gate") goes with the category.
+          subtitle: [PLACE_CATEGORY_LABELS[place.category], place.note].filter(Boolean).join(" · "),
+        }
       : { end, icon: fallbackIcon };
   };
   const recentRows = recent

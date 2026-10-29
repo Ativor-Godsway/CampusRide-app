@@ -101,7 +101,7 @@ export default function PickOnMapScreen() {
           {field === "pickup" ? "PICKUP" : "DROP-OFF"}
         </Text>
         <Text variant="h3" numberOfLines={2} accessibilityLiveRegion="polite">
-          {moving ? "Move the map to place the pin…" : end.label}
+          {moving ? "Move the map to place the pin…" : inside ? end.label : "Outside campus"}
         </Text>
         {!inside && !moving ? (
           <Text variant="bodySmall" style={styles.outside} accessibilityRole="alert">
