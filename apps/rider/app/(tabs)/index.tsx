@@ -27,6 +27,7 @@ import {
   Button,
   CampusMapView,
   Chip,
+  LaunchCountdownCard,
   ListRow,
   Notice,
   Skeleton,
@@ -41,6 +42,7 @@ import {
   shadows,
   spacing,
   useAuth,
+  useLaunchView,
   type ActiveRideSummary,
   type RideSummary,
 } from "@rida/mobile-shared";
@@ -88,6 +90,8 @@ export default function HomeTab() {
   const [areaHeight, setAreaHeight] = useState(windowHeight);
   const [sheetCover, setSheetCover] = useState(SHEET_ESTIMATE);
   const { data: places } = usePlaces();
+  // Before the public launch: a countdown (gone by itself at launch time; never for early access).
+  const launch = useLaunchView();
 
   // Own cache key: the Rides tab caches history pages, a different shape.
   // Fetch a few more than we show so repeat trips still leave 3 distinct places.
@@ -193,6 +197,10 @@ export default function HomeTab() {
             {firstName ? `, ${firstName}` : ""}
           </Text>
         )}
+
+        {launch.kind === "countdown" ? (
+          <LaunchCountdownCard launchAt={launch.launchAt} parts={launch.parts} />
+        ) : null}
 
         <Pressable
           onPress={planRide}

@@ -57,6 +57,7 @@ import {
   text,
 } from "../http/schemas";
 import { notifyRiderCancelled } from "../services/push/notify";
+import { LaunchNotOpenError } from "../services/launch/launchSettings";
 
 /**
  * Shape returned by `POST /rides/:id/initiate-payment` while
@@ -170,6 +171,9 @@ const RIDER_CANCELLABLE_STATUSES: RideStatus[] = [
  * dropoffZoneId instead, and get exactly the ride they always did. Refusals:
  * 422 OUTSIDE_SERVICE_AREA, 404 PLACE_NOT_FOUND, 400 TRIP_TOO_SHORT /
  * NOTE_TOO_LONG — each with `error` in words the app can show as-is.
+ * 422 LAUNCH_NOT_OPEN during the launch countdown: a 400/404/422 with a code
+ * and an error is what every app build since exact pins shows in its own
+ * words ("CampusRide opens on …"), so older builds need no update for it.
  */
 export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): void {
   useRequestValidation(app);
@@ -234,6 +238,11 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         paymentMethod,
       });
     } catch (err) {
+      if (err instanceof LaunchNotOpenError) {
+        return reply
+          .code(422)
+          .send({ error: err.message, code: err.code, launchAt: err.launchAt.toISOString() });
+      }
       if (err instanceof SameZoneError) {
         return reply.code(400).send({ error: err.message });
       }

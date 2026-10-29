@@ -44,6 +44,7 @@ Last reviewed: 2026-10-16 (pre-launch hardening, Stages 1–5).
 | `GET /health` | No | — | Returns `{status, app}` only. Render's liveness check; never touches the database. | none (Render polls it) |
 | `GET /health/ready` | No | — | Also checks the database (`SELECT 1`, at most 3 s): `{status, app, database}`, 503 when it can't be reached. No error details. For UptimeRobot. | none (UptimeRobot polls it) |
 | `GET /app/min-version` | No | — | Per app and platform, the lowest store version still allowed and the store link, from the `MIN_VERSION_*` / `STORE_URL_*` Render variables (docs/runbooks/releasing.md). Not secret, the same for everyone; reads nothing from the database. | IP backstop |
+| `GET /launch-status` | No | — | Launch mode in force (`OFF`, `COUNTDOWN`, `LIVE`), the launch time during a countdown, and the server's clock. Not secret, the same for everyone; one cached database read (10 s). | IP backstop |
 | `POST /auth/request-otp` | No | — | Sends a code to the phone given. | per number: 1 per 60 s, 5 / 15 min, 10 / 24 h (an admin's number: 3 / 15 min, 6 / 24 h); per IP: 200 codes / 15 min; IP backstop |
 | `POST /auth/verify-otp` | No | — | Returns a 5-minute verification token for that phone only. 5 wrong tries burns the code. | per number: 10 / 15 min (an admin's: 5); IP backstop |
 | `POST /auth/verify-code` | No | — | The apps' one phone entry. Checks the code exactly as `/auth/verify-otp` does (purpose LOGIN), then: an open account gets a session, as `/auth/login`; no account (or a deleted one) gets a 5-minute SIGNUP verification token for `/auth/signup`. Whether a number has an account is only said after the right code: `/auth/request-otp` answers the same for every number. Refuses ADMIN accounts not on `ADMIN_PHONE_ALLOWLIST`; attempts about an admin's number are recorded. | per number: 10 / 15 min verifying (an admin's: 5), then 10 / 15 min signing in (with sign-ups); IP backstop |
@@ -78,6 +79,7 @@ always the one in the token.
 | Route | Login | Roles | Ownership rule | Rate limit |
 |---|---|---|---|---|
 | `GET /me` | Yes | any | Own account only. | account default |
+| `GET /me/launch-status` | Yes | any | As `GET /launch-status`, plus `canRide`: whether this account may book now (review demo, admin and early-access accounts can during the countdown). Own account only. | account default |
 | `PATCH /me` | Yes | any | Own name and emergency contact only. Any other field sent (role, phone, ids) is ignored. | 20 / hour; account default |
 | `POST /me/terms` | Yes | any | Own account only: records "I'm 18 or older and I agree to the Terms and Privacy Policy" (time and terms version) for an account from before sign-up asked. | 20 / hour; account default |
 | `POST /me/deletion-code` | Yes | any | Texts a confirmation code to the account's **own** phone (never a number from the request); answers with it masked. Refused while a ride is active, before any text is sent. | 5 / hour; the login-code limits for that number; account default |
@@ -154,6 +156,11 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `POST /admin/account-deletion/code` | Yes | ADMIN | Texts that number an account-deletion code (valid 30 minutes). Refused for admin accounts and during a ride. Audit-logged. | account default; plus the number's code limits (as `POST /auth/request-otp`) and the per-IP code cap |
 | `POST /admin/account-deletion/verify` | Yes | ADMIN | Checks the code the person emailed back; a right one returns a 5-minute token for that account and that admin only. 5 wrong tries burns the code. Audit-logged, never the code. | account default; plus the number's code-check limit |
 | `POST /admin/account-deletion/delete` | Yes | ADMIN | Closes that one account with the token, exactly as in-app deletion does. Refused for admin accounts and during a ride. Audit-logged. | account default |
+| `GET /admin/launch` | Yes | ADMIN | Launch mode as stored, as in force now, who last changed it, and how many riders have early access. | account default |
+| `PUT /admin/launch` | Yes | ADMIN | Sets the launch mode; a countdown needs a launch time in the future. Audit-logged (`launch.update`, before and after). | account default |
+| `GET /admin/early-access` | Yes | ADMIN | One phone number's account and whether it has early access. | account default |
+| `POST /admin/early-access` | Yes | ADMIN | Gives or takes away one rider's early access (rider accounts only). Audit-logged (`early_access.grant` / `early_access.revoke`). | account default |
+| `POST /admin/early-access/all-riders` | Yes | ADMIN | Gives early access to every open rider account that exists now (not review demo accounts). Audit-logged once with the count (`early_access.grant_all`). | account default |
 
 ## Socket.io
 

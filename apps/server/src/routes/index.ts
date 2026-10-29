@@ -19,6 +19,7 @@ import { registerPlaceRoutes } from "./places";
 import { registerPushRoutes } from "./push";
 import { registerHealthRoutes } from "./health";
 import { registerAppVersionRoutes } from "./appVersion";
+import { registerLaunchRoutes } from "./launch";
 import { installRateLimits } from "../rateLimit/http";
 import { installErrorHandling } from "../http/errors";
 import { useRequestValidation } from "../http/validation";
@@ -52,6 +53,8 @@ export function registerAllRoutes(
   registerHealthRoutes(app, prisma);
   // Public: whether this app version must update first (the "Time to update" screen).
   registerAppVersionRoutes(app);
+  // Public launch countdown status, its signed-in form, and the admin Settings.
+  registerLaunchRoutes(app, prisma);
 
   registerAuthRoutes(app, prisma, deps.otpService);
   registerDemoOtpRoutes(app, prisma, deps.otpService);

@@ -5,6 +5,7 @@ import { resolveRideEnd, type ResolvedRideEnd, type RideEndInput } from "../plac
 import { broadcastRide } from "./dispatch";
 import { findActiveRideForRider } from "./activeRide";
 import { logger } from "../../lib/logger";
+import { assertCanBook } from "../launch/launchSettings";
 
 /** Rides in any of these statuses count as "active" — a rider may have at most one at a time. */
 export { ACTIVE_RIDE_STATUSES } from "./activeRide";
@@ -102,6 +103,10 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
   const occupancy = input.occupancy ?? 1;
   const paymentMethod: PaymentMethod = input.paymentMethod ?? "MOMO";
   const source: RideSource = input.source ?? "APP";
+
+  // Launch mode: during the countdown only exempt riders book, and everyone
+  // else hears when CampusRide opens before anything else (LaunchNotOpenError).
+  await assertCanBook(prisma, riderId);
 
   // Pins first: they can be refused (outside the area, unknown place) before
   // anything else is read.

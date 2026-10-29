@@ -15,3 +15,4 @@ export * from "./monitoring";
 export * from "./about";
 export * from "./appUpdate";
 export * from "./errors/AppErrorScreen";
+export * from "./launch";

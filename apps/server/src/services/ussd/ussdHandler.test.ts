@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { prisma } from "../../db/prisma";
 import { handleUssdRequest, type MoolreUssdRequest } from "./ussdHandler";
+import { clearLaunchCache, setLaunchMode } from "../launch/launchSettings";
 
 let counter = 0;
 /** A unique, valid (per lib/phone.ts) 233-format msisdn for each test. */
@@ -107,6 +108,26 @@ describe("handleUssdRequest", () => {
     // Session must be cleared — replaying the same sessionId now resets to MAIN.
     const replay = await handleUssdRequest(prisma, continueRequest(sessionId, msisdn, "1"));
     expect(replay.message).toContain("1. Request a ride");
+  });
+
+  it("during the launch countdown, says when CampusRide opens and books nothing", async () => {
+    const actor = `ussd-test-admin-${Date.now()}`;
+    await setLaunchMode(prisma, actor, { mode: "COUNTDOWN", launchAt: new Date(Date.now() + 86_400_000) });
+    try {
+      const msisdn = testMsisdn();
+      const { sessionId } = await walkToConfirm(msisdn);
+      const res = await handleUssdRequest(prisma, continueRequest(sessionId, msisdn, "1"));
+      expect(res.reply).toBe(false);
+      expect(res.message).toMatch(/^CampusRide opens on /);
+
+      const user = await prisma.user.findUnique({ where: { phone: `+${msisdn}` } });
+      if (user) createdUserIds.push(user.id);
+      expect(await prisma.ride.count({ where: { riderId: user?.id ?? "none" } })).toBe(0);
+    } finally {
+      await prisma.launchSetting.deleteMany({});
+      await prisma.adminAuditLog.deleteMany({ where: { actor } });
+      clearLaunchCache();
+    }
   });
 
   it("ends gracefully (does not throw) when the msisdn fails phone normalization", async () => {

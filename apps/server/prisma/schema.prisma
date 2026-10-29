@@ -139,6 +139,10 @@ model User {
   ageConfirmedAt        DateTime?
   termsAcceptedAt       DateTime?
   termsVersion          String?
+  /// Early access (launch mode): when an admin let this rider book during
+  /// the countdown before the public launch, null if not. Set one by one or
+  /// for every current rider at once in the admin site's Settings.
+  earlyAccessAt         DateTime?
 
   driver                 Driver?
   ridesAsRider           Ride[]             @relation("RiderRides")
@@ -637,6 +641,27 @@ model CommissionLedger {
   ride   Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
 
   @@index([driverUserId])
+}
+
+enum LaunchMode {
+  OFF
+  COUNTDOWN
+  LIVE
+}
+
+/// Launch mode (@rida/shared launch/launchMode.ts): at most one row, id
+/// "launch"; no row means OFF. During COUNTDOWN only exempt riders (review
+/// demo accounts, admins, early access) can book, and from `launchAt` on it
+/// counts as LIVE by itself (nothing rewrites the row). Edited only through
+/// services/launch/launchSettings.ts, which writes the audit log with it.
+model LaunchSetting {
+  id        String     @id @default("launch")
+  mode      LaunchMode @default(OFF)
+  /// The public launch moment; set while mode is COUNTDOWN, null otherwise.
+  launchAt  DateTime?
+  updatedAt DateTime   @updatedAt
+  /// User.id of the admin who last changed it. Plain column, like AdminAuditLog.actor.
+  updatedBy String?
 }
 
 /// Phase 5: an append-only record of every action an admin takes in the admin

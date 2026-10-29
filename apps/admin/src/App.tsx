@@ -7,8 +7,9 @@ import { PlacesScreen } from "./screens/PlacesScreen";
 import { RateLimitsScreen } from "./screens/RateLimitsScreen";
 import { AdminLoginsScreen } from "./screens/AdminLoginsScreen";
 import { DeleteAccountScreen } from "./screens/DeleteAccountScreen";
+import { SettingsScreen } from "./screens/SettingsScreen";
 
-type Tab = "drivers" | "rides" | "places" | "limits" | "delete" | "logins";
+type Tab = "drivers" | "rides" | "places" | "limits" | "delete" | "logins" | "settings";
 
 /**
  * A few screens behind one login gate. No router: adding one would buy
@@ -68,6 +69,13 @@ export function App() {
           >
             Admin logins
           </button>
+          <button
+            type="button"
+            className={tab === "settings" ? "tab active" : "tab"}
+            onClick={() => setTab("settings")}
+          >
+            Settings
+          </button>
         </nav>
         <div className="session">
           <span className="muted">{session.user.name}</span>
@@ -88,6 +96,8 @@ export function App() {
           <RateLimitsScreen />
         ) : tab === "delete" ? (
           <DeleteAccountScreen />
+        ) : tab === "settings" ? (
+          <SettingsScreen />
         ) : (
           <AdminLoginsScreen />
         )}

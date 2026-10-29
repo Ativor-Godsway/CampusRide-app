@@ -52,6 +52,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /health": "public",
   "GET /health/ready": "public",
   "GET /app/min-version": "public",
+  "GET /launch-status": "public",
   "POST /auth/request-otp": "public",
   "POST /auth/verify-otp": "public",
   "POST /auth/verify-code": "public",
@@ -73,6 +74,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /routes/legs": "signed-in",
 
   "GET /me": "self",
+  "GET /me/launch-status": "self",
   "PATCH /me": "self",
   "POST /me/terms": "self",
   "DELETE /me": "self",
@@ -130,6 +132,11 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /admin/account-deletion/code": "admin",
   "POST /admin/account-deletion/verify": "admin",
   "POST /admin/account-deletion/delete": "admin",
+  "GET /admin/launch": "admin",
+  "PUT /admin/launch": "admin",
+  "GET /admin/early-access": "admin",
+  "POST /admin/early-access": "admin",
+  "POST /admin/early-access/all-riders": "admin",
 };
 
 // ─── App, people and rides ─────────────────────────────────────────────────

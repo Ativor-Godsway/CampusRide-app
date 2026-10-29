@@ -10,11 +10,13 @@ import {
   MAX_PIN_ADJUST_METERS,
   PICKUP_NOTE_MAX_LENGTH,
   clampToRadius,
+  countdownWords,
   estimateEtaMinutes,
   getSharedFarePerRider,
   isInServiceArea,
   mapFitPadding,
   movedEnd,
+  opensInText,
   pickupPlace,
   planTripStops,
   pointsKey,
@@ -54,6 +56,7 @@ import {
   useAuth,
   useDriverLocation,
   useCarNotice,
+  useLaunchView,
   useRideTracking,
   useToast,
   RideRequestRefusedError,
@@ -164,6 +167,8 @@ export default function RideTypeScreen() {
   const [leaving, setLeaving] = useState(false);
   const [conflictOpen, setConflictOpen] = useState(false);
   const { user } = useAuth();
+  // Before the public launch the Request button says when booking opens (the server refuses it anyway).
+  const launch = useLaunchView();
   const { data: trackingData } = useRideTracking(activeRideId ?? undefined);
 
   // "Picking up 1 more rider on the way · ~3 min" when the driver adds a
@@ -731,12 +736,21 @@ export default function RideTypeScreen() {
           // The one action, pinned at the bottom (above the keyboard while the
           // note is being typed).
           footer={
-            <Button
-              label={`Request ${selectedOption.title}`}
-              onPress={() => void handleSubmit()}
-              loading={submitting}
-              accessibilityHint={`${spokenCedis(selectedOption.farePesewas)}, paid in cash`}
-            />
+            launch.kind === "countdown" ? (
+              // Before the public launch: the prices are real, booking opens at launch time.
+              <Button
+                label={opensInText(launch.parts)}
+                disabled
+                accessibilityLabel={`Booking opens in ${countdownWords(launch.parts)}`}
+              />
+            ) : (
+              <Button
+                label={`Request ${selectedOption.title}`}
+                onPress={() => void handleSubmit()}
+                loading={submitting}
+                accessibilityHint={`${spokenCedis(selectedOption.farePesewas)}, paid in cash`}
+              />
+            )
           }
         >
           <Text variant="title2" accessibilityRole="header">

@@ -423,3 +423,27 @@ label.inline input {
   transform: rotate(-45deg);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
+
+/* ── Settings ───────────────────────────────────────────────────────────── */
+
+.settings-card {
+  margin-bottom: 1.25rem;
+  max-width: 760px;
+}
+
+.settings-form {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.settings-option {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  cursor: pointer;
+}
+
+.settings-option input {
+  margin-top: 0.3rem;
+}

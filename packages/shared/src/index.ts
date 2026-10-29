@@ -56,3 +56,4 @@ export * from "./driver/locationAccess";
 export * from "./driver/todayEarnings";
 export * from "./driver/periodEarnings";
 export * from "./driver/plate";
+export * from "./launch/launchMode";
