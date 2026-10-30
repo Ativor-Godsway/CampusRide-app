@@ -61,6 +61,24 @@ export function estimateEtaMinutes(
 }
 
 /**
+ * A shown arrival time moves only when a new estimate differs from it by at
+ * least this much: GPS jitter and a road estimate replacing a straight-line
+ * one change the estimate by seconds, which made "3 min" / "4 min" and
+ * "Arrives 10:42" / "10:43" flick back and forth on every update.
+ */
+export const ETA_STEADY_MS = 60_000;
+
+/**
+ * The arrival time to show (epoch ms): the one already shown, unless the
+ * new estimate is ETA_STEADY_MS or more away from it. The minutes shown are
+ * worked out from it as time passes, so they only ever count down while the
+ * estimate holds.
+ */
+export function steadyArrivalAt(shown: number | null, estimate: number): number {
+  return shown === null || Math.abs(estimate - shown) >= ETA_STEADY_MS ? estimate : shown;
+}
+
+/**
  * Formats an ETA for display. "about" is doing real work here: it signals an
  * estimate rather than a promise, which matters when the underlying figure is
  * a straight-line guess.

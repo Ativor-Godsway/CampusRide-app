@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  ETA_STEADY_MS,
+  steadyArrivalAt,
   ASSUMED_AVERAGE_SPEED_KMH,
   MIN_ETA_MINUTES,
   estimateEtaMinutes,
@@ -74,5 +76,25 @@ describe("formatEta", () => {
     expect(formatEta(60)).toBe("about 1 hr");
     expect(formatEta(75)).toBe("about 1 hr 15 min");
     expect(formatEta(120)).toBe("about 2 hr");
+  });
+});
+
+describe("steadyArrivalAt", () => {
+  const T = 1_000_000;
+  it("takes the first estimate", () => {
+    expect(steadyArrivalAt(null, T)).toBe(T);
+  });
+  it("keeps the shown time through small changes either way", () => {
+    expect(steadyArrivalAt(T, T + 59_000)).toBe(T);
+    expect(steadyArrivalAt(T, T - 59_000)).toBe(T);
+  });
+  it("moves to a new estimate a minute or more away", () => {
+    expect(steadyArrivalAt(T, T + ETA_STEADY_MS)).toBe(T + ETA_STEADY_MS);
+    expect(steadyArrivalAt(T, T - 2 * ETA_STEADY_MS)).toBe(T - 2 * ETA_STEADY_MS);
+  });
+  it("estimates jittering around a half-minute boundary never move it", () => {
+    let shown: number | null = null;
+    for (const s of [150, 145, 155, 148, 152, 149, 151]) shown = steadyArrivalAt(shown, T + s * 1000);
+    expect(shown).toBe(T + 150_000);
   });
 });

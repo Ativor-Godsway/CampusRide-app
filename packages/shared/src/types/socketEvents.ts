@@ -14,6 +14,8 @@ export const RIDE_EVENTS = {
   COMPLETED: "ride:completed",
   PASSENGER_STATUS: "ride:passenger_status",
   CAR_NOTICE: "ride:car_notice",
+  /** This rider's road ETA, worked out by the server (to their own room only). */
+  ETA: "ride:eta",
 } as const;
 
 export type RideServerEvent = (typeof RIDE_EVENTS)[keyof typeof RIDE_EVENTS];
@@ -97,6 +99,21 @@ export interface RideServerEventPayloads {
   "ride:completed": RideCompletedPayload;
   "ride:passenger_status": PassengerStatusPayload;
   "ride:car_notice": CarNoticePayload;
+  "ride:eta": RideEtaPayload;
+}
+
+/**
+ * How long until the car reaches this rider's pickup (`toward: "pickup"`,
+ * still waiting) or their drop-off (on board), on campus roads, from the
+ * driver's latest position (services/ride/riderEta.ts). Sent to the rider's
+ * own room, at most every 10 s per ride.
+ */
+export interface RideEtaPayload {
+  rideId: string;
+  toward: "pickup" | "dropoff";
+  seconds: number;
+  /** When it was worked out (epoch ms). */
+  at: number;
 }
 
 /** Client -> server events: subscribe/unsubscribe to a ride's room. */

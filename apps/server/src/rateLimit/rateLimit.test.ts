@@ -98,11 +98,23 @@ function expect429(res: {
   expect(res.statusCode).toBe(429);
   const seconds = Number(res.headers["retry-after"]);
   expect(seconds).toBeGreaterThan(0);
-  expect(res.json()).toEqual({
-    error: expect.stringMatching(/^Too many attempts\. Try again in .+\.$/),
-    code: "RATE_LIMITED",
-    retryAfterSeconds: seconds,
-  });
+  const body = res.json() as { limit?: unknown };
+  // The one-a-minute login-code cooldown is worded as a short wait (the app
+  // opens the code screen on it); every other limit says the same sentence.
+  expect(body).toEqual(
+    body.limit === "OTP_COOLDOWN"
+      ? {
+          error: expect.stringMatching(/^Wait \d+:\d\d before asking for a new code\.$/),
+          code: "RATE_LIMITED",
+          retryAfterSeconds: seconds,
+          limit: "OTP_COOLDOWN",
+        }
+      : {
+          error: expect.stringMatching(/^Too many attempts\. Try again in .+\.$/),
+          code: "RATE_LIMITED",
+          retryAfterSeconds: seconds,
+        },
+  );
 }
 
 // ─── The store and the limiter ────────────────────────────────────────────
@@ -195,9 +207,9 @@ describe("one person's limit never touches another, even on the same IP", () => 
           .statusCode,
       ).toBe(200);
     }
-    expect429(
-      await call("POST", "/auth/request-otp", { payload: { phone: a, purpose: "SIGNUP" } }),
-    );
+    const refused = await call("POST", "/auth/request-otp", { payload: { phone: a, purpose: "SIGNUP" } });
+    expect(refused.statusCode).toBe(429);
+    expect(refused.json()).toMatchObject({ code: "RATE_LIMITED", limit: "OTP_COOLDOWN" });
     expect(
       (await call("POST", "/auth/request-otp", { payload: { phone: b, purpose: "SIGNUP" } }))
         .statusCode,

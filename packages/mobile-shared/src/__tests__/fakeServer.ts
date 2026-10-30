@@ -45,6 +45,12 @@ export interface FakeServer {
   deleteAccount(): void;
   /** Answers to requests on this path take this long (simulated time). */
   slow: { path: string; ms: number } | null;
+  /**
+   * Off (null) unless a test turns it on: like the real server, a second code
+   * to the same number within this many seconds is refused with the
+   * cooldown's 429 (limit OTP_COOLDOWN). Wall-clock time (jest's clock).
+   */
+  otpCooldownSeconds: number | null;
   /** Extra routes for a test: return a body, or undefined for 404. */
   routes: Record<string, (body: unknown) => unknown>;
   refreshTokenReuseGraceMs: number;
@@ -108,6 +114,8 @@ export function installFakeServer(role: AuthUser["role"] = "RIDER"): FakeServer 
     }
   }
 
+  /** Phone -> when the last code went out (otpCooldownSeconds). */
+  const codesSentAt = new Map<string, number>();
   const server: FakeServer = {
     user: makeUser(role),
     registered: true,
@@ -118,6 +126,7 @@ export function installFakeServer(role: AuthUser["role"] = "RIDER"): FakeServer 
     slow: null,
     refreshTokenReuseGraceMs: REUSE_GRACE_MS,
     routes: {},
+    otpCooldownSeconds: null,
     expireAccessTokens() {
       for (const t of accessTokens.values()) t.expired = true;
     },
@@ -144,8 +153,19 @@ export function installFakeServer(role: AuthUser["role"] = "RIDER"): FakeServer 
   function handle(method: string, path: string, body: Record<string, unknown>, config: InternalAxiosRequestConfig): [number, unknown] {
     const key = `${method} ${path}`;
     switch (key) {
-      case "POST /auth/request-otp":
+      case "POST /auth/request-otp": {
+        if (server.otpCooldownSeconds !== null) {
+          const phone = String(body.phone);
+          const last = codesSentAt.get(phone);
+          const wait = last === undefined ? 0 : server.otpCooldownSeconds * 1000 - (Date.now() - last);
+          if (wait > 0) {
+            const seconds = Math.ceil(wait / 1000);
+            return [429, { error: `Wait 0:${String(seconds).padStart(2, "0")} before asking for a new code.`, code: "RATE_LIMITED", retryAfterSeconds: seconds, limit: "OTP_COOLDOWN" }];
+          }
+          codesSentAt.set(phone, Date.now());
+        }
         return [200, { ok: true }];
+      }
       case "POST /auth/verify-otp":
         return [200, { verifiedToken: "verified" }];
       case "POST /auth/verify-code":

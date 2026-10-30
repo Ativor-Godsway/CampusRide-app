@@ -12,6 +12,7 @@ import {
 } from "@rida/shared";
 import { adminOnly, requireAuth, requireAdmin } from "../middleware/auth";
 import { getActiveZones } from "../services/zones/zoneCache";
+import { rideFareForAdmin } from "../services/ride/fares";
 import { clearPlaceCache } from "../services/places/placeCache";
 import { normalizePhone } from "../lib/phone";
 import { clearPersonLimits, personLimitStatus } from "../rateLimit/admin";
@@ -61,6 +62,8 @@ const ADMIN_RIDE_SELECT = {
   source: true,
   occupancy: true,
   fareTotal: true,
+  // The fare is read from the seats (Ride.fareTotal is never written).
+  passengers: { select: { status: true, lockedFare: true, fareCharged: true } },
   paymentStatus: true,
   paymentMethod: true,
   cancelReason: true,
@@ -446,15 +449,21 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
     // The readable label and the "driver problem" flag come from
     // @rida/shared, so the admin site never keeps its own copy.
     return reply.send({
-      rides: rides.map((ride) => ({
-        ...ride,
-        riderCancelReasonLabel: ride.riderCancelReason
-          ? RIDER_CANCEL_REASON_LABELS[ride.riderCancelReason]
-          : null,
-        riderCancelFlagged:
-          ride.riderCancelReason !== null &&
-          FLAGGED_RIDER_CANCEL_REASONS.includes(ride.riderCancelReason),
-      })),
+      rides: rides.map(({ passengers, ...ride }) => {
+        const fare = rideFareForAdmin(ride.type, ride.status, passengers);
+        return {
+          ...ride,
+          fareTotal: fare.pesewas,
+          /** False while the ride is still going on: what its riders will pay so far. */
+          fareFinal: fare.final,
+          riderCancelReasonLabel: ride.riderCancelReason
+            ? RIDER_CANCEL_REASON_LABELS[ride.riderCancelReason]
+            : null,
+          riderCancelFlagged:
+            ride.riderCancelReason !== null &&
+            FLAGGED_RIDER_CANCEL_REASONS.includes(ride.riderCancelReason),
+        };
+      }),
     });
   });
 

@@ -18,6 +18,8 @@ import { ExpiredAccessTokenError, verifyAccessToken } from "../services/auth/tok
 import { loadActiveAccount } from "../services/auth/accountStatus";
 import { checkDriverArriving } from "../services/push/notify";
 import { recordDriverPosition } from "../services/zones/livePositions";
+import { riderEtaDue, riderEtas } from "../services/ride/riderEta";
+import { logger } from "../lib/logger";
 import { limiter } from "../rateLimit/limiter";
 import { RULES } from "../rateLimit/rules";
 import { alerts, noteDatabaseError } from "../lib/alerts";
@@ -194,6 +196,15 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
           checkDriverArriving(prisma, data.rideId, userId, { latitude: data.lat, longitude: data.lng });
           // A shared car with a free seat still shows on riders' Home maps.
           recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
+          // Each rider's road ETA, to their own room (every 10 s per ride).
+          if (riderEtaDue(data.rideId)) {
+            riderEtas(prisma, data.rideId, userId, { latitude: data.lat, longitude: data.lng }).then(
+              (etas) => {
+                for (const eta of etas) ioRef?.to(roomForRider(eta.riderId)).emit(RIDE_EVENTS.ETA, eta.payload);
+              },
+              (err) => logger.warn("rider ETA failed", { err, rideId: data.rideId }),
+            );
+          }
         },
         () => {},
       );

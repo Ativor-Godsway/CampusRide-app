@@ -24,7 +24,9 @@ const NOTICES: { name: string; licence: string; by: string }[] = [
   { name: "axios", licence: "MIT", by: "Matt Zabriskie and contributors" },
   { name: "Socket.IO client", licence: "MIT", by: "Guillermo Rauch and contributors" },
   {
-    name: "Map routes (OSRM, openrouteservice)",
+    // Routes come from CampusRide's own campus road map (since 2026-10-29),
+    // made from OpenStreetMap data: no outside routing service.
+    name: "Campus road map (routes)",
     licence: "Open Database License (map data)",
     by: "© OpenStreetMap contributors",
   },

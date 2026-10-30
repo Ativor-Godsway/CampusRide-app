@@ -50,6 +50,24 @@ export function paidFareTotal(type: RideKind, seats: readonly SeatFare[]): numbe
 }
 
 /**
+ * A ride's fare as the admin site shows it, from the fares stored on its
+ * seats (Ride.fareTotal is never written): a completed ride, what was paid
+ * (final); a ride still going on, what its live seats will pay (not final
+ * yet); a cancelled one, none.
+ */
+export function rideFareForAdmin(
+  type: RideKind,
+  status: string,
+  seats: readonly SeatFare[],
+): { pesewas: number | null; final: boolean } {
+  if (status === "COMPLETED") return { pesewas: paidFareTotal(type, seats), final: true };
+  if (status === "CANCELLED") return { pesewas: null, final: true };
+  const live = seats.filter((s) => s.status !== "CANCELLED");
+  if (live.length === 0) return { pesewas: null, final: false };
+  return { pesewas: live.reduce((sum, s) => sum + seatFare(type, s), 0), final: false };
+}
+
+/**
  * The fare a waiting request was quoted: its requester's seat (a request has
  * just the one active seat). Used for the offer drivers see and for the seat
  * the rider takes when a driver adds them to a car.

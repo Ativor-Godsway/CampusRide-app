@@ -25,6 +25,12 @@ export const TOKEN = {
    * still holds the old token and sends it again once it is back online.
    * Inside this window that is honoured, and the user stays signed in;
    * after it, presenting a used token is treated as theft.
+   *
+   * Kept at 10 (reviewed 2026-10-30, not shortened to 2): a phone that loses
+   * the answer often can't retry for minutes (no signal, asleep), and past
+   * the window it is signed out. Shortening it only guards an already
+   * replaced token, which a thief able to take one from the phone wouldn't
+   * need — they'd take the current one.
    */
   REFRESH_RETRY_GRACE_MINUTES: 10,
   /**

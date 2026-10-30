@@ -1,9 +1,15 @@
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { GHANA_PHONE_EXAMPLE, normalizeGhanaPhone } from "@rida/shared";
+import {
+  GHANA_PHONE_EXAMPLE,
+  isOtpCooldown,
+  isTransientRequestFailure,
+  normalizeGhanaPhone,
+  retryAfterSecondsOf,
+} from "@rida/shared";
 import { requestOtp } from "../api";
 import { Button, PhoneInput } from "../../design";
-import { errorMessage } from "../errorMessage";
+import { errorMessage, errorStatus } from "../errorMessage";
 import { AuthPage } from "./AuthPage";
 
 /**
@@ -38,7 +44,22 @@ export function PhoneScreen() {
       await requestOtp(phone, "LOGIN");
       router.push({ pathname: "/auth/otp", params: { phone } });
     } catch (err) {
-      setError(errorMessage(err));
+      if (isOtpCooldown(err)) {
+        // A code went to this number under a minute ago — usually this
+        // "Send code" timing out earlier and then going through. Not a limit:
+        // the code screen, counting down to when a new one can be sent.
+        router.push({
+          pathname: "/auth/otp",
+          params: { phone, sent: "earlier", resendIn: String(retryAfterSecondsOf(err) ?? 60) },
+        });
+      } else if (isTransientRequestFailure({ status: errorStatus(err) ?? null })) {
+        // No answer (a server waking up, a slow network): the code may well be
+        // on its way. Never "Something went wrong" — and a retry here would only
+        // meet the one-a-minute cooldown.
+        router.push({ pathname: "/auth/otp", params: { phone, sent: "unsure" } });
+      } else {
+        setError(errorMessage(err));
+      }
     } finally {
       setSending(false);
     }
