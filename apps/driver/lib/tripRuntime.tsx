@@ -15,11 +15,14 @@ import { RIDE_EVENTS, type RideStatusPayload } from "@rida/shared";
 import { getRideSocket, subscribeToRide, unsubscribeFromRide, type RideWithZones } from "@rida/mobile-shared";
 import { driverActiveRideQueryKey, useDriverActiveTrip } from "./activeTrip";
 import { useDriverLocation, useLocationDemand } from "./location";
+import { useDriverPresence } from "./presence";
 import { configureTripActions, overlayPassengers, runPassengerAction, useTripActions } from "./tripActions";
 import { useZones } from "./zones";
 
 /** Riders see the driver move: one position every few seconds. */
 const LOCATION_SEND_MS = 4_000;
+/** Online without a trip: how often the car's position goes to riders' Home maps. */
+const IDLE_POSITION_SEND_MS = 5_000;
 /** How often arrival is re-checked while parked (the phone sends few fixes when it isn't moving). */
 const ARRIVAL_TICK_MS = 2_000;
 /**
@@ -63,6 +66,7 @@ export function TripRuntime() {
   const actions = useTripActions();
   const { data: zones = [] } = useZones();
   const location = useDriverLocation();
+  const { isOnline } = useDriverPresence();
   const rideId = trip?.id ?? null;
   useLocationDemand("trip-runtime", rideId !== null);
 
@@ -113,6 +117,25 @@ export function TripRuntime() {
     const t = setInterval(send, LOCATION_SEND_MS);
     return () => clearInterval(t);
   }, [rideId]);
+
+  // Online without a trip: the car shows on riders' Home maps (the server
+  // keeps the latest position in memory, blurred and unnamed for riders).
+  // The latest fix is sent however old it is: fixes come only after moving
+  // 10 m, so a car parked waiting for requests has an old one, and is still
+  // there. Volatile: a position that can't go now is dropped, not queued and
+  // sent late.
+  useEffect(() => {
+    if (rideId || !isOnline) return;
+    const socket = getRideSocket();
+    const send = () => {
+      const s = sampleRef.current;
+      if (!s) return;
+      socket.volatile.emit(DRIVER_CLIENT_EVENTS.POSITION_UPDATE, { lat: s.latitude, lng: s.longitude });
+    };
+    send();
+    const t = setInterval(send, IDLE_POSITION_SEND_MS);
+    return () => clearInterval(t);
+  }, [rideId, isOnline]);
 
   // ─── Automatic arrival ──────────────────────────────────────────────────
   // Every rider still WAITING for pickup (with this device's not-yet-sent

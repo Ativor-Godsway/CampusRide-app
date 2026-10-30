@@ -24,6 +24,7 @@ import {
 import { registerAllRoutes } from "./routes";
 import { checkPushReceipts } from "./services/push/pushService";
 import { maybeSendLaunchPush } from "./services/push/broadcast";
+import { sweepLivePositions } from "./services/zones/livePositions";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
 import { checkDeployEnv, checkProductionEnv } from "./lib/productionEnv";
@@ -268,7 +269,10 @@ async function bootstrap() {
   void maybeSendLaunchPush(prisma);
   const launchPushCheck = setInterval(() => void maybeSendLaunchPush(prisma), LAUNCH_PUSH_CHECK_INTERVAL_MS);
 
-  const timers = [timeoutSweep, receiptSweep, accountPurge, launchPushCheck];
+  // Drivers' last positions (Home map cars) are kept in memory; old ones go.
+  const livePositionSweep = setInterval(() => sweepLivePositions(), 60_000);
+
+  const timers = [timeoutSweep, receiptSweep, accountPurge, launchPushCheck, livePositionSweep];
 
   // App Store / Google Play review demo (docs/store/review-notes.md): off
   // unless REVIEW_DEMO_ENABLED=true and every setting is valid.

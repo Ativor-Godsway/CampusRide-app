@@ -11,11 +11,13 @@ import {
   type RideServerEventPayloads,
   type RideBroadcastPayload,
   type DriverLocationUpdatePayload,
+  type DriverPositionUpdatePayload,
   type OfferClosedPayload,
 } from "@rida/shared";
 import { ExpiredAccessTokenError, verifyAccessToken } from "../services/auth/tokens";
 import { loadActiveAccount } from "../services/auth/accountStatus";
 import { checkDriverArriving } from "../services/push/notify";
+import { recordDriverPosition } from "../services/zones/livePositions";
 import { limiter } from "../rateLimit/limiter";
 import { RULES } from "../rateLimit/rules";
 import { alerts, noteDatabaseError } from "../lib/alerts";
@@ -190,11 +192,43 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
           });
           // "Almost at your pickup" for riders still waiting (throttled per ride).
           checkDriverArriving(prisma, data.rideId, userId, { latitude: data.lat, longitude: data.lng });
+          // A shared car with a free seat still shows on riders' Home maps.
+          recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
         },
         () => {},
       );
     });
+
+    // An online driver without a trip: their position for riders' Home maps
+    // (services/ride/nearbyCars.ts). Memory only, no database read or write
+    // per position; who is online, approved and free is checked when a
+    // rider asks. Throttled like trip positions, extras dropped silently.
+    if (role === "DRIVER") {
+      socket.on(DRIVER_CLIENT_EVENTS.POSITION_UPDATE, (data: unknown) => {
+        if (!isDriverPositionUpdate(data)) return;
+        limiter.consume([{ rule: RULES.driverPosition, subject: userId }]).then(
+          (allowed) => {
+            if (allowed.ok) recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
+          },
+          () => {},
+        );
+      });
+    }
   });
+}
+
+/** A position a phone could actually report, with nothing else in it. */
+export function isDriverPositionUpdate(v: unknown): v is DriverPositionUpdatePayload {
+  if (typeof v !== "object" || v === null) return false;
+  const { lat, lng } = v as Record<string, unknown>;
+  return (
+    typeof lat === "number" &&
+    typeof lng === "number" &&
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180
+  );
 }
 
 /** A position a phone could actually report: finite, and on the globe. */

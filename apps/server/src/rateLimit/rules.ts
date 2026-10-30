@@ -138,6 +138,13 @@ function buildRules(c: typeof config.rateLimit) {
       15 * MINUTE,
     ),
     rating: rule("rating", "Ratings, per hour", "user", c.ratingPerHour, HOUR),
+    nearbyCars: rule(
+      "ride.nearby",
+      "Home map cars, 5 seconds",
+      "user",
+      c.nearbyCarsPer5Sec,
+      5 * SECOND,
+    ),
     profile: rule("profile", "Profile changes, per hour", "user", c.profilePerHour, HOUR),
     pushToken: rule(
       "push.token",
@@ -179,6 +186,15 @@ function buildRules(c: typeof config.rateLimit) {
     driverLocation: {
       name: "socket.location",
       label: "Driver positions",
+      subject: "user",
+      max: 1,
+      windowMs: c.driverLocationSeconds * SECOND,
+    } satisfies LimitRule,
+    // The same for an idle driver's position (Home map cars), counted apart
+    // so it can never hold back a trip's relayed position.
+    driverPosition: {
+      name: "socket.position",
+      label: "Driver positions (no trip)",
       subject: "user",
       max: 1,
       windowMs: c.driverLocationSeconds * SECOND,

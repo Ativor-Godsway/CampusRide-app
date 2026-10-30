@@ -1,9 +1,10 @@
 import type { FastifyInstance } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
-import type { PassengerStatus, PaymentMethod, RideStatus, RideType } from "@rida/shared";
+import type { NearbyCarsResponse, PassengerStatus, PaymentMethod, RideStatus, RideType } from "@rida/shared";
 import {
   FLAGGED_RIDER_CANCEL_REASONS,
+  NEARBY_CARS_PATH,
   RIDER_CANCEL_REASONS,
   parsePickupNote,
   parseRiderCancelInput,
@@ -57,6 +58,7 @@ import {
   text,
 } from "../http/schemas";
 import { notifyRiderCancelled } from "../services/push/notify";
+import { nearbyCars } from "../services/ride/nearbyCars";
 import { LaunchNotOpenError } from "../services/launch/launchSettings";
 
 /**
@@ -80,6 +82,7 @@ const rideEnd = object({ placeId: id, latitude, longitude });
 
 /** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
 const SCHEMAS = {
+  nearbyCars: { querystring: object({ latitude, longitude }) },
   create: {
     body: object(
       {
@@ -338,6 +341,24 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    * Pickup/drop-off are the rider's OWN (their seat's), which differ from
    * the ride's for a rider merged into someone else's car.
    */
+  /**
+   * The cars on the rider's Home map (services/ride/nearbyCars.ts): position
+   * and heading only, nearest to `?latitude=&longitude=` (the rider, or the
+   * map's middle) first. The app asks by itself every 10 s while Home is on
+   * screen, so this route counts against its own limit, not the default.
+   */
+  app.get(
+    NEARBY_CARS_PATH,
+    { onRequest: requireAuth, schema: SCHEMAS.nearbyCars, config: { limits: { user: [RULES.nearbyCars], userDefault: false } } },
+    async (request, reply) => {
+      if (!(await requireRider(request, reply))) return;
+      const { latitude: lat, longitude: lng } = request.query as { latitude?: number; longitude?: number };
+      const near = lat !== undefined && lng !== undefined ? { latitude: lat, longitude: lng } : null;
+      const cars = await nearbyCars(prisma, request.user!.userId, near);
+      return reply.header("cache-control", "no-store").send({ cars } satisfies NearbyCarsResponse);
+    },
+  );
+
   app.get("/rides/active", { onRequest: requireAuth, schema: SCHEMAS.active }, async (request, reply) => {
     if (!(await requireRider(request, reply))) return;
 

@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Animated, Easing, Image, Platform, StyleSheet, Text, View } from "react-native";
 import MapView, { Circle, Marker, Polyline, PROVIDER_DEFAULT, type Region } from "react-native-maps";
-import { carHeading, continueAngle, routeBearingAt, type EdgePadding } from "@rida/shared";
+import {
+  NEARBY_CARS_POLL_MS,
+  carHeading,
+  continueAngle,
+  routeBearingAt,
+  type EdgePadding,
+  type NearbyCar,
+} from "@rida/shared";
 import { useReduceMotion } from "../design/components/Illustration";
 import { colors, radii, spacing, withAlpha } from "../design/tokens";
 import { IconButton } from "../design/components/IconButton";
@@ -83,6 +90,12 @@ export interface CampusMapViewProps {
    * Google Maps load blocks a slow Android phone's UI thread for seconds.
    */
   followRegion?: boolean;
+  /**
+   * Other cars to show (the rider's Home map: GET /rides/nearby-cars), each
+   * gliding between updates and facing its heading. Drawn under everything
+   * else; not tappable, no title.
+   */
+  cars?: readonly NearbyCar[];
 }
 
 /**
@@ -113,6 +126,7 @@ export function CampusMapView({
   onZoneDragEnd,
   circle,
   followRegion = false,
+  cars,
 }: CampusMapViewProps) {
   const mapRef = useRef<MapView>(null);
   const reduceMotion = useReduceMotion();
@@ -193,6 +207,17 @@ export function CampusMapView({
             zIndex={1}
           />
         ) : null}
+
+        {cars?.map((car) => (
+          <CarMarker
+            key={car.key}
+            zone={{ id: car.key, label: "", latitude: car.latitude, longitude: car.longitude }}
+            heading={car.heading}
+            glideMs={NEARBY_CARS_POLL_MS}
+            mapHeading={mapHeading}
+            zIndex={1}
+          />
+        ))}
 
         {/* Every marker is a 3D render (docs/design-system.md, Iconography): a
             place without a role gets the drop-off pin. */}
@@ -382,6 +407,9 @@ export function CarMarker({
   onPress,
   route,
   mapHeading,
+  heading: givenHeading,
+  glideMs,
+  zIndex = 3,
 }: {
   zone: CampusMapZone;
   onPress?: () => void;
@@ -389,6 +417,15 @@ export function CarMarker({
   route?: readonly LatLng[] | null;
   /** The map's heading (useMapHeading); used on iOS only. */
   mapHeading?: Animated.Value;
+  /** The way the car faces, when known from elsewhere (the server); null or absent: worked out from its moves. */
+  heading?: number | null;
+  /**
+   * How long a move takes, for positions that arrive this far apart (the
+   * Home map's cars, every 10 s): a steady glide the whole way, so the car
+   * keeps moving instead of jumping and waiting. Default: GLIDE_MS, eased.
+   */
+  glideMs?: number;
+  zIndex?: number;
 }) {
   const reduceMotion = useReduceMotion();
   const ios = Platform.OS === "ios";
@@ -396,6 +433,12 @@ export function CarMarker({
   const last = useRef<LatLng | null>(null);
   const routeRef = useRef(route);
   routeRef.current = route;
+  const givenHeadingRef = useRef(givenHeading);
+  givenHeadingRef.current = givenHeading;
+  const moveGlide = useMemo(
+    () => (glideMs ? { duration: glideMs, easing: Easing.linear, useNativeDriver: false } : GLIDE),
+    [glideMs],
+  );
   /** Compass heading the car is turning to; null until known (it shows nose-north). */
   const heading = useRef<number | null>(null);
   /** The drawn angle. Not kept to [0, 360): it counts on past a full turn so each turn goes the short way. */
@@ -423,7 +466,11 @@ export function CarMarker({
     const prev = last.current;
     const next = { latitude: zone.latitude, longitude: zone.longitude };
     last.current = next;
-    turnTo(carHeading({ previous: prev, current: next, route: routeRef.current, heading: heading.current }), !prev);
+    const given = givenHeadingRef.current;
+    turnTo(
+      given ?? carHeading({ previous: prev, current: next, route: routeRef.current, heading: heading.current }),
+      !prev,
+    );
     if (!prev) return;
     latitude.stopAnimation();
     longitude.stopAnimation();
@@ -433,10 +480,15 @@ export function CarMarker({
       return;
     }
     Animated.parallel([
-      Animated.timing(latitude, { ...GLIDE, toValue: next.latitude }),
-      Animated.timing(longitude, { ...GLIDE, toValue: next.longitude }),
+      Animated.timing(latitude, { ...moveGlide, toValue: next.latitude }),
+      Animated.timing(longitude, { ...moveGlide, toValue: next.longitude }),
     ]).start();
-  }, [zone.latitude, zone.longitude, reduceMotion, latitude, longitude, turnTo]);
+  }, [zone.latitude, zone.longitude, reduceMotion, latitude, longitude, turnTo, moveGlide]);
+
+  // A heading given from elsewhere that changes while the car stands still.
+  useEffect(() => {
+    if (givenHeading !== null && givenHeading !== undefined && last.current) turnTo(givenHeading);
+  }, [givenHeading, turnTo]);
 
   // A route that arrives after the first fix still turns a car that hasn't
   // moved yet to face along the road.
@@ -457,13 +509,13 @@ export function CarMarker({
   return (
     <Marker.Animated
       coordinate={coordinate}
-      title={zone.label}
+      title={zone.label || undefined}
       onPress={onPress}
       anchor={{ x: 0.5, y: 0.5 }}
       rotation={ios ? undefined : angle}
       flat={!ios}
       tracksViewChanges={!ready}
-      zIndex={3}
+      zIndex={zIndex}
     >
       <Animated.Image
         testID="car-marker-image"

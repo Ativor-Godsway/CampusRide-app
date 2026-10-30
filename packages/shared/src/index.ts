@@ -46,6 +46,7 @@ export * from "./geo/liveRoute";
 export * from "./geo/heading";
 export * from "./driver/rideOffers";
 export * from "./rides/tripView";
+export * from "./rides/nearbyCars";
 export * from "./push/notifications";
 export * from "./push/broadcast";
 export * from "./api/rateLimit";
