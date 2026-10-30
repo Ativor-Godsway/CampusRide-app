@@ -275,6 +275,45 @@ describe("GET /admin/rides", () => {
     expect(filteredIds).not.toContain(requested.ride.id);
   });
 
+  it("fills Fare from the seats' stored fares (Ride.fareTotal is never written)", async () => {
+    const { token } = await authedAdmin();
+    // Riders of their own per ride: cleanupRide deletes a ride's riders with it.
+    const rider = async () => (await createTestUser("RIDER")).id;
+    // Completed shared car: two riders dropped off (one charged less), one cancelled.
+    const [a, b, c] = [await rider(), await rider(), await rider()];
+    const done = await createTestRide({
+      type: "SHARED",
+      status: "COMPLETED",
+      passengers: [
+        { riderId: a, status: "DROPPED_OFF", lockedFare: 700 },
+        { riderId: b, status: "DROPPED_OFF", lockedFare: 700 },
+        { riderId: c, status: "CANCELLED", lockedFare: 700 },
+      ],
+    });
+    createdRideIds.push(done.ride.id);
+    await prisma.ridePassenger.updateMany({ where: { rideId: done.ride.id, riderId: b }, data: { fareCharged: 600 } });
+    const going = await createTestRide({
+      type: "LONE",
+      status: "IN_PROGRESS",
+      passengers: [{ riderId: await rider(), status: "PICKED_UP", lockedFare: 1500 }],
+    });
+    createdRideIds.push(going.ride.id);
+    const cancelled = await createTestRide({
+      type: "LONE",
+      status: "CANCELLED",
+      passengers: [{ riderId: await rider(), status: "CANCELLED", lockedFare: 1500 }],
+    });
+    createdRideIds.push(cancelled.ride.id);
+
+    const res = await app.inject({ method: "GET", url: "/admin/rides", headers: { authorization: `Bearer ${token}` } });
+    const byId = new Map(res.json().rides.map((r: { id: string }) => [r.id, r]));
+    expect(byId.get(done.ride.id)).toMatchObject({ fareTotal: 1300, fareFinal: true });
+    expect(byId.get(going.ride.id)).toMatchObject({ fareTotal: 1500, fareFinal: false });
+    expect(byId.get(cancelled.ride.id)).toMatchObject({ fareTotal: null, fareFinal: true });
+    // The seats themselves aren't sent.
+    expect(byId.get(done.ride.id)).not.toHaveProperty("passengers");
+  });
+
   it("filters by a createdAt window", async () => {
     const { token } = await authedAdmin();
     const ride = await createTestRide({ type: "LONE", status: "REQUESTED" });

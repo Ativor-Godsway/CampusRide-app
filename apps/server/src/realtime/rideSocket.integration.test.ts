@@ -286,6 +286,41 @@ describe("ride rooms and driver positions", () => {
   });
 });
 
+describe("each rider's road ETA", () => {
+  it("goes to each rider's own socket only, from their driver's position", async () => {
+    const [waiting, aboard, stranger, ownDriver] = await Promise.all([rider(), rider(), rider(), driver()]);
+    const trip = await car("IN_PROGRESS", ownDriver.id, [
+      { riderId: waiting.id, status: "WAITING" },
+      { riderId: aboard.id, status: "PICKED_UP" },
+    ]);
+    // Exact pins on campus roads (the test zones may lie off them).
+    await prisma.ridePassenger.updateMany({
+      where: { rideId: trip.id, riderId: waiting.id },
+      data: { pickupLat: 5.65201, pickupLng: -0.18705 },
+    });
+    await prisma.ridePassenger.updateMany({
+      where: { rideId: trip.id, riderId: aboard.id },
+      data: { dropoffLat: 5.64208, dropoffLng: -0.1856 },
+    });
+    const [waitingSocket, aboardSocket, strangerSocket, driverSocket] = await Promise.all([
+      connectAs(tokenFor(waiting)),
+      connectAs(tokenFor(aboard)),
+      connectAs(tokenFor(stranger)),
+      connectAs(tokenFor(ownDriver)),
+    ]);
+    const heardWaiting = collect<{ toward: string; seconds: number; rideId: string }>(waitingSocket, RIDE_EVENTS.ETA, 800);
+    const heardAboard = collect<{ toward: string }>(aboardSocket, RIDE_EVENTS.ETA, 800);
+    const heardStranger = collect(strangerSocket, RIDE_EVENTS.ETA, 800);
+    driverSocket.emit(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, { rideId: trip.id, lat: 5.6515, lng: -0.18969 });
+
+    const [w] = await heardWaiting;
+    expect(w).toMatchObject({ rideId: trip.id, toward: "pickup" });
+    expect(w!.seconds).toBeGreaterThan(0);
+    expect((await heardAboard).map((e) => e.toward)).toEqual(["dropoff"]);
+    expect(await heardStranger).toEqual([]);
+  });
+});
+
 describe("an idle driver's position (Home map cars)", () => {
   it("is kept from the driver's own socket only, one per window; malformed ones and riders' are ignored", async () => {
     resetLivePositionsForTests();

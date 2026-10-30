@@ -176,7 +176,12 @@ export function RideList() {
                   <td>
                     <RouteCell ride={ride} />
                   </td>
-                  <td>{formatFare(ride.fareTotal)}</td>
+                  <td>
+                    {formatFare(ride.fareTotal)}
+                    {ride.fareTotal !== null && ride.fareFinal === false ? (
+                      <div className="muted small">so far</div>
+                    ) : null}
+                  </td>
                   <td>
                     {ride.paymentMethod} · {ride.paymentStatus}
                   </td>

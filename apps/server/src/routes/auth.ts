@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
+import { OTP_COOLDOWN_LIMIT, otpCooldownMessage, rateLimitedBody } from "@rida/shared";
 import type { OtpService } from "../services/otp/OtpService";
 import { requestOtp, verifyOtp } from "../services/auth/otp";
 import { signVerificationToken } from "../services/auth/tokens";
@@ -177,6 +178,16 @@ export function registerAuthRoutes(
     } catch (err) {
       if (err instanceof RateLimitedError) {
         await watch.record("failure", "rate_limited");
+        // Only the one-a-minute cooldown: a code went out moments ago (often
+        // this person's own "Send code" that timed out, then went through).
+        // Said as a short wait, and marked so the app opens the code screen.
+        if (err.rule.name === RULES.otpCooldown.name) {
+          const body = rateLimitedBody(err.retryAfterMs / 1000);
+          return reply
+            .code(429)
+            .header("retry-after", String(body.retryAfterSeconds))
+            .send({ ...body, error: otpCooldownMessage(body.retryAfterSeconds), limit: OTP_COOLDOWN_LIMIT });
+        }
         return sendRateLimited(reply, err.retryAfterMs);
       }
       throw err;

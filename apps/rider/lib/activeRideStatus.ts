@@ -7,7 +7,13 @@ import {
   stopLabel,
   stopPoint,
 } from "@rida/shared";
-import { subscribeToRide, useDriverLocation, type ActiveRideSummary } from "@rida/mobile-shared";
+import {
+  subscribeToRide,
+  useDriverLocation,
+  useServerEta,
+  useSteadyEta,
+  type ActiveRideSummary,
+} from "@rida/mobile-shared";
 
 export interface ActiveRideStatus {
   /** "Kwame is 3 min away", "Finding your driver…", "On your trip". */
@@ -40,9 +46,16 @@ export function useActiveRideStatus(ride: ActiveRideSummary): ActiveRideStatus {
     setDriverAt({ latitude: payload.lat, longitude: payload.lng }),
   );
 
-  const etaMinutes = driverOnTheWay
-    ? estimateEtaMinutes(driverAt, stopPoint(pickupPin(ride), ride.pickupZone))
-    : null;
+  // The server's road time to this rider's pickup when it has one (campus
+  // roads); else straight-line distance padded for roads. Kept steady, so the
+  // row doesn't flick between two numbers as the driver's pings arrive.
+  const serverSeconds = useServerEta(ride.id, driverOnTheWay ? "pickup" : null);
+  const straightLine = driverOnTheWay ? estimateEtaMinutes(driverAt, stopPoint(pickupPin(ride), ride.pickupZone)) : null;
+  const steady = useSteadyEta(
+    driverOnTheWay ? (serverSeconds ?? (straightLine !== null ? straightLine * 60 : null)) : null,
+    `${ride.id}:pickup`,
+  );
+  const etaMinutes = driverOnTheWay && steady ? Math.max(1, Math.round(steady.minutes)) : null;
   const line = activeRideStatusLine({
     status: ride.status,
     type: ride.type,

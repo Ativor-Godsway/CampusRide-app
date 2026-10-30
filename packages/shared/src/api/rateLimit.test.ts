@@ -6,6 +6,9 @@ import {
   rateLimitedBody,
   retryAfterSecondsOf,
   retryAfterText,
+  OTP_COOLDOWN_LIMIT,
+  isOtpCooldown,
+  otpCooldownMessage,
 } from "./rateLimit";
 
 describe("retryAfterText", () => {
@@ -55,5 +58,22 @@ describe("formatCountdown", () => {
     expect(formatCountdown(599.2)).toBe("10:00");
     expect(formatCountdown(3725)).toBe("1:02:05");
     expect(formatCountdown(-3)).toBe("0:00");
+  });
+});
+
+describe("the one-code-a-minute cooldown", () => {
+  it("says how long to wait, as a countdown, not as a limit reached", () => {
+    expect(otpCooldownMessage(45)).toBe("Wait 0:45 before asking for a new code.");
+    expect(otpCooldownMessage(59.2)).toBe("Wait 1:00 before asking for a new code.");
+    expect(otpCooldownMessage(0)).toBe("Wait 0:01 before asking for a new code.");
+  });
+
+  it("is told apart from every other 429 by the body's limit", () => {
+    const err = (status: number, data: unknown) => ({ response: { status, data } });
+    expect(isOtpCooldown(err(429, { code: "RATE_LIMITED", limit: OTP_COOLDOWN_LIMIT }))).toBe(true);
+    expect(isOtpCooldown(err(429, { code: "RATE_LIMITED" }))).toBe(false);
+    expect(isOtpCooldown(err(400, { limit: OTP_COOLDOWN_LIMIT }))).toBe(false);
+    expect(isOtpCooldown(new Error("timeout"))).toBe(false);
+    expect(isOtpCooldown(null)).toBe(false);
   });
 });

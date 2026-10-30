@@ -11,7 +11,7 @@ import {
   cleanupUser,
   uniqueTestPhone,
 } from "../services/auth/testFixtures";
-import { setRateLimitStore } from "../rateLimit/limiter";
+import { limiter, setRateLimitStore } from "../rateLimit/limiter";
 import { MemoryRateLimitStore } from "../rateLimit/store";
 import { createTestDriver, createTestRide, cleanupRide, createTestUser } from "../services/ride/testFixtures";
 import { TERMS_VERSION, needsTermsConfirmation } from "@rida/shared";
@@ -194,7 +194,7 @@ describe("auth routes — signup + login round trip", () => {
     expect(verifyRes.statusCode).toBe(400);
   });
 
-  it("refuses codes past the number's allowance with a 429, Retry-After and a friendly message", async () => {
+  it("refuses a second code within the minute with a 429, Retry-After and a short wait (not a limit reached)", async () => {
     const phone = newPhone();
 
     for (let i = 0; i < RULES.otpCooldown.max; i++) {
@@ -215,11 +215,25 @@ describe("auth routes — signup + login round trip", () => {
     const seconds = Number(refused.headers["retry-after"]);
     expect(seconds).toBeGreaterThan(0);
     expect(seconds).toBeLessThanOrEqual(RULES.otpCooldown.windowMs / 1000);
+    // The app opens the code screen on this one: the code that went out is
+    // probably on its way (a "Send code" that timed out, then went through).
     expect(refused.json()).toEqual({
-      error: expect.stringMatching(/^Too many attempts\. Try again in \d+ (seconds?|minutes?)\.$/),
+      error: expect.stringMatching(/^Wait \d:\d\d before asking for a new code\.$/),
       code: "RATE_LIMITED",
       retryAfterSeconds: seconds,
+      limit: "OTP_COOLDOWN",
     });
+  });
+
+  it("names only the cooldown: a number out of codes for 15 minutes gets the plain limit", async () => {
+    const phone = newPhone();
+    for (let i = 0; i < RULES.otpSend15m.max; i++) {
+      await limiter.consume([{ rule: RULES.otpSend15m, subject: phone }]);
+    }
+    const refused = await app.inject({ method: "POST", url: "/auth/request-otp", payload: { phone, purpose: "LOGIN" } });
+    expect(refused.statusCode).toBe(429);
+    expect(refused.json().limit).toBeUndefined();
+    expect(refused.json().error).toMatch(/^Too many attempts/);
   });
 });
 

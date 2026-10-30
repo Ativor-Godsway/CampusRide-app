@@ -14,6 +14,29 @@ export interface RateLimitedBody {
   code: typeof RATE_LIMITED_CODE;
   /** Whole seconds until the request will be accepted again (at least 1). */
   retryAfterSeconds: number;
+  /** Which limit, when the app words it its own way (OTP_COOLDOWN_LIMIT). */
+  limit?: string;
+}
+
+/**
+ * POST /auth/request-otp refused only by the one-code-a-minute cooldown: a
+ * code went to the number less than a minute ago (often the same person's
+ * "Send code" that timed out, then went through). Not a limit reached —
+ * the app takes them to the code screen to enter it.
+ */
+export const OTP_COOLDOWN_LIMIT = "OTP_COOLDOWN";
+
+/** "Wait 0:45 before asking for a new code." */
+export function otpCooldownMessage(seconds: number): string {
+  return `Wait ${formatCountdown(Math.max(1, Math.ceil(seconds)))} before asking for a new code.`;
+}
+
+/** Whether a failed request is that cooldown (an axios-shaped error). */
+export function isOtpCooldown(err: unknown): boolean {
+  const response = (err as { response?: { status?: number; data?: unknown } } | null)?.response;
+  return (
+    response?.status === 429 && (response.data as { limit?: unknown } | undefined)?.limit === OTP_COOLDOWN_LIMIT
+  );
 }
 
 /**

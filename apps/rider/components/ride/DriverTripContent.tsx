@@ -190,14 +190,18 @@ interface Shared {
 export function DriverOnTheWayContent({
   driver,
   etaMinutes,
+  arrivalAt,
   onShare,
   onSafety,
   onCancel,
 }: Shared & {
   /** Minutes until the driver reaches the pickup; null until the first GPS fix. */
   etaMinutes: number | null;
+  /** The steady arrival time (epoch ms) "Arrives" shows, when known; else now + etaMinutes. */
+  arrivalAt?: number | null;
   onCancel: () => void;
 }) {
+  const arrives = etaMinutes === null ? "" : arrivalAt ? clockTime(arrivalAt) : arrivalClock(etaMinutes);
   return (
     <View style={styles.section}>
       <View style={styles.header} accessibilityLiveRegion="polite">
@@ -208,13 +212,13 @@ export function DriverOnTheWayContent({
           <View
             style={styles.etaRow}
             accessible
-            accessibilityLabel={`${etaLabel(etaMinutes)} away. Arrives about ${arrivalClock(etaMinutes)}`}
+            accessibilityLabel={`${etaLabel(etaMinutes)} away. Arrives about ${arrives}`}
           >
             <Text variant="display" tabular>
               {etaLabel(etaMinutes)}
             </Text>
             <Text variant="body" color="secondary" tabular style={styles.arrives}>
-              Arrives {arrivalClock(etaMinutes)}
+              Arrives {arrives}
             </Text>
           </View>
         ) : (

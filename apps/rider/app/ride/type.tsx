@@ -62,6 +62,8 @@ import {
   RideRequestRefusedError,
   getRoadRoute,
   useLiveRoute,
+  useServerEta,
+  useSteadyEta,
   rateLimitText,
   BottomSheet,
   BottomSheetTextInput,
@@ -334,24 +336,24 @@ export default function RideTypeScreen() {
   }, [live.path, live.source, live.attribution, tripRoute, pickupCoord, dropoffCoord]);
 
   /**
-   * Phase 4 ETA. Straight-line distance from the driver's last reported
-   * position, padded for road circuity (see @rida/shared estimateEtaMinutes)
-   * — there is no routing or traffic data in this project, and the copy says
-   * "about" so it reads as the estimate it is.
-   *
-   * Null until the first driver_location ping arrives, which is why the
-   * caller falls back to "Your driver is getting ready" rather than showing
-   * a number invented from nothing.
+   * The ETA for the leg under way, best first: the server's road time to
+   * this rider's own stop (campus road engine, every 10 s); else the road
+   * the app drew (useLiveRoute); else straight-line distance padded for
+   * roads (estimateEtaMinutes). Kept steady by useSteadyEta, so it doesn't
+   * jump a minute up and down with every GPS fix or when one source takes
+   * over from another. Null until the driver's first position.
    */
-  const roadEtaMinutes = live.secondsToFirstStop !== null ? Math.max(1, Math.round(live.secondsToFirstStop / 60)) : null;
-  const etaToPickup = useMemo(
-    () => (legStage === "toPickup" && roadEtaMinutes !== null ? roadEtaMinutes : estimateEtaMinutes(driverLocation, pickupCoord)),
-    [legStage, roadEtaMinutes, driverLocation, pickupCoord],
+  const serverEtaSeconds = useServerEta(
+    ride?.id,
+    legStage === "toPickup" ? "pickup" : legStage === "toDropoff" ? "dropoff" : null,
   );
-  const etaToDropoff = useMemo(
-    () => (legStage === "toDropoff" && roadEtaMinutes !== null ? roadEtaMinutes : estimateEtaMinutes(driverLocation, dropoffCoord)),
-    [legStage, roadEtaMinutes, driverLocation, dropoffCoord],
-  );
+  const legStop = legStage === "toPickup" ? pickupCoord : legStage === "toDropoff" ? dropoffCoord : null;
+  const straightLineMinutes = legStop ? estimateEtaMinutes(driverLocation, legStop) : null;
+  const legEtaSeconds =
+    serverEtaSeconds ?? live.secondsToFirstStop ?? (straightLineMinutes !== null ? straightLineMinutes * 60 : null);
+  const steadyEta = useSteadyEta(legStage ? legEtaSeconds : null, `${ride?.id ?? ""}:${legStage ?? ""}`);
+  const etaToPickup = legStage === "toPickup" ? (steadyEta?.minutes ?? null) : estimateEtaMinutes(driverLocation, pickupCoord);
+  const etaToDropoff = legStage === "toDropoff" ? (steadyEta?.minutes ?? null) : estimateEtaMinutes(driverLocation, dropoffCoord);
 
   const region = useMemo(() => {
     const points = [pickupCoord, dropoffCoord];
@@ -910,6 +912,7 @@ export default function RideTypeScreen() {
                     <DriverOnTheWayContent
                       driver={driver}
                       etaMinutes={etaToPickup}
+                      arrivalAt={legStage === "toPickup" ? (steadyEta?.arrivalAt ?? null) : null}
                       onShare={shareThisTrip}
                       onSafety={() => setSafetyOpen(true)}
                       onCancel={() => setCancelOpen(true)}

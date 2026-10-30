@@ -39,6 +39,7 @@ import { MoolreOtpService } from "./services/otp/MoolreOtpService";
 import { createBalanceCheck } from "./services/sms/moolreBalance";
 import { loadTestOtpCode } from "./services/auth/loadTestOtp";
 import { purgeDeletedAccounts } from "./services/auth/deleteAccount";
+import { purgeOldOtpCodes } from "./services/auth/otpCleanup";
 import { startReviewDemo } from "./services/reviewDemo/simulation";
 import { reviewDemoConfig } from "./services/reviewDemo/config";
 
@@ -64,6 +65,8 @@ const SMS_BALANCE_INTERVAL_MS = 6 * 60 * 60_000;
 // Closed accounts whose retention period has ended are erased hourly
 // (services/auth/deleteAccount.ts); a day late at worst would still be fine.
 const ACCOUNT_PURGE_INTERVAL_MS = 60 * 60_000;
+/** Login codes older than a week are deleted this often (services/auth/otpCleanup.ts). */
+const OTP_PURGE_INTERVAL_MS = 6 * 60 * 60_000;
 
 export { paymentService, routeService, otpService };
 
@@ -269,10 +272,21 @@ async function bootstrap() {
   void maybeSendLaunchPush(prisma);
   const launchPushCheck = setInterval(() => void maybeSendLaunchPush(prisma), LAUNCH_PUSH_CHECK_INTERVAL_MS);
 
+  // Old login codes: once now, then every few hours.
+  const purgeOtpCodes = () =>
+    purgeOldOtpCodes(prisma).then(
+      (count) => {
+        if (count > 0) app.log.info({ count }, "Old login codes deleted");
+      },
+      (err) => app.log.error({ err }, "Deleting old login codes failed"),
+    );
+  void purgeOtpCodes();
+  const otpPurge = setInterval(() => void purgeOtpCodes(), OTP_PURGE_INTERVAL_MS);
+
   // Drivers' last positions (Home map cars) are kept in memory; old ones go.
   const livePositionSweep = setInterval(() => sweepLivePositions(), 60_000);
 
-  const timers = [timeoutSweep, receiptSweep, accountPurge, launchPushCheck, livePositionSweep];
+  const timers = [timeoutSweep, receiptSweep, accountPurge, launchPushCheck, livePositionSweep, otpPurge];
 
   // App Store / Google Play review demo (docs/store/review-notes.md): off
   // unless REVIEW_DEMO_ENABLED=true and every setting is valid.

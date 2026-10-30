@@ -181,7 +181,10 @@ export interface AdminRide {
   type: string;
   source: string;
   occupancy: number;
+  /** Pesewas, from the seats' stored fares; null for a cancelled ride. */
   fareTotal: number | null;
+  /** False while the ride is still going on: what its riders will pay so far. */
+  fareFinal?: boolean;
   paymentStatus: string;
   paymentMethod: string;
   cancelReason: string | null;
