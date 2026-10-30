@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { usePathname, useSegments } from "expo-router";
 import * as Notifications from "expo-notifications";
-import { parsePushData, type PushApp, type PushData } from "@rida/shared";
+import { isAnnouncementPushData, parsePushData, type PushApp, type PushData } from "@rida/shared";
 import { useAuth } from "../auth/AuthContext";
 import {
   getPushPermission,
@@ -40,17 +40,19 @@ export function PushNotifications({ app, showInForeground, onOpen }: PushNotific
   const live = useRef({ signedIn, pathname, showInForeground, onOpen });
   live.current = { signedIn, pathname, showInForeground, onOpen };
 
-  // While the app is open: ours show unless the current screen covers it;
+  // While the app is open: ride notifications show unless the current screen
+  // covers it; admin notifications (no screen ever covers them) always show;
   // anything after sign-out, or not ours, stays quiet.
   useEffect(() => {
     if (!pushSupported()) return;
     Notifications.setNotificationHandler({
       handleNotification: async (notification) => {
-        const data = parsePushData(notification.request.content.data);
+        const raw = notification.request.content.data;
+        const data = parsePushData(raw);
         const show =
-          data !== null &&
           live.current.signedIn &&
-          live.current.showInForeground(data, live.current.pathname);
+          (isAnnouncementPushData(raw) ||
+            (data !== null && live.current.showInForeground(data, live.current.pathname)));
         return {
           shouldShowBanner: show,
           shouldShowList: show,
@@ -112,7 +114,9 @@ export function usePushPermissionPrompt(enabled: boolean, open: () => void): voi
     if (!enabled || promptedThisSession || !pushSupported()) return;
     let cancelled = false;
     void (async () => {
-      if (await hasAskedForPush()) return;
+      // Keychain unreadable right now (phone locked): ask at the next chance instead.
+      const asked = await hasAskedForPush().catch(() => true);
+      if (asked) return;
       if ((await getPushPermission()) !== "undetermined") {
         // Decided already (e.g. in system settings): never prompt.
         await markAskedForPush();

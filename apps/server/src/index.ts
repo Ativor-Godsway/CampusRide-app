@@ -23,6 +23,7 @@ import {
 } from "./services/active";
 import { registerAllRoutes } from "./routes";
 import { checkPushReceipts } from "./services/push/pushService";
+import { maybeSendLaunchPush } from "./services/push/broadcast";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
 import { checkDeployEnv, checkProductionEnv } from "./lib/productionEnv";
@@ -52,6 +53,8 @@ const TIMEOUT_POLL_INTERVAL_MS = 30_000;
 // Push receipts are only ready ~15 minutes after a send (services/push), so a
 // slow sweep is plenty; it also deletes tokens Expo reports as unregistered.
 const PUSH_RECEIPT_POLL_INTERVAL_MS = 5 * 60_000;
+/** How soon after a countdown reaches its launch time the launch push goes out (when switched on). */
+const LAUNCH_PUSH_CHECK_INTERVAL_MS = 30_000;
 
 // The Moolre SMS balance is checked a minute after startup, then every 6 hours.
 const SMS_BALANCE_FIRST_CHECK_MS = 60_000;
@@ -259,7 +262,13 @@ async function bootstrap() {
   void purgeClosedAccounts();
   const accountPurge = setInterval(() => void purgeClosedAccounts(), ACCOUNT_PURGE_INTERVAL_MS);
 
-  const timers = [timeoutSweep, receiptSweep, accountPurge];
+  // "CampusRide is live!" once launch mode in force turns Live, if switched
+  // on in Settings: a countdown ends by itself, so it is watched for here
+  // (and checked once now, in case it ended while the server was down).
+  void maybeSendLaunchPush(prisma);
+  const launchPushCheck = setInterval(() => void maybeSendLaunchPush(prisma), LAUNCH_PUSH_CHECK_INTERVAL_MS);
+
+  const timers = [timeoutSweep, receiptSweep, accountPurge, launchPushCheck];
 
   // App Store / Google Play review demo (docs/store/review-notes.md): off
   // unless REVIEW_DEMO_ENABLED=true and every setting is valid.

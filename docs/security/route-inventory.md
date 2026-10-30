@@ -161,6 +161,11 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/early-access` | Yes | ADMIN | One phone number's account and whether it has early access. | account default |
 | `POST /admin/early-access` | Yes | ADMIN | Gives or takes away one rider's early access (rider accounts only). Audit-logged (`early_access.grant` / `early_access.revoke`). | account default |
 | `POST /admin/early-access/all-riders` | Yes | ADMIN | Gives early access to every open rider account that exists now (not review demo accounts). Audit-logged once with the count (`early_access.grant_all`). | account default |
+| `PUT /admin/launch/push` | Yes | ADMIN | Switches the one-time launch push ("CampusRide is live!") on or off. Refused once CampusRide is already Live or the push has gone out. Audit-logged (`launch.push.enable` / `launch.push.disable`). | account default |
+| `GET /admin/notifications` | Yes | ADMIN | The notification send history (text, audience, counts; one number only masked) and this hour's use of the caps. | account default |
+| `GET /admin/notifications/audience` | Yes | ADMIN | How many app installs a send would reach now; for one number, whose account it is (name, role, masked number). | account default |
+| `POST /admin/notifications` | Yes | ADMIN | Sends a notification to all riders, all drivers, everyone, or one number's account; delivered in the background. Audit-logged (`notification.send`, with the text). | account default; plus 5 sends to "all" audiences per hour and 10 single-number/test sends per hour, for all admins together, counted from the history |
+| `POST /admin/notifications/test` | Yes | ADMIN | Sends to the rider or driver account on the admin's own number only (none while that number is the admin account), and says why nothing arrived. Audit-logged (`notification.test`). | account default; plus the single-number/test cap |
 
 ## Socket.io
 

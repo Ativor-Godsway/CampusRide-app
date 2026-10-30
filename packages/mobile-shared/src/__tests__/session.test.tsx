@@ -83,6 +83,15 @@ async function wait(ms: number) {
   });
 }
 
+/**
+ * Lets `ms` pass in small steps, so work scheduled after each await (a
+ * keychain read's next try) runs too: one big jump fires only the timers
+ * that already exist.
+ */
+async function waitInSteps(ms: number, step = 100) {
+  for (let passed = 0; passed < ms; passed += step) await wait(step);
+}
+
 describe("opening the app (killed and reopened)", () => {
   it("restores the stored session", async () => {
     await launchSignedIn();
@@ -138,7 +147,9 @@ describe("opening the app (killed and reopened)", () => {
     await storeRefreshToken(server.issue().refreshToken);
     secureStore.getItemAsync.mockRejectedValue(new Error("User interaction is not allowed."));
     await launch();
-    await waitFor(() => expect(state()).toBe("unreachable"));
+    // Each read is tried a few times first (auth/keychain.ts).
+    await waitInSteps(3_000);
+    expect(state()).toBe("unreachable");
     secureStore.getItemAsync.mockImplementation(async (key: string) => secureStore.__store.get(key) ?? null);
     await act(async () => appStateListener?.("active"));
     await waitFor(() => expect(state()).toBe("signed in as Ama Test"));
@@ -324,5 +335,36 @@ describe("while using the app", () => {
     await waitFor(() => expect(state()).toBe("signed out"));
     expect(await onDisk()).toBeNull();
     expect(server.calls).toContain("POST /auth/logout");
+  });
+});
+
+describe("a keychain that can't be read for a moment (Sentry CAMPUSRIDE-DRIVER-2)", () => {
+  it("a read that fails once (the app just woke in the background): tried again, signed in", async () => {
+    await storeRefreshToken(server.issue().refreshToken);
+    secureStore.getItemAsync.mockRejectedValueOnce(new Error("Calling the 'getValueWithKeyAsync' function has failed"));
+    await launch();
+    await waitFor(() => expect(state()).toBe("signed in as Ama Test"));
+    expect(secureStore.getItemAsync.mock.calls.filter(([key]) => key === "rida.session.refreshToken").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("still unreadable after the retries: never signed out, and the session is kept", async () => {
+    await storeRefreshToken(server.issue().refreshToken);
+    secureStore.getItemAsync.mockRejectedValue(new Error("User interaction is not allowed."));
+    await launch();
+    await waitInSteps(30_000, 500);
+    expect(state()).toBe("unreachable");
+    expect(await secureStore.__store.get("rida.session.refreshToken")).toBeTruthy();
+  });
+
+  it("Log out isn't blocked by it: the session is forgotten, and signed out at the next check", async () => {
+    await storeRefreshToken(server.issue().refreshToken);
+    secureStore.getItemAsync.mockRejectedValue(new Error("User interaction is not allowed."));
+    await launch();
+    await waitInSteps(3_000);
+    expect(state()).toBe("unreachable");
+    await fireEvent.press(screen.getByText("Log out"));
+    await waitInSteps(5_000);
+    expect(secureStore.__store.has("rida.session.refreshToken")).toBe(false);
+    expect(state()).toBe("signed out");
   });
 });

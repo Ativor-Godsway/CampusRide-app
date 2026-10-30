@@ -98,3 +98,27 @@ describe("the driver app's background location", () => {
     expect(read("apps/driver/app.config.js")).toContain("withoutBackgroundFetch");
   });
 });
+
+describe("the driver app defines its location task before anything can use it", () => {
+  // Sentry CAMPUSRIDE-DRIVER-1: a task the OS asks for before JavaScript has
+  // defined it. iOS and Android both build the bundle from package.json
+  // "main" (no entryPoint override), so index.ts runs first on both.
+  it("the entry is index.ts, which loads the task's module before expo-router", () => {
+    expect(JSON.parse(read("apps/driver/package.json")).main).toBe("index.ts");
+    expect(JSON.parse(read("apps/driver/app.json")).expo.entryPoint).toBeUndefined();
+    expect(read("apps/driver/app.config.js")).not.toMatch(/entryPoint/);
+    const imports = [...read("apps/driver/index.ts").matchAll(/^import\s+"([^"]+)";/gm)].map((m) => m[1]);
+    expect(imports).toEqual(["./lib/backgroundLocation", "expo-router/entry"]);
+  });
+
+  it("defines the task at the top level of that module, and checks it before starting", () => {
+    const source = read("apps/driver/lib/backgroundLocation.ts");
+    expect(source).toMatch(/^TaskManager\.defineTask\(DRIVER_LOCATION_TASK,/m);
+    expect(source).toMatch(/TaskManager\.isTaskDefined\(DRIVER_LOCATION_TASK\)/);
+    // Only this module starts or stops updates.
+    const users = sourceFiles("apps/driver")
+      .filter((f) => /startLocationUpdatesAsync|stopLocationUpdatesAsync/.test(read(f)))
+      .map((f) => f.split(path.sep).join("/"));
+    expect(users).toEqual(["apps/driver/lib/backgroundLocation.ts"]);
+  });
+});

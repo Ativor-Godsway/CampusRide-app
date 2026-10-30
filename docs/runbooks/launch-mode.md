@@ -42,12 +42,36 @@ Every change (mode, launch time, early access, the "all riders" button) is in
 the audit log: `launch.update`, `early_access.grant`, `early_access.revoke`,
 `early_access.grant_all`.
 
+## The launch notification
+
+Settings → Launch mode → **Send "CampusRide is live!" when launch mode turns
+Live** (off unless you turn it on). When it is on, every rider whose phone
+allows CampusRide notifications gets "CampusRide is live! Book your first ride
+on campus now." at the moment launch mode in force turns Live: when the
+countdown reaches its time (within 30 seconds), or when you set **Live** and
+save.
+
+- It goes out **once, ever**. A second time is impossible: not after a server
+  restart, not if Live is switched off and on again. The server records the
+  send before anything goes out, and the database refuses a second record.
+- It can't be switched on once CampusRide is already Live (there is no launch
+  moment left; a late "it's live!" would confuse people). Use the
+  Notifications tab instead.
+- Once sent, Settings shows when, to how many phones, and how many failed. It
+  is also in the Notifications history ("Launch push") and the audit log
+  (`launch.push.enable`, `launch.push.disable`, `notification.launch`).
+- A phone that has the rider app open on screen doesn't show it as a banner
+  (today's app builds only show their own ride notifications in the
+  foreground); the countdown card disappears there anyway.
+
 ## Turning it on
 
 1. Settings → Early access → **Give early access to all current riders**.
 2. Settings → Launch mode → **Countdown**, choose the date and time (Ghana
    time) → **Save launch mode**.
-3. Check with a phone that has no early access: Home shows the countdown.
+3. If you want the launch notification: tick **Send "CampusRide is live!" …**
+   (any time before the launch).
+4. Check with a phone that has no early access: Home shows the countdown.
 
 Phones pick a change up within a minute (or when the app is reopened).
 

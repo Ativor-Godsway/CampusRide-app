@@ -183,7 +183,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    const storedRefreshToken = await getStoredRefreshToken();
+    // A keychain that can't be read now doesn't stop a sign-out; the server
+    // session is then left to expire instead of being ended here.
+    const storedRefreshToken = await getStoredRefreshToken().catch(() => null);
     const pushToken = getCurrentPushToken();
     // The logout below drops this install's token on the server, so the next
     // sign-in sends it again.

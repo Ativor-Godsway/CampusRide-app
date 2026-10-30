@@ -655,13 +655,68 @@ enum LaunchMode {
 /// counts as LIVE by itself (nothing rewrites the row). Edited only through
 /// services/launch/launchSettings.ts, which writes the audit log with it.
 model LaunchSetting {
-  id        String     @id @default("launch")
-  mode      LaunchMode @default(OFF)
+  id                String     @id @default("launch")
+  mode              LaunchMode @default(OFF)
   /// The public launch moment; set while mode is COUNTDOWN, null otherwise.
-  launchAt  DateTime?
-  updatedAt DateTime   @updatedAt
+  launchAt          DateTime?
+  updatedAt         DateTime   @updatedAt
   /// User.id of the admin who last changed it. Plain column, like AdminAuditLog.actor.
-  updatedBy String?
+  updatedBy         String?
+  /// "Send 'CampusRide is live!' when launch mode turns Live" (Settings).
+  /// Off by default. The push itself goes out at most once ever: it is the
+  /// Broadcast row with key "launch" (services/push/broadcast.ts).
+  launchPushEnabled Boolean    @default(false)
+}
+
+enum BroadcastKind {
+  RIDERS
+  DRIVERS
+  EVERYONE
+  PHONE
+  /// "Send test to me": the admin's own number.
+  TEST
+  /// The one-time launch push.
+  LAUNCH
+}
+
+enum BroadcastStatus {
+  SENDING
+  SENT
+  /// Nothing could be sent (push switched off, or the send failed outright).
+  FAILED
+}
+
+/// A notification sent from the admin site's Notifications page (or the
+/// launch push): the send history. The text and the counts only — never the
+/// push tokens, and a single recipient's number only masked.
+model Broadcast {
+  id          String          @id @default(cuid())
+  /// Set only for a send that may happen once ever ("launch"). Unique, so a
+  /// second attempt — another restart, Live switched off and on — fails to
+  /// insert and sends nothing.
+  key         String?         @unique @db.VarChar(40)
+  /// User.id of the admin who sent it; "system" for the launch push. Plain
+  /// column, like AdminAuditLog.actor.
+  actor       String
+  kind        BroadcastKind
+  /// PHONE and TEST: the account sent to (User.id), if there was one.
+  recipientId String?
+  /// PHONE and TEST: the number, masked ("+233*****146").
+  maskedPhone String?         @db.VarChar(20)
+  title       String          @db.VarChar(50)
+  body        String          @db.VarChar(150)
+  status      BroadcastStatus @default(SENDING)
+  /// App installs it was addressed to.
+  devices     Int             @default(0)
+  /// Accepted for delivery by Expo. A later delivery failure (Expo's
+  /// receipt, ~15 minutes on) moves one from here to `failed`.
+  delivered   Int             @default(0)
+  failed      Int             @default(0)
+  createdAt   DateTime        @default(now())
+  finishedAt  DateTime?
+
+  @@index([createdAt])
+  @@index([kind, createdAt])
 }
 
 /// Phase 5: an append-only record of every action an admin takes in the admin

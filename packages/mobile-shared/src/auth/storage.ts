@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { KEYCHAIN_BACKGROUND_OPTIONS, readKeychain } from "./keychain";
 
 /**
  * The refresh token, kept in the phone's keychain (expo-secure-store) so the
@@ -22,9 +23,7 @@ const LEGACY_REFRESH_TOKEN_KEY = "rida.refreshToken";
  * driver app's background refresh fail on a locked phone. A new key name,
  * because iOS keeps an existing item's original setting when it is updated.
  */
-const WRITE_OPTIONS: SecureStore.SecureStoreOptions = {
-  keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-};
+const WRITE_OPTIONS = KEYCHAIN_BACKGROUND_OPTIONS;
 
 /** undefined: not read from disk yet. */
 let current: string | null | undefined;
@@ -51,17 +50,16 @@ function persistSoon(): void {
 }
 
 /**
- * The newest refresh token, or null when signed out. Rejects only when the
- * keychain could not be read at all (iPhone locked) — which is "don't know",
- * never "signed out".
+ * The newest refresh token, or null when signed out. A failed keychain read
+ * is tried again (readKeychain); this rejects only when it still can't be
+ * read (iPhone locked) — which is "don't know", never "signed out".
  */
 export async function getStoredRefreshToken(): Promise<string | null> {
   if (current !== undefined) {
     if (unsaved) persistSoon();
     return current;
   }
-  const stored =
-    (await SecureStore.getItemAsync(REFRESH_TOKEN_KEY)) ?? (await SecureStore.getItemAsync(LEGACY_REFRESH_TOKEN_KEY));
+  const stored = (await readKeychain(REFRESH_TOKEN_KEY)) ?? (await readKeychain(LEGACY_REFRESH_TOKEN_KEY));
   // A write or clear may have happened while the disk was being read.
   if (current === undefined) current = stored;
   return current;

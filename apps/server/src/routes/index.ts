@@ -20,6 +20,7 @@ import { registerPushRoutes } from "./push";
 import { registerHealthRoutes } from "./health";
 import { registerAppVersionRoutes } from "./appVersion";
 import { registerLaunchRoutes } from "./launch";
+import { registerNotificationRoutes } from "./notifications";
 import { installRateLimits } from "../rateLimit/http";
 import { installErrorHandling } from "../http/errors";
 import { useRequestValidation } from "../http/validation";
@@ -76,4 +77,5 @@ export function registerAllRoutes(
   registerSafetyRoutes(app, prisma);
   registerPlaceRoutes(app, prisma);
   registerPushRoutes(app, prisma);
+  registerNotificationRoutes(app, prisma);
 }

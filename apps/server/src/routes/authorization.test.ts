@@ -137,6 +137,11 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /admin/early-access": "admin",
   "POST /admin/early-access": "admin",
   "POST /admin/early-access/all-riders": "admin",
+  "PUT /admin/launch/push": "admin",
+  "GET /admin/notifications": "admin",
+  "GET /admin/notifications/audience": "admin",
+  "POST /admin/notifications": "admin",
+  "POST /admin/notifications/test": "admin",
 };
 
 // ─── App, people and rides ─────────────────────────────────────────────────

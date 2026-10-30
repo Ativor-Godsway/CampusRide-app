@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   GHANA_PHONE_EXAMPLE,
+  LAUNCH_PUSH_TEXT,
   countdownParts,
   countdownWords,
   launchClockTime,
@@ -14,6 +15,7 @@ import {
   lookUpEarlyAccess,
   saveLaunchMode,
   setEarlyAccess,
+  setLaunchPush,
   type EarlyAccessLookup,
   type LaunchMode,
   type LaunchSettings,
@@ -45,8 +47,8 @@ function toInputs(iso: string | null): { date: string; time: string } {
 
 /**
  * Settings (for now: launch mode). The countdown before the public launch,
- * and who can book during it. Every change here is written to the audit log.
- * Times are Ghana time, GMT.
+ * who can book during it, and the one-time "CampusRide is live!" push.
+ * Every change here is written to the audit log. Times are Ghana time, GMT.
  */
 export function SettingsScreen() {
   const token = useToken();
@@ -104,13 +106,29 @@ export function SettingsScreen() {
       mode === "COUNTDOWN"
         ? `Start the countdown to ${ghanaTime(launchAt!)}? Riders without early access won't be able to book until then.`
         : mode === "LIVE"
-          ? "Set CampusRide to Live? Everyone will be able to book."
+          ? `Set CampusRide to Live? Everyone will be able to book.${
+              settings?.launchPush.enabled && !settings.launchPush.sent
+                ? ` Every rider with notifications allowed gets "${LAUNCH_PUSH_TEXT.title}" now.`
+                : ""
+            }`
           : "Turn launch mode off? Everyone will be able to book and no countdown is shown.";
     if (!window.confirm(sentence)) return;
     void run(async () => {
       await saveLaunchMode(token, mode, launchAt);
       await load();
       setNotice("Saved. Phones pick it up within a minute.");
+    });
+  }
+
+  function switchLaunchPush(enabled: boolean) {
+    const sentence = enabled
+      ? `Send "${LAUNCH_PUSH_TEXT.title} ${LAUNCH_PUSH_TEXT.body}" to every rider with notifications allowed when launch mode turns Live? It goes out once, ever.`
+      : "Don't send the launch notification when launch mode turns Live?";
+    if (!window.confirm(sentence)) return;
+    void run(async () => {
+      await setLaunchPush(token, enabled);
+      await load();
+      setNotice(enabled ? "The launch notification will go out when CampusRide turns Live." : "The launch notification is off.");
     });
   }
 
@@ -226,6 +244,41 @@ export function SettingsScreen() {
             </button>
           </p>
         </form>
+
+        <h4>Launch notification</h4>
+        {!settings ? null : settings.launchPush.sent ? (
+          <p className="muted">
+            &ldquo;{settings.launchPush.sent.title}&rdquo; went out{" "}
+            {new Date(settings.launchPush.sent.createdAt).toLocaleString()} to{" "}
+            {settings.launchPush.sent.devices} device(s): {settings.launchPush.sent.delivered} delivered,{" "}
+            {settings.launchPush.sent.failed} failed. It is only ever sent once.
+          </p>
+        ) : (
+          <>
+            <label className="settings-option">
+              <input
+                type="checkbox"
+                checked={settings.launchPush.enabled}
+                disabled={busy || (!settings.launchPush.enabled && status?.mode === "LIVE")}
+                onChange={(e) => switchLaunchPush(e.target.checked)}
+              />
+              <span>
+                <strong>Send &ldquo;{LAUNCH_PUSH_TEXT.title}&rdquo; when launch mode turns Live</strong>
+                <span className="muted small">
+                  {" "}
+                  To every rider with notifications allowed, once ever: at the end of the countdown,
+                  or when you set Live here. &ldquo;{LAUNCH_PUSH_TEXT.body}&rdquo;
+                </span>
+              </span>
+            </label>
+            {!settings.launchPush.enabled && status?.mode === "LIVE" ? (
+              <p className="muted small">
+                CampusRide is already Live, so there is no launch moment left to announce. Use the
+                Notifications tab to send a message now.
+              </p>
+            ) : null}
+          </>
+        )}
       </div>
 
       <div className="card settings-card">
