@@ -85,6 +85,11 @@ async function transitionRideTx(
   if (toStatus === "COMPLETED") {
     data.completedAt = new Date();
   }
+  // Stats (admin dashboard): time to match, when it was cancelled, and
+  // whether it ever found no driver in time.
+  if (toStatus === "MATCHED" && !ride.matchedAt) data.matchedAt = now;
+  if (toStatus === "CANCELLED") data.cancelledAt = now;
+  if (toStatus === "AWAITING_RIDER_DECISION" && !ride.noDriverFoundAt) data.noDriverFoundAt = now;
   if (toStatus === "CANCELLED" && ctx.riderCancel) {
     // Same write as the status change, so a cancel can never be recorded
     // without the reason the rider gave for it.

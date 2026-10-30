@@ -40,6 +40,8 @@ import { createBalanceCheck } from "./services/sms/moolreBalance";
 import { loadTestOtpCode } from "./services/auth/loadTestOtp";
 import { purgeDeletedAccounts } from "./services/auth/deleteAccount";
 import { purgeOldOtpCodes } from "./services/auth/otpCleanup";
+import { FLUSH_MS, flushLocationTrail, purgeOldLocationPoints } from "./services/stats/locationTrail";
+import { timeOutQuietSessions } from "./services/stats/driverSessions";
 import { startReviewDemo } from "./services/reviewDemo/simulation";
 import { reviewDemoConfig } from "./services/reviewDemo/config";
 
@@ -286,7 +288,34 @@ async function bootstrap() {
   // Drivers' last positions (Home map cars) are kept in memory; old ones go.
   const livePositionSweep = setInterval(() => sweepLivePositions(), 60_000);
 
-  const timers = [timeoutSweep, receiptSweep, accountPurge, launchPushCheck, livePositionSweep, otpPurge];
+  // Records for the admin dashboard (services/stats): the sampled location
+  // trail written in one batch a minute (with drivers' sessions marked as
+  // seen), quiet sessions timed out, and trail points past 90 days deleted.
+  const trailFlush = setInterval(() => void flushLocationTrail(prisma), FLUSH_MS);
+  const sessionTimeouts = setInterval(() => {
+    timeOutQuietSessions(prisma).catch((err) => app.log.error({ err }, "Timing out driver sessions failed"));
+  }, 60_000);
+  const purgeTrail = () =>
+    purgeOldLocationPoints(prisma).then(
+      (count) => {
+        if (count > 0) app.log.info({ count }, "Old driver location points deleted");
+      },
+      (err) => app.log.error({ err }, "Deleting old driver location points failed"),
+    );
+  void purgeTrail();
+  const trailPurge = setInterval(() => void purgeTrail(), OTP_PURGE_INTERVAL_MS);
+
+  const timers = [
+    timeoutSweep,
+    receiptSweep,
+    accountPurge,
+    launchPushCheck,
+    livePositionSweep,
+    otpPurge,
+    trailFlush,
+    sessionTimeouts,
+    trailPurge,
+  ];
 
   // App Store / Google Play review demo (docs/store/review-notes.md): off
   // unless REVIEW_DEMO_ENABLED=true and every setting is valid.

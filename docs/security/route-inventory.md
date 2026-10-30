@@ -52,6 +52,8 @@ Last reviewed: 2026-10-16 (pre-launch hardening, Stages 1–5).
 | `POST /auth/login` | No | — | Needs a verification token for the same phone. Refuses deleted accounts, and ADMIN accounts not on `ADMIN_PHONE_ALLOWLIST`. From the admin site (`X-CampusRide-Client: admin`), only an allowed ADMIN account gets a session. Attempts from the admin site, or about an admin's number, are recorded. | per number: 10 / 15 min (with sign-ups); IP backstop |
 | `POST /auth/refresh` | No | — | The refresh token is the credential. One-time use; re-using one revokes that whole login. Refuses deleted accounts. | per login: 10 / 15 min; per account: 30 / 15 min; IP backstop |
 | `POST /auth/logout` | No | — | The refresh token is the credential; only that token's own push token is removed. | IP backstop |
+| `POST /auth/passkey/options` | No | — | A single-use challenge (5 minutes) for signing in to the admin site with a passkey. Nothing about any account. | IP backstop |
+| `POST /auth/passkey/login` | No | — | The passkey's signature is the credential. Gives an admin session only to an open ADMIN account on ADMIN_PHONE_ALLOWLIST; every attempt is in "Admin logins". | IP backstop |
 | `POST /demo/otp/send` | No | — | Showcase demo only, separate table from real logins. | its own (per phone 1 / min and 5 / day, per IP 10 / hour, all phones 300 / day); IP backstop |
 | `POST /demo/otp/verify` | No | — | As above. 5 wrong tries burns the code. | IP backstop |
 | `POST /webhooks/moolre` | No | — | **Not registered in production** (payments are off). When on, Moolre's shared secret is the credential, compared in constant time. | IP backstop |
@@ -138,7 +140,7 @@ Two keys, both needed: the account's role is ADMIN in the database **and**
 its phone is on `ADMIN_PHONE_ALLOWLIST` (set on Render). Anyone else gets 403,
 riders and unlisted admins alike. Every change writes an `AdminAuditLog` row
 in the same transaction. Admin sessions are short: a 10-minute access token
-renewed while in use, ended by 30 idle minutes or 8 hours after signing in.
+renewed while in use, ended by an idle hour or 12 hours after signing in.
 See [admin-and-secrets.md](admin-and-secrets.md).
 
 | Route | Login | Roles | Ownership rule | Rate limit |
@@ -167,6 +169,10 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/notifications/audience` | Yes | ADMIN | How many app installs a send would reach now; for one number, whose account it is (name, role, masked number). | account default |
 | `POST /admin/notifications` | Yes | ADMIN | Sends a notification to all riders, all drivers, everyone, or one number's account; delivered in the background. Audit-logged (`notification.send`, with the text). | account default; plus 5 sends to "all" audiences per hour and 10 single-number/test sends per hour, for all admins together, counted from the history |
 | `POST /admin/notifications/test` | Yes | ADMIN | Sends to the rider or driver account on the admin's own number only (none while that number is the admin account), and says why nothing arrived. Audit-logged (`notification.test`). | account default; plus the single-number/test cap |
+| `GET /admin/passkeys` | Yes | ADMIN | The caller's own passkeys: name, synced or not, added, last used. No key material. | account default |
+| `POST /admin/passkeys/options` | Yes | ADMIN | A single-use challenge to add a passkey to the caller's own account. | account default |
+| `POST /admin/passkeys` | Yes | ADMIN | Adds a passkey to the caller's own account (public key only). Audit-logged (`admin.passkey.add`). | account default |
+| `DELETE /admin/passkeys/:id` | Yes | ADMIN | Removes one of the caller's own passkeys; another admin's answers 404. Audit-logged (`admin.passkey.remove`). | account default |
 
 ## Socket.io
 

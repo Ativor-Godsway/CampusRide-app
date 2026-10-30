@@ -6,10 +6,24 @@ import {
   formatGhanaPhone,
   normalizeGhanaPhone,
 } from "@rida/shared";
-import { ApiError, login, requestOtp, verifyOtp } from "../api";
+import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
+import { ApiError, login, requestOtp, signInWithPasskey, verifyOtp } from "../api";
 import { useAuth } from "../auth";
 
+/** What the browser's own refusal means, in words ("NotAllowedError" is a cancel or a timeout). */
+function passkeyProblem(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  const name = (err as { name?: string } | null)?.name;
+  if (name === "NotAllowedError" || name === "AbortError") return "Passkey sign-in was cancelled. Try again, or use a phone code.";
+  return "Your browser couldn't use a passkey here. Use a phone code instead.";
+}
+
 /**
+ * Passkey first (Face ID / Touch ID; api.signInWithPasskey): no number to
+ * type, nothing to phish. A phone code stays as the fallback — for admins
+ * with no passkey yet, or for everyone while the server allows it
+ * (ADMIN_OTP_FALLBACK); otherwise the server says to use the passkey.
+ *
  * Phone + OTP login, reusing the existing /auth/request-otp → /auth/verify-otp
  * → /auth/login chain exactly as the rider and driver apps do. There is no
  * separate admin credential anywhere.
@@ -22,7 +36,9 @@ import { useAuth } from "../auth";
  */
 export function LoginScreen() {
   const { signIn, endedReason } = useAuth();
+  const passkeysWork = browserSupportsWebAuthn();
   const [step, setStep] = useState<"phone" | "code">("phone");
+  const [showPhone, setShowPhone] = useState(!passkeysWork);
   const [phone, setPhone] = useState("");
   // The number as the server knows it (+233XXXXXXXXX), from the shared parser:
   // used for every step after "Send code", whatever was typed or pasted.
@@ -41,6 +57,24 @@ export function LoginScreen() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, [resendIn]);
+
+  async function signInByPasskey() {
+    setError(null);
+    setBusy(true);
+    try {
+      const result = await signInWithPasskey();
+      signIn({
+        user: result.user,
+        accessToken: result.accessToken,
+        refreshToken: result.refreshToken,
+        sessionExpiresAt: result.sessionExpiresAt,
+      });
+    } catch (err) {
+      setError(passkeyProblem(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function sendCode() {
     setError(null);
@@ -101,9 +135,27 @@ export function LoginScreen() {
     <div className="login">
       <div className="card login-card">
         <h1>CampusRide Admin</h1>
-        <p className="muted">Sign in with the phone number of an administrator account.</p>
+        {passkeysWork ? (
+          <>
+            <p className="muted">Sign in with your passkey (Face ID or Touch ID).</p>
+            <button type="button" disabled={busy} onClick={() => void signInByPasskey()}>
+              {busy && !showPhone ? "Waiting for your passkey…" : "Sign in with a passkey"}
+            </button>
+            {!showPhone ? (
+              <button type="button" className="link" disabled={busy} onClick={() => setShowPhone(true)}>
+                Use a phone code instead
+              </button>
+            ) : null}
+          </>
+        ) : null}
 
-        {step === "phone" ? (
+        {showPhone ? (
+          <p className="muted">
+            {passkeysWork ? "Or sign in" : "Sign in"} with the phone number of an administrator account.
+          </p>
+        ) : null}
+
+        {!showPhone ? null : step === "phone" ? (
           <form onSubmit={handleSendCode}>
             <label htmlFor="phone">Phone number</label>
             <input

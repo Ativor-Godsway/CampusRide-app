@@ -12,6 +12,8 @@ const REASONS: Record<string, string> = {
   not_admin: "not an admin account",
   not_allowlisted: "admin account not on the allowlist",
   invalid_verification: "verification expired",
+  passkey_required: "phone code for an admin who has a passkey",
+  passkey_failed: "passkey didn't verify, or isn't registered",
 };
 
 /** "Chrome on macOS" from a user-agent string — good enough to spot a stranger's device. */
@@ -112,7 +114,9 @@ export function AdminLoginsScreen() {
                   <td>{new Date(login.at).toLocaleString()}</td>
                   <td>
                     {login.outcome === "success" ? (
-                      <span className="badge badge-completed">Signed in</span>
+                      <span className="badge badge-completed">
+                        Signed in{login.reason === "passkey" ? " with a passkey" : ""}
+                      </span>
                     ) : login.outcome === "failure" ? (
                       <span className="badge badge-cancelled">
                         Refused{login.reason ? `: ${REASONS[login.reason] ?? login.reason}` : ""}

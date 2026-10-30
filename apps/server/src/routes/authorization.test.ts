@@ -60,6 +60,8 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /auth/login": "public",
   "POST /auth/refresh": "public",
   "POST /auth/logout": "public",
+  "POST /auth/passkey/options": "public",
+  "POST /auth/passkey/login": "public",
   "POST /demo/otp/send": "public",
   "POST /demo/otp/verify": "public",
   "POST /webhooks/moolre": "public",
@@ -143,6 +145,10 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /admin/notifications/audience": "admin",
   "POST /admin/notifications": "admin",
   "POST /admin/notifications/test": "admin",
+  "GET /admin/passkeys": "admin",
+  "POST /admin/passkeys/options": "admin",
+  "POST /admin/passkeys": "admin",
+  "DELETE /admin/passkeys/:id": "admin",
 };
 
 // ─── App, people and rides ─────────────────────────────────────────────────

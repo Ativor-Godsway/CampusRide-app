@@ -165,6 +165,11 @@ export async function deleteAccount(
       },
     });
 
+    // Stats: a driver's online session (if any) ends with the account.
+    await tx.driverOnlineSession.updateMany({
+      where: { driverUserId: userId, endedAt: null },
+      data: { endedAt: now, endReason: "ACCOUNT_CLOSED" },
+    });
     await tx.pushToken.deleteMany({ where: { userId } });
     await tx.trackingLink.deleteMany({ where: { riderId: userId } });
     await tx.otpCode.deleteMany({ where: { phone: user.phone } });

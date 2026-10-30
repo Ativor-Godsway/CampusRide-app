@@ -54,6 +54,8 @@ import { pinFieldsOf, requestPlaceNames } from "./ridePins";
 import { estimateRoute } from "../services/routing/campusRoutes";
 import { RULES } from "../rateLimit/rules";
 import { checkDriverPosition, hasActiveTrip, lastPositionData, parseDriverPoint } from "../services/zones/driverPosition";
+import { closeDriverSession, openDriverSession } from "../services/stats/driverSessions";
+import { recordOfferAnswer } from "../services/stats/rideOffers";
 import {
   MAX,
   bodyOptional,
@@ -296,6 +298,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         ...(body.isOnline ? lastPositionData(position) : {}),
       },
     });
+    // Stats: hours online (services/stats/driverSessions.ts).
+    if (body.isOnline) await openDriverSession(prisma, userId);
+    else await closeDriverSession(prisma, userId, "OFFLINE");
 
     return reply.code(200).send({ driver: updated });
   });
@@ -695,6 +700,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       update: {},
       create: { rideId, driverUserId: userId, reason },
     });
+    void recordOfferAnswer(prisma, rideId, userId, reason === "TIMED_OUT" ? "TIMED_OUT" : "DECLINED");
 
     return reply.code(200).send({ rejected: true, rideId });
   });
@@ -1231,7 +1237,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       });
 
       if (car.changed) {
-        if (requestPickupZoneId) closeOffer(prisma, { id: requestRideId, pickupZoneId: requestPickupZoneId }, "TAKEN");
+        if (requestPickupZoneId)
+          closeOffer(prisma, { id: requestRideId, pickupZoneId: requestPickupZoneId, driverId: userId }, "TAKEN");
         // #7 merged-rider reach: the absorbed request is now CANCELLED /
         // MERGED_INTO_ANOTHER_RIDE. That rider's app is still tracking it, so
         // tell its room — the client follows mergedIntoRideId to this car.
