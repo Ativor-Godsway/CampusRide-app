@@ -36,9 +36,33 @@ export interface StoredLaunch {
   updatedAt: Date | null;
   /** User.id of the admin who last changed it. */
   updatedBy: string | null;
+  /** Send "CampusRide is live!" when the mode in force turns LIVE (services/push/broadcast.ts). */
+  launchPushEnabled: boolean;
 }
 
-const NEVER_SET: StoredLaunch = { mode: "OFF", launchAt: null, updatedAt: null, updatedBy: null };
+const NEVER_SET: StoredLaunch = {
+  mode: "OFF",
+  launchAt: null,
+  updatedAt: null,
+  updatedBy: null,
+  launchPushEnabled: false,
+};
+
+function stored(row: {
+  mode: LaunchMode;
+  launchAt: Date | null;
+  updatedAt: Date;
+  updatedBy: string | null;
+  launchPushEnabled: boolean;
+}): StoredLaunch {
+  return {
+    mode: row.mode,
+    launchAt: row.launchAt,
+    updatedAt: row.updatedAt,
+    updatedBy: row.updatedBy,
+    launchPushEnabled: row.launchPushEnabled,
+  };
+}
 
 let cached: { value: StoredLaunch; readAt: number } | null = null;
 
@@ -50,9 +74,7 @@ export function clearLaunchCache(): void {
 export async function readLaunchSetting(prisma: PrismaClient): Promise<StoredLaunch> {
   if (cached && Date.now() - cached.readAt < CACHE_MS) return cached.value;
   const row = await prisma.launchSetting.findUnique({ where: { id: ROW_ID } });
-  const value: StoredLaunch = row
-    ? { mode: row.mode, launchAt: row.launchAt, updatedAt: row.updatedAt, updatedBy: row.updatedBy }
-    : NEVER_SET;
+  const value: StoredLaunch = row ? stored(row) : NEVER_SET;
   cached = { value, readAt: Date.now() };
   return value;
 }
@@ -159,7 +181,59 @@ export async function setLaunchMode(
     }),
   ]);
   clearLaunchCache();
-  return { mode: row.mode, launchAt: row.launchAt, updatedAt: row.updatedAt, updatedBy: row.updatedBy };
+  return stored(row);
+}
+
+/** The launch push's Broadcast row (services/push/broadcast.ts): its key makes it once ever. */
+export const LAUNCH_PUSH_KEY = "launch";
+
+/**
+ * The Settings switch "Send 'CampusRide is live!' when launch mode turns
+ * Live". Turning it on is refused once CampusRide is already Live (there is
+ * no launch moment left to announce; a late "it's live!" would confuse) and
+ * once the push has gone out. Audit row "launch.push.enable" / "launch.push.disable".
+ */
+export async function setLaunchPush(
+  prisma: PrismaClient,
+  actor: string,
+  enabled: boolean,
+  now = new Date(),
+): Promise<StoredLaunch> {
+  clearLaunchCache();
+  const before = await readLaunchSetting(prisma);
+  if (enabled) {
+    const sent = await prisma.broadcast.findUnique({
+      where: { key: LAUNCH_PUSH_KEY },
+      select: { createdAt: true },
+    });
+    if (sent) {
+      throw new LaunchSettingError(
+        `The launch push already went out (${sent.createdAt.toISOString()}). It is only ever sent once.`,
+      );
+    }
+    if (effectiveLaunchMode(before, now) === "LIVE") {
+      throw new LaunchSettingError(
+        "CampusRide is already Live, so there is no launch moment left to announce. Use the Notifications page to send a message now.",
+      );
+    }
+  }
+  const [row] = await prisma.$transaction([
+    prisma.launchSetting.upsert({
+      where: { id: ROW_ID },
+      create: { id: ROW_ID, launchPushEnabled: enabled, updatedBy: actor },
+      update: { launchPushEnabled: enabled, updatedBy: actor },
+    }),
+    prisma.adminAuditLog.create({
+      data: {
+        actor,
+        action: enabled ? "launch.push.enable" : "launch.push.disable",
+        target: ROW_ID,
+        reason: `while ${describeLaunch(before)}`,
+      },
+    }),
+  ]);
+  clearLaunchCache();
+  return stored(row);
 }
 
 /** Riders the "everyone now" button reaches: real, open rider accounts without early access yet. */

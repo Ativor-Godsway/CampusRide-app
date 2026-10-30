@@ -7,12 +7,14 @@ import {
 } from "expo-server-sdk";
 import {
   ANDROID_CHANNELS,
+  ANNOUNCEMENT_PUSH_KIND,
   appForKind,
   pushText,
   type PushApp,
   type PushData,
   type PushKind,
   type PushTextInput,
+  type BroadcastText,
 } from "@rida/shared";
 import { config } from "../../config";
 import { logger } from "../../lib/logger";
@@ -122,8 +124,12 @@ const RECEIPT_GIVE_UP_MS = 24 * 60 * 60_000;
 /** Ceiling on receipts waiting to be checked, so memory stays bounded. */
 const MAX_PENDING_RECEIPTS = 50_000;
 
-/** Receipt id -> the token row it was sent to, waiting to be checked. */
-const pendingReceipts = new Map<string, { tokenId: string; sentAt: number }>();
+/**
+ * Receipt id -> the token row it was sent to, waiting to be checked; and,
+ * for an admin notification, its Broadcast row (a late failure is counted
+ * there).
+ */
+const pendingReceipts = new Map<string, { tokenId: string; sentAt: number; broadcastId?: string }>();
 
 export interface SendPushInput {
   userIds: readonly string[];
@@ -233,6 +239,7 @@ export async function checkPushReceipts(
 
     const receipts = await transport.receipts(due.map(([id]) => id));
     const dead: string[] = [];
+    const lateFailures = new Map<string, number>();
     for (const [id, pending] of due) {
       const receipt = receipts[id];
       if (!receipt) {
@@ -242,6 +249,8 @@ export async function checkPushReceipts(
       }
       pendingReceipts.delete(id);
       if (receipt.status === "ok") continue;
+      if (pending.broadcastId)
+        lateFailures.set(pending.broadcastId, (lateFailures.get(pending.broadcastId) ?? 0) + 1);
       if (receipt.details?.error === "DeviceNotRegistered") dead.push(pending.tokenId);
       else {
         logger.warn("push: not delivered", {
@@ -255,9 +264,80 @@ export async function checkPushReceipts(
       }
     }
     await deleteTokens(prisma, dead, "receipt");
+    for (const [broadcastId, n] of lateFailures) {
+      await prisma.broadcast.updateMany({
+        where: { id: broadcastId },
+        data: { delivered: { decrement: n }, failed: { increment: n } },
+      });
+    }
   } catch (err) {
     logger.error("push: receipt check failed", { err });
   }
+}
+
+// ─── Admin notifications ────────────────────────────────────────────────────
+
+export interface AnnouncementResult {
+  /** Accepted by Expo for delivery. */
+  delivered: number;
+  failed: number;
+  /** Of the failed: installs Expo says are gone, now deleted. */
+  removed: number;
+}
+
+/** How long Expo/FCM/APNs keep trying to deliver an admin notification: news stays news for a day. */
+const ANNOUNCEMENT_TTL_SECONDS = 24 * 60 * 60;
+
+/**
+ * Sends an admin notification (services/push/broadcast.ts) to one batch of
+ * installs, each through its own app's Android channel. No dedupe or
+ * per-person limit: the admin site's caps apply instead. Never throws for a
+ * refused message; dead tokens are deleted, and the delivery receipts are
+ * checked later against `broadcastId`. Failures are logged once per batch
+ * with their reasons, never per token.
+ */
+export async function sendAnnouncement(
+  prisma: PrismaClient,
+  tokens: ReadonlyArray<{ id: string; token: string; app: string }>,
+  text: BroadcastText,
+  broadcastId: string,
+  now: number = Date.now(),
+): Promise<AnnouncementResult> {
+  if (!transport) return { delivered: 0, failed: tokens.length, removed: 0 };
+  if (tokens.length === 0) return { delivered: 0, failed: 0, removed: 0 };
+  const messages: ExpoPushMessage[] = tokens.map((t) => ({
+    to: t.token,
+    title: text.title,
+    body: text.body,
+    data: { kind: ANNOUNCEMENT_PUSH_KIND },
+    sound: "default",
+    channelId: ANDROID_CHANNELS[t.app === "driver" ? "driver" : "rider"].id,
+    ttl: ANNOUNCEMENT_TTL_SECONDS,
+  }));
+  const tickets = await transport.send(messages);
+
+  let delivered = 0;
+  const dead: string[] = [];
+  const reasons: Record<string, number> = {};
+  tokens.forEach((t, i) => {
+    const ticket = tickets[i];
+    if (ticket?.status === "ok") {
+      delivered += 1;
+      if (pendingReceipts.size < MAX_PENDING_RECEIPTS)
+        pendingReceipts.set(ticket.id, { tokenId: t.id, sentAt: now, broadcastId });
+      return;
+    }
+    const reason = ticket?.details?.error ?? ticket?.message ?? "no ticket";
+    reasons[reason] = (reasons[reason] ?? 0) + 1;
+    if (ticket?.details?.error === "DeviceNotRegistered") dead.push(t.id);
+  });
+  const failed = tokens.length - delivered;
+  if (failed > dead.length) {
+    logger.warn("push: announcement not accepted", { broadcastId, reasons });
+    alerts.pushFailures.record({ stage: "send", error: Object.keys(reasons).join(", ") });
+  }
+  await deleteTokens(prisma, dead, "ticket");
+  return { delivered, failed, removed: dead.length };
 }
 
 /** Tests only: forget pending receipts and rate-limit state between tests. */

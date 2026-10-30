@@ -4,7 +4,7 @@
  * more moving parts than the whole screen count justifies.
  */
 
-import { rateLimitMessage } from "@rida/shared";
+import { rateLimitMessage, type BroadcastAudience, type BroadcastKind } from "@rida/shared";
 
 const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
@@ -101,7 +101,9 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
     const fromBody = (body as { retryAfterSeconds?: unknown }).retryAfterSeconds;
     const seconds =
       typeof fromBody === "number" && fromBody > 0 ? fromBody : Number(res.headers.get("retry-after")) || 60;
-    throw new ApiError(rateLimitMessage(seconds), 429, Math.ceil(seconds));
+    // The API's own sentence when it sent one (it says which limit), else the generic one.
+    const said = (body as { error?: unknown }).error;
+    throw new ApiError(typeof said === "string" && said ? said : rateLimitMessage(seconds), 429, Math.ceil(seconds));
   }
 
   if (!res.ok) {
@@ -395,6 +397,13 @@ export interface LaunchSettings {
   status: LaunchStatus;
   /** Rider accounts with early access now. */
   earlyAccessRiders: number;
+  /** "Send 'CampusRide is live!' when launch mode turns Live", and the send once it has gone out. */
+  launchPush: LaunchPushState;
+}
+
+export interface LaunchPushState {
+  enabled: boolean;
+  sent: Broadcast | null;
 }
 
 export interface EarlyAccessLookup {
@@ -426,4 +435,71 @@ export function giveEarlyAccessToAllRiders(
   token: string,
 ): Promise<{ granted: number; earlyAccessRiders: number }> {
   return request("/admin/early-access/all-riders", { method: "POST", body: "{}" }, token);
+}
+
+export function setLaunchPush(token: string, enabled: boolean): Promise<{ launchPush: LaunchPushState }> {
+  return request("/admin/launch/push", { method: "PUT", body: JSON.stringify({ enabled }) }, token);
+}
+
+// ── Notifications ───────────────────────────────────────────────────────────
+
+export interface Broadcast {
+  id: string;
+  kind: BroadcastKind;
+  audienceLabel: string;
+  /** One number and tests: the number, masked. */
+  maskedPhone: string | null;
+  title: string;
+  body: string;
+  status: "SENDING" | "SENT" | "FAILED" | "INTERRUPTED";
+  devices: number;
+  /** Accepted for delivery; a failure reported later (~15 minutes) moves to `failed`. */
+  delivered: number;
+  failed: number;
+  createdAt: string;
+  finishedAt: string | null;
+  /** Null for the launch push (sent by the server). */
+  sentBy: { id: string; name: string } | null;
+}
+
+export interface CapStatus {
+  used: number;
+  max: number;
+}
+
+export interface BroadcastHistory {
+  broadcasts: Broadcast[];
+  caps: { broadcast: CapStatus; direct: CapStatus };
+}
+
+export interface AudiencePreview {
+  devices: number;
+  recipient: { name: string; role: "RIDER" | "DRIVER"; maskedPhone: string } | null;
+}
+
+export interface TestSendResult {
+  devices: number;
+  delivered: number;
+  failed: number;
+  message: string;
+}
+
+export function getBroadcasts(token: string): Promise<BroadcastHistory> {
+  return request("/admin/notifications", {}, token);
+}
+
+export function previewAudience(token: string, audience: BroadcastAudience, phone: string): Promise<AudiencePreview> {
+  const query = new URLSearchParams({ audience, ...(audience === "PHONE" ? { phone } : {}) });
+  return request(`/admin/notifications/audience?${query.toString()}`, {}, token);
+}
+
+export function sendBroadcast(
+  token: string,
+  input: { audience: BroadcastAudience; phone?: string; title: string; body: string },
+): Promise<{ broadcast: Broadcast }> {
+  return request("/admin/notifications", { method: "POST", body: JSON.stringify(input) }, token);
+}
+
+export function sendTestToMe(token: string, input: { title: string; body: string }): Promise<TestSendResult> {
+  return request("/admin/notifications/test", { method: "POST", body: JSON.stringify(input) }, token);
 }

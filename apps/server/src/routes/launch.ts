@@ -14,7 +14,9 @@ import {
   readLaunchSetting,
   setEarlyAccess,
   setLaunchMode,
+  setLaunchPush,
 } from "../services/launch/launchSettings";
+import { launchPushSent, maybeSendLaunchPush } from "../services/push/broadcast";
 
 /**
  * Launch mode (services/launch/launchSettings.ts): the countdown before the
@@ -26,7 +28,9 @@ import {
  * - GET /me/launch-status: the same, plus whether the caller can book now.
  *   The rider app asks this one: early-access riders see no countdown.
  * - Admin Settings: read and set the mode; give or take one rider's early
- *   access; give it to every current rider. Each change is audit-logged.
+ *   access; give it to every current rider; switch the one-time launch push
+ *   ("CampusRide is live!", services/push/broadcast.ts) on or off. Each
+ *   change is audit-logged.
  */
 
 const SCHEMAS = {
@@ -38,6 +42,7 @@ const SCHEMAS = {
   lookUp: { querystring: object({ phone: phoneField }, ["phone"]) },
   setAccess: { body: object({ phone: phoneField, enabled: boolean }, ["phone", "enabled"]) },
   grantAll: { body: empty },
+  launchPush: { body: object({ enabled: boolean }, ["enabled"]) },
 };
 
 const ACCOUNT_SELECT = { id: true, name: true, role: true, earlyAccessAt: true } as const;
@@ -65,10 +70,11 @@ export function registerLaunchRoutes(app: FastifyInstance, prisma: PrismaClient)
   app.get("/admin/launch", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.admin }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     const now = new Date();
-    const [setting, status, earlyAccessRiders] = await Promise.all([
+    const [setting, status, earlyAccessRiders, sent] = await Promise.all([
       readLaunchSetting(prisma),
       launchStatus(prisma, now),
       countEarlyAccess(prisma),
+      launchPushSent(prisma),
     ]);
     const updatedBy = setting.updatedBy
       ? await prisma.user.findUnique({ where: { id: setting.updatedBy }, select: { id: true, name: true } })
@@ -82,6 +88,7 @@ export function registerLaunchRoutes(app: FastifyInstance, prisma: PrismaClient)
       },
       status,
       earlyAccessRiders,
+      launchPush: { enabled: setting.launchPushEnabled, sent },
     });
   });
 
@@ -100,7 +107,23 @@ export function registerLaunchRoutes(app: FastifyInstance, prisma: PrismaClient)
       throw err;
     }
     request.log.info({ event: "launch_mode_changed", actor: request.user!.userId, mode: body.mode }, "Launch mode changed");
+    // Set to Live with the launch push on: it goes out now (once ever), not at the next timer tick.
+    await maybeSendLaunchPush(prisma);
     return reply.send({ status: await launchStatus(prisma) });
+  });
+
+  /** Body `{ enabled }`: the "Send 'CampusRide is live!' when launch mode turns Live" switch. */
+  app.put("/admin/launch/push", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.launchPush }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const { enabled } = request.body as { enabled: boolean };
+    try {
+      await setLaunchPush(prisma, request.user!.userId, enabled);
+    } catch (err) {
+      if (err instanceof LaunchSettingError) return reply.code(409).send({ error: err.message });
+      throw err;
+    }
+    request.log.info({ event: "launch_push_switched", actor: request.user!.userId, enabled }, "Launch push switched");
+    return reply.send({ launchPush: { enabled, sent: await launchPushSent(prisma) } });
   });
 
   /** `?phone=` in any spelling: the account and whether it has early access. Read-only, not logged. */

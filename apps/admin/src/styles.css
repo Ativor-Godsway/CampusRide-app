@@ -447,3 +447,49 @@ label.inline input {
 .settings-option input {
   margin-top: 0.3rem;
 }
+
+/* ── Notifications ──────────────────────────────────────────────────────── */
+
+.notify-audience {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.notify-audience legend {
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+}
+
+.notify-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.notify-confirm {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 2px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--bg);
+}
+
+.notify-confirm h4 {
+  margin: 0 0 0.5rem;
+}
+
+/* The notification roughly as a phone shows it. */
+.notify-preview {
+  display: grid;
+  gap: 0.2rem;
+  max-width: 360px;
+  padding: 0.75rem 0.9rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
