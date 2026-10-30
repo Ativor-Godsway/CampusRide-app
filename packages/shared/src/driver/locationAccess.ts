@@ -13,11 +13,12 @@
 export const DRIVER_LOCATION_DISCLOSURE = {
   title: "Share your location while you're online",
   body: "CampusRide Driver collects location data to share your position with riders and match you with nearby ride requests while you are online, even when the app is closed or not in use.",
-  /** Three short lines (the screen gives each an icon). */
+  /** Short lines (the screen gives each an icon). The last one matches the privacy policy (90 days). */
   details: [
     "Riders on your trip see where you are.",
     "Ride requests near you reach you first.",
     "Sharing stops as soon as you go offline.",
+    "We keep your location history for up to 90 days for safety and service quality.",
   ],
   /** Under the lines: what to choose on the system prompt that follows. */
   hint: "On the next screen, choose “Allow all the time” (Android) or “Always” (iPhone) so riders still see you when you switch to another app.",

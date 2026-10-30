@@ -14,8 +14,10 @@ Added 2026-10-16.
   "Share your location while you're online. CampusRide Driver collects
   location data to share your position with riders and match you with
   nearby ride requests while you are online, even when the app is closed or
-  not in use." with **Continue** and **Not now**. Nothing is asked of the
-  phone until the driver taps Continue.
+  not in use." Under it, four short lines, the last: "We keep your location
+  history for up to 90 days for safety and service quality." Then
+  **Continue** and **Not now**. Nothing is asked of the phone until the
+  driver taps Continue.
 - **Then the phone's own prompts:** "While using the app", then "Allow all
   the time" (Android opens the app's location settings page for this; iPhone
   shows "Change to Always Allow").
@@ -56,8 +58,12 @@ background mode (only that one).
    online, started by the driver going online and stopped when they go
    offline"**; the same video.
 3. **Data safety:** Location → **Precise location**, collected, **shared**
-   (with riders on the trip), purpose **App functionality**, not optional
-   for drivers who go online. Mention it's processed only while online.
+   (with riders on the trip), not optional for drivers who go online.
+   Purposes: **App functionality**, **Fraud prevention, security, and
+   compliance** (safety: looking into reports about trips) and **Analytics**
+   (service quality: where and when drivers are available). Processed
+   ephemerally: **No** — a location history is kept, collected only while
+   online, and deleted after 90 days (the privacy policy says so).
 
 The rider app needs none of this: it has no background location.
 
@@ -67,8 +73,10 @@ The rider app needs none of this: it has no background location.
 > switched Online on the Home screen. It shares the driver's live position
 > with the rider on their trip and matches the driver with nearby ride
 > requests while they use navigation apps or lock the phone. Location stops
-> when the driver goes Offline. A full explanation is shown before the
-> location prompt. Test account: [driver test number and code process].
+> when the driver goes Offline. A location history (one point about every
+> 30 seconds while online) is kept for up to 90 days for safety and service
+> quality, then deleted. A full explanation is shown before the location
+> prompt. Test account: [driver test number and code process].
 
 ## The 30-second screen recording
 

@@ -21,6 +21,7 @@ const DETAIL_ICONS: (keyof typeof Ionicons.glyphMap)[] = [
   "people-outline",
   "flash-outline",
   "power-outline",
+  "time-outline",
 ];
 
 export function useLocationDisclosure(): Ask {

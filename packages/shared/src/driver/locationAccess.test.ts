@@ -61,6 +61,10 @@ describe("the wording Google and Apple look for", () => {
     expect(DRIVER_LOCATION_DISCLOSURE.body).toContain("share your position with riders");
     expect(DRIVER_LOCATION_DISCLOSURE.body).toContain("match you with nearby ride requests");
     expect(DRIVER_LOCATION_DISCLOSURE.body).toContain("even when the app is closed or not in use");
+    // Kept, and for how long: as the privacy policy says (the server deletes after 90 days).
+    expect(DRIVER_LOCATION_DISCLOSURE.details).toContain(
+      "We keep your location history for up to 90 days for safety and service quality.",
+    );
     expect([DRIVER_LOCATION_DISCLOSURE.accept, DRIVER_LOCATION_DISCLOSURE.decline]).toEqual([
       "Continue",
       "Not now",
