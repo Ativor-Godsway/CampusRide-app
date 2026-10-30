@@ -28,6 +28,15 @@ export const BROADCAST_AUDIENCE_LABELS: Record<BroadcastKind, string> = {
 /** The `data.kind` of an admin notification: the apps open, nothing more (no ride to show). */
 export const ANNOUNCEMENT_PUSH_KIND = "ANNOUNCEMENT";
 
+/** Whether a notification's `data` is an admin notification (shown as a banner while the app is open). */
+export function isAnnouncementPushData(data: unknown): boolean {
+  return (
+    typeof data === "object" &&
+    data !== null &&
+    (data as Record<string, unknown>).kind === ANNOUNCEMENT_PUSH_KIND
+  );
+}
+
 /** What riders get when launch mode turns Live, if the switch in Settings is on. */
 export const LAUNCH_PUSH_TEXT = {
   title: "CampusRide is live!",

@@ -5,6 +5,7 @@ import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { ANDROID_CHANNELS, type PushApp } from "@rida/shared";
 import { api } from "../auth/apiClient";
+import { KEYCHAIN_BACKGROUND_OPTIONS, readKeychain } from "../auth/keychain";
 import { getSentPushToken, setCurrentPushToken, setSentPushToken } from "./currentToken";
 
 /**
@@ -47,15 +48,29 @@ export async function getPushPermission(): Promise<PushPermission> {
   return status === "granted" ? "granted" : status === "denied" ? "denied" : "undetermined";
 }
 
-const ASKED_KEY = "rida.pushPermissionAsked";
+/**
+ * "This install has shown its explanation screen", readable while the phone
+ * is locked (the driver app runs on in the background). A new key name:
+ * the old one was saved "when unlocked", and iOS keeps an existing item's
+ * original setting when it is updated. The old one is still read, once.
+ */
+const ASKED_KEY = "rida.push.permissionAsked";
+const LEGACY_ASKED_KEY = "rida.pushPermissionAsked";
 
-/** Whether this install has already shown its explanation screen. */
+/**
+ * Whether this install has already shown its explanation screen. Rejects
+ * when the keychain can't be read now (phone locked): ask again later.
+ */
 export async function hasAskedForPush(): Promise<boolean> {
-  return (await SecureStore.getItemAsync(ASKED_KEY)) === "1";
+  if ((await readKeychain(ASKED_KEY)) === "1") return true;
+  if ((await readKeychain(LEGACY_ASKED_KEY)) !== "1") return false;
+  await markAskedForPush();
+  return true;
 }
 
+/** Remembers that the explanation screen was shown. Best effort: never rejects. */
 export async function markAskedForPush(): Promise<void> {
-  await SecureStore.setItemAsync(ASKED_KEY, "1");
+  await SecureStore.setItemAsync(ASKED_KEY, "1", KEYCHAIN_BACKGROUND_OPTIONS).catch(() => {});
 }
 
 /**

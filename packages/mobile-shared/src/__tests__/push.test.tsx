@@ -4,7 +4,7 @@ import { act, fireEvent, renderRouter, screen, waitFor } from "expo-router/testi
 import * as Notifications from "expo-notifications";
 import * as SecureStore from "expo-secure-store";
 import { AuthProvider, useAuth } from "../auth/AuthContext";
-import { PushNotifications } from "../push/PushNotifications";
+import { PushNotifications, usePushPermissionPrompt } from "../push/PushNotifications";
 import { resetPushTokenMemoryForTests } from "../push/currentToken";
 import {
   PUSH_SEND_MIN_INTERVAL_MS,
@@ -278,5 +278,75 @@ describe("what the app remembers", () => {
     // Launch, then the first of the twenty. The other nineteen became one
     // follow-up, which used the token the listener had just reported.
     expect(notifications.getDevicePushTokenAsync).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("while the app is open", () => {
+  /** The rider app on a screen that already shows its ride's news live. */
+  function QuietRoot() {
+    return (
+      <AuthProvider>
+        <PushNotifications app="rider" showInForeground={() => false} onOpen={() => {}} />
+        <Stack screenOptions={{ headerShown: false }} />
+      </AuthProvider>
+    );
+  }
+
+  async function shown(data: Record<string, unknown>) {
+    const calls = notifications.setNotificationHandler.mock.calls;
+    const handler = calls[calls.length - 1]?.[0];
+    const notification = { request: { content: { data } } } as unknown as Notifications.Notification;
+    return (await handler!.handleNotification(notification)).shouldShowBanner;
+  }
+
+  it("an admin notification shows as a banner; ride notifications still follow the screen", async () => {
+    await storeRefreshToken(server.issue().refreshToken);
+    await renderRouter({ _layout: QuietRoot, index: Home }, { initialUrl: "/" });
+    await screen.findByText("Home, Ama Test");
+
+    expect(await shown({ kind: "ANNOUNCEMENT" })).toBe(true);
+    expect(await shown({ kind: "DRIVER_ARRIVED", rideId: "ride1" })).toBe(false);
+    expect(await shown({ kind: "SOMETHING_ELSE" })).toBe(false);
+  });
+
+  it("nothing shows once signed out", async () => {
+    const app = await launchSignedIn();
+    await fireEvent.press(screen.getByText("Log out"));
+    await screen.findByText("Signed out");
+    expect(await shown({ kind: "ANNOUNCEMENT" })).toBe(false);
+    app.unmount();
+  });
+});
+
+describe("the notification explanation screen (asked once per install)", () => {
+  function Prompt({ onOpen }: { onOpen: () => void }) {
+    usePushPermissionPrompt(true, onOpen);
+    return <Text>Prompt host</Text>;
+  }
+
+  const secureMock = SecureStore as unknown as { getItemAsync: jest.Mock; setItemAsync: jest.Mock };
+  const readFromStore = async (key: string) => secureStore.__store.get(key) ?? null;
+
+  afterEach(() => secureMock.getItemAsync.mockImplementation(readFromStore));
+
+  it("asked under the old key: not asked again, and moved to a key readable while locked", async () => {
+    mockPhone.permission = "undetermined";
+    secureStore.__store.set("rida.pushPermissionAsked", "1");
+    const open = jest.fn();
+    await renderRouter({ index: () => <Prompt onOpen={open} /> }, { initialUrl: "/" });
+    await wait(5_000);
+    expect(open).not.toHaveBeenCalled();
+    expect(secureMock.setItemAsync).toHaveBeenCalledWith("rida.push.permissionAsked", "1", {
+      keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
+    });
+  });
+
+  it("a keychain that can't be read (phone locked): no error, not shown now", async () => {
+    mockPhone.permission = "undetermined";
+    secureMock.getItemAsync.mockRejectedValue(new Error("Calling the 'getValueWithKeyAsync' function has failed"));
+    const open = jest.fn();
+    await renderRouter({ index: () => <Prompt onOpen={open} /> }, { initialUrl: "/" });
+    for (let i = 0; i < 30; i++) await wait(100);
+    expect(open).not.toHaveBeenCalled();
   });
 });

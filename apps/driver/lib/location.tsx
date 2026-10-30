@@ -130,17 +130,18 @@ export function DriverLocationProvider({ children }: { children: ReactNode }) {
       if (cancelled || perm.status !== "granted") return;
       backgroundModeRef.current = await hasBackgroundLocationAccess();
       if (backgroundModeRef.current) {
-        unlisten = onDriverLocation(setRealSample);
-        try {
-          await startDriverLocationUpdates();
+        const stopListening = onDriverLocation(setRealSample);
+        unlisten = stopListening;
+        // False: the task isn't defined (reported to Sentry); a throw: the OS refused.
+        const started = await startDriverLocationUpdates().catch(() => false);
+        if (started) {
           if (cancelled) void stopDriverLocationUpdates();
           return;
-        } catch {
-          // Couldn't start in the background: track while the app is open.
-          backgroundModeRef.current = false;
-          unlisten();
-          unlisten = null;
         }
+        // Couldn't start in the background: track while the app is open.
+        backgroundModeRef.current = false;
+        stopListening();
+        unlisten = null;
       }
       if (cancelled) return;
       const subscription = await Location.watchPositionAsync(

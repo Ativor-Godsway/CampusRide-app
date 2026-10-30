@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as SecureStore from "expo-secure-store";
+import { KEYCHAIN_BACKGROUND_OPTIONS, readKeychain } from "../auth/keychain";
 
 /**
  * Keeping react-native-maps (1.27) from crashing the app on Android.
@@ -50,13 +51,17 @@ let writes: Promise<unknown> = Promise.resolve();
 function save(): void {
   const value = JSON.stringify([...loadingNow]);
   writes = writes
-    .then(() => (loadingNow.size ? SecureStore.setItemAsync(STORE_KEY, value) : SecureStore.deleteItemAsync(STORE_KEY)))
+    .then(() =>
+      loadingNow.size
+        ? SecureStore.setItemAsync(STORE_KEY, value, KEYCHAIN_BACKGROUND_OPTIONS)
+        : SecureStore.deleteItemAsync(STORE_KEY),
+    )
     .catch(() => undefined);
 }
 
 /** The maps that were still loading when the app last stopped (read once per launch). */
 export function mapsLoadingAtLastStop(): Promise<ReadonlySet<string>> {
-  lastLaunch ??= SecureStore.getItemAsync(STORE_KEY)
+  lastLaunch ??= readKeychain(STORE_KEY)
     .then((raw) => {
       const names = raw ? (JSON.parse(raw) as unknown) : [];
       return new Set(Array.isArray(names) ? names.filter((n): n is string => typeof n === "string") : []);

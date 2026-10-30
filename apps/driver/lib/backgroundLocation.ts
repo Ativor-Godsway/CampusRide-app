@@ -10,6 +10,9 @@ import {
   type LocationAccessPlan,
   type PermissionState,
 } from "@rida/shared";
+// Sentry directly, not @rida/mobile-shared: this module loads first, from
+// the entry (index.ts), and must stay light. A no-op until Sentry starts.
+import * as Sentry from "@sentry/react-native";
 
 /**
  * Location while a driver is online, including when the app is in the
@@ -115,13 +118,33 @@ function serially<T>(step: () => Promise<T>): Promise<T> {
   return run;
 }
 
-/** Starts background updates (and Android's online notification). Safe to call twice. */
-export function startDriverLocationUpdates(): Promise<void> {
+/**
+ * Starts background updates (and Android's online notification). Safe to
+ * call twice. False when they can't run because the task isn't defined: the
+ * caller tracks while the app is open instead, and Sentry hears about it.
+ */
+export function startDriverLocationUpdates(): Promise<boolean> {
   return serially(startNow);
 }
 
-async function startNow(): Promise<void> {
-  if (await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK)) return;
+/** Reported once per launch: a sign the entry (index.ts) didn't load this module first. */
+let reportedUndefinedTask = false;
+
+async function startNow(): Promise<boolean> {
+  // index.ts defines the task before anything else loads, so this can only
+  // fail if the entry changes. Starting anyway would register a task whose
+  // positions go nowhere.
+  if (!TaskManager.isTaskDefined(DRIVER_LOCATION_TASK)) {
+    if (!reportedUndefinedTask) {
+      reportedUndefinedTask = true;
+      Sentry.captureException(
+        new Error(`Background location task '${DRIVER_LOCATION_TASK}' is not defined; tracking only while open`),
+        { tags: { caught_by: "driver_location_start" } },
+      );
+    }
+    return false;
+  }
+  if (await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK)) return true;
   await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, {
     accuracy: Location.Accuracy.Balanced,
     timeInterval: 5_000,
@@ -139,12 +162,19 @@ async function startNow(): Promise<void> {
       killServiceOnDestroy: true,
     },
   });
+  return true;
 }
 
 /**
  * Stops background updates and the notification. Safe to call when not
  * running: only stops what is registered and started, and a stop the OS
  * beat us to (the service already gone) is not an error.
+ *
+ * On iOS "Task 'campusride-driver-location' not found" (Sentry
+ * CAMPUSRIDE-DRIVER-1, build 1.0.0 (3)) comes from here, not from starting:
+ * two stops overlapped (going online re-ran the location effect), both saw
+ * updates running, and the second one found the task already removed.
+ * Running one step at a time and the try/catch below are the fix.
  */
 export function stopDriverLocationUpdates(): Promise<void> {
   return serially(async () => {

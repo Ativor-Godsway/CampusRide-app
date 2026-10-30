@@ -1,4 +1,5 @@
 import * as SecureStore from "expo-secure-store";
+import { KEYCHAIN_BACKGROUND_OPTIONS, readKeychain } from "../auth/keychain";
 
 /**
  * This install's push token once it has been registered with the server, so
@@ -51,7 +52,7 @@ function parseSent(raw: string | null): SentPushToken | null {
 export async function getSentPushToken(): Promise<SentPushToken | null> {
   if (sent !== undefined) return sent;
   // An unreadable keychain (iPhone locked) counts as "not sent": one extra send.
-  const raw = await SecureStore.getItemAsync(SENT_KEY).catch(() => null);
+  const raw = await readKeychain(SENT_KEY).catch(() => null);
   // A write made meanwhile is newer than what was on disk.
   if (sent === undefined) sent = parseSent(raw);
   return sent;
@@ -59,9 +60,7 @@ export async function getSentPushToken(): Promise<SentPushToken | null> {
 
 export async function setSentPushToken(record: SentPushToken): Promise<void> {
   sent = record;
-  await SecureStore.setItemAsync(SENT_KEY, JSON.stringify(record), {
-    keychainAccessible: SecureStore.AFTER_FIRST_UNLOCK,
-  }).catch(() => {});
+  await SecureStore.setItemAsync(SENT_KEY, JSON.stringify(record), KEYCHAIN_BACKGROUND_OPTIONS).catch(() => {});
 }
 
 /**

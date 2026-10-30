@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { BROADCAST_BODY_MAX, BROADCAST_TITLE_MAX, LAUNCH_PUSH_TEXT, checkBroadcastText } from "./broadcast";
+import {
+  BROADCAST_BODY_MAX,
+  BROADCAST_TITLE_MAX,
+  LAUNCH_PUSH_TEXT,
+  checkBroadcastText,
+  isAnnouncementPushData,
+} from "./broadcast";
 
 describe("checkBroadcastText", () => {
   it("trims, and keeps line breaks in the message", () => {
@@ -33,5 +39,15 @@ describe("checkBroadcastText", () => {
 
   it("the launch push fits its own limits", () => {
     expect(checkBroadcastText(LAUNCH_PUSH_TEXT)).toEqual({ ok: true, text: LAUNCH_PUSH_TEXT });
+  });
+});
+
+describe("isAnnouncementPushData", () => {
+  it("is true only for an admin notification's data", () => {
+    expect(isAnnouncementPushData({ kind: "ANNOUNCEMENT" })).toBe(true);
+    expect(isAnnouncementPushData({ kind: "TRIP_STARTED", rideId: "r1" })).toBe(false);
+    expect(isAnnouncementPushData({})).toBe(false);
+    expect(isAnnouncementPushData(null)).toBe(false);
+    expect(isAnnouncementPushData("ANNOUNCEMENT")).toBe(false);
   });
 });
