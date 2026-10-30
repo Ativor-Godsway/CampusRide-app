@@ -134,6 +134,49 @@ describe("CarMarker on iOS", () => {
   });
 });
 
+describe("CarMarker for the Home map's cars", () => {
+  beforeEach(() => jest.replaceProperty(Platform, "OS", "ios"));
+
+  const latitudeNow = () => {
+    const coordinate = markerProps() as unknown as { coordinate: { latitude: unknown } };
+    const lat = coordinate.coordinate.latitude;
+    return typeof lat === "number" ? lat : (lat as { __getValue(): number }).__getValue();
+  };
+
+  it("faces the heading it is given, not the way it moved", async () => {
+    const view = await show(true, { zone: car(START), heading: 180 });
+    expect(imageDegrees()).toBeCloseTo(180, 0);
+    await view.rerender(<CarMarker zone={car(EAST)} heading={180} />);
+    expect(imageDegrees()).toBeCloseTo(180, 0);
+    // A new heading while standing still turns it too.
+    await view.rerender(<CarMarker zone={car(EAST)} heading={270} />);
+    expect(imageDegrees()).toBeCloseTo(270, 0);
+    // None given: it faces the way it moves, as the driver's own car does.
+    await view.rerender(<CarMarker zone={car(NORTH_EAST)} heading={null} />);
+    expect(imageDegrees()! % 360).toBeCloseTo(0, 0);
+  });
+
+  const north = { latitude: START.latitude + 0.001, longitude: START.longitude };
+
+  it("glides steadily the whole time between updates (glideMs)", async () => {
+    jest.useFakeTimers();
+    const view = await show(false, { zone: car(START), glideMs: 10_000 });
+    await view.rerender(<CarMarker zone={car(north)} glideMs={10_000} />);
+    await act(async () => jest.advanceTimersByTime(5_000));
+    expect(latitudeNow()).toBeCloseTo(START.latitude + 0.0005, 4);
+    await act(async () => jest.advanceTimersByTime(5_100));
+    expect(latitudeNow()).toBeCloseTo(north.latitude, 6);
+  });
+
+  it("jumps to each update with Reduce Motion on", async () => {
+    const view = await show(true, { zone: car(START), glideMs: 10_000 });
+    await view.rerender(<CarMarker zone={car(north)} glideMs={10_000} />);
+    // Rendered once more so the marker's props show the value it was set to.
+    await view.rerender(<CarMarker zone={car(north)} glideMs={10_000} />);
+    expect(latitudeNow()).toBeCloseTo(north.latitude, 6);
+  });
+});
+
 describe("CarMarker on Android", () => {
   beforeEach(() => jest.replaceProperty(Platform, "OS", "android"));
 

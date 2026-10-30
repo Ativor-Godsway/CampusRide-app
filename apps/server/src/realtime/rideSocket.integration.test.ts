@@ -19,6 +19,7 @@ import { deleteAccount } from "../services/auth/deleteAccount";
 import { createTestDriver, createTestUser, getTestZones } from "../services/ride/testFixtures";
 import { RULES } from "../rateLimit/rules";
 import { limiter } from "../rateLimit/limiter";
+import { freshDriverPositions, resetLivePositionsForTests } from "../services/zones/livePositions";
 import {
   SOCKET_AUTH_ERROR,
   disconnectUser,
@@ -282,6 +283,29 @@ describe("ride rooms and driver positions", () => {
     emitRideEvent(s.trip.id, RIDE_EVENTS.STATUS, { rideId: s.trip.id, status: "IN_PROGRESS" });
     expect(await leavingHears).toHaveLength(0);
     expect(await stayingHears).toHaveLength(1);
+  });
+});
+
+describe("an idle driver's position (Home map cars)", () => {
+  it("is kept from the driver's own socket only, one per window; malformed ones and riders' are ignored", async () => {
+    resetLivePositionsForTests();
+    const [idleDriver, someRider] = await Promise.all([driver(), rider()]);
+    const driverSocket = await connectAs(tokenFor(idleDriver));
+    const riderSocket = await connectAs(tokenFor(someRider));
+
+    riderSocket.emit(DRIVER_CLIENT_EVENTS.POSITION_UPDATE, { lat: 5.65, lng: -0.187 });
+    for (const junk of [null, "x", { lat: 5.65 }, { lat: "5.6", lng: -0.18 }, { lat: 91, lng: 0 }, { lat: Infinity, lng: 0 }]) {
+      driverSocket.emit(DRIVER_CLIENT_EVENTS.POSITION_UPDATE, junk);
+    }
+    driverSocket.emit(DRIVER_CLIENT_EVENTS.POSITION_UPDATE, { lat: 5.652, lng: -0.187 });
+    // A second inside the window is dropped.
+    driverSocket.emit(DRIVER_CLIENT_EVENTS.POSITION_UPDATE, { lat: 5.7, lng: -0.1 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const kept = freshDriverPositions(60_000);
+    expect(kept.has(someRider.id)).toBe(false);
+    expect(kept.get(idleDriver.id)).toMatchObject({ latitude: 5.652, longitude: -0.187 });
+    expect(driverSocket.connected).toBe(true);
   });
 });
 

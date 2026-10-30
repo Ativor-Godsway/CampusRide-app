@@ -205,6 +205,8 @@ export const config = {
     sosRepeatSmsMinutes: positive("RATE_LIMIT_SOS_REPEAT_MINUTES", 2),
     /** Driver GPS over the socket: at most one relayed per this many seconds per driver; extras are dropped. */
     driverLocationSeconds: positive("RATE_LIMIT_DRIVER_LOCATION_SECONDS", 2),
+    /** GET /rides/nearby-cars (the Home map asks every 10 s): requests per account per 5 seconds. */
+    nearbyCarsPer5Sec: positive("RATE_LIMIT_NEARBY_CARS_5S", 1),
     /** Socket ride subscriptions per account. */
     socketSubscribePerMinute: positive("RATE_LIMIT_SOCKET_SUBSCRIBE_MINUTE", 60),
     /** USSD keypresses per subscriber (dormant while ENABLE_USSD is off). */

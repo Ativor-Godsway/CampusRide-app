@@ -149,9 +149,21 @@ export interface RideBroadcastPayload {
 export const DRIVER_CLIENT_EVENTS = {
   /** Driver streams their GPS location during an active ride. */
   LOCATION_UPDATE: "driver:location",
+  /**
+   * An online driver without a trip sends their GPS location, so riders'
+   * Home maps can show the car (rides/nearbyCars). Kept in the server's
+   * memory only; never relayed to anyone as it is.
+   */
+  POSITION_UPDATE: "driver:position",
 } as const;
 
 export type DriverClientEvent = (typeof DRIVER_CLIENT_EVENTS)[keyof typeof DRIVER_CLIENT_EVENTS];
+
+/** Payload sent driver→server while online without a trip (DRIVER_CLIENT_EVENTS.POSITION_UPDATE). */
+export interface DriverPositionUpdatePayload {
+  lat: number;
+  lng: number;
+}
 
 /** Payload sent driver→server on every location ping during an active ride. */
 export interface DriverLocationUpdatePayload {

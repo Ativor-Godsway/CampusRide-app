@@ -38,7 +38,8 @@ beforeAll(async () => {
   app.addHook("onRoute", (route) => {
     const limits = route.config?.limits;
     if (limits && limits.user?.length) {
-      for (const m of [route.method].flat()) routeLimits.set(`${m} ${route.url}`, limits.user);
+      // Not the HEAD twin Fastify adds to every GET: its answer has no body to check.
+      for (const m of [route.method].flat()) if (m !== "HEAD") routeLimits.set(`${m} ${route.url}`, limits.user);
     }
   });
   registerAllRoutes(app, prisma, {

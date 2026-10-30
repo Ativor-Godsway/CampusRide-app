@@ -95,6 +95,7 @@ always the one in the token.
 | `GET /driver/rides/eligible` | Yes | DRIVER | Requests offered to this driver (online, approved, nearby zone, not declined). First names and place names, never pins. | account default |
 | `GET /rides/mine` | Yes | RIDER | Own bookings only. | account default |
 | `GET /rides/active` | Yes | RIDER | Own current ride (as booker or passenger), own stops only. | account default |
+| `GET /rides/nearby-cars` | Yes | RIDER | Up to 20 available cars on campus for the Home map: a key that changes every 5 minutes, a position moved 10-25 m, and a heading. No driver id, name, plate or number. Empty while the rider has a ride going on. Positions come from drivers' sockets, kept in memory only. | 1 / 5 s (instead of the account default) |
 | `POST /rides` | Yes | RIDER | Books for the caller only; one active ride at a time. Rider, driver, status and fares can't be set by the app. | 12 / hour (and one active ride at a time); account default |
 | `POST /uploads/driver-photo/signature` | Yes | DRIVER | Signs an upload that can only land at this driver's own image id. | 10 / hour; account default |
 | `POST /uploads/driver-photo/failure` | Yes | DRIVER | Logs the driver's own upload error. | account default |

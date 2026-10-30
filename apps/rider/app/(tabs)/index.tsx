@@ -43,6 +43,7 @@ import {
   spacing,
   useAuth,
   useLaunchView,
+  useNearbyCars,
   type ActiveRideSummary,
   type RideSummary,
 } from "@rida/mobile-shared";
@@ -92,6 +93,11 @@ export default function HomeTab() {
   const { data: places } = usePlaces();
   // Before the public launch: a countdown (gone by itself at launch time; never for early access).
   const launch = useLaunchView();
+  // Available cars around, live, like Bolt or Uber: only while Home is on
+  // screen and the app is open, and only once we know there's no ride going
+  // on (then the rider follows their own driver). Shown during the launch
+  // countdown too: real cars on campus say CampusRide is real.
+  const cars = useNearbyCars(activeRide === null, location.state === "here" ? location.coords : null);
 
   // Own cache key: the Rides tab caches history pages, a different shape.
   // Fetch a few more than we show so repeat trips still leave 3 distinct places.
@@ -164,6 +170,7 @@ export default function HomeTab() {
           location.state === "here" ? "Recentre on your location" : "Show the whole campus"
         }
         controlsBottomInset={sheetCover}
+        cars={cars}
       />
 
       <Pressable

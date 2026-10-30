@@ -81,6 +81,8 @@ site's tighter limits can't be dodged by logging in through the rider app.
 | Payment attempts (each calls Moolre) | 15 / 15 min | `RATE_LIMIT_PAYMENT_INIT` |
 | Live-ride subscriptions (socket) | 60 / minute | `RATE_LIMIT_SOCKET_SUBSCRIBE_MINUTE` |
 | Driver GPS (socket) | 1 per 2 s per driver; extras dropped silently, never a disconnect | `RATE_LIMIT_DRIVER_LOCATION_SECONDS` |
+| Driver position without a trip (socket, for riders' Home map cars) | 1 per 2 s per driver, counted apart from trip GPS; extras dropped silently | `RATE_LIMIT_DRIVER_LOCATION_SECONDS` |
+| Home map cars (`GET /rides/nearby-cars`) | 1 / 5 s; counts against this one only, not the default above (the app asks by itself every 10 s) | `RATE_LIMIT_NEARBY_CARS_5S` |
 
 The busiest screen (a driver on a trip) makes about 30 requests a minute, so
 the default leaves four times that.

@@ -90,6 +90,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /driver/rides/eligible": "self",
   "GET /rides/mine": "self",
   "GET /rides/active": "self",
+  "GET /rides/nearby-cars": "signed-in",
   "POST /rides": "self",
   "POST /uploads/driver-photo/signature": "self",
   "POST /uploads/driver-photo/failure": "self",
