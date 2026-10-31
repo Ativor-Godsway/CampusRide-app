@@ -417,6 +417,9 @@ describe("summary, search, audit, system", () => {
     await prisma.adminAuditLog.create({ data: { actor: admin.id, action: "rate_limit.clear", target: "x", reason: `${r1.phone}: nothing in use` } });
     const audit = (await get("/admin/audit?action=rate_limit")).json();
     expect(audit.entries[0].reason).not.toContain(r1.phone);
+    expect(audit.admins.map((a: { id: string }) => a.id)).toContain(admin.id);
+    const mine = (await get(`/admin/audit?actor=${admin.id}`)).json();
+    expect(mine.entries.every((e: { actor: { id: string } | null }) => e.actor?.id === admin.id)).toBe(true);
     expect((await get("/admin/system")).json()).toHaveProperty("server.startedAt");
   });
 

@@ -1011,7 +1011,7 @@ export function getAudit(token: string, q: { action?: string; q?: string; actor?
   if (q.actor) params.set("actor", q.actor);
   if (q.q) params.set("q", q.q);
   params.set("page", String(q.page ?? 1));
-  return get<{ entries: AuditEntry[]; actions: string[]; total: number; page: number; pageSize: number }>(token, `/admin/audit?${params.toString()}`);
+  return get<{ entries: AuditEntry[]; actions: string[]; admins: Array<{ id: string; name: string }>; total: number; page: number; pageSize: number }>(token, `/admin/audit?${params.toString()}`);
 }
 
 export interface SystemInfo {

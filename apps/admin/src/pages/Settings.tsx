@@ -13,10 +13,11 @@ import { Page, Section } from "../shell/Page";
 function AuditLog() {
   const token = useToken();
   const [action, setAction] = useState("");
+  const [actor, setActor] = useState("");
   const [term, setTerm] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
-  const log = usePolled(() => getAudit(token, { action, q, page }), `${action}|${q}|${page}`);
+  const log = usePolled(() => getAudit(token, { action, actor, q, page }), `${action}|${actor}|${q}|${page}`);
   return (
     <>
       <form
@@ -40,6 +41,23 @@ function AuditLog() {
             {(log.data?.actions ?? []).map((a) => (
               <option key={a} value={a}>
                 {a}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span>Admin</span>
+          <select
+            value={actor}
+            onChange={(e) => {
+              setActor(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">Every admin</option>
+            {(log.data?.admins ?? []).map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
               </option>
             ))}
           </select>

@@ -271,12 +271,14 @@ export function registerAdminDashboardRoutes(app: FastifyInstance, prisma: Prism
         { reason: { contains: query.q, mode: "insensitive" } },
       ];
     }
-    const [rows, total, actions] = await Promise.all([
+    const [rows, total, actions, adminList] = await Promise.all([
       prisma.adminAuditLog.findMany({ where, orderBy: { timestamp: "desc" }, skip: (page - 1) * pageSize, take: pageSize }),
       prisma.adminAuditLog.count({ where }),
       cached("audit:actions", () =>
         prisma.adminAuditLog.groupBy({ by: ["action"], _count: true, orderBy: { action: "asc" } }).then((g) => g.map((a) => a.action)),
       ),
+      // For the "by admin" filter: the admin accounts (a handful).
+      prisma.user.findMany({ where: { role: "ADMIN" }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
     ]);
     const actorIds = [...new Set(rows.map((r) => r.actor).filter((a) => a !== "unknown" && a !== "system"))];
     const admins = await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } });
@@ -292,6 +294,7 @@ export function registerAdminDashboardRoutes(app: FastifyInstance, prisma: Prism
         reason: r.reason === null ? null : redactText(r.reason),
       })),
       actions,
+      admins: adminList,
       total,
       page,
       pageSize,
