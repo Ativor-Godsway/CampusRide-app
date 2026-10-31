@@ -12,12 +12,20 @@ import {
   type RideBroadcastPayload,
   type DriverLocationUpdatePayload,
   type DriverPositionUpdatePayload,
+  type DriverPresenceAnswer,
   type OfferClosedPayload,
 } from "@rida/shared";
 import { ExpiredAccessTokenError, verifyAccessToken } from "../services/auth/tokens";
 import { loadActiveAccount } from "../services/auth/accountStatus";
 import { checkDriverArriving } from "../services/push/notify";
 import { recordDriverPosition } from "../services/zones/livePositions";
+import {
+  driverHeard,
+  driverSaidPresence,
+  driverSocketConnected,
+  driverSocketDisconnected,
+  wasTakenOffline,
+} from "../services/zones/driverPresence";
 import { noteDriverPosition } from "../services/stats/locationTrail";
 import { riderEtaDue, riderEtas } from "../services/ride/riderEta";
 import { logger } from "../lib/logger";
@@ -135,6 +143,9 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
     // receive ride:broadcast events pushed by broadcastRide.
     if (role === "DRIVER") {
       void socket.join(roomForDriver(userId));
+      // In touch with this driver's phone while a socket is connected (services/zones/driverPresence.ts).
+      driverSocketConnected(userId);
+      socket.on("disconnect", () => driverSocketDisconnected(userId));
     }
 
     // Every authenticated user joins a personal rider room so per-passenger
@@ -197,6 +208,7 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
           checkDriverArriving(prisma, data.rideId, userId, { latitude: data.lat, longitude: data.lng });
           // A shared car with a free seat still shows on riders' Home maps.
           recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
+          driverHeard(userId);
           // The sampled trail and "still online" (services/stats/locationTrail.ts).
           noteDriverPosition(userId, { latitude: data.lat, longitude: data.lng }, true);
           // Each rider's road ETA, to their own room (every 10 s per ride).
@@ -218,12 +230,30 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
     // per position; who is online, approved and free is checked when a
     // rider asks. Throttled like trip positions, extras dropped silently.
     if (role === "DRIVER") {
+      // The app in front or in the background (never timed out in the
+      // background). The answer says whether the server took the driver
+      // offline after losing touch, so the app can show it.
+      socket.on(DRIVER_CLIENT_EVENTS.PRESENCE, (data: unknown, ack?: unknown) => {
+        const reply = typeof ack === "function" ? (ack as (a: DriverPresenceAnswer) => void) : () => {};
+        const state = (data as { state?: unknown } | null)?.state;
+        if (state !== "foreground" && state !== "background") return reply({ takenOffline: false });
+        driverSaidPresence(userId, state);
+        limiter
+          .consume([{ rule: RULES.socketSubscribe, subject: userId }])
+          .then((allowed) => (allowed.ok ? wasTakenOffline(prisma, userId) : false))
+          .then(
+            (takenOffline) => reply({ takenOffline }),
+            () => reply({ takenOffline: false }),
+          );
+      });
+
       socket.on(DRIVER_CLIENT_EVENTS.POSITION_UPDATE, (data: unknown) => {
         if (!isDriverPositionUpdate(data)) return;
         limiter.consume([{ rule: RULES.driverPosition, subject: userId }]).then(
           (allowed) => {
             if (!allowed.ok) return;
             recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
+            driverHeard(userId);
             noteDriverPosition(userId, { latitude: data.lat, longitude: data.lng }, false);
           },
           () => {},

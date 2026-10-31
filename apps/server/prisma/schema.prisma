@@ -768,8 +768,9 @@ model AdminAuditLog {
 enum DriverSessionEnd {
   /// The driver went offline in the app.
   OFFLINE
-  /// The server stopped hearing from the driver's app (closed, no signal,
-  /// phone off) for 5 minutes; the session ends when it last did.
+  /// The server took the driver offline after losing touch with the phone
+  /// (app last in front, no connection, nothing heard for
+  /// DRIVER_SILENCE_TIMEOUT_MIN); the session ends at the last contact.
   TIMEOUT
   /// An admin took the driver's approval away.
   ADMIN
@@ -784,8 +785,7 @@ model DriverOnlineSession {
   driverUserId String
   startedAt    DateTime
   /// The last time the server heard from the driver's app during it (its
-  /// positions; written about once a minute). Null for an app that sends no
-  /// position while idle: such a session is never timed out.
+  /// positions; written about once a minute). Null when none came.
   lastSeenAt   DateTime?
   endedAt      DateTime?
   endReason    DriverSessionEnd?

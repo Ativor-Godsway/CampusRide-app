@@ -122,3 +122,14 @@ describe("the driver app defines its location task before anything can use it", 
     expect(users).toEqual(["apps/driver/lib/backgroundLocation.ts"]);
   });
 });
+
+describe("the driver app tells the server whether it's in front", () => {
+  // The server never takes offline a driver whose app said "background"
+  // (apps/server/src/services/zones/driverPresence.ts).
+  it("sends its presence on every (re)connect and app state change", () => {
+    const source = read("apps/driver/lib/presence.tsx");
+    expect(source).toContain("DRIVER_CLIENT_EVENTS.PRESENCE");
+    expect(source).toMatch(/socket\.on\("connect", onConnect\)/);
+    expect(source).toMatch(/AppState\.addEventListener\("change"/);
+  });
+});

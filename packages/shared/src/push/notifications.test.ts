@@ -102,8 +102,19 @@ describe("pushTapTarget", () => {
     expect(pushTapTarget("DRIVER_ARRIVED")).toBe("trip");
     expect(pushTapTarget("NO_DRIVER_FOUND")).toBe("trip");
     expect(pushTapTarget("RIDER_CANCELLED")).toBe("trip");
+    expect(pushTapTarget("WENT_OFFLINE")).toBe("home");
     expect(pushTapTarget("TRIP_COMPLETED")).toBe("rides");
     expect(pushTapTarget("RIDE_REQUEST")).toBe("home");
     expect(pushTapTarget("DRIVER_CANCELLED")).toBe("home");
+  });
+});
+
+describe("the driver taken offline for silence", () => {
+  it("goes to the driver app, in the owner's words, and opens Home", () => {
+    expect(appForKind("WENT_OFFLINE")).toBe("driver");
+    expect(pushText("WENT_OFFLINE")).toEqual({
+      title: "You're offline",
+      body: "We lost touch with your phone for a while. Go online again when you're ready.",
+    });
   });
 });

@@ -105,6 +105,7 @@ const DEDUPE_MS: Record<PushKind, number> = {
   // the same driver again within its window.
   RIDE_REQUEST: 10 * 60_000,
   RIDER_CANCELLED: 60_000,
+  WENT_OFFLINE: 10 * 60_000,
 };
 
 /**
@@ -113,7 +114,7 @@ const DEDUPE_MS: Record<PushKind, number> = {
  */
 const TTL_SECONDS: Record<PushApp, Partial<Record<PushKind, number>>> = {
   rider: {},
-  driver: { RIDE_REQUEST: 90 },
+  driver: { RIDE_REQUEST: 90, WENT_OFFLINE: 6 * 60 * 60 },
 };
 const DEFAULT_TTL_SECONDS = 10 * 60;
 
