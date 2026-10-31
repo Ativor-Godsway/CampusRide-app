@@ -27,10 +27,10 @@ export const site = {
   emailDeletionDays: 30,
 
   /**
-   * The apps' store listings. While a link is "" the page says "Coming soon
-   * to the App Store and Google Play" in plain text: Apple and Google allow
-   * their badges only for apps people can download. Paste a listing's address
-   * here and its official badge shows on the home page, linked to it.
+   * The apps' store listings. While a link is "" nothing is shown for that
+   * store (Apple and Google allow their badges only for apps people can
+   * download). Paste a listing's address here and its official badge shows on
+   * the home page, linked to it.
    */
   stores: {
     rider: {

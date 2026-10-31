@@ -380,22 +380,20 @@ describe("the home page matches the code", () => {
     assert.ok(map.includes("OpenStreetMap contributors"));
   });
 
-  it("says Coming soon until a store link is set, then shows that store's official badge", () => {
+  it("shows nothing for a store until its link is set, then that store's official badge", () => {
     for (const app of ["rider", "driver"]) {
       for (const store of ["appStore", "googlePlay"]) {
         assert.equal(typeof site.stores[app][store], "string", `site.stores.${app}.${store}`);
       }
     }
-    const none = storeButtons({ appStore: "", googlePlay: "" }, "CampusRide");
-    assert.ok(none.includes("Coming soon to the App Store and Google Play"));
-    assert.ok(!none.includes("<img"), "no store badge without a link (Apple's and Google's rules)");
+    // No placeholder and no empty block: Apple's and Google's rules allow no badge without a listing.
+    assert.equal(storeButtons({ appStore: "", googlePlay: "" }, "CampusRide"), "");
     const one = storeButtons({ appStore: "", googlePlay: "https://play.google.com/store/apps/details?id=x" }, "CampusRide");
     assert.ok(one.includes('href="https://play.google.com/store/apps/details?id=x"'));
     assert.ok(one.includes('src="/badges/google-play.png"'));
-    assert.ok(one.includes("Coming soon to the App Store"));
-    assert.ok(!one.includes("Google Play</p>"));
+    assert.ok(!one.includes("app-store.svg"));
+    assert.ok(!/soon/i.test(one));
     const both = storeButtons({ appStore: "https://apps.apple.com/app/id1", googlePlay: "https://play.google.com/x" }, "CampusRide");
-    assert.ok(!both.includes("Coming soon"));
     // Apple: the App Store badge comes first.
     assert.ok(both.indexOf("app-store.svg") < both.indexOf("google-play.png"));
     for (const badge of ["badges/app-store.svg", "badges/google-play.png"]) assert.ok(existsSync(join(out, badge)));
