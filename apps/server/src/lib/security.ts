@@ -33,6 +33,22 @@ export function parseOriginAllowlist(raw: string): string[] {
 }
 
 /**
+ * Every HTTP method a browser client (the admin site) uses. @fastify/cors
+ * allows only GET, HEAD and POST unless told otherwise, so without this a
+ * browser's preflight for PUT, PATCH or DELETE was refused and the admin
+ * site's Save launch mode, launch notification switch, Remove passkey and
+ * place edits never reached the server (2026-10-31). Add a method here when
+ * a route the admin site calls uses a new one (cors.integration.test.ts
+ * checks every method the admin site sends).
+ */
+export const CORS_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
+
+/** The @fastify/cors options for HTTP: one place, used by index.ts and the CORS tests alike. */
+export function corsOptions(origin: CorsOrigin): { origin: CorsOrigin; methods: string[] } {
+  return { origin, methods: [...CORS_METHODS] };
+}
+
+/**
  * Resolves the CORS `origin` option.
  *
  * Previously this reflected ANY origin whenever the allowlist was unset,

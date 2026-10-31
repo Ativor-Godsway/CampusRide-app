@@ -23,6 +23,23 @@ function post<T>(token: string, path: string, body: unknown = {}): Promise<T> {
   return request<T>(path, { method: "POST", body: JSON.stringify(body) }, token);
 }
 
+/** The words for a request that got no answer: which request, and what that can mean. The query is left out (it can hold a phone number). */
+export function noAnswerMessage(method: string, path: string): string {
+  return `No answer from the API for ${method.toUpperCase()} ${path.split("?")[0]}: the browser blocked the request or the connection dropped`;
+}
+
+/**
+ * What a section shows when its request fails: which section, what went
+ * wrong, and the HTTP status ("Saving launch mode failed: Admin role
+ * required (HTTP 403)"), or that there was no answer at all (status 0).
+ */
+export function failureText(section: string, err: unknown, fallback = "something went wrong"): string {
+  if (err instanceof ApiError) {
+    return `${section} failed: ${err.message}${err.status > 0 ? ` (HTTP ${err.status})` : " (no HTTP response)"}`;
+  }
+  return `${section} failed: ${fallback}`;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -127,9 +144,11 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
   try {
     res = await fetch(`${API_URL}${path}`, { ...init, headers });
   } catch {
-    // A network-level failure here is nearly always CORS or a server that
-    // isn't running; say so rather than surfacing "Failed to fetch".
-    throw new ApiError(`Could not reach the API at ${API_URL}. Is the server running?`, 0);
+    // No response at all. The browser doesn't say why: the request was
+    // refused before it was sent (CORS, the site's CSP), or the connection
+    // dropped. It doesn't mean the server is down — other requests may be
+    // working — so name the request instead of guessing.
+    throw new ApiError(noAnswerMessage(init.method ?? "GET", path), 0);
   }
 
   const text = await res.text();

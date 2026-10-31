@@ -17,7 +17,7 @@ function AuditLog() {
   const [term, setTerm] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
-  const log = usePolled(() => getAudit(token, { action, actor, q, page }), `${action}|${actor}|${q}|${page}`);
+  const log = usePolled(() => getAudit(token, { action, actor, q, page }), `${action}|${actor}|${q}|${page}`, undefined, "Loading the audit log");
   return (
     <>
       <form
@@ -92,7 +92,7 @@ function AuditLog() {
 
 function SystemFacts() {
   const token = useToken();
-  const sys = usePolled(() => getSystem(token), "system");
+  const sys = usePolled(() => getSystem(token), "system", undefined, "Loading system facts");
   return (
     <Loaded {...sys} onRetry={sys.refresh}>
       {(s) => (

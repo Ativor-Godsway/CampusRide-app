@@ -9,6 +9,7 @@ import { config } from "./config";
 import { prisma } from "./db/prisma";
 import { assertDatabaseAllowedForEnv } from "./db/dbHostGuard";
 import {
+  corsOptions,
   parseOriginAllowlist,
   resolveCorsOrigin,
   resolveTrustProxy,
@@ -166,7 +167,7 @@ async function bootstrap() {
       );
     }
   }
-  await app.register(cors, { origin: corsOrigin });
+  await app.register(cors, corsOptions(corsOrigin));
   // Parser for application/x-www-form-urlencoded, scoped to that
   // Content-Type only — Fastify dispatches by exact header match, so this
   // never touches the built-in application/json parser every other route

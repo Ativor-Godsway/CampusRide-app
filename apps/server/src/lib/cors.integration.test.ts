@@ -16,7 +16,9 @@
 import { describe, it, expect } from "vitest";
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import { parseOriginAllowlist, resolveCorsOrigin } from "./security";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { CORS_METHODS, corsOptions, parseOriginAllowlist, resolveCorsOrigin } from "./security";
 
 const ADMIN_ORIGIN = "https://campusride-admin.onrender.com";
 
@@ -27,7 +29,7 @@ const ADMIN_ORIGIN = "https://campusride-admin.onrender.com";
 async function serverWith(rawEnvValue: string, nodeEnv: string) {
   const allowlist = parseOriginAllowlist(rawEnvValue);
   const app = Fastify();
-  await app.register(cors, { origin: resolveCorsOrigin(allowlist, nodeEnv) });
+  await app.register(cors, corsOptions(resolveCorsOrigin(allowlist, nodeEnv)));
   app.get("/health", async () => ({ status: "ok" }));
   await app.ready();
   return app;
@@ -163,5 +165,42 @@ describe("the admin site's own request header", () => {
     expect(res.headers["access-control-allow-origin"]).toBe("https://campusride-admin.onrender.com");
     expect(String(res.headers["access-control-allow-headers"]).toLowerCase()).toContain("x-campusride-client");
     await app.close();
+  });
+});
+
+describe("every method the admin site sends passes the preflight", () => {
+  /**
+   * @fastify/cors allows only GET, HEAD and POST by default: the admin
+   * site's PUT (launch mode, launch notification), PATCH (places) and DELETE
+   * (passkeys) were refused by the browser and showed "Could not reach the
+   * API" (2026-10-31). Read from the admin site's own API client, so a new
+   * method there that the server doesn't allow fails here.
+   */
+  const adminApi = readFileSync(path.resolve(__dirname, "../../../admin/src/api.ts"), "utf8");
+  const methods = [...new Set([...adminApi.matchAll(/method: "([A-Z]+)"/g)].map((m) => m[1]!))];
+
+  it("finds the admin site's methods", () => {
+    expect(methods).toEqual(expect.arrayContaining(["POST", "PUT", "PATCH", "DELETE"]));
+  });
+
+  it.each(["GET", "POST", "PUT", "PATCH", "DELETE"])("allows %s from the admin origin", async (method) => {
+    const app = await serverWith(ADMIN_ORIGIN, "production");
+    const res = await app.inject({
+      method: "OPTIONS",
+      url: "/health",
+      headers: {
+        origin: ADMIN_ORIGIN,
+        "access-control-request-method": method,
+        "access-control-request-headers": "content-type,authorization,x-campusride-client",
+      },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(res.headers["access-control-allow-origin"]).toBe(ADMIN_ORIGIN);
+    expect(String(res.headers["access-control-allow-methods"]).split(/,\s*/)).toContain(method);
+    await app.close();
+  });
+
+  it("covers every method the admin site's API client uses", () => {
+    for (const m of methods) expect(CORS_METHODS as readonly string[], m).toContain(m);
   });
 });
