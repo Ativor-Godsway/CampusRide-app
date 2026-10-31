@@ -128,7 +128,7 @@ export function SafetyPage() {
                       </span>{" "}
                       <strong>{r.rater.name}</strong> rated {r.ratee.role === "DRIVER" && r.ratee.driverId ? <Link to={link("driver", r.ratee.driverId)}>{r.ratee.name}</Link> : r.ratee.name} ·{" "}
                       <Link to={link("ride", r.rideId)}>{dayAndTime(r.createdAt)}</Link>
-                      {r.comment ? <q className="block"> {r.comment}</q> : <span className="muted"> · no comment</span>}
+                      {r.comment ? <q className="block">{r.comment}</q> : <span className="muted"> · no comment</span>}
                     </li>
                   ))}
                 </ul>

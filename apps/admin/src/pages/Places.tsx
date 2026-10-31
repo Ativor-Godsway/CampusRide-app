@@ -35,7 +35,7 @@ export function PlacesPage() {
           const cells = showDropoffs ? d.dropoffs : d.pickups;
           const max = Math.max(0, ...cells.map((c) => c.count));
           return (
-            <div className="grid-2-1">
+            <div className="grid-2">
               <Section
                 title={showDropoffs ? "Drop-offs" : "Pickups"}
                 actions={

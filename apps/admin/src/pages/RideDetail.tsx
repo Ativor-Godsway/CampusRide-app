@@ -154,7 +154,7 @@ export function RideDetail({ id, onClose }: { id: string; onClose: () => void })
                         <span className="stars-off">{"\u2605".repeat(5 - rt.stars)}</span>
                       </span>{" "}
                       {rt.rater.name} rated {rt.ratee.name}
-                      {rt.comment ? <q className="muted"> {rt.comment}</q> : null}
+                      {rt.comment ? <> <q className="muted">{rt.comment}</q></> : null}
                     </li>
                   ))}
                 </ul>

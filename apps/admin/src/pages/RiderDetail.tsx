@@ -85,7 +85,7 @@ export function RiderDetail({ id, onClose }: { id: string; onClose: () => void }
                       <span className="stars-off">{"★".repeat(5 - rt.stars)}</span>
                     </span>{" "}
                     for {rt.ratee.name} · <Link to={withParams(path, search, { rider: null, ride: rt.rideId })}>{shortDay(rt.createdAt)}</Link>
-                    {rt.comment ? <q className="muted"> {rt.comment}</q> : null}
+                    {rt.comment ? <> <q className="muted">{rt.comment}</q></> : null}
                   </li>
                 ))}
               </ul>
