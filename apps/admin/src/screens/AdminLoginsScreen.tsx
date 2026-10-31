@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, getRecentLogins, type AdminLoginEvent } from "../api";
+import { ApiError, failureText, getRecentLogins, type AdminLoginEvent } from "../api";
 import { useAuth, useToken } from "../auth";
 import { dayAndTime } from "../lib/time";
 
@@ -69,7 +69,7 @@ export function AdminLoginsScreen() {
         signOut();
         return;
       }
-      setError(err instanceof ApiError ? err.message : "Could not load the sign-ins");
+      setError(failureText("Loading admin sign-ins", err));
     } finally {
       setLoading(false);
     }

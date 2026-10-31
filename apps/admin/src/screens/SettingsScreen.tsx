@@ -10,6 +10,7 @@ import {
 } from "@rida/shared";
 import {
   ApiError,
+  failureText,
   getLaunchSettings,
   giveEarlyAccessToAllRiders,
   lookUpEarlyAccess,
@@ -65,7 +66,8 @@ export function SettingsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function run(action: () => Promise<void>) {
+  /** Runs one action of a section; a failure says which (`section`) and the HTTP status. */
+  async function run(section: string, action: () => Promise<void>) {
     setError(null);
     setNotice(null);
     setBusy(true);
@@ -76,7 +78,7 @@ export function SettingsScreen() {
         signOut();
         return;
       }
-      setError(err instanceof ApiError ? err.message : "The request failed");
+      setError(failureText(section, err));
     } finally {
       setBusy(false);
     }
@@ -92,7 +94,7 @@ export function SettingsScreen() {
   }
 
   useEffect(() => {
-    void run(load);
+    void run("Loading launch settings", load);
     // Once, on opening the tab.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -115,7 +117,7 @@ export function SettingsScreen() {
             }`
           : "Turn launch mode off? Everyone will be able to book and no countdown is shown.";
     if (!window.confirm(sentence)) return;
-    void run(async () => {
+    void run("Saving launch mode", async () => {
       await saveLaunchMode(token, mode, launchAt);
       await load();
       setNotice("Saved. Phones pick it up within a minute.");
@@ -127,7 +129,7 @@ export function SettingsScreen() {
       ? `Send "${LAUNCH_PUSH_TEXT.title} ${LAUNCH_PUSH_TEXT.body}" to every rider with notifications allowed when launch mode turns Live? It goes out once, ever.`
       : "Don't send the launch notification when launch mode turns Live?";
     if (!window.confirm(sentence)) return;
-    void run(async () => {
+    void run("Changing the launch notification", async () => {
       await setLaunchPush(token, enabled);
       await load();
       setNotice(enabled ? "The launch notification will go out when CampusRide turns Live." : "The launch notification is off.");
@@ -141,12 +143,12 @@ export function SettingsScreen() {
       setError(GHANA_PHONE_EXAMPLE);
       return;
     }
-    void run(async () => setLookup(await lookUpEarlyAccess(token, canonical)));
+    void run("Looking up early access", async () => setLookup(await lookUpEarlyAccess(token, canonical)));
   }
 
   function toggle(enabled: boolean) {
     if (!lookup?.account) return;
-    void run(async () => {
+    void run("Changing early access", async () => {
       setLookup(await setEarlyAccess(token, lookup.phone, enabled));
       await load();
     });
@@ -159,7 +161,7 @@ export function SettingsScreen() {
       )
     )
       return;
-    void run(async () => {
+    void run("Giving early access to all riders", async () => {
       const { granted } = await giveEarlyAccessToAllRiders(token);
       await load();
       setNotice(`Early access given to ${granted} more rider(s).`);

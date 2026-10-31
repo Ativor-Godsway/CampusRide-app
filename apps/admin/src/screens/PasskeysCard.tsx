@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
-import { ApiError, addPasskey, getPasskeys, removePasskey, type Passkey } from "../api";
+import { ApiError, addPasskey, failureText, getPasskeys, removePasskey, type Passkey } from "../api";
 import { useAuth, useToken } from "../auth";
 import { dayAndTime, shortDay } from "../lib/time";
 
@@ -31,7 +31,7 @@ export function PasskeysCard() {
   const [busy, setBusy] = useState(false);
   const supported = browserSupportsWebAuthn();
 
-  async function run(action: () => Promise<void>) {
+  async function run(section: string, action: () => Promise<void>) {
     setError(null);
     setNotice(null);
     setBusy(true);
@@ -45,7 +45,7 @@ export function PasskeysCard() {
       const browserName = (err as { name?: string } | null)?.name;
       setError(
         err instanceof ApiError
-          ? err.message
+          ? failureText(section, err)
           : browserName === "InvalidStateError"
             ? "This device already has a passkey for your account."
             : browserName === "NotAllowedError" || browserName === "AbortError"
@@ -62,14 +62,14 @@ export function PasskeysCard() {
   }
 
   useEffect(() => {
-    void run(load);
+    void run("Loading passkeys", load);
     // Once, on opening the tab.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function add(event: React.FormEvent) {
     event.preventDefault();
-    void run(async () => {
+    void run("Adding a passkey", async () => {
       await addPasskey(token, name.trim() || deviceName());
       await load();
       setNotice("Passkey added. Next time, sign in with it.");
@@ -82,7 +82,7 @@ export function PasskeysCard() {
       ? `Remove "${passkey.name}"? It is your only passkey: you'll sign in with a phone code again.`
       : `Remove "${passkey.name}"? It won't sign you in any more.`;
     if (!window.confirm(sentence)) return;
-    void run(async () => {
+    void run("Removing a passkey", async () => {
       await removePasskey(token, passkey.id);
       await load();
     });

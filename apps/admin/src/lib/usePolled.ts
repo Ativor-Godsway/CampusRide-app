@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError } from "../api";
+import { ApiError, failureText } from "../api";
 import { useAuth } from "../auth";
 
 /** Most pages: once a minute (the database plan bills compute; the server caches aggregates for 60 s). */
@@ -22,7 +22,13 @@ export interface Polled<T> {
  * when it shows again). A failed refresh keeps the last data on screen with
  * the error beside it. A 401/403 signs the site out.
  */
-export function usePolled<T>(load: () => Promise<T>, key: string, intervalMs: number = PAGE_REFRESH_MS): Polled<T> {
+export function usePolled<T>(
+  load: () => Promise<T>,
+  key: string,
+  intervalMs: number = PAGE_REFRESH_MS,
+  /** What the page calls this data ("Loading the audit log"), so a failure says which part failed. */
+  section = "Loading this page",
+): Polled<T> {
   const { signOut } = useAuth();
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,11 +55,11 @@ export function usePolled<T>(load: () => Promise<T>, key: string, intervalMs: nu
         signOut();
         return;
       }
-      setError(err instanceof ApiError ? err.message : "Couldn't load this page");
+      setError(failureText(section, err));
     } finally {
       if (mine === generation.current) setLoading(false);
     }
-  }, [signOut]);
+  }, [signOut, section]);
 
   // A new key (period, filters) starts afresh.
   useEffect(() => {
