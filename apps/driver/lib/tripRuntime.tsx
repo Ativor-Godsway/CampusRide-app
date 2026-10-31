@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef } from "react";
 import { activateKeepAwakeAsync, deactivateKeepAwake } from "expo-keep-awake";
 import {
   AUTO_ARRIVAL_RADIUS_METERS,
-  DRIVER_CLIENT_EVENTS,
   INITIAL_ARRIVAL_STATE,
   PIN_ARRIVAL_RADIUS_METERS,
   pickupPin,
@@ -15,14 +14,15 @@ import { RIDE_EVENTS, type RideStatusPayload } from "@rida/shared";
 import { getRideSocket, subscribeToRide, unsubscribeFromRide, type RideWithZones } from "@rida/mobile-shared";
 import { driverActiveRideQueryKey, useDriverActiveTrip } from "./activeTrip";
 import { useDriverLocation, useLocationDemand } from "./location";
+import { setDriverLocationMode } from "./backgroundLocation";
+import { offerPosition, setPositionSharing } from "./positionSender";
 import { useDriverPresence } from "./presence";
 import { configureTripActions, overlayPassengers, runPassengerAction, useTripActions } from "./tripActions";
 import { useZones } from "./zones";
 
 /** Riders see the driver move: one position every few seconds. */
-const LOCATION_SEND_MS = 4_000;
-/** Online without a trip: how often the car's position goes to riders' Home maps. */
-const IDLE_POSITION_SEND_MS = 5_000;
+/** How often the latest fix is offered again (the sender decides what is due: 4 s on a trip, 15 s idle). */
+const RESEND_CHECK_MS = 2_000;
 /** How often arrival is re-checked while parked (the phone sends few fixes when it isn't moving). */
 const ARRIVAL_TICK_MS = 2_000;
 /**
@@ -103,37 +103,26 @@ export function TripRuntime() {
     };
   }, [rideId, queryClient]);
 
-  // Live location to the ride room.
+  // The latest fix, for the automatic arrival check below.
   const sampleRef = useRef<ArrivalSample | null>(location.sample);
   sampleRef.current = location.sample;
-  useEffect(() => {
-    if (!rideId) return;
-    const socket = getRideSocket();
-    const send = () => {
-      const s = sampleRef.current;
-      if (s) socket.emit(DRIVER_CLIENT_EVENTS.LOCATION_UPDATE, { rideId, lat: s.latitude, lng: s.longitude });
-    };
-    send();
-    const t = setInterval(send, LOCATION_SEND_MS);
-    return () => clearInterval(t);
-  }, [rideId]);
 
-  // Online without a trip: the car shows on riders' Home maps (the server
-  // keeps the latest position in memory, blurred and unnamed for riders).
-  // The latest fix is sent however old it is: fixes come only after moving
-  // 10 m, so a car parked waiting for requests has an old one, and is still
-  // there. Volatile: a position that can't go now is dropped, not queued and
-  // sent late.
+  // The driver's position to the server (lib/positionSender): to the ride
+  // room during a trip, for riders' Home maps while online without one.
+  // Background fixes go straight from the location task to the sender; here
+  // the sender learns what to share, each fix the app gets, and is asked
+  // again on a timer for when no new fix comes (a parked iPhone).
   useEffect(() => {
-    if (rideId || !isOnline) return;
-    const socket = getRideSocket();
-    const send = () => {
-      const s = sampleRef.current;
-      if (!s) return;
-      socket.volatile.emit(DRIVER_CLIENT_EVENTS.POSITION_UPDATE, { lat: s.latitude, lng: s.longitude });
-    };
-    send();
-    const t = setInterval(send, IDLE_POSITION_SEND_MS);
+    setPositionSharing({ rideId, online: isOnline });
+    void setDriverLocationMode(rideId ? "trip" : "idle");
+    offerPosition();
+  }, [rideId, isOnline]);
+  useEffect(() => {
+    offerPosition(location.sample);
+  }, [location.sample]);
+  useEffect(() => {
+    if (!rideId && !isOnline) return;
+    const t = setInterval(() => offerPosition(), RESEND_CHECK_MS);
     return () => clearInterval(t);
   }, [rideId, isOnline]);
 

@@ -1,12 +1,15 @@
+import { Platform } from "react-native";
 import Constants, { ExecutionEnvironment } from "expo-constants";
 import * as Location from "expo-location";
 import * as TaskManager from "expo-task-manager";
 import {
   DRIVER_ONLINE_NOTIFICATION,
   accessFromAlwaysAnswer,
+  driverLocationCadence,
   isExpoGoMissingAlwaysKey,
   planLocationAccess,
   type ArrivalSample,
+  type DriverLocationMode,
   type LocationAccessPlan,
   type PermissionState,
 } from "@rida/shared";
@@ -118,6 +121,43 @@ function serially<T>(step: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/** Trip or idle: how often the task delivers a fix (driverLocationCadence; Android only). */
+let mode: DriverLocationMode = "idle";
+
+function updatesOptions(): Location.LocationTaskOptions {
+  return {
+    accuracy: Location.Accuracy.Balanced,
+    ...driverLocationCadence(Platform.OS, mode),
+    // iOS: the blue indicator, so the driver can always see location is on;
+    // never paused by the OS while they're online.
+    showsBackgroundLocationIndicator: true,
+    pausesUpdatesAutomatically: false,
+    activityType: Location.ActivityType.AutomotiveNavigation,
+    foregroundService: {
+      notificationTitle: DRIVER_ONLINE_NOTIFICATION.title,
+      notificationBody: DRIVER_ONLINE_NOTIFICATION.body,
+      notificationColor: "#19743C",
+      // Swiping the app away stops location too.
+      killServiceOnDestroy: true,
+    },
+  };
+}
+
+/**
+ * A trip started or ended: on Android the running updates switch to that
+ * mode's cadence (the same request is restarted with new options; the
+ * online notification stays). iPhone's cadence is the same in both modes.
+ */
+export function setDriverLocationMode(next: DriverLocationMode): Promise<void> {
+  if (next === mode) return Promise.resolve();
+  mode = next;
+  if (Platform.OS !== "android") return Promise.resolve();
+  return serially(async () => {
+    if (!(await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK).catch(() => false))) return;
+    await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, updatesOptions()).catch(() => {});
+  });
+}
+
 /**
  * Starts background updates (and Android's online notification). Safe to
  * call twice. False when they can't run because the task isn't defined: the
@@ -145,23 +185,7 @@ async function startNow(): Promise<boolean> {
     return false;
   }
   if (await Location.hasStartedLocationUpdatesAsync(DRIVER_LOCATION_TASK)) return true;
-  await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, {
-    accuracy: Location.Accuracy.Balanced,
-    timeInterval: 5_000,
-    distanceInterval: 10,
-    // iOS: the blue indicator, so the driver can always see location is on;
-    // never paused by the OS while they're online.
-    showsBackgroundLocationIndicator: true,
-    pausesUpdatesAutomatically: false,
-    activityType: Location.ActivityType.AutomotiveNavigation,
-    foregroundService: {
-      notificationTitle: DRIVER_ONLINE_NOTIFICATION.title,
-      notificationBody: DRIVER_ONLINE_NOTIFICATION.body,
-      notificationColor: "#19743C",
-      // Swiping the app away stops location too.
-      killServiceOnDestroy: true,
-    },
-  });
+  await Location.startLocationUpdatesAsync(DRIVER_LOCATION_TASK, updatesOptions());
   return true;
 }
 
