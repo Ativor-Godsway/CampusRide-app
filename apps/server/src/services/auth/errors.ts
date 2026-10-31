@@ -120,6 +120,15 @@ export class AdminNotAllowedError extends Error {
   }
 }
 
+/** An admin who has a passkey tried to sign in with a phone code while ADMIN_OTP_FALLBACK is off. */
+export class AdminPasskeyRequiredError extends Error {
+  readonly code = "ADMIN_PASSKEY_REQUIRED";
+  constructor(readonly userId: string) {
+    super("Sign in with your passkey (Face ID or Touch ID). Phone codes are off for admins with a passkey.");
+    this.name = "AdminPasskeyRequiredError";
+  }
+}
+
 /** A non-admin account tried to log in through the admin site. */
 export class NotAnAdminError extends Error {
   constructor(readonly userId: string) {

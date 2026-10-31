@@ -92,15 +92,43 @@ export const config = {
    */
   adminPhoneAllowlist: parsePhoneList(process.env.ADMIN_PHONE_ALLOWLIST),
   /**
-   * Admin sessions are short (services/auth/authService.ts): the admin site
-   * holds a 10-minute access token, renewed while it's in use; 30 minutes
-   * without using it signs it out, and nothing lasts past 8 hours from the
-   * login. Rider and driver sessions are unchanged.
+   * Admin sessions (services/auth/authService.ts): the admin site holds a
+   * 10-minute access token, renewed while it's in use (the site renews in
+   * the background while someone is clicking or typing); an hour without
+   * activity signs it out, and nothing lasts past 12 hours from the login.
+   * Rider and driver sessions are unchanged.
    */
   adminSession: {
     accessTokenMinutes: Math.min(60, positive("ADMIN_ACCESS_TOKEN_MINUTES", 10)),
-    idleMinutes: Math.min(240, positive("ADMIN_IDLE_MINUTES", 30)),
-    maxHours: Math.min(24, positive("ADMIN_SESSION_MAX_HOURS", 8)),
+    idleMinutes: Math.min(240, positive("ADMIN_IDLE_MINUTES", 60)),
+    maxHours: Math.min(24, positive("ADMIN_SESSION_MAX_HOURS", 12)),
+  },
+  /**
+   * Admin passkeys (services/auth/passkeys.ts): Face ID / Touch ID sign-in
+   * to the admin site. A passkey belongs to one site address (the RP ID),
+   * so these must name the admin site exactly; moving the admin site to
+   * another address means adding passkeys again there.
+   *
+   * ADMIN_OTP_FALLBACK=on lets an admin who has a passkey sign in with a
+   * phone code too (recovery, e.g. every Apple device lost). Off: such an
+   * admin can only use a passkey, so a SIM swap alone can't get in. Admins
+   * with no passkey use phone codes as before.
+   */
+  adminPasskeys: {
+    rpId:
+      process.env.ADMIN_PASSKEY_RP_ID ||
+      ((process.env.NODE_ENV ?? "development") === "production" ? "campusride-admin.onrender.com" : "localhost"),
+    origins: (
+      process.env.ADMIN_PASSKEY_ORIGINS ||
+      ((process.env.NODE_ENV ?? "development") === "production"
+        ? "https://campusride-admin.onrender.com"
+        : "http://localhost:5173")
+    )
+      .split(",")
+      .map((o) => o.trim().replace(/\/$/, ""))
+      .filter(Boolean),
+    rpName: "CampusRide Admin",
+    otpFallback: process.env.ADMIN_OTP_FALLBACK === "on",
   },
   mnotify: {
     enabled: process.env.MNOTIFY_ENABLED === "true",

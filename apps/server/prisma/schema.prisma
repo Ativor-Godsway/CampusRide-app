@@ -145,18 +145,22 @@ model User {
   earlyAccessAt         DateTime?
 
   driver                 Driver?
-  ridesAsRider           Ride[]             @relation("RiderRides")
-  ridesAsDriver          Ride[]             @relation("DriverRides")
+  ridesAsRider           Ride[]                @relation("RiderRides")
+  ridesAsDriver          Ride[]                @relation("DriverRides")
   ridePassengers         RidePassenger[]
   payments               Payment[]
   refreshTokens          RefreshToken[]
-  ratingsGiven           Rating[]           @relation("RatingsGiven")
-  ratingsReceived        Rating[]           @relation("RatingsReceived")
-  driverCommissionLedger CommissionLedger[] @relation("DriverCommission")
-  rideRejections         RideRejection[]    @relation("DriverRejections")
+  ratingsGiven           Rating[]              @relation("RatingsGiven")
+  ratingsReceived        Rating[]              @relation("RatingsReceived")
+  driverCommissionLedger CommissionLedger[]    @relation("DriverCommission")
+  rideRejections         RideRejection[]       @relation("DriverRejections")
   pushTokens             PushToken[]
   trackingLinks          TrackingLink[]
   accountDeletion        AccountDeletion?
+  driverOnlineSessions   DriverOnlineSession[]
+  rideOffers             RideOffer[]
+  driverLocationPoints   DriverLocationPoint[]
+  adminPasskeys          AdminPasskey[]
 }
 
 /// One per closed account. Closing an account hides the person at once (the
@@ -360,6 +364,13 @@ model Ride {
   /// rows; /track/:token still answers an old token from here. Nothing
   /// writes it any more — drop it once no live link can still use it.
   trackingToken      String?            @unique
+  /// When a driver first took it (stats: time to match). Null before 2026-10-30.
+  matchedAt          DateTime?
+  /// When it was cancelled (who: cancelReason). Null before 2026-10-30.
+  cancelledAt        DateTime?
+  /// The first time its window passed with no driver (it went to
+  /// AWAITING_RIDER_DECISION), even if a driver came later. Stats only.
+  noDriverFoundAt    DateTime?
   /// Stamped when the ride enters REQUESTED and is broadcast to eligible
   /// drivers; the 90s dispatch timeout is measured from this (or createdAt
   /// if never set).
@@ -405,6 +416,7 @@ model Ride {
   ratings          Rating[]
   commissionLedger CommissionLedger?
   rejections       RideRejection[]
+  offers           RideOffer[]
   trackingLinks    TrackingLink[]
 
   @@index([status])
@@ -749,4 +761,112 @@ model AdminAuditLog {
   @@index([target])
   @@index([timestamp])
   @@index([action, timestamp])
+}
+
+// ─── Records for the admin dashboard (services/stats) ──────────────────────
+
+enum DriverSessionEnd {
+  /// The driver went offline in the app.
+  OFFLINE
+  /// The server stopped hearing from the driver's app (closed, no signal,
+  /// phone off) for 5 minutes; the session ends when it last did.
+  TIMEOUT
+  /// An admin took the driver's approval away.
+  ADMIN
+  ACCOUNT_CLOSED
+}
+
+/// One stretch of a driver being online: hours online per driver per day.
+/// Opened when they go online (or when their app is heard from again after
+/// a timeout while still online), closed with why it ended.
+model DriverOnlineSession {
+  id           String            @id @default(cuid())
+  driverUserId String
+  startedAt    DateTime
+  /// The last time the server heard from the driver's app during it (its
+  /// positions; written about once a minute). Null for an app that sends no
+  /// position while idle: such a session is never timed out.
+  lastSeenAt   DateTime?
+  endedAt      DateTime?
+  endReason    DriverSessionEnd?
+
+  driver User @relation(fields: [driverUserId], references: [id], onDelete: Cascade)
+
+  @@index([driverUserId, startedAt])
+  @@index([endedAt])
+}
+
+enum RideOfferOutcome {
+  ACCEPTED
+  DECLINED
+  TIMED_OUT
+  /// Another driver took it (or added the rider to their car).
+  TAKEN
+  /// The rider cancelled while it was open.
+  CANCELLED
+  /// Its window ran out with nobody taking it.
+  EXPIRED
+}
+
+/// A request offered to a driver, and what became of it. One row per ride
+/// and driver (an offer sent again keeps its first time).
+model RideOffer {
+  id           String            @id @default(cuid())
+  rideId       String
+  driverUserId String
+  offeredAt    DateTime
+  outcome      RideOfferOutcome?
+  /// When the outcome happened: the driver's answer, or the offer closing.
+  decidedAt    DateTime?
+
+  ride   Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  driver User @relation(fields: [driverUserId], references: [id], onDelete: Cascade)
+
+  @@unique([rideId, driverUserId])
+  @@index([driverUserId, offeredAt])
+  @@index([offeredAt])
+}
+
+/// Where an online driver was: about one point every 30 seconds (services/stats/locationTrail.ts),
+/// written in batches. Deleted after 90 days (LOCATION_TRAIL_KEEP_DAYS),
+/// as the privacy policy says. Never shown to riders.
+model DriverLocationPoint {
+  id           BigInt   @id @default(autoincrement())
+  driverUserId String
+  latitude     Float    @db.Real
+  longitude    Float    @db.Real
+  recordedAt   DateTime
+  /// On a trip at the time (positions sent with a ride).
+  onTrip       Boolean  @default(false)
+
+  driver User @relation(fields: [driverUserId], references: [id], onDelete: Cascade)
+
+  @@index([driverUserId, recordedAt])
+  @@index([recordedAt], type: Brin)
+}
+
+/// An admin's passkey (Face ID / Touch ID; services/auth/passkeys.ts): the
+/// main way into the admin site. Only the public key is stored; the private
+/// key never leaves the admin's devices. Once an admin has one, phone-code
+/// sign-in for them is refused unless ADMIN_OTP_FALLBACK=on.
+model AdminPasskey {
+  id           String    @id @default(cuid())
+  userId       String
+  /// The credential's id (base64url), as the browser reports it.
+  credentialId String    @unique @db.VarChar(512)
+  publicKey    Bytes
+  /// The authenticator's signature counter (0 for synced passkeys, which don't count).
+  counter      BigInt    @default(0)
+  /// How the browser can reach it ("internal", "hybrid", …), comma-separated.
+  transports   String?   @db.VarChar(100)
+  /// Synced to other devices (iCloud Keychain and the like).
+  backedUp     Boolean   @default(false)
+  /// The admin's own label ("MacBook", "iPhone").
+  name         String    @db.VarChar(60)
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }

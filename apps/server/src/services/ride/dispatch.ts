@@ -9,6 +9,7 @@ import { ACTIVE_DRIVER_STATUSES } from "./stateMachine";
 import { requestPlaceNames } from "../../routes/ridePins";
 import { notifyRideRequest } from "../push/notify";
 import { dispatchDemoRide, isServedBySimDriver } from "../reviewDemo/simulation";
+import { recordOffers, recordOffersClosed } from "../stats/rideOffers";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -73,9 +74,11 @@ export async function getEligibleDrivers(
  */
 export function closeOffer(
   prisma: PrismaClient,
-  ride: { id: string; pickupZoneId: string; isReviewDemo?: boolean },
+  ride: { id: string; pickupZoneId: string; isReviewDemo?: boolean; driverId?: string | null },
   reason: OfferClosedReason,
 ): void {
+  // Stats (services/stats/rideOffers.ts): the taker accepted, the rest closed with the reason.
+  void recordOffersClosed(prisma, ride.id, reason, reason === "TAKEN" ? (ride.driverId ?? null) : null);
   void getEligibleDrivers(prisma, { pickupZoneId: ride.pickupZoneId, isReviewDemo: ride.isReviewDemo })
     .then((drivers) => emitOfferClosed(drivers.map((d) => d.userId), { rideId: ride.id, reason }))
     .catch((err) => logger.warn("closeOffer failed", { rideId: ride.id, err }));
@@ -127,6 +130,8 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
     );
     // Drivers whose app is in the background or closed get it as a push.
     notifyRideRequest(prisma, ride.id, eligible.map((d) => d.userId), placeNames.pickupPlaceName);
+    // Stats: who it was offered to, and when (services/stats/rideOffers.ts).
+    void recordOffers(prisma, ride.id, eligible.map((d) => d.userId));
   }
 
   return eligible;
@@ -186,7 +191,7 @@ export async function claimIfOpen(prisma: PrismaClient, rideId: string, driverId
   // A review demo ride can only be taken by a demo driver, and a real ride
   // only by a real one (services/reviewDemo): checked in the same statement.
   const rows = await prisma.$queryRaw<Ride[]>`
-    UPDATE "Ride" SET "driverId" = ${driverId}, status = 'MATCHED'
+    UPDATE "Ride" SET "driverId" = ${driverId}, status = 'MATCHED', "matchedAt" = COALESCE("matchedAt", now())
     WHERE id = ${rideId} AND status = 'REQUESTED' AND "driverId" IS NULL
       AND "isReviewDemo" = (SELECT u."isReviewDemo" FROM "User" u WHERE u.id = ${driverId})
     RETURNING *`;

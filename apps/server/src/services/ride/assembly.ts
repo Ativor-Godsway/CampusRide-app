@@ -110,7 +110,9 @@ export async function addRiderToCar(
       ? await tx.$queryRaw<(Ride & { quotedFare: number | null })[]>`
           WITH closed AS (
             UPDATE "Ride"
-            SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId}
+            SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId},
+              -- Stats: the rider got a car (this one's), and the request closed, now.
+              "matchedAt" = COALESCE("matchedAt", now()), "cancelledAt" = now()
             WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
               AND "isReviewDemo" = ${anchor.isReviewDemo}
             RETURNING *

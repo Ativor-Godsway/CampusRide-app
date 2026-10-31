@@ -15,6 +15,7 @@ import {
 } from "../services/auth/authService";
 import {
   AdminNotAllowedError,
+  AdminPasskeyRequiredError,
   AdminSessionEndedError,
   NotAnAdminError,
   InvalidOtpError,
@@ -45,6 +46,7 @@ import { RateLimitedError, enforce } from "../rateLimit/limiter";
 import { RULES } from "../rateLimit/rules";
 import { clientIpForLimits, sendRateLimited } from "../rateLimit/reply";
 import { isAdminSiteRequest, recordAdminLogin, type AdminLoginFailure } from "../services/admin/loginAudit";
+import { adminNeedsPasskey } from "../services/auth/passkeys";
 import { MAX, boolean, bodyOptional, empty, noInput, object, oneOf, phone as phoneField, text } from "../http/schemas";
 
 
@@ -150,7 +152,7 @@ export function registerAuthRoutes(
       isAdminSiteRequest(request) || config.adminPhoneAllowlist.phones.includes(phone) || account?.role === "ADMIN";
     const record = (outcome: "code_sent" | "failure" | "success", reason?: AdminLoginFailure) =>
       watched ? recordAdminLogin(prisma, request, { outcome, phone, userId: account?.id ?? null, reason }) : Promise.resolve();
-    return { record };
+    return { record, adminId: account?.role === "ADMIN" ? account.id : null };
   }
 
   /**
@@ -171,6 +173,13 @@ export function registerAuthRoutes(
     }
 
     const watch = await adminLoginWatch(request, phone);
+    // An admin with a passkey signs in with it (ADMIN_OTP_FALLBACK off): no
+    // code is sent that couldn't be used.
+    if (watch.adminId && (await adminNeedsPasskey(prisma, watch.adminId))) {
+      const refused = new AdminPasskeyRequiredError(watch.adminId);
+      await watch.record("failure", "passkey_required");
+      return reply.code(403).send({ error: refused.message, code: refused.code });
+    }
     try {
       await requestOtp(prisma, otpService, phone, body.purpose, new Date(), { ip: clientIpForLimits(request) });
       await watch.record("code_sent");
@@ -303,6 +312,10 @@ export function registerAuthRoutes(
         request.log.warn({ event: "admin_login_not_allowlisted", userId: err.userId }, "ADMIN login refused: not on ADMIN_PHONE_ALLOWLIST");
         return reply.code(403).send({ error: err.message, code: "ADMIN_NOT_ALLOWED" });
       }
+      if (err instanceof AdminPasskeyRequiredError) {
+        await watch.record("failure", "passkey_required");
+        return reply.code(403).send({ error: err.message, code: err.code });
+      }
       if (err instanceof NotAnAdminError) {
         await watch.record("failure", "not_admin");
         return reply.code(403).send({ error: err.message, code: "NOT_AN_ADMIN" });
@@ -404,6 +417,10 @@ export function registerAuthRoutes(
         await watch.record("failure", "not_allowlisted");
         request.log.warn({ event: "admin_login_not_allowlisted", userId: err.userId }, "ADMIN login refused: not on ADMIN_PHONE_ALLOWLIST");
         return reply.code(403).send({ error: err.message, code: "ADMIN_NOT_ALLOWED" });
+      }
+      if (err instanceof AdminPasskeyRequiredError) {
+        await watch.record("failure", "passkey_required");
+        return reply.code(403).send({ error: err.message, code: err.code });
       }
       if (err instanceof NotAnAdminError) {
         await watch.record("failure", "not_admin");

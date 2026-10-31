@@ -10,10 +10,12 @@ import {
   PhoneAlreadyRegisteredError,
   TermsNotConfirmedError,
   UserNotFoundError,
+  AdminPasskeyRequiredError,
 } from "./errors";
 import { config } from "../../config";
 import { termsConfirmation } from "./terms";
 import { adminPhoneAllowed } from "./adminAccess";
+import { adminNeedsPasskey } from "./passkeys";
 import { signAccessToken, verifyVerificationToken } from "./tokens";
 import { enforce } from "../../rateLimit/limiter";
 import { RULES } from "../../rateLimit/rules";
@@ -48,8 +50,8 @@ function adminSessionEnd(startedAt: Date): number {
  * why the create is followed by a self-referencing update.
  *
  * ADMIN sessions are short (config.adminSession): a 10-minute access token,
- * and a refresh token that dies after 30 minutes unused — each refresh
- * renews it — and never outlives `sessionStartedAt` + 8 hours. Nothing an
+ * and a refresh token that dies after an hour unused — each refresh
+ * renews it — and never outlives `sessionStartedAt` + 12 hours. Nothing an
  * admin holds is long-lived, and a stolen admin token is soon worthless.
  */
 async function issueTokens(
@@ -191,7 +193,26 @@ export async function login(prisma: PrismaClient, input: LoginInput): Promise<Lo
   if (input.adminSite && user.role !== "ADMIN") {
     throw new NotAnAdminError(user.id);
   }
+  // An admin with a passkey signs in with it; a phone code only while
+  // ADMIN_OTP_FALLBACK=on (recovery). A SIM swap alone can't get in.
+  if (user.role === "ADMIN" && (await adminNeedsPasskey(prisma, user.id))) {
+    throw new AdminPasskeyRequiredError(user.id);
+  }
 
+  const tokens = await issueTokens(prisma, user);
+  return { user, ...tokens };
+}
+
+/**
+ * Starts an admin session for an account a passkey has just proved
+ * (services/auth/passkeys.ts), with the same checks and session rules as a
+ * code login from the admin site: an open ADMIN account on the allowlist.
+ */
+export async function loginVerifiedAdmin(prisma: PrismaClient, userId: string): Promise<LoginResult> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: { driver: true } });
+  if (!user || user.deletedAt) throw new UserNotFoundError(userId);
+  if (user.role !== "ADMIN") throw new NotAnAdminError(user.id);
+  if (!adminPhoneAllowed(user.phone)) throw new AdminNotAllowedError(user.id);
   const tokens = await issueTokens(prisma, user);
   return { user, ...tokens };
 }

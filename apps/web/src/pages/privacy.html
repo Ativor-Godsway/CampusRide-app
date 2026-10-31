@@ -115,8 +115,9 @@
     in use</strong>. Before asking for permission, the app explains this on a full screen.
   </p>
   <ul>
-    <li><strong>While you're online:</strong> your phone works out which campus zone you're in and sends us only the zone, so requests near you reach you. We store your current zone, not your position.</li>
-    <li><strong>During a trip</strong> (from accepting a rider until the trip ends): your position is sent to us every few seconds and passed straight on to the riders on that trip, so they can see the car coming. We use it to tell riders you're nearly there. <strong>We don't store these positions.</strong></li>
+    <li><strong>While you're online:</strong> your position is sent to us every few seconds, so ride requests near you reach you and we know which campus zone you're in. Riders looking at the map see available cars near them at an approximate position (moved by 10 to 25 metres), <strong>without your name, car or plate</strong>.</li>
+    <li><strong>During a trip</strong> (from accepting a rider until the trip ends): your position is passed on to the riders on that trip, so they can see the car coming, and we use it to tell them you're nearly there.</li>
+    <li><strong>Location history:</strong> while you're online, we keep your position about once every 30 seconds, with the time and whether you were on a trip. We use it for <strong>safety</strong> (for example, to look into a report about a trip) and for <strong>service quality</strong> (where and when drivers are available). It is <strong>deleted automatically after 90 days</strong>. Riders never see it.</li>
     <li><strong>It stops</strong> when you go offline, sign out or close the app. On Android a notification ("You're online") shows the whole time; on iPhone the location indicator shows.</li>
     <li>If you allow location only "while using the app", you can still drive, but riders won't see you move while the app is in the background.</li>
   </ul>
@@ -139,6 +140,7 @@
         <tr><td>Recording that you confirmed you're 18 or over and agreed to the Terms and this policy</td><td>When you confirmed, and which version</td><td>Contract; our legitimate interest in being able to show you agreed and that the service is for adults</td></tr>
         <tr><td>Booking, matching and completing trips; letting rider and driver find and call each other</td><td>Name, phone, trip points, driver location, car details, photo</td><td>Contract</td></tr>
         <tr><td>Drivers' location in the background</td><td>Driver location</td><td>Your consent (the location permission), which you can withdraw in your phone's settings</td></tr>
+        <tr><td>Safety and service quality: looking into reports about trips, and seeing where and when drivers are available</td><td>Drivers' location history (90 days), when drivers were online, how ride requests were answered</td><td>Legitimate interest in a safe, reliable service</td></tr>
         <tr><td>Approving drivers</td><td>Driver profile and photo</td><td>Contract; our legitimate interest in rider safety</td></tr>
         <tr><td>SOS alerts</td><td>Rider's and driver's details, emergency contact</td><td>Protecting the vital interests of the rider; consent (you add the contact)</td></tr>
         <tr><td>Trip notifications</td><td>Push token, names, place names</td><td>Contract; consent (notification permission)</td></tr>
@@ -194,9 +196,10 @@
         <tr><td>Trip records (time, area, fare, stars) and drivers' commission records</td><td>Kept as our business records, without your name once the {{retentionDays}} days are over</td></tr>
         <tr><td>Your 18+ and terms confirmation (when, and which version)</td><td>While your account is open; after you delete it, kept without your name or number with the anonymous record that the account existed</td></tr>
         <tr><td>Emergency contact</td><td>Until you change or remove it, or delete your account</td></tr>
-        <tr><td>Drivers' live position during a trip</td><td>Not stored: passed on to riders and discarded</td></tr>
+        <tr><td>Drivers' location history (a position about every 30 seconds while online)</td><td><strong>90 days</strong>, then deleted automatically</td></tr>
+        <tr><td>When drivers were online, and how they answered ride requests</td><td>Kept as our business records, without your name once the {{retentionDays}} days after you delete your account are over</td></tr>
         <tr><td>SOS tracking links</td><td>Stop working 24 hours after the trip ends; deleted with your account</td></tr>
-        <tr><td>Sign-in codes</td><td>Work for 5 minutes. The hashed record is deleted when your account is deleted</td></tr>
+        <tr><td>Sign-in codes</td><td>Work for 5 minutes. The hashed record is deleted after 7 days, or when your account is deleted</td></tr>
         <tr><td>Push notification tokens</td><td>Until you sign out, delete your account or uninstall the app</td></tr>
         <tr><td>Server logs and crash reports</td><td>A limited period set by our providers (typically days to a few weeks)</td></tr>
         <tr><td>Records that an account was deleted</td><td>Kept, without a name, to show the request was completed</td></tr>

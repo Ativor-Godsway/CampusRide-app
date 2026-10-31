@@ -21,6 +21,7 @@ import { registerHealthRoutes } from "./health";
 import { registerAppVersionRoutes } from "./appVersion";
 import { registerLaunchRoutes } from "./launch";
 import { registerNotificationRoutes } from "./notifications";
+import { registerAdminPasskeyRoutes } from "./adminPasskeys";
 import { installRateLimits } from "../rateLimit/http";
 import { installErrorHandling } from "../http/errors";
 import { useRequestValidation } from "../http/validation";
@@ -78,4 +79,5 @@ export function registerAllRoutes(
   registerPlaceRoutes(app, prisma);
   registerPushRoutes(app, prisma);
   registerNotificationRoutes(app, prisma);
+  registerAdminPasskeyRoutes(app, prisma);
 }
