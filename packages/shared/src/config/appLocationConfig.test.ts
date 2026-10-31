@@ -123,6 +123,25 @@ describe("the driver app defines its location task before anything can use it", 
   });
 });
 
+describe("the driver's position reaches the server while the app is in the background", () => {
+  // Android pauses JS timers in the background and with the screen locked:
+  // a timer-only sender stopped there, and riders lost the car on a trip.
+  it("every background fix goes straight to the sender, and only the sender emits positions", () => {
+    const sender = read("apps/driver/lib/positionSender.ts");
+    expect(sender).toMatch(/^onDriverLocation\(\(sample\) => offerPosition\(sample\)\);$/m);
+    const emitters = sourceFiles("apps/driver")
+      .filter((f) => /DRIVER_CLIENT_EVENTS\.(LOCATION_UPDATE|POSITION_UPDATE)/.test(read(f)))
+      .map((f) => f.split(path.sep).join("/"));
+    expect(emitters).toEqual(["apps/driver/lib/positionSender.ts"]);
+  });
+
+  it("the location task takes its cadence from driverLocationCadence (Android: fixes without moving)", () => {
+    const source = read("apps/driver/lib/backgroundLocation.ts");
+    expect(source).toContain("...driverLocationCadence(Platform.OS, mode)");
+    expect(source).not.toMatch(/distanceInterval:\s*10/);
+  });
+});
+
 describe("the driver app tells the server whether it's in front", () => {
   // The server never takes offline a driver whose app said "background"
   // (apps/server/src/services/zones/driverPresence.ts).
