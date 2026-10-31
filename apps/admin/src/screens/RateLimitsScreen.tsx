@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GHANA_PHONE_EXAMPLE, normalizeGhanaPhone, retryAfterText } from "@rida/shared";
 import { ApiError, clearRateLimits, getRateLimits, type RateLimitLookup } from "../api";
 import { useAuth, useToken } from "../auth";
+import { Chip } from "../components/Chip";
 
 /**
  * For "I can't log in" calls: what a phone number's rate limits look like
@@ -9,10 +10,10 @@ import { useAuth, useToken } from "../auth";
  * account, so clearing one person never affects anyone else. Looking and
  * clearing are both written to the audit log.
  */
-export function RateLimitsScreen() {
+export function RateLimitsScreen({ phone: initialPhone, embedded = false }: { phone?: string; embedded?: boolean } = {}) {
   const token = useToken();
   const { signOut } = useAuth();
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(initialPhone ?? "");
   const [result, setResult] = useState<RateLimitLookup | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,6 +35,13 @@ export function RateLimitsScreen() {
       setBusy(false);
     }
   }
+
+  // Opened for a known number (a rider's detail): look it up straight away.
+  useEffect(() => {
+    if (initialPhone) void run(async () => setResult(await getRateLimits(token, initialPhone)));
+    // Once per number.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPhone]);
 
   function lookUp(event: React.FormEvent) {
     event.preventDefault();
@@ -62,17 +70,17 @@ export function RateLimitsScreen() {
   const blocked = result?.limits.filter((l) => l.blocked).length ?? 0;
 
   return (
-    <section>
-      <div className="section-head">
-        <h2>Rate limits</h2>
-      </div>
-      <p className="muted">
-        Look up a phone number someone can&apos;t log in or book with. Limits count per number and
-        per account, so clearing one person never touches anyone else.
-      </p>
+    <div>
+      {embedded ? null : (
+        <p className="muted">
+          Look up a phone number someone can&apos;t log in or book with. Limits count per number and
+          per account, so clearing one person never touches anyone else.
+        </p>
+      )}
 
+      {initialPhone ? null : (
       <form className="filters" onSubmit={lookUp}>
-        <div>
+        <div className="field">
           <label htmlFor="limit-phone">Phone number</label>
           <input
             id="limit-phone"
@@ -83,12 +91,13 @@ export function RateLimitsScreen() {
             required
           />
         </div>
-        <button type="submit" disabled={busy || phone.trim().length === 0}>
+        <button type="submit" className="tonal-button" disabled={busy || phone.trim().length === 0}>
           {busy ? "Looking…" : "Look up"}
         </button>
       </form>
+      )}
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error-text" role="alert">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}
 
       {result ? (
@@ -107,8 +116,8 @@ export function RateLimitsScreen() {
           {result.limits.length === 0 ? (
             <p className="muted">No limits are in use for this number.</p>
           ) : (
-            <div className="table-wrap">
-              <table>
+            <div className="table-scroll">
+              <table className="mini-table">
                 <thead>
                   <tr>
                     <th>Limit</th>
@@ -129,9 +138,9 @@ export function RateLimitsScreen() {
                       <td>{retryAfterText(limit.resetsInSeconds)}</td>
                       <td>
                         {limit.blocked ? (
-                          <span className="badge badge-cancelled">Blocked</span>
+                          <Chip tone="red">Blocked</Chip>
                         ) : (
-                          <span className="badge">OK</span>
+                          <Chip tone="green">OK</Chip>
                         )}
                       </td>
                     </tr>
@@ -142,12 +151,12 @@ export function RateLimitsScreen() {
           )}
 
           <p>
-            <button type="button" className="danger" disabled={busy} onClick={clear}>
+            <button type="button" className="danger-text-button" disabled={busy || result.limits.length === 0} onClick={clear}>
               Clear this number&apos;s limits
             </button>
           </p>
         </>
       ) : null}
-    </section>
+    </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   type PendingDriver,
 } from "../api";
 import { useAuth, useToken } from "../auth";
+import { dayAndTime } from "../lib/time";
 
 /**
  * The primary screen: every driver sitting at isApproved=false, with enough
@@ -16,7 +17,7 @@ import { useAuth, useToken } from "../auth";
  * (some rejections are obvious) but the audit log is worth much more with one,
  * and the moment to capture it is while the admin is looking at the row.
  */
-export function DriverQueue() {
+export function DriverQueue({ onChange }: { onChange?: () => void } = {}) {
   const token = useToken();
   const { signOut } = useAuth();
   const [drivers, setDrivers] = useState<PendingDriver[]>([]);
@@ -61,6 +62,7 @@ export function DriverQueue() {
       setRejecting(null);
       setReason("");
       await load();
+      onChange?.();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "The action failed");
     } finally {
@@ -71,22 +73,22 @@ export function DriverQueue() {
   if (loading) return <p className="muted">Loading the approval queue…</p>;
 
   return (
-    <section>
-      <div className="section-head">
-        <h2>Driver approvals</h2>
-        <button type="button" className="secondary" onClick={() => void load()}>
+    <div>
+      <div className="queue-head">
+        <p className="muted">Approve a driver once their name, car and plate match the photo. A rejection needs a reason.</p>
+        <button type="button" className="text-button" onClick={() => void load()}>
           Refresh
         </button>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error-text" role="alert">{error}</p> : null}
 
       {drivers.length === 0 ? (
         <p className="muted">No drivers are waiting for approval.</p>
       ) : (
-        <ul className="driver-list">
+        <ul className="queue-list">
           {drivers.map((driver) => (
-            <li key={driver.id} className="card driver-card">
+            <li key={driver.id} className="queue-card">
               {driver.photoUrl ? (
                 <img className="photo" src={driver.photoUrl} alt={`${driver.user.name}'s vehicle`} />
               ) : (
@@ -95,7 +97,7 @@ export function DriverQueue() {
 
               <div className="driver-detail">
                 <h3>{driver.user.name}</h3>
-                <p className="muted">{driver.user.phone}</p>
+                <p className="muted num">{driver.user.phone}</p>
                 <dl>
                   <div>
                     <dt>Vehicle</dt>
@@ -110,7 +112,7 @@ export function DriverQueue() {
                   </div>
                   <div>
                     <dt>Applied</dt>
-                    <dd>{new Date(driver.createdAt).toLocaleString()}</dd>
+                    <dd>{dayAndTime(driver.createdAt)}</dd>
                   </div>
                 </dl>
               </div>
@@ -128,7 +130,7 @@ export function DriverQueue() {
                     />
                     <button
                       type="button"
-                      className="danger"
+                      className="danger-button"
                       disabled={busyId === driver.id || reason.trim().length === 0}
                       onClick={() => void act(driver.id, "reject")}
                     >
@@ -136,7 +138,7 @@ export function DriverQueue() {
                     </button>
                     <button
                       type="button"
-                      className="link"
+                      className="text-button"
                       onClick={() => {
                         setRejecting(null);
                         setReason("");
@@ -149,6 +151,7 @@ export function DriverQueue() {
                   <>
                     <button
                       type="button"
+                      className="primary-button"
                       disabled={busyId === driver.id}
                       onClick={() => void act(driver.id, "approve")}
                     >
@@ -156,7 +159,7 @@ export function DriverQueue() {
                     </button>
                     <button
                       type="button"
-                      className="danger"
+                      className="danger-text-button"
                       disabled={busyId === driver.id}
                       onClick={() => {
                         setRejecting(driver.id);
@@ -172,6 +175,6 @@ export function DriverQueue() {
           ))}
         </ul>
       )}
-    </section>
+    </div>
   );
 }

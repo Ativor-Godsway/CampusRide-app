@@ -188,16 +188,16 @@ export function PlacesScreen() {
   };
 
   return (
-    <section>
-      <div className="section-head">
-        <h2>Places</h2>
-        <button type="button" onClick={startAdding}>
+    <div>
+      <div className="queue-head">
+        <p className="muted">Search, add, rename, move (drag the pin) or deactivate a place. Every save is in the audit log.</p>
+        <button type="button" className="tonal-button" onClick={startAdding}>
           Add place
         </button>
       </div>
 
       <div className="places-layout">
-        <div className="places-list card">
+        <div className="places-list">
           <input
             type="search"
             placeholder="Search places (typos are fine)"
@@ -235,7 +235,7 @@ export function PlacesScreen() {
 
           {draft ? (
             <form
-              className="card place-form"
+              className="inset place-form"
               onSubmit={(e) => {
                 e.preventDefault();
                 void save();
@@ -266,24 +266,24 @@ export function PlacesScreen() {
               <p className="muted small">
                 Position {draft.latitude.toFixed(6)}, {draft.longitude.toFixed(6)} — drag the pin to move it.
               </p>
-              {!inArea ? <p className="error">That spot is outside the CampusRide service area (dashed line).</p> : null}
-              {error ? <p className="error">{error}</p> : null}
+              {!inArea ? <p className="error-text" role="alert">That spot is outside the CampusRide service area (dashed line).</p> : null}
+              {error ? <p className="error-text" role="alert">{error}</p> : null}
               {notice ? <p className="muted">{notice}</p> : null}
               <div className="driver-actions">
-                <button type="submit" disabled={saving || !inArea || !draft.name.trim()}>
+                <button type="submit" className="tonal-button" disabled={saving || !inArea || !draft.name.trim()}>
                   {saving ? "Saving…" : draft.id ? "Save" : "Add place"}
                 </button>
                 {draft.id ? (
                   <button
                     type="button"
-                    className={draft.isActive ? "danger" : "secondary"}
+                    className={draft.isActive ? "danger-text-button" : "text-button"}
                     disabled={saving}
                     onClick={() => void save({ isActive: !draft.isActive })}
                   >
                     {draft.isActive ? "Deactivate" : "Reactivate"}
                   </button>
                 ) : null}
-                <button type="button" className="secondary" onClick={() => setDraft(null)}>
+                <button type="button" className="text-button" onClick={() => setDraft(null)}>
                   Close
                 </button>
               </div>
@@ -294,6 +294,6 @@ export function PlacesScreen() {
           <p className="muted small">Place data {PLACES_ATTRIBUTION}.</p>
         </div>
       </div>
-    </section>
+    </div>
   );
 }

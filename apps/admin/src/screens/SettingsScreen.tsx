@@ -21,6 +21,7 @@ import {
   type LaunchSettings,
 } from "../api";
 import { useAuth, useToken } from "../auth";
+import { dayAndTime, shortDay } from "../lib/time";
 import { PasskeysCard } from "./PasskeysCard";
 
 const MODES: { mode: LaunchMode; title: string; detail: string }[] = [
@@ -170,17 +171,13 @@ export function SettingsScreen() {
     settings?.setting.mode === "COUNTDOWN" && status?.mode === "LIVE" && settings.setting.launchAt;
 
   return (
-    <section>
-      <div className="section-head">
-        <h2>Settings</h2>
-      </div>
-
+    <div className="settings-stack">
       <PasskeysCard />
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error-text" role="alert">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}
 
-      <div className="card settings-card">
+      <div className="inset">
         <h3>Launch mode</h3>
         {status ? (
           <p>
@@ -206,7 +203,7 @@ export function SettingsScreen() {
         )}
         {settings?.setting.updatedAt ? (
           <p className="muted small">
-            Last changed {new Date(settings.setting.updatedAt).toLocaleString()}
+            Last changed {dayAndTime(settings.setting.updatedAt)}
             {settings.setting.updatedBy ? ` by ${settings.setting.updatedBy.name}` : ""}.
           </p>
         ) : null}
@@ -242,7 +239,7 @@ export function SettingsScreen() {
           ) : null}
 
           <p>
-            <button type="submit" disabled={busy || !settings}>
+            <button type="submit" className="tonal-button" disabled={busy || !settings}>
               {busy ? "Saving…" : "Save launch mode"}
             </button>
           </p>
@@ -252,7 +249,7 @@ export function SettingsScreen() {
         {!settings ? null : settings.launchPush.sent ? (
           <p className="muted">
             &ldquo;{settings.launchPush.sent.title}&rdquo; went out{" "}
-            {new Date(settings.launchPush.sent.createdAt).toLocaleString()} to{" "}
+            {dayAndTime(settings.launchPush.sent.createdAt)} to{" "}
             {settings.launchPush.sent.devices} device(s): {settings.launchPush.sent.delivered} delivered,{" "}
             {settings.launchPush.sent.failed} failed. It is only ever sent once.
           </p>
@@ -284,7 +281,7 @@ export function SettingsScreen() {
         )}
       </div>
 
-      <div className="card settings-card">
+      <div className="inset">
         <h3>Early access</h3>
         <p className="muted">
           Riders with early access can book during the countdown (the pilot testers). Review demo
@@ -292,7 +289,7 @@ export function SettingsScreen() {
           {settings ? `${settings.earlyAccessRiders} rider(s) have early access now.` : null}
         </p>
         <p>
-          <button type="button" disabled={busy} onClick={giveEveryone}>
+          <button type="button" className="tonal-button" disabled={busy} onClick={giveEveryone}>
             Give early access to all current riders
           </button>
         </p>
@@ -309,7 +306,7 @@ export function SettingsScreen() {
               required
             />
           </div>
-          <button type="submit" disabled={busy || phone.trim().length === 0}>
+          <button type="submit" className="tonal-button" disabled={busy || phone.trim().length === 0}>
             Look up
           </button>
         </form>
@@ -321,16 +318,16 @@ export function SettingsScreen() {
               <span className="muted">
                 {lookup.account.name} ({lookup.account.role.toLowerCase()}) ·{" "}
                 {lookup.account.earlyAccessAt
-                  ? `early access since ${new Date(lookup.account.earlyAccessAt).toLocaleDateString()}`
+                  ? `early access since ${shortDay(lookup.account.earlyAccessAt)}`
                   : "no early access"}
               </span>{" "}
               {lookup.account.role === "RIDER" ? (
                 lookup.account.earlyAccessAt ? (
-                  <button type="button" className="secondary" disabled={busy} onClick={() => toggle(false)}>
+                  <button type="button" className="text-button" disabled={busy} onClick={() => toggle(false)}>
                     Take away early access
                   </button>
                 ) : (
-                  <button type="button" disabled={busy} onClick={() => toggle(true)}>
+                  <button type="button" className="tonal-button" disabled={busy} onClick={() => toggle(true)}>
                     Give early access
                   </button>
                 )
@@ -341,6 +338,6 @@ export function SettingsScreen() {
           )
         ) : null}
       </div>
-    </section>
+    </div>
   );
 }

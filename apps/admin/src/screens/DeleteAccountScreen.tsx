@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { GHANA_PHONE_EXAMPLE, normalizeGhanaPhone } from "@rida/shared";
 import {
   ApiError,
@@ -9,6 +9,7 @@ import {
   type DeletionLookup,
 } from "../api";
 import { useAuth, useToken } from "../auth";
+import { shortDay } from "../lib/time";
 
 /**
  * For someone who asked by email to delete their account (the no-app route
@@ -18,10 +19,10 @@ import { useAuth, useToken } from "../auth";
  * Deleting does exactly what the app's own Delete account does. Every step
  * is written to the audit log.
  */
-export function DeleteAccountScreen() {
+export function DeleteAccountScreen({ phone: initialPhone }: { phone?: string } = {}) {
   const token = useToken();
   const { signOut } = useAuth();
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(initialPhone ?? "");
   const [result, setResult] = useState<DeletionLookup | null>(null);
   const [codeSent, setCodeSent] = useState<{ phone: string; minutes: number } | null>(null);
   const [code, setCode] = useState("");
@@ -53,6 +54,13 @@ export function DeleteAccountScreen() {
       setBusy(false);
     }
   }
+
+  // Opened for a known number (a rider's detail): look it up straight away.
+  useEffect(() => {
+    if (initialPhone) void run(async () => setResult(await lookUpForDeletion(token, initialPhone)));
+    // Once per number.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPhone]);
 
   function lookUp(event: React.FormEvent) {
     event.preventDefault();
@@ -91,7 +99,7 @@ export function DeleteAccountScreen() {
     void run(async () => {
       const deleted = await deleteAccountByEmail(token, result.phone, confirmToken);
       setDone(
-        `Deleted. Their kept details are erased on ${new Date(deleted.erasedAfter).toLocaleDateString()}. ` +
+        `Deleted. Their kept details are erased on ${shortDay(deleted.erasedAfter)}. ` +
           "Email them to say it's done.",
       );
       setConfirmToken(null);
@@ -103,18 +111,16 @@ export function DeleteAccountScreen() {
   const deletable = account !== null && result?.blocked === null && done === null;
 
   return (
-    <section>
-      <div className="section-head">
-        <h2>Delete an account</h2>
-      </div>
+    <div>
       <p className="muted">
         For someone who emailed asking to delete their account. We text a code to the number on the
         account; they email it back, and only that code unlocks deleting. Deleting does exactly what
         the app&apos;s own Delete account does.
       </p>
 
+      {initialPhone ? null : (
       <form className="filters" onSubmit={lookUp}>
-        <div>
+        <div className="field">
           <label htmlFor="delete-phone">Phone number from the email</label>
           <input
             id="delete-phone"
@@ -128,21 +134,22 @@ export function DeleteAccountScreen() {
             required
           />
         </div>
-        <button type="submit" disabled={busy || phone.trim().length === 0}>
+        <button type="submit" className="tonal-button" disabled={busy || phone.trim().length === 0}>
           {busy && !result ? "Looking…" : "Look up"}
         </button>
       </form>
+      )}
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error-text" role="alert">{error}</p> : null}
 
       {result ? (
-        <div className="card">
+        <div className="inset">
           {account ? (
             <p>
               <strong>{done ? "Deleted user" : account.name}</strong>{" "}
               <span className="muted">
                 {account.role.toLowerCase()} · {result.phone} · joined{" "}
-                {new Date(account.createdAt).toLocaleDateString()}
+                {shortDay(account.createdAt)}
               </span>
             </p>
           ) : (
@@ -151,13 +158,13 @@ export function DeleteAccountScreen() {
             </p>
           )}
 
-          {result.blocked ? <p className="error">{result.blocked.message}</p> : null}
+          {result.blocked ? <p className="error-text">{result.blocked.message}</p> : null}
           {done ? <p>{done}</p> : null}
 
           {deletable ? (
             <>
               <p>
-                <button type="button" disabled={busy} onClick={sendCode}>
+                <button type="button" className="tonal-button" disabled={busy} onClick={sendCode}>
                   {codeSent ? "Send a new code" : "Send verification code"}
                 </button>
               </p>
@@ -170,7 +177,7 @@ export function DeleteAccountScreen() {
 
               {codeSent && !confirmToken ? (
                 <form className="filters" onSubmit={checkCode}>
-                  <div>
+                  <div className="field">
                     <label htmlFor="delete-code">Code they emailed back</label>
                     <input
                       id="delete-code"
@@ -181,7 +188,7 @@ export function DeleteAccountScreen() {
                       required
                     />
                   </div>
-                  <button type="submit" disabled={busy || code.trim().length === 0}>
+                  <button type="submit" className="tonal-button" disabled={busy || code.trim().length === 0}>
                     Check code
                   </button>
                 </form>
@@ -191,7 +198,7 @@ export function DeleteAccountScreen() {
                 <>
                   <p className="muted">Code correct. Delete within 5 minutes, or send a new code.</p>
                   <p>
-                    <button type="button" className="danger" disabled={busy} onClick={remove}>
+                    <button type="button" className="danger-button" disabled={busy} onClick={remove}>
                       Delete account
                     </button>
                   </p>
@@ -201,6 +208,6 @@ export function DeleteAccountScreen() {
           ) : null}
         </div>
       ) : null}
-    </section>
+    </div>
   );
 }
