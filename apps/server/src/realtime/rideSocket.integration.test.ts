@@ -20,6 +20,7 @@ import { createTestDriver, createTestUser, getTestZones } from "../services/ride
 import { RULES } from "../rateLimit/rules";
 import { limiter } from "../rateLimit/limiter";
 import { freshDriverPositions, resetLivePositionsForTests } from "../services/zones/livePositions";
+import { resetDriverPresenceForTests, silentDrivers } from "../services/zones/driverPresence";
 import {
   SOCKET_AUTH_ERROR,
   disconnectUser,
@@ -318,6 +319,35 @@ describe("each rider's road ETA", () => {
     expect(w!.seconds).toBeGreaterThan(0);
     expect((await heardAboard).map((e) => e.toward)).toEqual(["dropoff"]);
     expect(await heardStranger).toEqual([]);
+  });
+});
+
+describe("a driver's presence (in touch with the phone)", () => {
+  it("is tracked from the driver's socket and app state; the answer says if they were taken offline", async () => {
+    resetDriverPresenceForTests();
+    const d = await driver();
+    const sock = await connectAs(tokenFor(d));
+    const ask = (state: unknown) =>
+      new Promise<{ takenOffline: boolean }>((resolve) => sock.emit(DRIVER_CLIENT_EVENTS.PRESENCE, { state }, resolve));
+    expect(await ask("foreground")).toEqual({ takenOffline: false });
+    expect(await ask("nonsense")).toEqual({ takenOffline: false });
+
+    // Connected: never silent, however long.
+    const later = Date.now() + 10 * config.driverSilenceTimeoutMinutes * 60_000;
+    expect(silentDrivers(later).map((s) => s.userId)).not.toContain(d.id);
+    sock.disconnect();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(silentDrivers(later).map((s) => s.userId)).toContain(d.id);
+  });
+
+  it("an app that said 'background' is never silent after its socket goes", async () => {
+    resetDriverPresenceForTests();
+    const d = await driver();
+    const sock = await connectAs(tokenFor(d));
+    await new Promise((resolve) => sock.emit(DRIVER_CLIENT_EVENTS.PRESENCE, { state: "background" }, resolve));
+    sock.disconnect();
+    await new Promise((r) => setTimeout(r, 200));
+    expect(silentDrivers(Date.now() + 10 * config.driverSilenceTimeoutMinutes * 60_000)).toEqual([]);
   });
 });
 

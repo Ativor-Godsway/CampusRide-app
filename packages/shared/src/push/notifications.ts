@@ -20,7 +20,7 @@ export const RIDER_PUSH_KINDS = [
   "DRIVER_CANCELLED",
   "NO_DRIVER_FOUND",
 ] as const;
-export const DRIVER_PUSH_KINDS = ["RIDE_REQUEST", "RIDER_CANCELLED"] as const;
+export const DRIVER_PUSH_KINDS = ["RIDE_REQUEST", "RIDER_CANCELLED", "WENT_OFFLINE"] as const;
 
 export type RiderPushKind = (typeof RIDER_PUSH_KINDS)[number];
 export type DriverPushKind = (typeof DRIVER_PUSH_KINDS)[number];
@@ -133,6 +133,11 @@ export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
       };
     case "RIDER_CANCELLED":
       return { title: "Ride cancelled", body: `${rider} cancelled the ride.` };
+    case "WENT_OFFLINE":
+      return {
+        title: "You're offline",
+        body: "We lost touch with your phone for a while. Go online again when you're ready.",
+      };
   }
 }
 
@@ -150,6 +155,7 @@ export function pushTapTarget(kind: PushKind): PushTapTarget {
       return "rides";
     case "RIDE_REQUEST":
     case "DRIVER_CANCELLED":
+    case "WENT_OFFLINE":
       return "home";
     default:
       return "trip";

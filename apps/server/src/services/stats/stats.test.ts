@@ -1,8 +1,8 @@
 /**
  * Records for the admin dashboard (services/stats). Pins:
- *   1. online sessions open and close with the switch, end on admin
- *      rejection, and time out when the app goes quiet — at the last moment
- *      it was heard — then reopen if it comes back while still online;
+ *   1. online sessions open and close with the switch and end on admin
+ *      rejection; silence alone never ends one (services/zones/driverPresence.ts
+ *      decides when a driver is taken offline);
  *   2. the location trail keeps one point per 30 s per driver, writes in one
  *      batch, and deletes points past 90 days;
  *   3. every offer's outcome: accepted, declined, timed out, taken, cancelled, expired;
@@ -15,7 +15,7 @@ import { registerDriverRoutes } from "../../routes/driver";
 import { signAccessToken } from "../auth/tokens";
 import { cleanupRide, createTestDriver, createTestRide } from "../ride/testFixtures";
 import { applyRideTransition } from "../ride/rideService";
-import { closeDriverSession, openDriverSession, SESSION_TIMEOUT_MS, timeOutQuietSessions } from "./driverSessions";
+import { closeDriverSession, openDriverSession } from "./driverSessions";
 import {
   LOCATION_TRAIL_KEEP_DAYS,
   SAMPLE_MS,
@@ -71,35 +71,21 @@ describe("driver online sessions", () => {
     expect(s!.endedAt!.getTime()).toBeGreaterThanOrEqual(s!.startedAt.getTime());
   });
 
-  it("time out at the last moment the app was heard, and reopen if it is heard again while online", async () => {
+  it("silence alone never ends a session (an Android app in the background may send nothing)", async () => {
     const d = await driver(true);
     const t0 = Date.now();
-    await openDriverSession(prisma, d.user.id, new Date(t0 - 20 * MIN));
-    noteDriverPosition(d.user.id, BALME, false, t0 - 10 * MIN);
+    await openDriverSession(prisma, d.user.id, new Date(t0 - 3 * 60 * MIN));
+    noteDriverPosition(d.user.id, BALME, false, t0 - 2 * 60 * MIN);
     await flushLocationTrail(prisma);
-    const lastSeen = (await sessions(d.user.id))[0]!.lastSeenAt!;
-    expect(lastSeen.getTime()).toBe(t0 - 10 * MIN);
-
-    // Inside the grace after a server start, nothing is timed out.
-    expect(await timeOutQuietSessions(prisma, new Date(t0), t0 - MIN)).toBe(0);
-    expect(await timeOutQuietSessions(prisma, new Date(t0), 0)).toBeGreaterThanOrEqual(1);
-    const [ended] = await sessions(d.user.id);
-    expect(ended).toMatchObject({ endReason: "TIMEOUT" });
-    expect(ended!.endedAt!.getTime()).toBe(lastSeen.getTime());
-
-    // Heard again, still online: a new session.
-    noteDriverPosition(d.user.id, BALME, false, t0);
-    await flushLocationTrail(prisma);
-    const all = await sessions(d.user.id);
-    expect(all).toHaveLength(2);
-    expect(all[1]).toMatchObject({ endedAt: null, startedAt: new Date(t0) });
+    const [s] = await sessions(d.user.id);
+    expect(s).toMatchObject({ endedAt: null, lastSeenAt: new Date(t0 - 2 * 60 * MIN) });
   });
 
-  it("a session never heard from (an app that sends no idle position) is never timed out", async () => {
+  it("an online driver with no open session (online before these records) gets one when heard", async () => {
     const d = await driver(true);
-    await openDriverSession(prisma, d.user.id, new Date(Date.now() - 60 * MIN));
-    await timeOutQuietSessions(prisma, new Date(Date.now() + SESSION_TIMEOUT_MS), 0);
-    expect((await sessions(d.user.id))[0]).toMatchObject({ endedAt: null });
+    noteDriverPosition(d.user.id, BALME, false);
+    await flushLocationTrail(prisma);
+    expect(await sessions(d.user.id)).toHaveLength(1);
   });
 
   it("an admin taking approval away ends it with ADMIN", async () => {

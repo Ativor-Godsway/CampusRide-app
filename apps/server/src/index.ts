@@ -41,7 +41,7 @@ import { loadTestOtpCode } from "./services/auth/loadTestOtp";
 import { purgeDeletedAccounts } from "./services/auth/deleteAccount";
 import { purgeOldOtpCodes } from "./services/auth/otpCleanup";
 import { FLUSH_MS, flushLocationTrail, purgeOldLocationPoints } from "./services/stats/locationTrail";
-import { timeOutQuietSessions } from "./services/stats/driverSessions";
+import { sweepDriverPresence, takeSilentDriversOffline } from "./services/zones/driverPresence";
 import { startReviewDemo } from "./services/reviewDemo/simulation";
 import { reviewDemoConfig } from "./services/reviewDemo/config";
 
@@ -290,10 +290,14 @@ async function bootstrap() {
 
   // Records for the admin dashboard (services/stats): the sampled location
   // trail written in one batch a minute (with drivers' sessions marked as
-  // seen), quiet sessions timed out, and trail points past 90 days deleted.
+  // seen), and trail points past 90 days deleted.
   const trailFlush = setInterval(() => void flushLocationTrail(prisma), FLUSH_MS);
+  // Online drivers whose phone the server lost touch with (app last in
+  // front, no connection, nothing heard for DRIVER_SILENCE_TIMEOUT_MIN) are
+  // taken offline and told by push; never in the background or mid-trip.
   const sessionTimeouts = setInterval(() => {
-    timeOutQuietSessions(prisma).catch((err) => app.log.error({ err }, "Timing out driver sessions failed"));
+    sweepDriverPresence();
+    takeSilentDriversOffline(prisma).catch((err) => app.log.error({ err }, "Taking silent drivers offline failed"));
   }, 60_000);
   const purgeTrail = () =>
     purgeOldLocationPoints(prisma).then(

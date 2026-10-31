@@ -360,6 +360,13 @@ export const config = {
    * Notifications" is turned on for the Expo account. It is a secret: never
    * log it.
    */
+  /**
+   * An online driver is taken offline after this many minutes without any
+   * contact from an app that was last in front (services/zones/driverPresence.ts):
+   * the phone died, lost signal or the app crashed. Never a driver whose app
+   * said it went to the background, and never one mid-trip.
+   */
+  driverSilenceTimeoutMinutes: Math.min(24 * 60, positive("DRIVER_SILENCE_TIMEOUT_MIN", 30)),
   push: {
     enabled: process.env.PUSH_DISABLED !== "true" && process.env.NODE_ENV !== "test",
     accessToken: process.env.EXPO_ACCESS_TOKEN || undefined,

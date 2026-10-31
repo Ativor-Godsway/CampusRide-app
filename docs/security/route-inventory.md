@@ -197,6 +197,8 @@ join their driver room. Nobody else can join those.
 | `ride:subscribe` (ride id) | Yes | any | Joins the ride's room only for: its driver; a rider whose own seat is still live (waiting, at pickup or in the car); the booking rider of an older ride with no seats. A rider who has been dropped off or cancelled stops following the car, and is removed from the room when that happens. Optional acknowledgement `{ok}`: `false` for someone else's ride and for a ride that doesn't exist alike. Malformed ids are ignored. | 60 / min per account (past it: `{ok: false}`) |
 | `ride:unsubscribe` (ride id) | Yes | any | Leaves the caller's own socket from that room. | none (no database work) |
 | `driver:location` (`{rideId, lat, lng}`) | Yes | DRIVER | Relayed to the ride's room only from that ride's own driver while the trip is active (matched, arrived or under way). Coordinates must be real numbers on the globe. Anything else is dropped silently, without disconnecting. | 1 per 2 s per driver; extras dropped silently |
+| `driver:position` (`{lat, lng}`) | Yes | DRIVER | Online without a trip: kept in the server's memory for riders' Home maps (blurred, unnamed) and the online records; never relayed as it is. Coordinates must be real numbers on the globe; anything else is dropped. | 1 per 2 s per driver (counted apart from trip positions); extras dropped silently |
+| `driver:presence` (`{state: "foreground" \| "background"}`, with an answer) | Yes | DRIVER | The driver's own app in front or in the background. The server never takes a driver offline whose app last said "background"; the answer (`{takenOffline}`) is about the caller only. | answers count toward the account's live-ride subscriptions limit (60 / minute) |
 
 ### Events the server sends
 

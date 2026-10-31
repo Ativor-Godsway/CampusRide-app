@@ -141,3 +141,14 @@ describe("the driver's position reaches the server while the app is in the backg
     expect(source).not.toMatch(/distanceInterval:\s*10/);
   });
 });
+
+describe("the driver app tells the server whether it's in front", () => {
+  // The server never takes offline a driver whose app said "background"
+  // (apps/server/src/services/zones/driverPresence.ts).
+  it("sends its presence on every (re)connect and app state change", () => {
+    const source = read("apps/driver/lib/presence.tsx");
+    expect(source).toContain("DRIVER_CLIENT_EVENTS.PRESENCE");
+    expect(source).toMatch(/socket\.on\("connect", onConnect\)/);
+    expect(source).toMatch(/AppState\.addEventListener\("change"/);
+  });
+});

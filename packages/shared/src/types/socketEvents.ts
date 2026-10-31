@@ -172,9 +172,27 @@ export const DRIVER_CLIENT_EVENTS = {
    * memory only; never relayed to anyone as it is.
    */
   POSITION_UPDATE: "driver:position",
+  /**
+   * The driver app is in front or in the background: sent on every
+   * (re)connect and app state change, with an acknowledgement
+   * (DriverPresenceAnswer). The server never times out a driver whose app
+   * last said "background" (services/zones/driverPresence.ts).
+   */
+  PRESENCE: "driver:presence",
 } as const;
 
 export type DriverClientEvent = (typeof DRIVER_CLIENT_EVENTS)[keyof typeof DRIVER_CLIENT_EVENTS];
+
+/** DRIVER_CLIENT_EVENTS.PRESENCE. */
+export interface DriverPresencePayload {
+  state: "foreground" | "background";
+}
+
+/** The server's answer to DRIVER_CLIENT_EVENTS.PRESENCE. */
+export interface DriverPresenceAnswer {
+  /** The server took this driver offline after losing touch with the phone (the app should show offline). */
+  takenOffline: boolean;
+}
 
 /** Payload sent driver→server while online without a trip (DRIVER_CLIENT_EVENTS.POSITION_UPDATE). */
 export interface DriverPositionUpdatePayload {

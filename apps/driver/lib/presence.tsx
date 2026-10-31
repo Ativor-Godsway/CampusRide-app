@@ -8,22 +8,26 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Alert, Linking } from "react-native";
+import { Alert, AppState, Linking } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  DRIVER_CLIENT_EVENTS,
   DRIVER_OUTSIDE_AREA_MESSAGE,
+  pushText,
   WHILE_USING_ONLY_MESSAGE,
   isOutsideServiceArea,
   isTransientRequestFailure,
   planZoneUpdate,
   resolveGoOnlineAccess,
   zoneInServiceArea,
+  type DriverPresenceAnswer,
   type LatLng,
   type LocationProblem,
   type ZoneUpdateState,
 } from "@rida/shared";
 import {
   errorMessage,
+  getRideSocket,
   getZones,
   setDriverAvailability,
   updateDriverZone,
@@ -120,6 +124,43 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     isOnlineRef.current = next;
     setIsOnline(next);
   }, []);
+  const confirmedRef = useRef(confirmed);
+  confirmedRef.current = confirmed;
+
+  // Tell the server whether the app is in front or in the background, on
+  // every (re)connect and app state change: it never takes a driver offline
+  // whose app said "background" (it may send nothing for a long while), only
+  // one whose phone it lost touch with while the app was in front
+  // (server: services/zones/driverPresence.ts). Its answer says if that
+  // happened meanwhile, and the app then shows the driver offline — unless a
+  // tap of the switch is still on its way, which wins.
+  useEffect(() => {
+    if (!isDriver) return;
+    const socket = getRideSocket();
+    let last: string | null = null;
+    const send = (force = false) => {
+      const state = AppState.currentState === "background" ? "background" : "foreground";
+      if (!force && state === last) return;
+      last = state;
+      socket.emit(DRIVER_CLIENT_EVENTS.PRESENCE, { state }, (answer?: DriverPresenceAnswer) => {
+        if (!answer?.takenOffline || !isOnlineRef.current || !confirmedRef.current) return;
+        seqRef.current += 1;
+        applyOnline(false);
+        if (AppState.currentState === "active") {
+          const { title, body } = pushText("WENT_OFFLINE");
+          Alert.alert(title, body);
+        }
+      });
+    };
+    const onConnect = () => send(true);
+    if (socket.connected) send(true);
+    socket.on("connect", onConnect);
+    const sub = AppState.addEventListener("change", () => send());
+    return () => {
+      socket.off("connect", onConnect);
+      sub.remove();
+    };
+  }, [isDriver, applyOnline]);
 
   // Start from what the server says (the app may have been closed while
   // online), once per signed-in driver; signing out resets to offline.
