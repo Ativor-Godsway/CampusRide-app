@@ -7,6 +7,7 @@ import { CASH_STATUS, oldestWords } from "./CashOwed";
 import { driverNow } from "./Drivers";
 import { heatRadius } from "../charts/math";
 import { rideStatusChip, shortName, initials } from "../lib/labels";
+import { rideColumns } from "./rideColumns";
 
 describe("Overview words", () => {
   it("the busiest hour line", () => {
@@ -77,5 +78,14 @@ describe("Cash and drivers", () => {
     expect(heatRadius(0, 10)).toBe(0);
     expect(heatRadius(10, 10)).toBe(24);
     expect(heatRadius(1, 4)).toBe(15);
+  });
+});
+
+describe("ride table columns", () => {
+  it("every column on the Rides page; a detail panel drops the one it's about and the type", () => {
+    expect(rideColumns({ withSeats: true }).map((c) => c.key)).toEqual(["time", "rider", "driver", "route", "type", "seats", "fare", "status"]);
+    expect(rideColumns().map((c) => c.key)).toEqual(["time", "rider", "driver", "route", "type", "fare", "status"]);
+    expect(rideColumns({ compact: "driver" }).map((c) => c.key)).toEqual(["time", "rider", "route", "fare", "status"]);
+    expect(rideColumns({ compact: "rider" }).map((c) => c.key)).toEqual(["time", "driver", "route", "fare", "status"]);
   });
 });

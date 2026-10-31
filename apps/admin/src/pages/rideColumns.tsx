@@ -26,9 +26,10 @@ export function rideColumns(opts: { now?: number; withSeats?: boolean; compact?:
     },
     { key: "type", header: "Type", render: (r) => rideTypeLabel(r.type), sortValue: (r) => r.type, phoneHidden: true },
   ];
-  const kept = opts.compact ? cols.filter((c) => c.key !== opts.compact && c.key !== "type") : cols;
-  cols.length = 0;
-  cols.push(...kept);
+  if (opts.compact) {
+    const kept = cols.filter((c) => c.key !== opts.compact && c.key !== "type");
+    cols.splice(0, cols.length, ...kept);
+  }
   if (opts.withSeats) cols.push({ key: "seats", header: "Seats", render: (r) => <span className="num">{r.seats}</span>, sortValue: (r) => r.seats, align: "right", phoneHidden: true });
   cols.push(
     {
