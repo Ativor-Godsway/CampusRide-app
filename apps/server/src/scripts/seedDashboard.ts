@@ -147,7 +147,6 @@ async function main() {
     });
     if (!pending) drivers.push({ userId: user.id, driverId: d.id, name: user.name, reliability: suspended ? 0.6 : between(0.75, 0.97) });
   }
-  const active = drivers.slice(0, 6);
 
   // ── Online sessions (morning and evening shifts) ───────────────────────
   type Shift = { driverUserId: string; startedAt: number; endedAt: number };
