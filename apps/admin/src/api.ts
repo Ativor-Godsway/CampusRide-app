@@ -5,6 +5,12 @@
  */
 
 import { rateLimitMessage, type BroadcastAudience, type BroadcastKind } from "@rida/shared";
+import {
+  startAuthentication,
+  startRegistration,
+  type PublicKeyCredentialCreationOptionsJSON,
+  type PublicKeyCredentialRequestOptionsJSON,
+} from "@simplewebauthn/browser";
 
 const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
@@ -23,14 +29,15 @@ export class ApiError extends Error {
 }
 
 /**
- * Admin sessions are short (10-minute access tokens, renewed while in use;
- * 30 idle minutes or 8 hours in total end them — decided by the server). The
- * signed-in session registers these so a request that meets an expired
- * access token renews it once and retries, and a session the server won't
- * renew signs the site out.
+ * Admin sessions (10-minute access tokens, renewed while in use; an idle
+ * hour or 12 hours in total end them — decided by the server). The signed-in
+ * session registers these so a request that meets an expired access token
+ * renews it once and retries, and a session the server won't renew signs the
+ * site out.
  */
 export interface SessionHooks {
-  refreshToken: () => string | null;
+  /** The tokens as stored now: another tab of the site may have renewed them. */
+  current: () => { accessToken: string; refreshToken: string | null } | null;
   onRenewed: (tokens: { accessToken: string; refreshToken: string }) => void;
   onEnded: (message: string) => void;
 }
@@ -42,32 +49,61 @@ export function setSessionHooks(hooks: SessionHooks | null): void {
   sessionHooks = hooks;
 }
 
-/** One renewal at a time: refresh tokens are single-use, so parallel 401s share it. */
+const RENEW_LOCK = "campusride.admin.renew";
+
+/**
+ * Runs `work` while no other tab of the site is renewing (Web Locks; every
+ * browser the admin site supports has them). Without the API it just runs.
+ */
+function inRenewLock<T>(work: () => Promise<T>): Promise<T> {
+  const locks = (navigator as Navigator & { locks?: { request(name: string, cb: () => Promise<T>): Promise<T> } }).locks;
+  return locks ? locks.request(RENEW_LOCK, work) : work();
+}
+
+/**
+ * Renews the access token. One renewal at a time, across every tab: refresh
+ * tokens are single-use, and two tabs presenting the same one would look
+ * like theft to the server and end the session. A tab that waited while
+ * another renewed just takes the tokens it stored.
+ */
 function renewAccessToken(): Promise<string | null> {
   if (renewing) return renewing;
-  renewing = (async () => {
-    const refreshToken = sessionHooks?.refreshToken();
-    if (!refreshToken) return null;
+  const startedWith = sessionHooks?.current()?.refreshToken ?? null;
+  renewing = inRenewLock(async () => {
+    const now = sessionHooks?.current();
+    if (!now?.refreshToken) return null;
+    if (now.refreshToken !== startedWith) return now.accessToken;
     try {
       const tokens = await request<{ accessToken: string; refreshToken: string }>("/auth/refresh", {
         method: "POST",
-        body: JSON.stringify({ refreshToken }),
+        body: JSON.stringify({ refreshToken: now.refreshToken }),
       });
       sessionHooks?.onRenewed(tokens);
       return tokens.accessToken;
     } catch (err) {
       if (err instanceof ApiError && err.status === 429) throw err;
+      // Offline or the server restarting: not a sign-out; the next renewal tries again.
+      if (err instanceof ApiError && (err.status === 0 || err.status >= 500)) throw err;
       sessionHooks?.onEnded(
         err instanceof ApiError && err.code === "ADMIN_SESSION_ENDED"
-          ? "Your admin session has ended (sessions last at most 8 hours). Please sign in again."
-          : "You were signed out after a while without activity. Please sign in again.",
+          ? "Your admin session has ended (sessions last at most 12 hours). Please sign in again."
+          : "You were signed out after an hour without activity. Please sign in again.",
       );
       return null;
-    } finally {
-      renewing = null;
     }
-  })();
+  }).finally(() => {
+    renewing = null;
+  });
   return renewing;
+}
+
+/**
+ * Renews the session now, while someone is using the site (auth.tsx calls it
+ * every few minutes of activity), so reading one screen for a long time
+ * doesn't run out the server's idle hour. Never throws.
+ */
+export async function keepSessionAlive(): Promise<void> {
+  await renewAccessToken().catch(() => null);
 }
 
 async function request<T>(path: string, init: RequestInit = {}, token?: string, retried = false): Promise<T> {
@@ -505,4 +541,49 @@ export function sendBroadcast(
 
 export function sendTestToMe(token: string, input: { title: string; body: string }): Promise<TestSendResult> {
   return request("/admin/notifications/test", { method: "POST", body: JSON.stringify(input) }, token);
+}
+
+// ── Passkeys (Face ID / Touch ID sign-in) ───────────────────────────────────
+
+export interface Passkey {
+  id: string;
+  name: string;
+  /** Synced to the admin's other devices (iCloud Keychain and the like). */
+  backedUp: boolean;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+/**
+ * Signs in with a passkey: the browser offers this site's passkeys (Face ID /
+ * Touch ID), and the server starts an admin session for the account the
+ * chosen one belongs to. Throws ApiError for a refusal; the browser's own
+ * error (cancelled, no passkey) as it is.
+ */
+export async function signInWithPasskey(): Promise<LoginResult> {
+  const { challengeId, options } = await request<{
+    challengeId: string;
+    options: PublicKeyCredentialRequestOptionsJSON;
+  }>("/auth/passkey/options", { method: "POST", body: "{}" });
+  const response = await startAuthentication({ optionsJSON: options });
+  return request("/auth/passkey/login", { method: "POST", body: JSON.stringify({ challengeId, response }) });
+}
+
+export function getPasskeys(token: string): Promise<{ passkeys: Passkey[] }> {
+  return request("/admin/passkeys", {}, token);
+}
+
+/** Adds a passkey on this device to the signed-in admin's account. */
+export async function addPasskey(token: string, name: string): Promise<{ passkey: Passkey }> {
+  const { challengeId, options } = await request<{
+    challengeId: string;
+    options: PublicKeyCredentialCreationOptionsJSON;
+  }>("/admin/passkeys/options", { method: "POST", body: "{}" }, token);
+  const response = await startRegistration({ optionsJSON: options });
+  return request("/admin/passkeys", { method: "POST", body: JSON.stringify({ challengeId, response, name }) }, token);
+}
+
+export function removePasskey(token: string, id: string): Promise<{ removed: true }> {
+  // An empty JSON body: request() always says it sends JSON, and the server refuses that with no body.
+  return request(`/admin/passkeys/${encodeURIComponent(id)}`, { method: "DELETE", body: "{}" }, token);
 }

@@ -18,6 +18,7 @@ import { ExpiredAccessTokenError, verifyAccessToken } from "../services/auth/tok
 import { loadActiveAccount } from "../services/auth/accountStatus";
 import { checkDriverArriving } from "../services/push/notify";
 import { recordDriverPosition } from "../services/zones/livePositions";
+import { noteDriverPosition } from "../services/stats/locationTrail";
 import { riderEtaDue, riderEtas } from "../services/ride/riderEta";
 import { logger } from "../lib/logger";
 import { limiter } from "../rateLimit/limiter";
@@ -196,6 +197,8 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
           checkDriverArriving(prisma, data.rideId, userId, { latitude: data.lat, longitude: data.lng });
           // A shared car with a free seat still shows on riders' Home maps.
           recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
+          // The sampled trail and "still online" (services/stats/locationTrail.ts).
+          noteDriverPosition(userId, { latitude: data.lat, longitude: data.lng }, true);
           // Each rider's road ETA, to their own room (every 10 s per ride).
           if (riderEtaDue(data.rideId)) {
             riderEtas(prisma, data.rideId, userId, { latitude: data.lat, longitude: data.lng }).then(
@@ -219,7 +222,9 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
         if (!isDriverPositionUpdate(data)) return;
         limiter.consume([{ rule: RULES.driverPosition, subject: userId }]).then(
           (allowed) => {
-            if (allowed.ok) recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
+            if (!allowed.ok) return;
+            recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
+            noteDriverPosition(userId, { latitude: data.lat, longitude: data.lng }, false);
           },
           () => {},
         );

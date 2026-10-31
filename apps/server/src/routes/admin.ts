@@ -13,6 +13,7 @@ import {
 import { adminOnly, requireAuth, requireAdmin } from "../middleware/auth";
 import { getActiveZones } from "../services/zones/zoneCache";
 import { rideFareForAdmin } from "../services/ride/fares";
+import { closeDriverSession } from "../services/stats/driverSessions";
 import { clearPlaceCache } from "../services/places/placeCache";
 import { normalizePhone } from "../lib/phone";
 import { clearPersonLimits, personLimitStatus } from "../rateLimit/admin";
@@ -403,6 +404,8 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
         data: { actor: request.user!.userId, action: "driver.reject", target: id, reason },
       }),
     ]);
+    // Stats: their online session (if any) ends here.
+    await closeDriverSession(prisma, updated.user.id, "ADMIN");
 
     return reply.send({ driver: updated });
   });

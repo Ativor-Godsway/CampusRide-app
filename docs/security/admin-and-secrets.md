@@ -34,19 +34,24 @@ needs no setup.
 | | Value | Setting |
 |---|---|---|
 | Access token (what each request carries) | 10 minutes, renewed automatically while you use the site | `ADMIN_ACCESS_TOKEN_MINUTES` |
-| Signed out after no activity | 30 minutes | `ADMIN_IDLE_MINUTES` |
-| Hard maximum, however active you are | 8 hours from signing in | `ADMIN_SESSION_MAX_HOURS` |
+| Signed out after no activity | 1 hour | `ADMIN_IDLE_MINUTES` |
+| Hard maximum, however active you are | 12 hours from signing in | `ADMIN_SESSION_MAX_HOURS` |
 
-There is no long-lived token. The renewal token dies after 30 unused minutes
-and never outlives the 8 hours. It is single-use, and both tokens live only
-in that browser tab (closing the tab ends the session). The page also signs
-itself out after 30 minutes without a click or key press, so a screen of
-phone numbers isn't left on an unattended computer. A stolen admin token is
-useless within minutes. Rider and driver sessions are unchanged.
+There is no long-lived token. The renewal token dies after an hour unused
+and never outlives the 12 hours; it is single-use. While you click or type
+anywhere on the site, it renews in the background (about every 10 minutes),
+so reading one screen for a long time doesn't sign you out; an hour with no
+click or key press in any tab does. Tabs of the same browser share one
+session (stored in that browser's local storage, not a cookie), and only one
+tab renews at a time, so a second tab neither asks you to sign in again nor
+ends the session by reusing the renewal token. Closing the browser doesn't
+end it by itself: the hour without activity, the 12 hours, or Sign out do.
+A stolen admin token is useless within minutes. Rider and driver sessions
+are unchanged.
 
-Why these numbers: 8 hours is a working day, so you sign in (one SMS code) at
-most once a day while working; 30 idle minutes covers a lunch break left
-open; 10 minutes keeps a leaked token short-lived without you noticing the
+Why these numbers: 12 hours covers a long working day, so you sign in at most
+once a day while working; an idle hour covers a meeting or lunch left open;
+10 minutes keeps a leaked token short-lived without you noticing the
 renewals.
 
 ## Noticing a stranger: "Admin logins"
@@ -92,34 +97,40 @@ admin site from `render.yaml`. In the Render dashboard, open `campusride-admin`
 → Settings → Headers and confirm they are there; if the site was created by
 hand, add them there.
 
-## Proposal, not built: a second factor for admins
+## Passkeys: signing in without a texted code
 
-Today an admin signs in with an SMS code. Someone who takes over your number
-(a SIM swap at a carrier shop) receives that code. The allowlist doesn't help
-then: it's your number.
+An admin signs in with a **passkey** (Face ID or Touch ID on a Mac, iPhone or
+iPad; a fingerprint or security key elsewhere). Built 2026-10-30
+(`services/auth/passkeys.ts`, WebAuthn with `@simplewebauthn/server`).
 
-**Proposal: an authenticator-app code (TOTP) on top of the SMS code.**
-
-- **Setting up:** after your next sign-in, the admin site shows a QR code once.
-  You scan it with Google Authenticator, Microsoft Authenticator or Authy. The
-  server keeps the shared secret encrypted with a new Render setting
-  (`ADMIN_TOTP_KEY`), never readable from the database alone.
-- **Signing in:** SMS code, then the 6-digit code from the app. A stolen SIM
-  gets the first but not the second, which lives on your phone, not your
-  number.
-- **Recovery:** 10 one-time recovery codes shown once at setup (keep them on
-  paper); used codes stop working. If you lose both phone and codes, the way
-  back is a script you run by hand against the database, as with `seedAdmin`.
-- **Enforced** for every admin, recorded in the sign-in log like everything
-  else.
-- **Cost:** about a day of work, no new services or fees, works offline.
-
-**Better still, later: passkeys** (Face ID, a fingerprint or a security key
-via WebAuthn). They can't be phished at all, but take more work and need
-care with recovery. Worth doing once there is more than one admin.
-
-**Not built yet.** Decided 2026-10-16: **passkeys** rather than an
-authenticator-app code, built later, before public launch.
+- **Why:** a texted code can be taken by whoever takes over your number (a SIM
+  swap at a carrier shop). A passkey can't be: its private key never leaves
+  your devices, it only works on the admin site's own address (so a look-alike
+  phishing site gets nothing), and each use needs Face ID / Touch ID.
+- **Adding one:** sign in (with a phone code, the first time), then Settings →
+  Passkeys → **Add a passkey on this device**. Do it on your Mac and your
+  iPhone, or rely on iCloud Keychain, which shares it with your other Apple
+  devices.
+- **Signing in:** **Sign in with a passkey** on the sign-in page. No number to
+  type. The account must still be an ADMIN on `ADMIN_PHONE_ALLOWLIST`, and the
+  attempt is in "Admin logins" (a success says `passkey`).
+- **Phone codes after that:** once an admin has a passkey, a phone code is
+  refused for them (`ADMIN_PASSKEY_REQUIRED`), and no code is even sent, so a
+  stolen SIM alone gets nowhere. Admins with no passkey still use codes.
+- **Recovery** (every device with your passkey lost): set
+  `ADMIN_OTP_FALLBACK=on` in Render, sign in with a phone code, add a passkey
+  on your new device, remove the old ones, then delete the setting again.
+  Changing Render settings needs your Render login, which a SIM swap alone
+  doesn't give.
+- **What it rests on:** synced passkeys live in your Apple ID's iCloud
+  Keychain. Someone who gets into your Apple ID **and** knows a device
+  passcode could add your passkey to their own device — keep your Apple ID's
+  password strong and its two-factor sign-in on.
+- **The site's address:** a passkey belongs to one address
+  (`ADMIN_PASSKEY_RP_ID`, default `campusride-admin.onrender.com`;
+  `ADMIN_PASSKEY_ORIGINS`, default `https://campusride-admin.onrender.com`).
+  If the admin site moves to another address, sign in with a phone code
+  (`ADMIN_OTP_FALLBACK=on`) and add passkeys again there.
 
 ## Secrets in the git history (the repo is public)
 

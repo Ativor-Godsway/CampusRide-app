@@ -21,6 +21,7 @@ import {
   type LaunchSettings,
 } from "../api";
 import { useAuth, useToken } from "../auth";
+import { PasskeysCard } from "./PasskeysCard";
 
 const MODES: { mode: LaunchMode; title: string; detail: string }[] = [
   { mode: "OFF", title: "Off", detail: "Normal: everyone can ride. No countdown anywhere." },
@@ -173,6 +174,8 @@ export function SettingsScreen() {
       <div className="section-head">
         <h2>Settings</h2>
       </div>
+
+      <PasskeysCard />
 
       {error ? <p className="error">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}

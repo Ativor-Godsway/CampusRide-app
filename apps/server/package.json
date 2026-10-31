@@ -52,6 +52,7 @@
     "@prisma/client": "^5.14.0",
     "@rida/shared": "*",
     "@sentry/node": "^10.75.3",
+    "@simplewebauthn/server": "14.0.3",
     "@types/jsonwebtoken": "^9.0.10",
     "dotenv": "^16.4.5",
     "expo-server-sdk": "^5.0.0",

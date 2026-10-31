@@ -9,7 +9,7 @@ import { maskPhone } from "../auth/adminAccess";
  *
  *   admin.login.code_sent   a code went to an admin number (or the admin site asked for one)
  *   admin.login.failure     refused; `reason` says why
- *   admin.login.success     an admin session started
+ *   admin.login.success     an admin session started (reason "passkey" when by passkey)
  *
  * Recorded for a request from the admin site, and for ANY request about an
  * admin's number (from whatever app), so trying an admin number through the
@@ -25,7 +25,11 @@ export type AdminLoginFailure =
   | "no_account"
   | "not_admin"
   | "not_allowlisted"
-  | "invalid_verification";
+  | "invalid_verification"
+  /** A phone code for an admin who has a passkey (ADMIN_OTP_FALLBACK off). */
+  | "passkey_required"
+  /** A passkey sign-in that didn't verify, or a passkey not registered here. */
+  | "passkey_failed";
 
 /** The admin site marks its own auth requests with this header. */
 export const ADMIN_CLIENT_HEADER = "x-campusride-client";
@@ -42,7 +46,7 @@ export async function recordAdminLogin(
     phone: string;
     /** The account, when there is one. */
     userId?: string | null;
-    reason?: AdminLoginFailure;
+    reason?: AdminLoginFailure | "passkey";
   },
 ): Promise<void> {
   const userAgent = request.headers["user-agent"];
@@ -53,7 +57,7 @@ export async function recordAdminLogin(
         action: `admin.login.${event.outcome}`,
         // An account by id; a number with no account only partly, since it
         // may be a stranger's.
-        target: event.userId ?? maskPhone(event.phone),
+        target: event.userId ?? (event.phone ? maskPhone(event.phone) : "passkey"),
         reason: event.reason ?? null,
         ip: plainIp(request.ip).slice(0, 64),
         userAgent: typeof userAgent === "string" ? userAgent.slice(0, 512) : null,

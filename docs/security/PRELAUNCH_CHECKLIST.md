@@ -42,7 +42,7 @@ Updated at the end of each stage.
 | ✅ | `ADMIN_PHONE_ALLOWLIST`: admin routes, admin login and admin session renewal refuse any number not on it, whatever the database says |
 | ✅ | Short admin sessions: 10-minute access token, signed out after 30 idle minutes, 8-hour hard maximum; no long-lived token |
 | ✅ | Every admin sign-in attempt recorded (time, IP, device), shown on the admin site's "Admin logins" tab |
-| ⬜ | Second factor for admins: **passkeys** (Face ID, fingerprint or a security key), to be built later, **before public launch** — [admin-and-secrets.md](admin-and-secrets.md#proposal-not-built-a-second-factor-for-admins) |
+| ✅ | Admins sign in with **passkeys** (Face ID, fingerprint or a security key); phone codes refused for an admin with a passkey unless `ADMIN_OTP_FALLBACK=on` (recovery) — [admin-and-secrets.md](admin-and-secrets.md#passkeys-signing-in-without-a-texted-code) |
 | ✅ | Admin site headers: strict CSP with `frame-ancestors 'none'`, HSTS, noindex and more; tested against the real build in Chrome |
 | ✅ | Full git history scanned (gitleaks, 205 commits, 40 branches + project-specific patterns): no secrets; the old prod `.env` backup is gone and was never committed |
 | ✅ | Production boot refuses a missing/weak `JWT_SECRET` and any missing required setting (names listed, values never logged) |
@@ -207,4 +207,4 @@ Updated at the end of each stage.
 
 **Next**
 
-- [ ] Admin passkeys (second factor) — built later, before public launch; you then register a passkey on the admin site
+- [ ] Admin passkeys: built (2026-10-30); add a passkey on the admin site (Settings → Passkeys) on your Mac and iPhone
