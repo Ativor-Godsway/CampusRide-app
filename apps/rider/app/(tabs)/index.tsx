@@ -2,7 +2,6 @@ import { useMemo, useState } from "react";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,7 +31,6 @@ import {
   Notice,
   Skeleton,
   SkeletonGroup,
-  StatusChip,
   Text,
   colors,
   getRecentRides,
@@ -124,11 +122,6 @@ export default function HomeTab() {
       : CAMPUS_REGION;
 
   const planRide = () => router.push("/ride/location");
-  const comingSoon = () =>
-    Alert.alert(
-      "Food and courier are coming soon",
-      "We're working on it — check back in a future update.",
-    );
 
   /**
    * A place goes STRAIGHT to Choose a ride, from where the rider is now. If we
@@ -265,16 +258,6 @@ export default function HomeTab() {
             ))}
           </ScrollView>
         ) : null}
-
-        <View style={styles.divider} />
-
-        <ListRow
-          title="Food and courier"
-          subtitle="Coming to campus soon"
-          leading={<ListRow.Icon name="cube-outline" />}
-          trailing={<StatusChip label="Soon" tone="warn" style={styles.soon} />}
-          onPress={comingSoon}
-        />
       </BottomSheet>
     </View>
   );
@@ -352,12 +335,5 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     gap: spacing[2],
     paddingHorizontal: spacing.gutter,
-  },
-  soon: {
-    alignSelf: "center",
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.line,
   },
 });
