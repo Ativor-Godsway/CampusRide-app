@@ -114,6 +114,9 @@ function buildRules(c: typeof config.rateLimit) {
     ),
 
     userDefault: rule("user.default", "Requests, per minute", "user", c.userPerMinute, MINUTE),
+    adminExport: rule("admin.export", "Admin exports, 15 minutes", "user", c.adminExportPer15Min, 15 * MINUTE),
+    adminWrite: rule("admin.write", "Admin changes, 15 minutes", "user", c.adminWritePer15Min, 15 * MINUTE),
+    adminTrail: rule("admin.trail", "Location trails viewed, per hour", "user", c.adminTrailPerHour, HOUR),
     rideCreate: rule("ride.create", "Rides booked, per hour", "user", c.rideCreatePerHour, HOUR),
     rideCancel: rule("ride.cancel", "Rides cancelled, per hour", "user", c.rideCancelPerHour, HOUR),
     rideSwitch: rule(

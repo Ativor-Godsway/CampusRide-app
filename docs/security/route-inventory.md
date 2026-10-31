@@ -148,7 +148,7 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/drivers/pending` | Yes | ADMIN | All drivers awaiting approval. | account default |
 | `POST /admin/drivers/:id/approve` | Yes | ADMIN | Any driver; audit-logged. | account default |
 | `POST /admin/drivers/:id/reject` | Yes | ADMIN | Any driver; audit-logged; takes them offline. | account default |
-| `GET /admin/rides` | Yes | ADMIN | All rides, including pins and phone numbers. | account default |
+| `GET /admin/rides` | Yes | ADMIN | All rides, filtered (status, type, zone, driver, rider phone, ride id, period) and paginated; phone numbers masked. More than 200 rows (the CSV) needs a period of at most 92 days. | account default; an export also counts against 20 / 15 min |
 | `GET /admin/places` | Yes | ADMIN | All places. | account default |
 | `POST /admin/places` | Yes | ADMIN | Audit-logged. | account default |
 | `PATCH /admin/places/:id` | Yes | ADMIN | Audit-logged. | account default |
@@ -173,6 +173,29 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `POST /admin/passkeys/options` | Yes | ADMIN | A single-use challenge to add a passkey to the caller's own account. | account default |
 | `POST /admin/passkeys` | Yes | ADMIN | Adds a passkey to the caller's own account (public key only). Audit-logged (`admin.passkey.add`). | account default |
 | `DELETE /admin/passkeys/:id` | Yes | ADMIN | Removes one of the caller's own passkeys; another admin's answers 404. Audit-logged (`admin.passkey.remove`). | account default |
+| `GET /admin/summary` | Yes | ADMIN | The sidebar badges: open SOS count, drivers waiting for approval, commission still owed in total, launch mode, and whether the database answers. Cached 60 s. | account default |
+| `GET /admin/search` | Yes | ADMIN | The top bar's search: a phone number, ride id, or a driver's name or plate (riders by name). At most 10 results, phone numbers masked. | account default |
+| `GET /admin/overview` | Yes | ADMIN | Overview for a period (`from`/`to`, at most 400 days): requests vs a week earlier, fares and CampusRide's 15% of completed trips, requests and drivers online per hour, no-driver requests, latest 8 rides (phones masked). Cached 60 s per period. | account default |
+| `GET /admin/live` | Yes | ADMIN | The live map: online drivers' exact positions and app status, trips under way, requests waiting (offered/declined counts). From the server's memory; the database part is read at most once a minute for everyone. | account default |
+| `GET /admin/system` | Yes | ADMIN | Read-only facts for Settings: app minimum versions, review demo mode on/off (setting names only), server commit and start time. | account default |
+| `GET /admin/audit` | Yes | ADMIN | The audit log, newest first, filtered by action, admin and text; phone numbers masked. Paginated. | account default |
+| `GET /admin/rides/:id` | Yes | ADMIN | One ride in full: timeline, offers and answers, seats and fares, exact pins and route, ratings, SOS, tracking links. | account default |
+| `GET /admin/supply-demand` | Yes | ADMIN | Supply & demand for a period: requests, got a driver, median time to a driver, no-driver heat grid, driver-hours online, per-zone verdict. Cached 60 s per period. | account default |
+| `GET /admin/cancellations` | Yes | ADMIN | Cancellations for a period: who, why, before/after a driver took it, by hour, the cancelled rides (phones masked). Cached 60 s per period. | account default |
+| `GET /admin/places/activity` | Yes | ADMIN | Pickups and drop-offs for a period on a ~55 m grid, and the busiest places. Cached 60 s per period. | account default |
+| `GET /admin/drivers` | Yes | ADMIN | Every driver with the period's trips, hours online, earnings, acceptance, reply time, rating (phones masked). Cached 60 s per period. | account default |
+| `GET /admin/drivers/:id` | Yes | ADMIN | One driver (by Driver or User id): details incl. phone, the period's stats, balance owed, recent trips, sessions, offers, days with a location trail. Cached 60 s. | account default |
+| `GET /admin/drivers/:id/trail` | Yes | ADMIN | One driver's location trail for one Accra day (`day=YYYY-MM-DD`). Audit-logged (`driver.trail.view`). | account default; plus 60 trails / hour |
+| `POST /admin/drivers/:id/suspend` | Yes | ADMIN | Suspends a driver with a required reason: offline at once, refused going online until lifted. Audit-logged (`driver.suspend`). | account default; plus 60 changes / 15 min |
+| `POST /admin/drivers/:id/unsuspend` | Yes | ADMIN | Lifts a suspension, with a required reason. Audit-logged (`driver.unsuspend`). | account default; plus 60 changes / 15 min |
+| `GET /admin/cash` | Yes | ADMIN | Cash owed: still owed in total, the period's 15% and payments, every driver's balance and status. Cached 60 s per period. | account default |
+| `GET /admin/cash/payments` | Yes | ADMIN | The payments ledger by period and driver, with reversals. Paginated. | account default |
+| `POST /admin/cash/payments` | Yes | ADMIN | Records cash a driver handed over (amount, method, note, date). Never edited or deleted. Audit-logged (`cash.payment.record`). | account default; plus 60 changes / 15 min |
+| `POST /admin/cash/payments/:id/reverse` | Yes | ADMIN | Reverses a payment with a negative entry and a required reason; once per payment. Audit-logged (`cash.payment.reverse`). | account default; plus 60 changes / 15 min |
+| `GET /admin/riders` | Yes | ADMIN | Rider totals for a period, sign-ups per day, and a page of riders (phones masked; search by phone or name). | account default |
+| `GET /admin/riders/:id` | Yes | ADMIN | One rider in full, incl. their phone number: rides, ratings given, SOS. | account default |
+| `GET /admin/safety` | Yes | ADMIN | Open SOS (any date) and the period's handled ones, SOS from before records, 1–2 star ratings. Cached 60 s per period. | account default |
+| `POST /admin/sos/:id/handle` | Yes | ADMIN | Marks an SOS handled with a required note; once. Audit-logged (`sos.handle`). | account default; plus 60 changes / 15 min |
 
 ## Socket.io
 

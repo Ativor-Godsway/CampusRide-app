@@ -204,6 +204,9 @@ async function main() {
     await tx.rating.deleteMany({ where: { OR: [{ raterId: { in: ids } }, { rateeId: { in: ids } }] } });
     await tx.payment.deleteMany({ where: { riderId: { in: ids } } });
     await tx.commissionLedger.deleteMany({ where: { driverUserId: { in: ids } } });
+    // Cash handed over (admin site, Cash owed): reversals before the payments they cancel.
+    await tx.driverCashPayment.deleteMany({ where: { driverUserId: { in: ids }, reversesId: { not: null } } });
+    await tx.driverCashPayment.deleteMany({ where: { driverUserId: { in: ids } } });
     await tx.rideRejection.deleteMany({ where: { driverUserId: { in: ids } } });
     await tx.refreshToken.deleteMany({ where: { userId: { in: ids } } });
     await tx.otpCode.deleteMany({ where: { phone: { in: phones } } });

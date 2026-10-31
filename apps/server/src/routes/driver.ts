@@ -127,6 +127,10 @@ async function requireDriver(request: Parameters<typeof requireAuth>[0], reply: 
   return true;
 }
 
+/** What a suspended driver's app shows when they try to go online. */
+export const DRIVER_SUSPENDED_MESSAGE =
+  "Your driver account is suspended, so you can't go online. Contact CampusRide to find out why.";
+
 const DETOUR_TOO_LONG_MESSAGE =
   "Adding this rider would make the riders in your car more than 5 minutes late.";
 
@@ -266,6 +270,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     if (!driver.isApproved) {
       return reply.code(403).send({ error: "Driver account is not approved yet" });
+    }
+    // Suspended by an admin (admin site, Drivers): going offline still works.
+    if (body.isOnline && driver.suspendedAt) {
+      return refuse(reply, 403, "DRIVER_SUSPENDED", DRIVER_SUSPENDED_MESSAGE);
     }
 
     const requestedZoneId = typeof body.zoneId === "string" && body.zoneId.length > 0

@@ -89,6 +89,9 @@ export async function cleanupSimulatorData(prisma: PrismaClient): Promise<SimCle
         await tx.rating.deleteMany({ where: { OR: [{ raterId: { in: ids } }, { rateeId: { in: ids } }] } })
       ).count;
       report.payments += (await tx.payment.deleteMany({ where: { riderId: { in: ids } } })).count;
+      // Cash a fake driver "handed over" in the admin site: reversals first.
+      await tx.driverCashPayment.deleteMany({ where: { driverUserId: { in: ids }, reversesId: { not: null } } });
+      await tx.driverCashPayment.deleteMany({ where: { driverUserId: { in: ids } } });
       report.refreshTokens = (await tx.refreshToken.deleteMany({ where: { userId: { in: ids } } })).count;
       report.otpCodes = (await tx.otpCode.deleteMany({ where: { phone: { in: phones } } })).count;
 

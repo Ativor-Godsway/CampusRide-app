@@ -2,9 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient, Prisma } from "@prisma/client";
 import {
-  FLAGGED_RIDER_CANCEL_REASONS,
   PLACE_CATEGORIES,
-  RIDER_CANCEL_REASON_LABELS,
   isInServiceArea,
   nearestZone,
   searchPlaces,
@@ -12,7 +10,10 @@ import {
 } from "@rida/shared";
 import { adminOnly, requireAuth, requireAdmin } from "../middleware/auth";
 import { getActiveZones } from "../services/zones/zoneCache";
-import { rideFareForAdmin } from "../services/ride/fares";
+import { RIDE_ROW_SELECT, rideRow } from "../services/admin/rows";
+import { limiter } from "../rateLimit/limiter";
+import { RULES } from "../rateLimit/rules";
+import { sendRateLimited } from "../rateLimit/reply";
 import { closeDriverSession } from "../services/stats/driverSessions";
 import { clearPlaceCache } from "../services/places/placeCache";
 import { normalizePhone } from "../lib/phone";
@@ -22,6 +23,7 @@ import {
   boolean,
   bodyOptional,
   empty,
+  id,
   idParams,
   integer,
   latitude,
@@ -56,35 +58,6 @@ const PENDING_DRIVER_SELECT = {
   user: { select: { id: true, name: true, phone: true } },
 } satisfies Prisma.DriverSelect;
 
-const ADMIN_RIDE_SELECT = {
-  id: true,
-  status: true,
-  type: true,
-  source: true,
-  occupancy: true,
-  fareTotal: true,
-  // The fare is read from the seats (Ride.fareTotal is never written).
-  passengers: { select: { status: true, lockedFare: true, fareCharged: true } },
-  paymentStatus: true,
-  paymentMethod: true,
-  cancelReason: true,
-  riderCancelReason: true,
-  riderCancelNote: true,
-  createdAt: true,
-  completedAt: true,
-  rider: { select: { id: true, name: true, phone: true } },
-  driver: { select: { id: true, name: true, phone: true } },
-  pickupZone: { select: { id: true, name: true } },
-  dropoffZone: { select: { id: true, name: true } },
-  // Admins may see exact pins (support, disputes).
-  pickupLat: true,
-  pickupLng: true,
-  pickupLabel: true,
-  dropoffLat: true,
-  dropoffLng: true,
-  dropoffLabel: true,
-  pickupNote: true,
-} satisfies Prisma.RideSelect;
 
 const RIDE_STATUSES = [
   "REQUESTED",
@@ -98,6 +71,9 @@ const RIDE_STATUSES = [
 
 const DEFAULT_RIDE_LIMIT = 50;
 const MAX_RIDE_LIMIT = 200;
+/** The CSV download: at most this many rows, from at most this many days. */
+const MAX_EXPORT_ROWS = 5_000;
+const MAX_EXPORT_DAYS = 92;
 
 function parseLimit(raw: unknown): number {
   const n = Number(raw);
@@ -232,9 +208,16 @@ const SCHEMAS = {
   rides: {
     querystring: object({
       status: oneOf(RIDE_STATUSES),
+      type: oneOf(["LONE", "SHARED"]),
+      zoneId: id,
+      driverId: id,
+      riderPhone: phoneField,
+      q: text(64),
       from: text(40),
       to: text(40),
       limit: integer(1, 1000),
+      page: integer(1, 10_000),
+      pageSize: integer(1, MAX_EXPORT_ROWS),
     }),
   },
   places: { querystring: object({ q: text(MAX.query) }) },
@@ -411,14 +394,31 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
   });
 
   /**
-   * Basic oversight list. v1 filters: status, and a createdAt window
-   * (from/to). Read-only, so no audit row — the log records decisions, not
-   * every page view.
+   * The Rides page: newest first, filtered by status, type, pickup zone,
+   * driver, rider phone, ride id and a createdAt window (from/to), a page at
+   * a time. Phone numbers are masked; the rider's full number is only in
+   * their detail panel. Read-only, so no audit row.
+   *
+   * A page of more than 200 rows is an export (the CSV download): it needs a
+   * period (from and to, at most 92 days) and counts against the admin's
+   * export limit.
    */
   app.get("/admin/rides", { onRequest: [requireAuth, adminOnly], schema: SCHEMAS.rides }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
 
-    const query = request.query as { status?: unknown; from?: unknown; to?: unknown; limit?: unknown };
+    const query = request.query as {
+      status?: string;
+      type?: "LONE" | "SHARED";
+      zoneId?: string;
+      driverId?: string;
+      riderPhone?: string;
+      q?: string;
+      from?: unknown;
+      to?: unknown;
+      limit?: number;
+      page?: number;
+      pageSize?: number;
+    };
 
     if (query.status !== undefined && !(RIDE_STATUSES as readonly string[]).includes(String(query.status))) {
       return reply.code(400).send({ error: `status must be one of ${RIDE_STATUSES.join(", ")}` });
@@ -433,41 +433,45 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
       return reply.code(400).send({ error: (err as Error).message });
     }
 
+    const pageSize = query.pageSize ?? parseLimit(query.limit);
+    const page = query.page ?? 1;
+    if (pageSize > MAX_RIDE_LIMIT) {
+      if (!from || !to || to.getTime() - from.getTime() > MAX_EXPORT_DAYS * 86_400_000) {
+        return reply.code(400).send({ error: `An export needs a period of at most ${MAX_EXPORT_DAYS} days` });
+      }
+      const allowed = await limiter.consume([{ rule: RULES.adminExport, subject: request.user!.userId }]);
+      if (!allowed.ok) return sendRateLimited(reply, allowed.retryAfterMs);
+    }
+
     // Review demo rides (App Store / Google Play reviewers) aren't real trips.
     const where: Prisma.RideWhereInput = { isReviewDemo: false };
-    if (query.status !== undefined) {
-      where.status = String(query.status) as Prisma.RideWhereInput["status"];
+    if (query.status !== undefined) where.status = query.status as Prisma.RideWhereInput["status"];
+    if (query.type) where.type = query.type;
+    if (query.zoneId) where.pickupZoneId = query.zoneId;
+    if (query.driverId) where.driverId = query.driverId;
+    if (query.q) where.id = { startsWith: query.q.trim() };
+    if (query.riderPhone) {
+      const phone = normalizePhone(query.riderPhone);
+      if (!phone) return reply.code(400).send({ error: "riderPhone must be a Ghanaian number" });
+      // The booking rider or anyone who rode along.
+      where.OR = [{ rider: { phone } }, { passengers: { some: { rider: { phone } } } }];
     }
     if (from || to) {
       where.createdAt = { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) };
     }
 
-    const rides = await prisma.ride.findMany({
-      where,
-      select: ADMIN_RIDE_SELECT,
-      orderBy: { createdAt: "desc" },
-      take: parseLimit(query.limit),
-    });
-
-    // The readable label and the "driver problem" flag come from
-    // @rida/shared, so the admin site never keeps its own copy.
-    return reply.send({
-      rides: rides.map(({ passengers, ...ride }) => {
-        const fare = rideFareForAdmin(ride.type, ride.status, passengers);
-        return {
-          ...ride,
-          fareTotal: fare.pesewas,
-          /** False while the ride is still going on: what its riders will pay so far. */
-          fareFinal: fare.final,
-          riderCancelReasonLabel: ride.riderCancelReason
-            ? RIDER_CANCEL_REASON_LABELS[ride.riderCancelReason]
-            : null,
-          riderCancelFlagged:
-            ride.riderCancelReason !== null &&
-            FLAGGED_RIDER_CANCEL_REASONS.includes(ride.riderCancelReason),
-        };
+    const [rides, total] = await Promise.all([
+      prisma.ride.findMany({
+        where,
+        select: RIDE_ROW_SELECT,
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
       }),
-    });
+      prisma.ride.count({ where }),
+    ]);
+
+    return reply.send({ rides: rides.map(rideRow), total, page, pageSize });
   });
 
   // ─── Campus places ───────────────────────────────────────────────────────

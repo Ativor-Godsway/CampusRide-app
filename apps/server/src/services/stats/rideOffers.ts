@@ -1,6 +1,7 @@
 import type { PrismaClient, RideOfferOutcome } from "@prisma/client";
 import type { OfferClosedReason } from "@rida/shared";
 import { logger } from "../../lib/logger";
+import { noteRequestAnswer } from "../admin/liveRequests";
 
 /**
  * Every request offered to a driver, and what became of it (RideOffer), for
@@ -46,6 +47,7 @@ export function recordOfferAnswer(
   outcome: Extract<RideOfferOutcome, "DECLINED" | "TIMED_OUT">,
   now: Date = new Date(),
 ): Promise<void> {
+  noteRequestAnswer(rideId, driverUserId, outcome, now.getTime());
   return quietly(
     "answer",
     prisma.rideOffer.updateMany({

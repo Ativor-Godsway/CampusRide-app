@@ -20,6 +20,8 @@ export interface LivePosition extends LatLng {
   heading: number | null;
   /** When it arrived (epoch ms). */
   at: number;
+  /** The trip it was sent with (a trip position), null for an idle driver's. Admin live map. */
+  rideId: string | null;
 }
 
 /** Older than this, a position no longer gives a heading to the next one. */
@@ -31,8 +33,16 @@ const MAX_DRIVERS = 5_000;
 
 const positions = new Map<string, LivePosition>();
 
-/** Records a driver's position; the heading comes from how they moved since the last one. */
-export function recordDriverPosition(userId: string, point: LatLng, now: number = Date.now()): void {
+/**
+ * Records a driver's position; the heading comes from how they moved since
+ * the last one. `rideId`: the trip it was sent with, if any.
+ */
+export function recordDriverPosition(
+  userId: string,
+  point: LatLng,
+  now: number = Date.now(),
+  rideId: string | null = null,
+): void {
   const prev = positions.get(userId);
   let heading = prev && now - prev.at < HEADING_KEEP_MS ? prev.heading : null;
   // Smaller moves are GPS jitter: a parked car keeps the way it was facing.
@@ -41,7 +51,7 @@ export function recordDriverPosition(userId: string, point: LatLng, now: number 
   }
   // Re-inserted, so the Map stays oldest-first for the size cap below.
   positions.delete(userId);
-  positions.set(userId, { latitude: point.latitude, longitude: point.longitude, heading, at: now });
+  positions.set(userId, { latitude: point.latitude, longitude: point.longitude, heading, at: now, rideId });
   if (positions.size > MAX_DRIVERS) {
     const oldest = positions.keys().next().value;
     if (oldest !== undefined) positions.delete(oldest);

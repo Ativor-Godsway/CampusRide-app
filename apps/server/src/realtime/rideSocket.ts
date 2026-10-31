@@ -207,7 +207,7 @@ export function initRideSocket(io: SocketIOServer, prisma: PrismaClient): void {
           // "Almost at your pickup" for riders still waiting (throttled per ride).
           checkDriverArriving(prisma, data.rideId, userId, { latitude: data.lat, longitude: data.lng });
           // A shared car with a free seat still shows on riders' Home maps.
-          recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng });
+          recordDriverPosition(userId, { latitude: data.lat, longitude: data.lng }, Date.now(), data.rideId);
           driverHeard(userId);
           // The sampled trail and "still online" (services/stats/locationTrail.ts).
           noteDriverPosition(userId, { latitude: data.lat, longitude: data.lng }, true);

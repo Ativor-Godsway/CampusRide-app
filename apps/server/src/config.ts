@@ -219,6 +219,10 @@ export const config = {
     accountDeletePerHour: positive("RATE_LIMIT_ACCOUNT_DELETE_HOUR", 5),
     /** POST /routes/legs — each is a campus route (cheap, but not free in a loop). */
     routeLegsPer15Min: positive("RATE_LIMIT_ROUTE_LEGS", 120),
+    /** Admin dashboard (per admin): big exports (CSV), changes (payments, suspensions, SOS handled), location trails viewed. */
+    adminExportPer15Min: positive("RATE_LIMIT_ADMIN_EXPORT_15M", 20),
+    adminWritePer15Min: positive("RATE_LIMIT_ADMIN_WRITE_15M", 60),
+    adminTrailPerHour: positive("RATE_LIMIT_ADMIN_TRAIL_HOUR", 60),
     /** POST /rides/:id/initiate-payment — each hits Moolre. */
     paymentInitPer15Min: positive("RATE_LIMIT_PAYMENT_INIT", 15),
 

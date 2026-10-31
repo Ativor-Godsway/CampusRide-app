@@ -161,6 +161,11 @@ model User {
   rideOffers             RideOffer[]
   driverLocationPoints   DriverLocationPoint[]
   adminPasskeys          AdminPasskey[]
+  cashPayments           DriverCashPayment[]
+  sosEvents              SosEvent[]
+
+  /// Sign-ups per day (admin Riders page).
+  @@index([createdAt])
 }
 
 /// One per closed account. Closing an account hides the person at once (the
@@ -187,27 +192,34 @@ model AccountDeletion {
 }
 
 model Driver {
-  id            String    @id @default(cuid())
-  userId        String    @unique
+  id              String    @id @default(cuid())
+  userId          String    @unique
   /// Nullable until the driver completes their profile (Phase 3:
   /// completeDriverProfile) — a Driver row is created at signup with these
   /// fields empty and isApproved=false.
-  carMake       String?
-  carModel      String?
-  carColor      String?
-  plate         String?
-  photoUrl      String?
-  isApproved    Boolean   @default(false)
-  isOnline      Boolean   @default(false)
-  currentZoneId String?
+  carMake         String?
+  carModel        String?
+  carColor        String?
+  plate           String?
+  photoUrl        String?
+  isApproved      Boolean   @default(false)
+  isOnline        Boolean   @default(false)
+  currentZoneId   String?
   /// Where the driver's app last said they were (sent with going online and
   /// with zone updates; apps from before 2026-10-29 send none). The server
   /// checks it against the service area; also for the admin live map.
-  lastLat       Float?
-  lastLng       Float?
-  lastSeenAt    DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  lastLat         Float?
+  lastLng         Float?
+  lastSeenAt      DateTime?
+  /// Suspended by an admin (admin site, Drivers): can't go online until an
+  /// admin lifts it. Separate from isApproved — a suspension keeps the
+  /// approval and says why. `suspendedBy` is the admin's User.id (plain
+  /// column, like AdminAuditLog.actor). The audit log keeps the history.
+  suspendedAt     DateTime?
+  suspendedReason String?   @db.VarChar(500)
+  suspendedBy     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   user        User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   currentZone Zone? @relation(fields: [currentZoneId], references: [id], onDelete: SetNull)
@@ -418,8 +430,12 @@ model Ride {
   rejections       RideRejection[]
   offers           RideOffer[]
   trackingLinks    TrackingLink[]
+  sosEvents        SosEvent[]
 
   @@index([status])
+  /// The admin dashboard's period queries (requests, rides, completions).
+  @@index([createdAt])
+  @@index([completedAt])
   @@index([isReviewDemo])
   @@index([riderId])
   @@index([driverId])
@@ -616,6 +632,7 @@ model Rating {
 
   @@unique([rideId, raterId, rateeId])
   @@index([rateeId])
+  @@index([createdAt])
 }
 
 /// Phase 4: a driver explicitly declining a broadcast ride. Previously a
@@ -869,4 +886,74 @@ model AdminPasskey {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// ─── Admin dashboard v2 (routes/adminDashboard.ts) ─────────────────────────
+
+enum CashPaymentMethod {
+  CASH
+  MOMO
+  OTHER
+}
+
+/// Money a driver handed over to CampusRide against the 15% commission they
+/// owe on cash rides (CommissionLedger). Recorded by an admin on the Cash
+/// owed page. A ledger: rows are never edited or deleted. A mistake is put
+/// right by a REVERSAL — a new row with the negative amount, `reversesId`
+/// pointing at the row it cancels, and a reason. A driver's balance is
+/// Σ CommissionLedger.amountPesewas − Σ amountPesewas here
+/// (docs/admin-metrics.md).
+model DriverCashPayment {
+  id             String            @id @default(cuid())
+  driverUserId   String
+  /// Pesewas. Positive for a payment, negative for a reversal.
+  amountPesewas  Int
+  method         CashPaymentMethod
+  note           String?           @db.VarChar(500)
+  /// When the driver paid (chosen by the admin, default: when recorded).
+  paidAt         DateTime
+  /// User.id of the admin who recorded it. Plain column, like AdminAuditLog.actor.
+  recordedBy     String
+  createdAt      DateTime          @default(now())
+  /// A reversal: the payment it cancels (at most one reversal per payment).
+  reversesId     String?           @unique
+  reversalReason String?           @db.VarChar(500)
+
+  driver   User               @relation(fields: [driverUserId], references: [id], onDelete: Restrict)
+  reverses DriverCashPayment? @relation("CashPaymentReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversal DriverCashPayment? @relation("CashPaymentReversal")
+
+  @@index([driverUserId, paidAt])
+  @@index([paidAt])
+}
+
+/// One SOS a rider raised (services/safety/sos.ts): who was told, and
+/// whether an admin has dealt with it (Safety page). A repeat press within
+/// the repeat window, which texts nobody again, is not a new row. Review
+/// demo SOSes aren't recorded.
+model SosEvent {
+  id              String    @id @default(cuid())
+  rideId          String
+  riderId         String
+  createdAt       DateTime  @default(now())
+  /// The ride's status at the time ("IN_PROGRESS").
+  rideStatus      String    @db.VarChar(30)
+  /// Where the car was at the time (the driver's last live position, if
+  /// heard in the last 2 minutes). Null otherwise.
+  latitude        Float?
+  longitude       Float?
+  hasContact      Boolean   @default(false)
+  smsDelivered    Boolean   @default(false)
+  supportNotified Boolean   @default(false)
+  handledAt       DateTime?
+  /// User.id of the admin who marked it handled.
+  handledBy       String?
+  handledNote     String?   @db.VarChar(1000)
+
+  ride  Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
+  rider User @relation(fields: [riderId], references: [id], onDelete: Cascade)
+
+  @@index([createdAt])
+  @@index([handledAt])
+  @@index([rideId])
 }
