@@ -49,10 +49,10 @@ So the site can't say something the apps and server don't do, `build.mjs` reads:
 
 `stores` in `site.config.mjs` has an App Store and a Google Play address for
 each app, all `""` for now. Apple and Google allow their badges only for apps
-people can download, so an empty one shows **Coming soon to the App Store and
-Google Play** in plain text. Paste a listing's address and that store's
-official badge appears, linked (the App Store badge first, as Apple asks), with
-the stores' trademark line in the footer.
+people can download, so a store with no address shows nothing (no "coming
+soon" placeholder). Paste a listing's address and that store's official badge
+appears, linked (the App Store badge first, as Apple asks), with the stores'
+trademark line in the footer.
 
 ## Screenshots
 

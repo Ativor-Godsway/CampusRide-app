@@ -489,37 +489,6 @@ p {
   width: auto;
 }
 
-.store-soon {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 11px 18px;
-  border-radius: 999px;
-  background: var(--white);
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow-card);
-  color: var(--ink);
-  font-size: 15px;
-  font-weight: 650;
-}
-
-@media (max-width: 420px) {
-  .store-soon {
-    border-radius: var(--r-md);
-    padding: 10px 14px;
-    font-size: 14px;
-  }
-}
-
-.store-soon-dot {
-  flex: none;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--amber);
-  box-shadow: 0 0 0 4px var(--amber-soft);
-}
-
 /* ── How it works ────────────────────────────────────────────────────── */
 
 .how-steps {

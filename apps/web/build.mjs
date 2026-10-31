@@ -351,10 +351,10 @@ function phone(screen, { size = 260, eager = false, extra = "" } = {}) {
 }
 
 /**
- * Store links for one app. Apple and Google allow their badges only for apps
- * people can download, so while a store's link in site.config is empty the
- * page says "Coming soon" in plain text instead; with a link, its official
- * badge shows, linked to the listing.
+ * Store links for one app: each store's official badge, linked to the
+ * listing, once its link is set in site.config. Apple and Google allow their
+ * badges only for apps people can download, so a store with no link yet shows
+ * nothing at all (no placeholder), and with neither there is no block.
  */
 export function storeButtons(links, appName) {
   const live = [];
@@ -368,11 +368,7 @@ export function storeButtons(links, appName) {
       `<a class="store-badge" href="${escapeHtml(links.googlePlay)}"><img src="/badges/google-play.png" width="134" height="40" alt="Get ${escapeHtml(appName)} on Google Play" /></a>`,
     );
   }
-  const soon = [!links.appStore && "the App Store", !links.googlePlay && "Google Play"].filter(Boolean);
-  const note = soon.length
-    ? `<p class="store-soon"><span class="store-soon-dot" aria-hidden="true"></span>Coming soon to ${soon.join(" and ")}</p>`
-    : "";
-  return `<div class="stores">${live.join("")}${note}</div>`;
+  return live.length ? `<div class="stores">${live.join("")}</div>` : "";
 }
 
 /** schema.org Organization, for search engines. */
