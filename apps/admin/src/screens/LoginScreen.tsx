@@ -68,6 +68,7 @@ export function LoginScreen() {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
         sessionExpiresAt: result.sessionExpiresAt,
+        signedInWith: "passkey",
       });
     } catch (err) {
       setError(passkeyProblem(err));
@@ -123,6 +124,7 @@ export function LoginScreen() {
         accessToken: result.accessToken,
         refreshToken: result.refreshToken,
         sessionExpiresAt: result.sessionExpiresAt,
+        signedInWith: "code",
       });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not sign in");

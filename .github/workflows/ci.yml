@@ -72,6 +72,12 @@ jobs:
       - name: Test apps/web (website)
         run: npm run test --workspace=apps/web
 
+      # The admin site (apps/admin): money and time helpers, chart maths, the
+      # Supply & demand verdict copy, and how components render loading,
+      # empty and error states. A step, not a job: the check names stay the same.
+      - name: Test apps/admin (admin site)
+        run: npm run test --workspace=apps/admin
+
   # ── Integration suite against a real Postgres.
   server-tests:
     name: Server tests (Postgres)

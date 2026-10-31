@@ -14,6 +14,15 @@ import {
 
 const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
+/** GET with the session token (the dashboard's many reads). */
+function get<T>(token: string, path: string): Promise<T> {
+  return request<T>(path, {}, token);
+}
+
+function post<T>(token: string, path: string, body: unknown = {}): Promise<T> {
+  return request<T>(path, { method: "POST", body: JSON.stringify(body) }, token);
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -211,42 +220,6 @@ export interface PendingDriver {
   user: { id: string; name: string; phone: string };
 }
 
-export interface AdminRide {
-  id: string;
-  status: string;
-  type: string;
-  source: string;
-  occupancy: number;
-  /** Pesewas, from the seats' stored fares; null for a cancelled ride. */
-  fareTotal: number | null;
-  /** False while the ride is still going on: what its riders will pay so far. */
-  fareFinal?: boolean;
-  paymentStatus: string;
-  paymentMethod: string;
-  cancelReason: string | null;
-  /** What the rider chose in the app's cancel sheet, e.g. "DRIVER_ASKED_TO_CANCEL". */
-  riderCancelReason: string | null;
-  /** Readable form of riderCancelReason, e.g. "Driver asked me to cancel". */
-  riderCancelReasonLabel: string | null;
-  riderCancelNote: string | null;
-  /** True for reasons that may signal a driver problem. */
-  riderCancelFlagged: boolean;
-  createdAt: string;
-  completedAt: string | null;
-  rider: { id: string; name: string; phone: string } | null;
-  driver: { id: string; name: string; phone: string } | null;
-  pickupZone: { id: string; name: string } | null;
-  dropoffZone: { id: string; name: string } | null;
-  /** Exact pins (null for rides booked by app builds without them). */
-  pickupLabel: string | null;
-  dropoffLabel: string | null;
-  pickupLat: number | null;
-  pickupLng: number | null;
-  dropoffLat: number | null;
-  dropoffLng: number | null;
-  pickupNote: string | null;
-}
-
 export function getPendingDrivers(token: string): Promise<{ drivers: PendingDriver[] }> {
   return request("/admin/drivers/pending", {}, token);
 }
@@ -265,22 +238,6 @@ export function rejectDriver(
     { method: "POST", body: JSON.stringify(reason ? { reason } : {}) },
     token,
   );
-}
-
-export interface RideFilters {
-  status?: string;
-  from?: string;
-  to?: string;
-}
-
-export function getRides(token: string, filters: RideFilters): Promise<{ rides: AdminRide[] }> {
-  const params = new URLSearchParams();
-  if (filters.status) params.set("status", filters.status);
-  // Date inputs give "YYYY-MM-DD"; widen to the whole day so `to` includes it.
-  if (filters.from) params.set("from", `${filters.from}T00:00:00.000Z`);
-  if (filters.to) params.set("to", `${filters.to}T23:59:59.999Z`);
-  const query = params.toString();
-  return request(`/admin/rides${query ? `?${query}` : ""}`, {}, token);
 }
 
 // ── Campus places ───────────────────────────────────────────────────────────
@@ -587,3 +544,483 @@ export function removePasskey(token: string, id: string): Promise<{ removed: tru
   // An empty JSON body: request() always says it sends JSON, and the server refuses that with no body.
   return request(`/admin/passkeys/${encodeURIComponent(id)}`, { method: "DELETE", body: "{}" }, token);
 }
+
+// ── Dashboard v2 (routes/adminDashboard.ts, adminInsights.ts, adminPeople.ts) ──
+// Every number follows docs/admin-metrics.md. Money is integer pesewas;
+// times are ISO strings. Lists carry masked phones ("+233*****146").
+
+export type LaunchModeName = "OFF" | "COUNTDOWN" | "LIVE";
+
+export interface Summary {
+  openSos: number;
+  driversNeedingApproval: number;
+  cashOutstandingPesewas: number;
+  launchMode: LaunchModeName;
+  database: "ok" | "down";
+  generatedAt: string;
+}
+
+export const getSummary = (token: string) => get<Summary>(token, "/admin/summary");
+
+export interface SearchResult {
+  kind: "ride" | "rider" | "driver";
+  id: string;
+  title: string;
+  subtitle: string;
+}
+
+export const search = (token: string, q: string) => get<{ results: SearchResult[] }>(token, `/admin/search?q=${encodeURIComponent(q)}`);
+
+export interface RideRow {
+  id: string;
+  createdAt: string;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  status: string;
+  type: "LONE" | "SHARED";
+  source: string;
+  paymentMethod: string;
+  seats: number;
+  fareTotal: number | null;
+  fareFinal: boolean;
+  rider: { id: string; name: string; maskedPhone: string | null };
+  driver: { id: string; driverId: string | null; name: string; plate: string | null } | null;
+  pickup: string;
+  dropoff: string;
+  pickupZone: { id: string; name: string };
+  dropoffZone: { id: string; name: string };
+  cancelReason: string | null;
+  cancelledBy: "rider" | "driver" | "system" | null;
+  riderCancelReason: string | null;
+  riderCancelReasonLabel: string | null;
+  riderCancelNote: string | null;
+  riderCancelFlagged: boolean;
+}
+
+export interface Overview {
+  generatedAt: string;
+  requests: { count: number; previousCount: number; gotDriver: number };
+  completed: { trips: number; sharedTrips: number; faresPesewas: number; commissionPesewas: number };
+  cashOutstandingPesewas: number;
+  hourly: { requests: number[]; driversOnline: number[] };
+  noDriver: { count: number; firstHour: number | null; lastHour: number | null; topZones: string[] };
+  latestRides: RideRow[];
+}
+
+export const getOverview = (token: string, period: string) => get<Overview>(token, `/admin/overview?${period}`);
+
+export interface LivePosition {
+  latitude: number;
+  longitude: number;
+  heading: number | null;
+  at: string | null;
+  /** False: the last position on record, not a live one. */
+  live: boolean;
+}
+
+export interface LiveDriver {
+  userId: string;
+  driverId: string;
+  name: string;
+  plate: string | null;
+  status: "WAITING" | "ON_TRIP";
+  rideId: string | null;
+  position: LivePosition | null;
+  seenAt: string | null;
+  app: { connected: boolean; state: "foreground" | "background" | null } | null;
+}
+
+export interface LiveRequest {
+  rideId: string;
+  riderId: string;
+  riderName: string;
+  type: "LONE" | "SHARED";
+  requestedAt: string;
+  pickup: { latitude: number; longitude: number; label: string } | null;
+  pickupLabel: string;
+  dropoffLabel: string;
+  offeredTo: number;
+  declined: number;
+  timedOut: number;
+}
+
+export interface LiveTrip {
+  rideId: string;
+  driverUserId: string;
+  status: string;
+  type: "LONE" | "SHARED";
+  riders: number;
+  stops: Array<{ kind: "pickup" | "dropoff"; latitude: number; longitude: number; label: string; done: boolean }>;
+}
+
+export interface Live {
+  generatedAt: string;
+  boardAt: string;
+  drivers: LiveDriver[];
+  requests: LiveRequest[];
+  trips: LiveTrip[];
+  counts: { online: number; onTrip: number; waitingDrivers: number; ridersWaiting: number; tripsRunning: number };
+}
+
+export const getLive = (token: string) => get<Live>(token, "/admin/live");
+
+export interface RideQuery {
+  period?: string;
+  status?: string;
+  type?: string;
+  zoneId?: string;
+  driverId?: string;
+  riderPhone?: string;
+  q?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface RidePage {
+  rides: RideRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export function getRidePage(token: string, query: RideQuery): Promise<RidePage> {
+  const params = new URLSearchParams(query.period ?? "");
+  for (const key of ["status", "type", "zoneId", "driverId", "riderPhone", "q"] as const) {
+    if (query[key]) params.set(key, query[key]!);
+  }
+  if (query.page) params.set("page", String(query.page));
+  if (query.pageSize) params.set("pageSize", String(query.pageSize));
+  return get(token, `/admin/rides?${params.toString()}`);
+}
+
+export interface RideDetail {
+  ride: RideRow & {
+    pickupPin: { latitude: number; longitude: number; label: string; note: string | null } | null;
+    dropoffPin: { latitude: number; longitude: number; label: string } | null;
+    routePolyline: string | null;
+    mergedIntoRideId: string | null;
+  };
+  timeline: Array<{ at: string; kind: string; text: string }>;
+  offers: Array<{ driver: { id: string; name: string }; offeredAt: string; outcome: string | null; responseMs: number | null }>;
+  seats: Array<{
+    id: string;
+    rider: { id: string; name: string; maskedPhone: string | null };
+    status: string;
+    farePesewas: number | null;
+    pickup: string;
+    dropoff: string;
+    pickupPin: { latitude: number; longitude: number } | null;
+    dropoffPin: { latitude: number; longitude: number } | null;
+    joinedAt: string;
+    arrivedAt: string | null;
+    noShowAt: string | null;
+  }>;
+  ratings: Array<{ stars: number; comment: string | null; createdAt: string; rater: { id: string; name: string; role: string }; ratee: { id: string; name: string; role: string } }>;
+  sos: Array<{ id: string; createdAt: string; riderId: string; smsDelivered: boolean; supportNotified: boolean; handledAt: string | null }>;
+  trackingLinks: Array<{ riderName: string; createdAt: string; active: boolean }>;
+  mergedRides: Array<{ id: string; riderName: string }>;
+}
+
+export const getRideDetail = (token: string, id: string) => get<RideDetail>(token, `/admin/rides/${encodeURIComponent(id)}`);
+
+export interface ZoneSupply {
+  zoneId: string;
+  name: string;
+  requests: number;
+  noDriver: number;
+  medianTimeToDriverMs: number | null;
+  need: number;
+  window: string | null;
+  windows: Array<{ label: string; requests: number; noDriver: number; need: number }>;
+}
+
+export interface SupplyDemand {
+  generatedAt: string;
+  requests: number;
+  previousRequests: number;
+  gotDriver: number;
+  gotDriverRate: number | null;
+  medianTimeToDriverMs: number | null;
+  noDriver: number;
+  heat: { noDriver: number[][]; requests: number[][] };
+  hourly: { requests: number[]; driverHours: number[] };
+  zones: ZoneSupply[];
+  suggestion: string | null;
+}
+
+export const getSupplyDemand = (token: string, period: string) => get<SupplyDemand>(token, `/admin/supply-demand?${period}`);
+
+export interface Cancellations {
+  generatedAt: string;
+  cancellations: number;
+  requests: number;
+  rate: number | null;
+  byWho: { rider: number; driver: number; system: number };
+  beforeMatch: number;
+  afterMatch: number;
+  byHour: number[];
+  reasons: Array<{ reason: string; label: string; count: number }>;
+  rides: RideRow[];
+}
+
+export const getCancellations = (token: string, period: string, who?: string) =>
+  get<Cancellations>(token, `/admin/cancellations?${period}${who ? `&who=${who}` : ""}`);
+
+export interface PlacesActivity {
+  generatedAt: string;
+  pickups: Array<{ latitude: number; longitude: number; count: number }>;
+  dropoffs: Array<{ latitude: number; longitude: number; count: number }>;
+  places: Array<{ name: string; pickups: number; dropoffs: number; noDriver: number }>;
+}
+
+export const getPlacesActivity = (token: string, period: string) => get<PlacesActivity>(token, `/admin/places/activity?${period}`);
+
+export interface DriverRow {
+  driverId: string;
+  userId: string;
+  name: string;
+  maskedPhone: string | null;
+  plate: string | null;
+  car: string | null;
+  photoUrl: string | null;
+  isApproved: boolean;
+  isOnline: boolean;
+  suspended: boolean;
+  onTrip: boolean;
+  joinedAt: string;
+  trips: number;
+  hoursOnlineMs: number;
+  earnedPesewas: number;
+  offers: number;
+  acceptanceRate: number | null;
+  avgReplyMs: number | null;
+  rating: number | null;
+  ratings: number;
+}
+
+export interface DriverList {
+  generatedAt: string;
+  drivers: DriverRow[];
+  counts: { all: number; online: number; needsApproval: number; suspended: number };
+}
+
+export const getDrivers = (token: string, period: string) => get<DriverList>(token, `/admin/drivers?${period}`);
+
+export interface DriverDetail {
+  generatedAt: string;
+  driver: {
+    driverId: string;
+    userId: string;
+    name: string;
+    phone: string | null;
+    carMake: string | null;
+    carModel: string | null;
+    carColor: string | null;
+    plate: string | null;
+    photoUrl: string | null;
+    isApproved: boolean;
+    isOnline: boolean;
+    suspendedAt: string | null;
+    suspendedReason: string | null;
+    joinedAt: string;
+  };
+  period: {
+    trips: number;
+    faresPesewas: number;
+    commissionPesewas: number;
+    earnedPesewas: number;
+    hoursOnlineMs: number;
+    offers: number;
+    accepted: number;
+    declined: number;
+    timedOut: number;
+    acceptanceRate: number | null;
+    avgReplyMs: number | null;
+    cancelledByDriver: number;
+  };
+  rating: number | null;
+  ratings: number;
+  balance: { owedPesewas: number; paidPesewas: number; balancePesewas: number; oldestUnpaidAt: string | null };
+  recentTrips: RideRow[];
+  sessions: Array<{ startedAt: string; endedAt: string | null; endReason: string | null; ms: number }>;
+  offers: Array<{ rideId: string; offeredAt: string; outcome: string | null; responseMs: number | null }>;
+  trailDays: string[];
+}
+
+export const getDriverDetail = (token: string, id: string, period: string) =>
+  get<DriverDetail>(token, `/admin/drivers/${encodeURIComponent(id)}?${period}`);
+
+export interface TrailPoint {
+  latitude: number;
+  longitude: number;
+  at: string;
+  onTrip: boolean;
+}
+
+export const getDriverTrail = (token: string, id: string, day: string) =>
+  get<{ day: string; points: TrailPoint[] }>(token, `/admin/drivers/${encodeURIComponent(id)}/trail?day=${day}`);
+
+export const suspendDriver = (token: string, id: string, reason: string) => post<{ suspended: true }>(token, `/admin/drivers/${encodeURIComponent(id)}/suspend`, { reason });
+export const unsuspendDriver = (token: string, id: string, reason: string) => post<{ suspended: false }>(token, `/admin/drivers/${encodeURIComponent(id)}/unsuspend`, { reason });
+
+export interface CashDriverRow {
+  userId: string;
+  driverId: string;
+  name: string;
+  plate: string | null;
+  owedInPeriodPesewas: number;
+  paidInPeriodPesewas: number;
+  balancePesewas: number;
+  oldestUnpaidAt: string | null;
+  status: "PAID" | "PART_PAID" | "NOT_PAID";
+}
+
+export interface CashOwed {
+  generatedAt: string;
+  outstandingPesewas: number;
+  driversOwing: number;
+  oldestUnpaidAt: string | null;
+  earnedInPeriodPesewas: number;
+  faresInPeriodPesewas: number;
+  paidInPeriodPesewas: number;
+  paymentsInPeriod: number;
+  drivers: CashDriverRow[];
+}
+
+export const getCash = (token: string, period: string) => get<CashOwed>(token, `/admin/cash?${period}`);
+
+export type CashMethod = "CASH" | "MOMO" | "OTHER";
+
+export interface CashPayment {
+  id: string;
+  driver: { id: string; name: string };
+  amountPesewas: number;
+  method: CashMethod;
+  note: string | null;
+  paidAt: string;
+  createdAt: string;
+  recordedBy: { id: string; name: string };
+  reversesId: string | null;
+  reversalReason: string | null;
+  reversedBy: { id: string; at: string; reason: string | null } | null;
+}
+
+export function getPayments(token: string, q: { period?: string; driverId?: string; page?: number; pageSize?: number }) {
+  const params = new URLSearchParams(q.period ?? "");
+  if (q.driverId) params.set("driverId", q.driverId);
+  if (q.page) params.set("page", String(q.page));
+  if (q.pageSize) params.set("pageSize", String(q.pageSize));
+  return get<{ payments: CashPayment[]; total: number; page: number; pageSize: number }>(token, `/admin/cash/payments?${params.toString()}`);
+}
+
+export const recordPayment = (token: string, input: { driverId: string; amountPesewas: number; method: CashMethod; note: string | null; paidAt: string }) =>
+  post<{ payment: { id: string } }>(token, "/admin/cash/payments", input);
+export const reversePayment = (token: string, id: string, reason: string) => post(token, `/admin/cash/payments/${encodeURIComponent(id)}/reverse`, { reason });
+
+export interface RiderRow {
+  id: string;
+  name: string;
+  maskedPhone: string | null;
+  joinedAt: string;
+  rides: number;
+  lastRideAt: string | null;
+  earlyAccess: boolean;
+}
+
+export interface RiderList {
+  generatedAt: string;
+  riders: number;
+  newInPeriod: number;
+  activeInPeriod: number;
+  riddenEver: number;
+  returning: number;
+  returningRate: number | null;
+  signupsPerDay: Array<{ day: string; count: number }>;
+  list: RiderRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export function getRiders(token: string, period: string, q: string, page: number): Promise<RiderList> {
+  const params = new URLSearchParams(period);
+  if (q.trim()) params.set("q", q.trim());
+  params.set("page", String(page));
+  return get(token, `/admin/riders?${params.toString()}`);
+}
+
+export interface RiderDetail {
+  rider: { id: string; name: string; phone: string | null; joinedAt: string; closed: boolean; earlyAccessAt: string | null; hasEmergencyContact: boolean };
+  stats: { requests: number; completed: number; cancelled: number };
+  rides: RideRow[];
+  ratingsGiven: Array<{ stars: number; comment: string | null; createdAt: string; rideId: string; ratee: { id: string; name: string } }>;
+  sos: Array<{ id: string; rideId: string; createdAt: string; handledAt: string | null }>;
+}
+
+export const getRiderDetail = (token: string, id: string) => get<RiderDetail>(token, `/admin/riders/${encodeURIComponent(id)}`);
+
+export interface SosRow {
+  id: string;
+  createdAt: string;
+  rideId: string;
+  rideStatus: string;
+  route: string;
+  rider: { id: string; name: string; maskedPhone: string | null };
+  driver: { id: string; name: string } | null;
+  latitude: number | null;
+  longitude: number | null;
+  hasContact: boolean;
+  smsDelivered: boolean;
+  supportNotified: boolean;
+  handledAt: string | null;
+  handledBy: { id: string; name: string } | null;
+  handledNote: string | null;
+}
+
+export interface Safety {
+  generatedAt: string;
+  openCount: number;
+  sos: SosRow[];
+  earlierSos: Array<{ rideId: string; riderName: string; createdAt: string }>;
+  lowRatings: Array<{
+    id: string;
+    stars: number;
+    comment: string | null;
+    createdAt: string;
+    rideId: string;
+    rater: { id: string; name: string; role: string };
+    ratee: { id: string; name: string; role: string; driverId: string | null };
+  }>;
+}
+
+export const getSafety = (token: string, period: string) => get<Safety>(token, `/admin/safety?${period}`);
+export const handleSos = (token: string, id: string, note: string) => post(token, `/admin/sos/${encodeURIComponent(id)}/handle`, { note });
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  action: string;
+  actor: { id: string; name: string } | null;
+  target: string;
+  reason: string | null;
+}
+
+export function getAudit(token: string, q: { action?: string; q?: string; actor?: string; page?: number }) {
+  const params = new URLSearchParams();
+  if (q.action) params.set("action", q.action);
+  if (q.actor) params.set("actor", q.actor);
+  if (q.q) params.set("q", q.q);
+  params.set("page", String(q.page ?? 1));
+  return get<{ entries: AuditEntry[]; actions: string[]; admins: Array<{ id: string; name: string }>; total: number; page: number; pageSize: number }>(token, `/admin/audit?${params.toString()}`);
+}
+
+export interface SystemInfo {
+  minVersions: Record<"rider" | "driver", Record<"ios" | "android", { minVersion: string | null; storeUrl: string | null } | null>>;
+  reviewDemo: { enabled: boolean; problems: string[] };
+  server: { commit: string | null; startedAt: string; environment: string };
+}
+
+export const getSystem = (token: string) => get<SystemInfo>(token, "/admin/system");
+
+/** The campus zones (the same list the apps get), for filters. */
+export const getZones = (token: string) => get<{ zones: Array<{ id: string; name: string }> }>(token, "/zones");

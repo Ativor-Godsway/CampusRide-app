@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@rida/shared": "*",
@@ -25,6 +26,7 @@
     "@types/react-dom": "~19.2.3",
     "@vitejs/plugin-react": "^5.1.0",
     "typescript": "~6.0.3",
-    "vite": "^7.1.14"
+    "vite": "^7.1.14",
+    "vitest": "^5.0.1"
   }
 }

@@ -22,6 +22,9 @@ import { registerAppVersionRoutes } from "./appVersion";
 import { registerLaunchRoutes } from "./launch";
 import { registerNotificationRoutes } from "./notifications";
 import { registerAdminPasskeyRoutes } from "./adminPasskeys";
+import { registerAdminDashboardRoutes } from "./adminDashboard";
+import { registerAdminInsightRoutes } from "./adminInsights";
+import { registerAdminPeopleRoutes } from "./adminPeople";
 import { installRateLimits } from "../rateLimit/http";
 import { installErrorHandling } from "../http/errors";
 import { useRequestValidation } from "../http/validation";
@@ -80,4 +83,8 @@ export function registerAllRoutes(
   registerPushRoutes(app, prisma);
   registerNotificationRoutes(app, prisma);
   registerAdminPasskeyRoutes(app, prisma);
+  // The admin dashboard v2 (apps/admin): docs/admin-metrics.md.
+  registerAdminDashboardRoutes(app, prisma);
+  registerAdminInsightRoutes(app, prisma);
+  registerAdminPeopleRoutes(app, prisma);
 }

@@ -17,7 +17,7 @@ import { keepSessionAlive, logout, setSessionHooks, type AuthUser } from "./api"
  * tab at a time (api.ts) so two tabs never present the same refresh token.
  */
 
-interface Session {
+export interface Session {
   user: AuthUser;
   accessToken: string;
   refreshToken?: string;
@@ -25,6 +25,8 @@ interface Session {
   sessionExpiresAt?: string;
   /** When the tokens were last renewed (epoch ms); the background renewal counts from it. */
   renewedAt?: number;
+  /** How this session began, shown under the admin's name. */
+  signedInWith?: "passkey" | "code";
 }
 
 interface AuthContextValue {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, getRecentLogins, type AdminLoginEvent } from "../api";
 import { useAuth, useToken } from "../auth";
+import { dayAndTime } from "../lib/time";
 
 /** What each failure reason means, in plain words. */
 const REASONS: Record<string, string> = {
@@ -79,10 +80,10 @@ export function AdminLoginsScreen() {
   }, [load]);
 
   return (
-    <section>
-      <div className="section-head">
-        <h2>Recent admin logins</h2>
-        <button type="button" className="secondary" onClick={() => void load()}>
+    <div>
+      <div className="queue-head">
+        <span />
+        <button type="button" className="text-button" onClick={() => void load()}>
           Refresh
         </button>
       </div>
@@ -91,14 +92,14 @@ export function AdminLoginsScreen() {
         someone may have your number: take it off ADMIN_PHONE_ALLOWLIST on Render straight away.
       </p>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error-text" role="alert">{error}</p> : null}
       {loading ? (
         <p className="muted">Loading…</p>
       ) : logins.length === 0 ? (
         <p className="muted">No sign-in attempts recorded yet.</p>
       ) : (
-        <div className="table-wrap">
-          <table>
+        <div className="table-scroll">
+          <table className="mini-table">
             <thead>
               <tr>
                 <th>When</th>
@@ -111,18 +112,18 @@ export function AdminLoginsScreen() {
             <tbody>
               {logins.map((login) => (
                 <tr key={login.id}>
-                  <td>{new Date(login.at).toLocaleString()}</td>
+                  <td>{dayAndTime(login.at)}</td>
                   <td>
                     {login.outcome === "success" ? (
-                      <span className="badge badge-completed">
+                      <span className="chip chip-green">
                         Signed in{login.reason === "passkey" ? " with a passkey" : ""}
                       </span>
                     ) : login.outcome === "failure" ? (
-                      <span className="badge badge-cancelled">
+                      <span className="chip chip-red">
                         Refused{login.reason ? `: ${REASONS[login.reason] ?? login.reason}` : ""}
                       </span>
                     ) : (
-                      <span className="badge">Code sent</span>
+                      <span className="chip chip-neutral">Code sent</span>
                     )}
                   </td>
                   <td>{login.account ? login.account.name : (login.target ?? "unknown")}</td>
@@ -134,6 +135,6 @@ export function AdminLoginsScreen() {
           </table>
         </div>
       )}
-    </section>
+    </div>
   );
 }

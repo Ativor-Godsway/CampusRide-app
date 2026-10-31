@@ -73,6 +73,15 @@ export function driverHeard(userId: string, now: number = Date.now()): void {
   if (p) p.heardAt = now;
 }
 
+/** What the server knows of a driver's app now (admin live map), or null when nothing. */
+export function driverPresenceOf(
+  userId: string,
+): { connected: boolean; state: Presence["state"] | null; heardAt: number } | null {
+  const p = presence.get(userId);
+  if (!p) return null;
+  return { connected: p.sockets > 0, state: p.announced ? p.state : null, heardAt: p.heardAt };
+}
+
 /** The drivers the rule calls silent now, with when they were last heard. */
 export function silentDrivers(now: number = Date.now()): Array<{ userId: string; heardAt: number }> {
   const timeout = config.driverSilenceTimeoutMinutes * 60_000;

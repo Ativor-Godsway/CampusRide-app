@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
 import { ApiError, addPasskey, getPasskeys, removePasskey, type Passkey } from "../api";
 import { useAuth, useToken } from "../auth";
+import { dayAndTime, shortDay } from "../lib/time";
 
 /** A starting name for a passkey made on this device. */
 function deviceName(): string {
@@ -88,14 +89,14 @@ export function PasskeysCard() {
   }
 
   return (
-    <div className="card settings-card">
+    <div className="inset">
       <h3>Passkeys</h3>
       <p className="muted small">
         Sign in with Face ID or Touch ID instead of a texted code. Once you have a passkey, phone
         codes stop working for your account (a stolen SIM can&apos;t get in), so add one on a second
         device too, or use iCloud Keychain, which shares it with your other Apple devices.
       </p>
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error-text" role="alert">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}
 
       {passkeys === null ? (
@@ -110,12 +111,12 @@ export function PasskeysCard() {
                 <strong>{p.name}</strong>
                 <span className="muted small">
                   {" "}
-                  · added {new Date(p.createdAt).toLocaleDateString()}
-                  {p.lastUsedAt ? ` · last used ${new Date(p.lastUsedAt).toLocaleString()}` : " · not used yet"}
+                  · added {shortDay(p.createdAt)}
+                  {p.lastUsedAt ? ` · last used ${dayAndTime(p.lastUsedAt)}` : " · not used yet"}
                   {p.backedUp ? " · synced" : ""}
                 </span>
               </span>
-              <button type="button" className="secondary" disabled={busy} onClick={() => remove(p)}>
+              <button type="button" className="text-button" disabled={busy} onClick={() => remove(p)}>
                 Remove
               </button>
             </li>
@@ -129,7 +130,7 @@ export function PasskeysCard() {
             <label htmlFor="passkey-name">Name for this device&apos;s passkey</label>
             <input id="passkey-name" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />
           </div>
-          <button type="submit" disabled={busy}>
+          <button type="submit" className="tonal-button" disabled={busy}>
             {busy ? "Waiting…" : "Add a passkey on this device"}
           </button>
         </form>

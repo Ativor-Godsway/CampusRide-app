@@ -62,11 +62,13 @@ afterAll(async () => {
   await app.close();
 });
 
-async function person(role: "RIDER" | "DRIVER" = "RIDER") {
+async function person(role: "RIDER" | "DRIVER" | "ADMIN" = "RIDER") {
   const user =
     role === "DRIVER"
       ? (await createTestDriver({ isOnline: true, isApproved: true })).user
-      : await createTestUser();
+      : role === "ADMIN"
+        ? await prisma.user.update({ where: { id: (await createTestUser()).id }, data: { role: "ADMIN" } })
+        : await createTestUser();
   userIds.push(user.id);
   return { user, token: signAccessToken({ userId: user.id, role: user.role }) };
 }
@@ -302,23 +304,15 @@ describe("one person's limit never touches another, even on the same IP", () => 
     for (const [route, rules] of routeLimits) {
       const [method, pattern] = route.split(" ") as [string, string];
       const url = pattern.replace(/:[A-Za-z]+/g, "c-placeholder");
+      // Admin routes refuse anyone else (403) before counting: an admin asks.
+      const role = pattern.startsWith("/admin")
+        ? "ADMIN"
+        : route.includes("/driver") || route.includes("claim") || route.includes("reject") || route.includes("uploads")
+          ? "DRIVER"
+          : "RIDER";
       for (const rule of rules) {
-        const a = await person(
-          route.includes("/driver") ||
-            route.includes("claim") ||
-            route.includes("reject") ||
-            route.includes("uploads")
-            ? "DRIVER"
-            : "RIDER",
-        );
-        const b = await person(
-          route.includes("/driver") ||
-            route.includes("claim") ||
-            route.includes("reject") ||
-            route.includes("uploads")
-            ? "DRIVER"
-            : "RIDER",
-        );
+        const a = await person(role);
+        const b = await person(role);
         await exhaust(rule, a.user.id);
         const payload = { pickupZoneId: pickup.id, dropoffZoneId: pickup.id, type: "LONE" };
         const refused = await call(method, url, { token: a.token, payload });

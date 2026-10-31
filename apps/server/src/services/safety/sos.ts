@@ -5,6 +5,45 @@ import { logger } from "../../lib/logger";
 import { rideStatusLabel } from "./rideStatusLabels";
 import { limiter } from "../../rateLimit/limiter";
 import { RULES } from "../../rateLimit/rules";
+import { freshDriverPositions } from "../zones/livePositions";
+
+/** A driver position this recent says where the car was at an SOS. */
+const SOS_POSITION_FRESH_MS = 2 * 60_000;
+
+/**
+ * Records the SOS for the admin site's Safety page (SosEvent): who was
+ * told, where the car was, and the ride's status. Never fails the SOS.
+ */
+async function recordSosEvent(
+  prisma: PrismaClient,
+  event: {
+    rideId: string;
+    riderId: string;
+    rideStatus: string;
+    driverId: string | null;
+    hasContact: boolean;
+    smsDelivered: boolean;
+    supportNotified: boolean;
+  },
+): Promise<void> {
+  const at = event.driverId ? freshDriverPositions(SOS_POSITION_FRESH_MS).get(event.driverId) : undefined;
+  try {
+    await prisma.sosEvent.create({
+      data: {
+        rideId: event.rideId,
+        riderId: event.riderId,
+        rideStatus: event.rideStatus,
+        latitude: at?.latitude ?? null,
+        longitude: at?.longitude ?? null,
+        hasContact: event.hasContact,
+        smsDelivered: event.smsDelivered,
+        supportNotified: event.supportNotified,
+      },
+    });
+  } catch (err) {
+    logger.error("SOS event could not be recorded", { rideId: event.rideId, err });
+  }
+}
 
 /** Ride statuses during which an SOS makes sense — the rider is mid-journey. */
 export const SOS_ACTIVE_STATUSES = ["MATCHED", "ARRIVED", "IN_PROGRESS"] as const;
@@ -291,6 +330,16 @@ export async function raiseSos(
     supportNotified,
     // Loud enough to find in a log search when nothing at all got through.
     reachedNobody: !smsDelivered && !supportNotified,
+  });
+
+  await recordSosEvent(prisma, {
+    rideId,
+    riderId,
+    rideStatus: ride.status,
+    driverId: ride.driverId,
+    hasContact: hasEmergencyContact,
+    smsDelivered,
+    supportNotified,
   });
 
   if (smsDelivered || supportNotified) rememberAlert(repeat.subject, { smsDelivered, supportNotified }, now);

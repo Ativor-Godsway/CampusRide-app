@@ -9,6 +9,7 @@ import { describe, it, expect, vi, afterEach, afterAll, beforeAll } from "vitest
 import Fastify, { type FastifyInstance } from "fastify";
 import { earningsTotals, getLoneFare, getSharedFarePerRider, splitFare } from "@rida/shared";
 import { prisma } from "../db/prisma";
+import { recordDriverPosition } from "../services/zones/livePositions";
 import { config } from "../config";
 import { registerAuthRoutes } from "./auth";
 import { registerRideRoutes } from "./rides";
@@ -290,6 +291,27 @@ describe("POST /rides/:id/sos", () => {
 
     // A link already in the contact's hands must keep working.
     expect(first.json().trackingUrl).toBe(second.json().trackingUrl);
+  });
+
+  it("records each alert for the admin Safety page (a repeat press is not a new one)", async () => {
+    const { ride, rider, driver, token } = await rideWithSosReadyRider();
+    recordDriverPosition(driver.user.id, { latitude: 5.6505, longitude: -0.1865 });
+
+    await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+    await app.inject({ method: "POST", url: `/rides/${ride.id}/sos`, headers: auth(token) });
+
+    const events = await prisma.sosEvent.findMany({ where: { rideId: ride.id } });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      riderId: rider.id,
+      rideStatus: "IN_PROGRESS",
+      hasContact: true,
+      smsDelivered: true,
+      supportNotified: true,
+      handledAt: null,
+    });
+    // Where the car was: the driver's live position.
+    expect(events[0]!.latitude).toBeCloseTo(5.6505, 4);
   });
 
   it("still reaches support when the rider saved no emergency contact", async () => {

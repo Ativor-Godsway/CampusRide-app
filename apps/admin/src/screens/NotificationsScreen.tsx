@@ -19,6 +19,7 @@ import {
   type BroadcastHistory,
 } from "../api";
 import { useAuth, useToken } from "../auth";
+import { dayAndTime } from "../lib/time";
 
 const AUDIENCES: BroadcastAudience[] = ["RIDERS", "DRIVERS", "EVERYONE", "PHONE"];
 
@@ -39,10 +40,10 @@ const STATUS_LABEL: Record<Broadcast["status"], string> = {
 };
 
 const STATUS_BADGE: Record<Broadcast["status"], string> = {
-  SENDING: "badge",
-  SENT: "badge badge-completed",
-  FAILED: "badge badge-cancelled",
-  INTERRUPTED: "badge badge-cancelled",
+  SENDING: "chip chip-neutral",
+  SENT: "chip chip-green",
+  FAILED: "chip chip-red",
+  INTERRUPTED: "chip chip-red",
 };
 
 /**
@@ -163,18 +164,18 @@ export function NotificationsScreen() {
   const recipient = pending?.preview.recipient;
 
   return (
-    <section>
-      <div className="section-head">
-        <h2>Notifications</h2>
-        <button type="button" className="secondary" disabled={busy} onClick={() => void run(load)}>
+    <div className="settings-stack">
+      <div className="queue-head">
+        <span />
+        <button type="button" className="text-button" disabled={busy} onClick={() => void run(load)}>
           Refresh
         </button>
       </div>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? <p className="error-text" role="alert">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}
 
-      <div className="card settings-card">
+      <div className="inset">
         <h3>New notification</h3>
         <p className="muted small">
           Goes to every phone signed in to the app with notifications allowed. Review demo accounts
@@ -254,10 +255,10 @@ export function NotificationsScreen() {
           ) : null}
 
           <p className="notify-actions">
-            <button type="submit" disabled={busy || pending !== null}>
+            <button type="submit" className="tonal-button" disabled={busy || pending !== null}>
               Review and send…
             </button>
-            <button type="button" className="secondary" disabled={busy} onClick={testToMe}>
+            <button type="button" className="text-button" disabled={busy} onClick={testToMe}>
               Send test to me
             </button>
           </p>
@@ -278,10 +279,10 @@ export function NotificationsScreen() {
               <span>{pending.body}</span>
             </div>
             <p className="notify-actions">
-              <button type="button" className="danger" disabled={busy} onClick={confirmSend}>
+              <button type="button" className="primary-button" disabled={busy} onClick={confirmSend}>
                 {busy ? "Sending…" : "Send now"}
               </button>
-              <button type="button" className="secondary" disabled={busy} onClick={() => setPending(null)}>
+              <button type="button" className="text-button" disabled={busy} onClick={() => setPending(null)}>
                 Cancel
               </button>
             </p>
@@ -289,14 +290,14 @@ export function NotificationsScreen() {
         ) : null}
       </div>
 
-      <h3>History</h3>
+      <h2 className="block-title">History</h2>
       {!history ? (
         <p className="muted">Loading…</p>
       ) : history.broadcasts.length === 0 ? (
         <p className="muted">Nothing sent yet.</p>
       ) : (
-        <div className="table-wrap">
-          <table>
+        <div className="table-scroll">
+          <table className="mini-table">
             <thead>
               <tr>
                 <th>When</th>
@@ -312,7 +313,7 @@ export function NotificationsScreen() {
             <tbody>
               {history.broadcasts.map((b) => (
                 <tr key={b.id}>
-                  <td>{new Date(b.createdAt).toLocaleString()}</td>
+                  <td>{dayAndTime(b.createdAt)}</td>
                   <td>{b.sentBy ? b.sentBy.name : <span className="muted">Server</span>}</td>
                   <td>
                     {b.audienceLabel}
@@ -339,6 +340,6 @@ export function NotificationsScreen() {
         refuse it afterwards (reported about 15 minutes later), it moves to Failed. Phones that
         uninstalled the app are removed from the list.
       </p>
-    </section>
+    </div>
   );
 }

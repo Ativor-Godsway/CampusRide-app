@@ -10,6 +10,7 @@ import { requestPlaceNames } from "../../routes/ridePins";
 import { notifyRideRequest } from "../push/notify";
 import { dispatchDemoRide, isServedBySimDriver } from "../reviewDemo/simulation";
 import { recordOffers, recordOffersClosed } from "../stats/rideOffers";
+import { noteRequestClosed, noteRequestOffered } from "../admin/liveRequests";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -79,6 +80,8 @@ export function closeOffer(
 ): void {
   // Stats (services/stats/rideOffers.ts): the taker accepted, the rest closed with the reason.
   void recordOffersClosed(prisma, ride.id, reason, reason === "TAKEN" ? (ride.driverId ?? null) : null);
+  // The admin live map stops showing it as waiting.
+  noteRequestClosed(ride.id);
   void getEligibleDrivers(prisma, { pickupZoneId: ride.pickupZoneId, isReviewDemo: ride.isReviewDemo })
     .then((drivers) => emitOfferClosed(drivers.map((d) => d.userId), { rideId: ride.id, reason }))
     .catch((err) => logger.warn("closeOffer failed", { rideId: ride.id, err }));
@@ -97,6 +100,7 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
       pickupZone: true,
       dropoffZone: true,
       passengers: { select: { riderId: true, status: true, lockedFare: true } },
+      rider: { select: { name: true } },
     },
   });
   // A review demo rider's request goes to the demo's simulated driver, never
@@ -106,6 +110,26 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
     return [];
   }
   const eligible = await getEligibleDrivers(prisma, { id: ride.id, pickupZoneId: ride.pickupZoneId, isReviewDemo: ride.isReviewDemo });
+  // The admin live map's "waiting for a driver" (memory only), offered or not.
+  if (!ride.isReviewDemo) {
+    noteRequestOffered(
+      {
+        rideId: ride.id,
+        riderId: ride.riderId,
+        riderName: ride.rider.name,
+        type: ride.type,
+        requestedAt: ride.createdAt.getTime(),
+        pickup:
+          ride.pickupLat != null && ride.pickupLng != null
+            ? { latitude: ride.pickupLat, longitude: ride.pickupLng, label: ride.pickupLabel ?? ride.pickupZone.name }
+            : { latitude: ride.pickupZone.latitude, longitude: ride.pickupZone.longitude, label: ride.pickupZone.name },
+        pickupZoneId: ride.pickupZoneId,
+        pickupLabel: ride.pickupLabel ?? ride.pickupZone.name,
+        dropoffLabel: ride.dropoffLabel ?? ride.dropoffZone.name,
+      },
+      eligible.map((d) => d.userId),
+    );
+  }
 
   if (eligible.length > 0) {
     // The fare the rider was quoted, stored on their seat (services/ride/fares).
