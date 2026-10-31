@@ -19,6 +19,7 @@
     "db:seed": "ts-node -r tsconfig-paths/register prisma/seed.ts",
     "db:seed:dev": "dotenv -e .env.development.local -e .env.development -- sh -c 'npm run db:guard:dev && SEED_ZONE_ADJACENCY=true ts-node -r tsconfig-paths/register prisma/seed.ts'",
     "db:seed:test": "dotenv -e .env.test -- sh -c 'npm run db:guard && SEED_ZONE_ADJACENCY=false ts-node -r tsconfig-paths/register prisma/seed.ts'",
+    "seed:dashboard:dev": "dotenv -e .env.development.local -e .env.development -- sh -c 'npm run db:guard:dev && ts-node --transpile-only -r tsconfig-paths/register src/scripts/seedDashboard.ts'",
     "sim:riders": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/riders.ts",
     "sim:driver": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/fakeDriver.ts",
     "sim:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/cleanupCli.ts",
