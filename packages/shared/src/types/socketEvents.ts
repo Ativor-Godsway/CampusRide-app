@@ -1,4 +1,4 @@
-import type { PassengerStatus, PaymentMethod, PaymentStatus, RideStatus, RideType } from "./ride";
+import type { PassengerStatus, PaymentMethod, PaymentStatus, RideCancelReason, RideStatus, RideType } from "./ride";
 
 /**
  * Real-time event contract for rider-facing ride tracking (Phase 5c).
@@ -51,6 +51,13 @@ export interface DriverLocationPayload {
 export interface RideStatusPayload {
   rideId: string;
   status: RideStatus;
+  /**
+   * Sent with CANCELLED when the ride was closed because its rider was added
+   * to another driver's car: the app follows `mergedIntoRideId` to that car
+   * instead of showing "Ride cancelled". Absent on every other status event.
+   */
+  cancelReason?: RideCancelReason;
+  mergedIntoRideId?: string;
 }
 
 export interface RideCompletedFareSummary {
@@ -63,6 +70,12 @@ export interface RideCompletedFareSummary {
   paymentStatus: PaymentStatus;
 }
 
+/**
+ * "Your trip is complete", to one rider's own room. On a Shared trip it is
+ * sent when THAT rider is dropped off, while the car may still be carrying
+ * others (`rideId` is the car's ride, which only completes after the last
+ * drop-off), and again to every rider when the whole ride completes.
+ */
 export interface RideCompletedPayload {
   rideId: string;
   fareSummary: RideCompletedFareSummary;

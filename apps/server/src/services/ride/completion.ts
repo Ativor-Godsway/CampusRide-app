@@ -1,5 +1,11 @@
 import type { PrismaClient } from "@prisma/client";
-import { splitFare, type PaymentMethod, type RideSource } from "@rida/shared";
+import {
+  splitFare,
+  type PaymentMethod,
+  type PaymentStatus,
+  type RideCompletedFareSummary,
+  type RideSource,
+} from "@rida/shared";
 import { emitToRider } from "../../realtime/rideSocket";
 import { getRidePaymentSummary } from "../payment/paymentFlow";
 import { notifyUssdRiders } from "../sms/notifyUssdRiders";
@@ -61,29 +67,12 @@ export async function finalizeRideCompletion(
     });
   }
 
-  // A cash ride has no Payment rows, so its per-rider summary is known from
-  // the passengers alone; MoMo needs the payment records.
-  const perPassenger =
-    paymentMethod === "CASH" && passengers
-      ? passengers
-          .filter((p) => p.status !== "CANCELLED" && p.lockedFare != null)
-          .map((p) => ({
-            riderId: p.riderId,
-            farePesewas: p.lockedFare ?? 0,
-            status: "PENDING" as const,
-          }))
-      : (await getRidePaymentSummary(prisma, ride.id)).perPassenger;
-  const totalFarePesewas = perPassenger.reduce((sum, p) => sum + p.farePesewas, 0);
+  const { perPassenger, totalFarePesewas } = await riderFareSummaries(prisma, paymentMethod, ride.id, passengers);
 
   for (const p of perPassenger) {
     emitToRider(p.riderId, "ride:completed", {
       rideId: ride.id,
-      fareSummary: {
-        yourFarePesewas: p.farePesewas,
-        totalFarePesewas,
-        paymentMethod,
-        paymentStatus: p.status,
-      },
+      fareSummary: fareSummaryFor(p, totalFarePesewas, paymentMethod),
     });
   }
 
@@ -98,4 +87,62 @@ export async function finalizeRideCompletion(
       "Trip complete. Thanks for riding CampusRide.",
     );
   }
+}
+
+/**
+ * One rider of a Shared car is dropped off while others ride on: their trip
+ * is over, so they get their own `ride:completed` fare summary now (the trip
+ * screen shows the fare and the rating) instead of waiting for the last
+ * drop-off. Nothing else happens here — the ride, the commission ledger and
+ * the other riders are untouched until the ride completes
+ * (finalizeRideCompletion), which tells every rider again.
+ */
+export async function announceRiderTripComplete(
+  prisma: PrismaClient,
+  ride: { id: string; paymentMethod: string },
+  riderId: string,
+  passengers: ReadonlyArray<{ riderId: string; status: string; lockedFare: number | null }>,
+): Promise<void> {
+  const paymentMethod = ride.paymentMethod as PaymentMethod;
+  const { perPassenger, totalFarePesewas } = await riderFareSummaries(prisma, paymentMethod, ride.id, passengers);
+  const mine = perPassenger.find((p) => p.riderId === riderId);
+  if (!mine) return;
+  emitToRider(riderId, "ride:completed", {
+    rideId: ride.id,
+    fareSummary: fareSummaryFor(mine, totalFarePesewas, paymentMethod),
+  });
+}
+
+type RiderFare = { riderId: string; farePesewas: number; status: PaymentStatus };
+
+/** Each billable rider's fare and payment state, and the car's total. */
+async function riderFareSummaries(
+  prisma: PrismaClient,
+  paymentMethod: PaymentMethod,
+  rideId: string,
+  passengers: ReadonlyArray<{ riderId: string; status: string; lockedFare: number | null }> | undefined,
+): Promise<{ perPassenger: RiderFare[]; totalFarePesewas: number }> {
+  // A cash ride has no Payment rows, so its per-rider summary is known from
+  // the passengers alone; MoMo needs the payment records.
+  const perPassenger: RiderFare[] =
+    paymentMethod === "CASH" && passengers
+      ? passengers
+          .filter((p) => p.status !== "CANCELLED" && p.lockedFare != null)
+          .map((p) => ({
+            riderId: p.riderId,
+            farePesewas: p.lockedFare ?? 0,
+            status: "PENDING" as const,
+          }))
+      : (await getRidePaymentSummary(prisma, rideId)).perPassenger;
+  const totalFarePesewas = perPassenger.reduce((sum, p) => sum + p.farePesewas, 0);
+  return { perPassenger, totalFarePesewas };
+}
+
+function fareSummaryFor(p: RiderFare, totalFarePesewas: number, paymentMethod: PaymentMethod): RideCompletedFareSummary {
+  return {
+    yourFarePesewas: p.farePesewas,
+    totalFarePesewas,
+    paymentMethod,
+    paymentStatus: p.status,
+  };
 }

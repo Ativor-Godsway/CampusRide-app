@@ -12,6 +12,23 @@ export const ACTIVE_RIDE_STATUSES: RideStatus[] = [
 
 /** A rider whose own passenger row has one of these is still in the car (or waiting for it). */
 const ACTIVE_PASSENGER_STATUSES: PassengerStatus[] = ["WAITING", "ARRIVED", "PICKED_UP"];
+const ENDED_PASSENGER_STATUSES: PassengerStatus[] = ["DROPPED_OFF", "CANCELLED"];
+
+/**
+ * Whether this rider's own trip on a ride is complete: the whole ride
+ * completed, or their seat was dropped off (on a Shared ride the car may
+ * still be carrying others). The fare summary, the rating and a MoMo payment
+ * open on this, never on the car's status alone.
+ */
+export function riderTripComplete(
+  ride: { status: string; passengers: ReadonlyArray<{ riderId: string; status: string }> },
+  riderId: string,
+): boolean {
+  return (
+    ride.status === "COMPLETED" ||
+    ride.passengers.some((p) => p.riderId === riderId && p.status === "DROPPED_OFF")
+  );
+}
 
 export interface RiderActiveRide {
   ride: Ride;
@@ -31,10 +48,12 @@ export interface RiderActiveRide {
  *    ride is closed (CANCELLED / MERGED_INTO_ANOTHER_RIDE) and they ride as
  *    a RidePassenger on the anchor ride, whose riderId is someone else. A
  *    riderId-only lookup misses them entirely.
- * 2. As the ride's REQUESTER (ride.riderId), unless their own seat on it was
- *    cancelled (e.g. the driver cancelled their pickup while the car carries
- *    on). A requester already dropped off still counts until the whole ride
- *    completes: they come back to it for the fare summary and rating.
+ * 2. As the ride's REQUESTER (ride.riderId), unless their own seat on it
+ *    has ended: cancelled (e.g. the driver cancelled their pickup while the
+ *    car carries on) or dropped off. A Shared requester dropped off while
+ *    others ride on is done — their fare summary and rating come with the
+ *    drop-off (riderTripComplete) — so they can book again straight away.
+ *    (This used to count them until the whole ride completed, 2026-11-05.)
  *
  * A passenger seat wins over a requested ride (it is where they physically
  * are). Newest first in both cases.
@@ -61,7 +80,7 @@ export async function findActiveRideForRider(
     where: {
       riderId,
       status: { in: ACTIVE_RIDE_STATUSES },
-      NOT: { passengers: { some: { riderId, status: "CANCELLED" } } },
+      NOT: { passengers: { some: { riderId, status: { in: ENDED_PASSENGER_STATUSES } } } },
     },
     include: { passengers: { where: { riderId } } },
     orderBy: { createdAt: "desc" },

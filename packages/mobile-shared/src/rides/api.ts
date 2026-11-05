@@ -196,6 +196,12 @@ export async function getRide(rideId: string): Promise<GetRideResult> {
 export interface RideSummary extends Ride {
   pickupZone: Zone;
   dropoffZone: Zone;
+  /**
+   * This rider's own trip on it is still going on (the same answer as the
+   * Home banner): not the car's status, which on a Shared car stays
+   * IN_PROGRESS after this rider is dropped off. Absent from older servers.
+   */
+  inProgress?: boolean;
 }
 
 /** The signed-in rider's most recent rides, newest first (Home's "recent" strip). */

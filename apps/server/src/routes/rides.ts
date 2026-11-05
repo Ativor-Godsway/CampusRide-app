@@ -15,7 +15,7 @@ import { isActivePassengerStatus } from "../services/ride/stateMachine";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
 import { InvalidTransitionError, RideSwitchNotAllowedError } from "../services/ride/errors";
 import { fareForType, switchRideType } from "../services/ride/switchRideType";
-import { findActiveRideForRider } from "../services/ride/activeRide";
+import { findActiveRideForRider, riderTripComplete } from "../services/ride/activeRide";
 import { emitRideEvent, emitToRider, removeRiderFromRide } from "../realtime/rideSocket";
 import { broadcastRide, closeOffer } from "../services/ride/dispatch";
 import {
@@ -314,20 +314,32 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
 
     // Fetch one extra row to determine whether another page exists, without
     // paying for a second COUNT query over the rider's whole history.
-    const rows = await prisma.ride.findMany({
-      where: { riderId },
-      select: riderRideListSelect,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      take: limit + 1,
-      ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-    });
+    const [rows, active] = await Promise.all([
+      prisma.ride.findMany({
+        where: { riderId },
+        select: riderRideListSelect,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      }),
+      findActiveRideForRider(prisma, riderId),
+    ]);
 
     // Only rides this rider booked, but a ride they joined as someone
     // else's passenger never appears here; their own pins are theirs to see
     // (Recent destinations are built from them).
     const hasMore = rows.length > limit;
-    const rides = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor = hasMore ? rides[rides.length - 1]!.id : null;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    const nextCursor = hasMore ? page[page.length - 1]!.id : null;
+    // "In progress" is this rider's own trip, as the Home banner says — not
+    // the car's status: a Shared rider dropped off while others ride on is
+    // done, and a request merged into a car is in progress only while that
+    // car still carries them.
+    const activeId = active?.ride.id;
+    const rides = page.map((ride) => ({
+      ...ride,
+      inProgress: activeId !== undefined && (ride.id === activeId || ride.mergedIntoRideId === activeId),
+    }));
 
     return reply.code(200).send({ rides, nextCursor, hasMore });
   });
@@ -412,8 +424,10 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     // trip has been finished for more than 24h (services/user/driverInfo.ts).
     const driver = ride.driverId ? await getDriverInfo(prisma, ride.driverId, ride) : null;
 
-    // Include fare summary when COMPLETED so polling self-contains the full
-    // completion signal (no socket required to show the rating/fare screen).
+    // Include fare summary once this rider's trip is complete (the ride, or
+    // their own seat on a Shared car others are still in) so polling
+    // self-contains the full completion signal (no socket required to show
+    // the rating/fare screen).
     let fareSummary:
       | {
           yourFarePesewas: number;
@@ -422,7 +436,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
           paymentStatus: string;
         }
       | undefined;
-    if (ride.status === "COMPLETED") {
+    if (riderTripComplete(ride, userId)) {
       const summary = await getRidePaymentSummary(prisma, id);
       const yourShare = summary.perPassenger.find((p) => p.riderId === userId);
       fareSummary = {
@@ -706,7 +720,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     });
     const passenger = ride?.passengers.find((p) => p.riderId === userId);
     if (!ride || (ride.riderId !== userId && !passenger)) return rideNotFound(reply);
-    if (ride.status !== "COMPLETED") {
+    if (!riderTripComplete(ride, userId)) {
       return reply.code(409).send({ error: "Ride is not yet completed" });
     }
     if (ride.paymentMethod !== "MOMO") {

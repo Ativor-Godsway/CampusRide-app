@@ -58,6 +58,8 @@ import {
   useCarNotice,
   useLaunchView,
   useRideTracking,
+  isMergedRequest,
+  riderTripOutcome,
   useToast,
   RideRequestRefusedError,
   getRoadRoute,
@@ -218,10 +220,7 @@ export default function RideTypeScreen() {
   // the anchor ride so useRideTracking listens on the correct room and
   // per-passenger events reach us. Anchor riders never hit this (their ride is
   // never merged).
-  const isMerged =
-    ride?.status === "CANCELLED" &&
-    ride.cancelReason === "MERGED_INTO_ANOTHER_RIDE" &&
-    !!ride.mergedIntoRideId;
+  const isMerged = !!ride && isMergedRequest(ride);
 
   useEffect(() => {
     if (isMerged && ride?.mergedIntoRideId && ride.mergedIntoRideId !== activeRideId) {
@@ -397,15 +396,17 @@ export default function RideTypeScreen() {
   // ── Phase ───────────────────────────────────────────────────────────────────
   const isSearching = activeRideId !== null && (!ride || ride.status === "REQUESTED" || isMerged);
   const hasDriver = ride?.status === "MATCHED" || ride?.status === "ARRIVED";
-  /** Over: a modal sheet over the dimmed map takes the ride sheet's place. */
-  const tripEnded: "completed" | "cancelled" | "driverCancelled" | null =
-    myPassenger?.status === "CANCELLED"
-      ? "driverCancelled"
-      : ride?.status === "COMPLETED"
-        ? "completed"
-        : ride?.status === "CANCELLED" && !isMerged
-          ? "cancelled"
-          : null;
+  /**
+   * Over: a modal sheet over the dimmed map takes the ride sheet's place.
+   * From this rider's own seat (riderTripOutcome): on a Shared trip, being
+   * dropped off ends their trip while the car carries others on, and
+   * nothing done to another rider's seat ends it.
+   */
+  const tripEnded = riderTripOutcome(trackingData, user?.id);
+  // The trip is over: the Home banner goes with it (it polls only every 15 s).
+  useEffect(() => {
+    if (tripEnded) void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
+  }, [tripEnded, queryClient]);
   const driverComing = hasDriver && !!driver && (myLegStatus === "WAITING" || myLegStatus === "ARRIVED");
 
   // Still unclaimed and holding only this rider: the server will accept a
@@ -882,11 +883,7 @@ export default function RideTypeScreen() {
                 ride?.status === "ARRIVED" ||
                 ride?.status === "IN_PROGRESS") &&
                 driver &&
-                (myLegStatus === "DROPPED_OFF" ? (
-                  <FadeIn key="leg-done">
-                    <MyLegDoneContent dropoffZoneName={dropoffEnd.label} />
-                  </FadeIn>
-                ) : myLegStatus === "PICKED_UP" ? (
+                (myLegStatus === "PICKED_UP" ? (
                   <FadeIn key="in-ride">
                     <InRideContent
                       driver={driver}
@@ -1087,33 +1084,6 @@ function RoutePill({
   );
 }
 
-// ── Tracking phase content ────────────────────────────────────────────────────
-
-/**
- * Phase 6b-3: shown once THIS rider's own passenger row is DROPPED_OFF, even
- * if the overall ride isn't COMPLETED yet (other passengers may still be
- * riding). No fare/rating here — that needs the ride-level fareSummary,
- * which the backend only computes once the whole ride completes; this is
- * purely a "your leg is done" acknowledgement in the meantime.
- */
-function MyLegDoneContent({ dropoffZoneName }: { dropoffZoneName: string }) {
-  return (
-    <View style={styles.section}>
-      <View style={styles.stateHeader}>
-        <View style={styles.doneBadge}>
-          <Ionicons name="checkmark" size={24} color={colors.onBrand} />
-        </View>
-        <View style={styles.stateHeading}>
-          <Text variant="title2">You&apos;re at {dropoffZoneName}</Text>
-          <Text variant="subhead" color="secondary">
-            Wrapping up the rest of the trip — your fare summary will appear shortly.
-          </Text>
-        </View>
-      </View>
-    </View>
-  );
-}
-
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
@@ -1175,16 +1145,4 @@ const styles = StyleSheet.create({
   pillRoute: { flexShrink: 1 },
   resumeSkeleton: { gap: spacing.lg, paddingTop: spacing.md },
   centerSelf: { alignSelf: "center" },
-  // ── State panels
-  section: { gap: spacing.md },
-  stateHeader: { flexDirection: "row", alignItems: "flex-start", gap: spacing.md },
-  stateHeading: { flex: 1, gap: 4 },
-  doneBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: radii.full,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: colors.green500,
-  },
 });

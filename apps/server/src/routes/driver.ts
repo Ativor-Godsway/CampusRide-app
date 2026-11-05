@@ -1249,8 +1249,14 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           closeOffer(prisma, { id: requestRideId, pickupZoneId: requestPickupZoneId, driverId: userId }, "TAKEN");
         // #7 merged-rider reach: the absorbed request is now CANCELLED /
         // MERGED_INTO_ANOTHER_RIDE. That rider's app is still tracking it, so
-        // tell its room — the client follows mergedIntoRideId to this car.
-        emitRideEvent(requestRideId, "ride:status", { rideId: requestRideId, status: "CANCELLED" });
+        // tell its room — with the reason and this car, which the client
+        // follows. A bare "CANCELLED" showed them "Ride cancelled" (2026-11-05).
+        emitRideEvent(requestRideId, "ride:status", {
+          rideId: requestRideId,
+          status: "CANCELLED",
+          cancelReason: "MERGED_INTO_ANOTHER_RIDE",
+          mergedIntoRideId: rideId,
+        });
         if (requestRiderId) notifyRider(prisma, requestRiderId, "DRIVER_ASSIGNED", rideId, { driverUserId: userId });
         // Riders already in the car hear about the detour.
         for (const p of car.passengers) {
