@@ -10,6 +10,7 @@ import {
   type CarNoticePayload,
 } from "@rida/shared";
 import { getRide, type GetRideResult } from "./api";
+import { withFareSummary, withRideStatus, withSeatStatus } from "./tripOutcome";
 import { getRideSocket, subscribeToRide, unsubscribeFromRide } from "../realtime/socket";
 
 export function rideQueryKey(rideId: string) {
@@ -23,8 +24,10 @@ export function rideQueryKey(rideId: string) {
  * events arrive. Also listens for `ride:passenger_status` (Phase 6b-3,
  * delivered to this rider's personal `rider:{userId}` room, not the ride
  * room) to patch this rider's own passenger row the moment the driver acts
- * on it. `ride:driver_location` pings are NOT cached (too frequent) —
- * consumers should subscribe to them separately via `useDriverLocation`.
+ * on it. A CANCELLED / COMPLETED / drop-off event is followed by a fresh
+ * read of the ride (see tripOutcome.ts). `ride:driver_location` pings are
+ * NOT cached (too frequent) — consumers should subscribe to them separately
+ * via `useDriverLocation`.
  */
 export function useRideTracking(rideId: string | undefined) {
   const queryClient = useQueryClient();
@@ -37,7 +40,10 @@ export function useRideTracking(rideId: string | undefined) {
     // Poll every 12 s while the ride is in a non-terminal transitioning state so
     // the UI converges on true backend state even when a socket event is missed
     // (e.g. timeout-driven transitions from processTimeouts).
+    // Not once this rider's trip is complete (a fare summary in hand), though
+    // a Shared car may still be carrying others.
     refetchInterval: (q) => {
+      if (q.state.data?.fareSummary) return false;
       const s = q.state.data?.ride?.status;
       return s === "REQUESTED" ||
         s === "AWAITING_RIDER_DECISION" ||
@@ -55,11 +61,15 @@ export function useRideTracking(rideId: string | undefined) {
     const socket = getRideSocket();
     subscribeToRide(rideId);
 
+    // An event that may end this rider's trip is followed by a fresh read of
+    // the ride: the screen ends a trip on what the server says, not on the
+    // event alone (tripOutcome.ts).
+    const refetch = () => void queryClient.invalidateQueries({ queryKey });
+
     const onStatus = (payload: RideStatusPayload) => {
       if (payload.rideId !== rideId) return;
-      queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current?: GetRideResult) =>
-        current ? { ...current, ride: { ...current.ride, status: payload.status } } : current,
-      );
+      queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current) => withRideStatus(current, payload));
+      if (payload.status === "CANCELLED" || payload.status === "COMPLETED") refetch();
     };
 
     const onDriverAssigned = (payload: DriverAssignedPayload) => {
@@ -72,11 +82,10 @@ export function useRideTracking(rideId: string | undefined) {
 
     const onCompleted = (payload: RideCompletedPayload) => {
       if (payload.rideId !== rideId) return;
-      queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current?: GetRideResult) =>
-        current
-          ? { ...current, ride: { ...current.ride, status: "COMPLETED" }, fareSummary: payload.fareSummary }
-          : current,
+      queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current) =>
+        withFareSummary(current, payload.fareSummary),
       );
+      refetch();
     };
 
     /**
@@ -85,25 +94,12 @@ export function useRideTracking(rideId: string | undefined) {
      * this is the one place that patches `ride.passengers[]` from them, so a
      * driver tapping a per-passenger action reaches this rider in ~1-2s
      * instead of waiting for the 12s poll safety net. Matches by
-     * ridePassengerId first, falling back to riderId.
+     * ridePassengerId (this rider's own seat only).
      */
     const onPassengerStatus = (payload: PassengerStatusPayload) => {
       if (payload.rideId !== rideId) return;
-      queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current?: GetRideResult) =>
-        current
-          ? {
-              ...current,
-              ride: {
-                ...current.ride,
-                passengers: current.ride.passengers.map((p) =>
-                  p.id === payload.ridePassengerId || p.riderId === payload.riderId
-                    ? { ...p, status: payload.status }
-                    : p,
-                ),
-              },
-            }
-          : current,
-      );
+      queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current) => withSeatStatus(current, payload));
+      if (payload.status === "DROPPED_OFF" || payload.status === "CANCELLED") refetch();
     };
 
     socket.on(RIDE_EVENTS.STATUS, onStatus);

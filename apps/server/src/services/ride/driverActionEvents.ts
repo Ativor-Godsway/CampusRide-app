@@ -5,7 +5,7 @@ import { notifyRider } from "../push/notify";
 import { notifyUssdRider } from "../sms/notifyUssdRiders";
 import { getDriverInfo } from "../user/driverInfo";
 import { closeOffer } from "./dispatch";
-import { finalizeRideCompletion } from "./completion";
+import { announceRiderTripComplete, finalizeRideCompletion } from "./completion";
 import { isActivePassengerStatus } from "./stateMachine";
 
 /**
@@ -80,6 +80,9 @@ export async function announcePassengerChange(
       driverUserId,
       ride.passengers,
     );
+  } else if (passenger.status === "DROPPED_OFF") {
+    // Dropped off while others ride on: this rider's own trip is complete.
+    await announceRiderTripComplete(prisma, ride, passenger.riderId, ride.passengers);
   }
   // Out of the car: their phone stops following it (after the events above,
   // so they still hear how their own trip ended).

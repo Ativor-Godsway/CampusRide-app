@@ -152,7 +152,9 @@ export default function RidesTab() {
           </Text>
           <View>
             {day.items.map((ride, index) => {
-              const resumable = ACTIVE_STATUSES.includes(ride.status) || isMerged(ride);
+              // The server's word on this rider's own trip when it has one
+              // (a Shared rider dropped off is done while the car drives on).
+              const resumable = ride.inProgress ?? (ACTIVE_STATUSES.includes(ride.status) || isMerged(ride));
               const cancelled = ride.status === "CANCELLED" && !isMerged(ride);
               const from = stopLabel(ride.pickupLabel, ride.pickupZone.name);
               const to = stopLabel(ride.dropoffLabel, ride.dropoffZone.name);

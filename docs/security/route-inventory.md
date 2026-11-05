@@ -227,10 +227,10 @@ join their driver room. Nobody else can join those.
 
 | Event | Sent to | Contains |
 |---|---|---|
-| `ride:status` | The ride's room | Ride id and status. |
+| `ride:status` | The ride's room | Ride id and status; for a request merged into a car, also the reason and the car's ride id. |
 | `ride:driver_assigned` | The ride's room | Driver's name, phone, car, plate, rating, photo. |
 | `ride:driver_location` | The ride's room | Driver's position. |
-| `ride:completed` | Each carried rider's personal room | That rider's own fare. |
+| `ride:completed` | Each carried rider's personal room, at their own drop-off and again when the ride completes | That rider's own fare. |
 | `ride:passenger_status` | That rider's personal room | That rider's own seat status. |
 | `ride:car_notice` | That rider's personal room | "Picking up 1 more rider", for riders in the car. |
 | `ride:broadcast` | Driver rooms of the drivers it is offered to | Place names and fare; never pins. |

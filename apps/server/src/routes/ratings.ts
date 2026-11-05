@@ -3,6 +3,7 @@ import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import { requireAuth } from "../middleware/auth";
 import { RULES } from "../rateLimit/rules";
+import { riderTripComplete } from "../services/ride/activeRide";
 import { MAX, empty, id, idParams, integer, object, text } from "../http/schemas";
 
 const ratingLimits = { limits: { user: [RULES.rating] } };
@@ -46,7 +47,8 @@ function tripParticipants(ride: {
 const RIDE_NOT_FOUND = { error: "Ride not found" } as const;
 
 /**
- * Phase 5c: a rider rates their driver after a COMPLETED ride.
+ * Phase 5c: a rider rates their driver once their trip is complete (the
+ * ride COMPLETED, or their own seat dropped off on a Shared car).
  * Phase 4: a driver rates a rider, on the same model and the same rules.
  *
  * Both upsert, so either party can correct a rating; one row per
@@ -77,7 +79,8 @@ export function registerRatingRoutes(app: FastifyInstance, prisma: PrismaClient)
         .code(403)
         .send({ error: "Only riders who took this trip can rate it", code: "NOT_A_PARTICIPANT" });
     }
-    if (ride.status !== "COMPLETED") {
+    // Their own trip: a Shared rider dropped off rates while the car carries on.
+    if (!riderTripComplete(ride, raterId)) {
       return reply.code(409).send({ error: "Ride is not completed yet" });
     }
     if (!ride.driverId) {

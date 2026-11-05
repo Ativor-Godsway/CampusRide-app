@@ -118,9 +118,9 @@ describe("findActiveRideForRider", () => {
     expect(await findActiveRideForRider(prisma, rider.id)).toBeNull();
   });
 
-  it("still counts the ride after the requester is dropped off, until it completes (fare + rating)", async () => {
-    const { ride, rider } = await requestedRide("IN_PROGRESS", "SHARED", "DROPPED_OFF");
-    expect((await findActiveRideForRider(prisma, rider.id))?.ride.id).toBe(ride.id);
+  it("does not count the ride once the requester is dropped off, though others still ride (2026-11-05)", async () => {
+    const { rider } = await requestedRide("IN_PROGRESS", "SHARED", "DROPPED_OFF");
+    expect(await findActiveRideForRider(prisma, rider.id)).toBeNull();
   });
 });
 

@@ -128,7 +128,9 @@ describe("GET /rides/mine", () => {
     expect(rides.length).toBeGreaterThan(0);
 
     const [first] = rides;
-    expect(Object.keys(first).sort()).toEqual([...RIDE_KEYS, "pickupZone", "dropoffZone"].sort());
+    // inProgress: whether this rider's own trip on it is still going on.
+    expect(Object.keys(first).sort()).toEqual([...RIDE_KEYS, "pickupZone", "dropoffZone", "inProgress"].sort());
+    expect(first.inProgress).toBe(true);
     expect(Object.keys(first.pickupZone).sort()).toEqual(ZONE_KEYS);
 
     // The platform's fare split is not the rider's business.
