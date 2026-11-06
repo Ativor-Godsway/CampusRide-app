@@ -175,7 +175,9 @@ usually within a few weeks.
 - Text: edit `apps/web/src/pages/*.html`.
 - Operator name, address, support phone, draft banners, **store links**:
   `apps/web/site.config.mjs`. Paste an app's App Store or Google Play address
-  into `stores` and its official badge replaces "Coming soon".
+  into `stores` and its official badge appears. The rider links also drive
+  `https://campusride.app/get` (the flyers' QR code): a phone whose store has
+  no link yet stays on the page and sees "Coming soon" for that store.
 - Prices, pickup areas, the welcome animation: nothing to do on the website.
   The build reads them from the code; after a price change, re-run
   `python3 apps/web/tools/screenshots.py` (the tests say so).

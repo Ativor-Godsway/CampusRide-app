@@ -359,8 +359,9 @@ services:
       - campusride.app
       - www.campusride.app
 
-    # A public site that may load only its own files. Its one script (the home
-    # page's welcome animation) and fonts are its own; the animation fetches
+    # A public site that may load only its own files. Its scripts (the home
+    # page's welcome animation, /get's store redirect, which only navigates)
+    # and fonts are its own; the animation fetches
     # its JSON (connect-src). Unlike the admin site it IS indexed (no
     # X-Robots-Tag). Render applies these only when set in the dashboard too:
     # docs/runbooks/website.md, "Headers".

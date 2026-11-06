@@ -6,14 +6,19 @@
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { runInNewContext } from "node:vm";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, before, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   build,
+  buildGetScript,
   checkScreens,
+  deviceStore,
   formatCedis,
+  getPage,
+  getStores,
   pages,
   pageUrl,
   readPricing,
@@ -22,6 +27,7 @@ import {
   readTermsDate,
   readZones,
   storeButtons,
+  storeLink,
   webpSize,
 } from "../build.mjs";
 import { site } from "../site.config.mjs";
@@ -83,7 +89,7 @@ describe("website build", () => {
   });
 
   it("has no broken internal links, assets or #anchors", () => {
-    for (const { slug } of pages) {
+    for (const { slug } of [...pages, getPage]) {
       const html = read(pageFile(slug));
       for (const [, target] of html.matchAll(/(?:href|src)="(\/[^"#?]*)/g)) {
         const file = target === "/" ? "index.html" : target.slice(1);
@@ -110,7 +116,7 @@ describe("website build", () => {
   });
 
   it("works under the site's Content-Security-Policy: no inline styles or scripts", () => {
-    for (const slug of [...pages.map((p) => p.slug), "404"]) {
+    for (const slug of [...pages.map((p) => p.slug), "get", "404"]) {
       const html = read(pageFile(slug));
       assert.doesNotMatch(html, /\sstyle="/, `${pageFile(slug)} has a style attribute`);
       assert.doesNotMatch(html, /<style/, `${pageFile(slug)} has a <style> element`);
@@ -138,7 +144,7 @@ describe("website build", () => {
   });
 
   it("gives every picture alt text, and sizes so nothing jumps while loading", () => {
-    for (const slug of [...pages.map((p) => p.slug), "404"]) {
+    for (const slug of [...pages.map((p) => p.slug), "get", "404"]) {
       for (const [tag] of read(pageFile(slug)).matchAll(/<img\b[^>]*>/g)) {
         assert.match(tag, /\salt="[^"]+"/, `${pageFile(slug)}: ${tag}`);
         assert.match(tag, /\swidth="\d+" height="\d+"|\sheight="\d+"[^>]*\swidth="\d+"/, tag);
@@ -397,5 +403,116 @@ describe("the home page matches the code", () => {
     // Apple: the App Store badge comes first.
     assert.ok(both.indexOf("app-store.svg") < both.indexOf("google-play.png"));
     for (const badge of ["badges/app-store.svg", "badges/google-play.png"]) assert.ok(existsSync(join(out, badge)));
+  });
+});
+
+describe("/get, the download link on flyers", () => {
+  const UA = {
+    iPhone:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Mobile/15E148 Safari/604.1",
+    iPadOld:
+      "Mozilla/5.0 (iPad; CPU OS 12_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/12.1 Mobile/15E148 Safari/604.1",
+    // iPadOS 13+ Safari asks for desktop sites: the same user agent as a Mac.
+    iPadDesktop:
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.1 Safari/605.1.15",
+    android:
+      "Mozilla/5.0 (Linux; Android 14; SM-A156E) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36",
+    windows:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+  };
+  const APPLE = "https://apps.apple.com/app/id6827157564";
+  const PLAY = "https://play.google.com/store/apps/details?id=app.campusride.rider";
+
+  /** Runs a built /get.js as a browser would; returns where it sent the visitor, or null. */
+  function visit(script, { userAgent, maxTouchPoints = 0, search = "" }) {
+    let went = null;
+    const location = { search, replace: (to) => (went = to) };
+    runInNewContext(script, { navigator: { userAgent, maxTouchPoints }, location, URL, URLSearchParams });
+    return went;
+  }
+  const stores = (rider, appleProviderToken = "") => ({ rider, driver: {}, appleProviderToken });
+  const bothLive = buildGetScript(stores({ appStore: APPLE, googlePlay: PLAY }));
+
+  it("tells iPhones, iPads, Android phones and computers apart", () => {
+    assert.equal(deviceStore(UA.iPhone, 5), "appStore");
+    assert.equal(deviceStore(UA.iPadOld, 5), "appStore");
+    assert.equal(deviceStore(UA.iPadDesktop, 5), "appStore");
+    assert.equal(deviceStore(UA.iPadDesktop, 0), null, "a real Mac has no touch screen");
+    assert.equal(deviceStore(UA.android, 5), "googlePlay");
+    assert.equal(deviceStore(UA.windows, 0), null);
+    assert.equal(deviceStore("", 0), null);
+  });
+
+  it("sends an iPhone to the App Store", () => {
+    assert.equal(visit(bothLive, { userAgent: UA.iPhone, maxTouchPoints: 5 }), APPLE);
+  });
+
+  it("sends an iPad to the App Store, including one asking for the desktop site", () => {
+    assert.equal(visit(bothLive, { userAgent: UA.iPadOld, maxTouchPoints: 5 }), APPLE);
+    assert.equal(visit(bothLive, { userAgent: UA.iPadDesktop, maxTouchPoints: 5 }), APPLE);
+  });
+
+  it("sends an Android phone to Google Play", () => {
+    assert.equal(visit(bothLive, { userAgent: UA.android, maxTouchPoints: 5 }), PLAY);
+  });
+
+  it("keeps a computer on the page", () => {
+    assert.equal(visit(bothLive, { userAgent: UA.windows }), null);
+    assert.equal(visit(bothLive, { userAgent: UA.iPadDesktop, maxTouchPoints: 0 }), null);
+  });
+
+  it("doesn't redirect to a store whose link isn't set yet", () => {
+    const iosOnly = buildGetScript(stores({ appStore: APPLE, googlePlay: "" }));
+    assert.equal(visit(iosOnly, { userAgent: UA.android, maxTouchPoints: 5 }), null);
+    assert.equal(visit(iosOnly, { userAgent: UA.iPhone, maxTouchPoints: 5 }), APPLE);
+    const none = buildGetScript(stores({ appStore: "", googlePlay: "" }));
+    assert.equal(visit(none, { userAgent: UA.iPhone, maxTouchPoints: 5 }), null);
+  });
+
+  it("passes ?src= on to each store's own campaign tracking", () => {
+    const play = new URL(visit(bothLive, { userAgent: UA.android, search: "?src=flyer" }));
+    assert.equal(play.searchParams.get("id"), "app.campusride.rider");
+    assert.equal(play.searchParams.get("referrer"), "utm_source=flyer&utm_medium=get-link");
+    // The App Store counts campaigns only with the provider ID; without it the link is left alone.
+    assert.equal(visit(bothLive, { userAgent: UA.iPhone, search: "?src=flyer" }), APPLE);
+    const tracked = buildGetScript(stores({ appStore: APPLE, googlePlay: PLAY }, "123456"));
+    const apple = new URL(visit(tracked, { userAgent: UA.iPhone, search: "?src=flyer" }));
+    assert.equal(apple.searchParams.get("pt"), "123456");
+    assert.equal(apple.searchParams.get("ct"), "flyer");
+    // Anything that isn't a plain short name is dropped, not passed to the store.
+    assert.equal(storeLink("googlePlay", PLAY, "?src=%3Cscript%3E", ""), PLAY);
+    assert.equal(storeLink("googlePlay", PLAY, `?src=${"a".repeat(41)}`, ""), PLAY);
+    assert.equal(storeLink("googlePlay", PLAY, "?other=1", ""), PLAY);
+    assert.equal(storeLink("appStore", "", "?src=flyer", "123456"), "");
+  });
+
+  it("shows both stores' buttons, or Coming soon for one without a link", () => {
+    const both = getStores({ appStore: APPLE, googlePlay: PLAY }, "CampusRide");
+    assert.ok(both.includes(`href="${APPLE}"`) && both.includes("google-play.png"));
+    assert.ok(!/soon/i.test(both));
+    const iosOnly = getStores({ appStore: APPLE, googlePlay: "" }, "CampusRide");
+    assert.ok(iosOnly.includes("app-store.svg"));
+    assert.ok(iosOnly.includes("Coming soon to Google Play"));
+    assert.ok(!iosOnly.includes("google-play.png"));
+    const none = getStores({ appStore: "", googlePlay: "" }, "CampusRide");
+    assert.ok(none.includes("Coming soon to the App Store") && none.includes("Coming soon to Google Play"));
+    assert.ok(!none.includes("<a "));
+  });
+
+  it("builds /get from site.config's rider links: redirect script in the head, buttons in the page", () => {
+    assert.equal(site.stores.rider.appStore, APPLE);
+    const html = read("get.html");
+    assert.equal(read("get/index.html"), html);
+    assert.ok(html.includes(`<title>${getPage.title}</title>`));
+    assert.ok(html.includes("CampusRide &ndash; shared rides on UG campus"));
+    assert.equal(meta(html, "name", "robots"), "noindex");
+    assert.ok(!read("sitemap.xml").includes("/get<"), "/get isn't for search engines");
+    // Not deferred, and before the body: it runs before anything is drawn.
+    const head = html.slice(0, html.indexOf("</head>"));
+    assert.ok(head.includes('<script src="/get.js"></script>'));
+    assert.equal(read("get.js"), buildGetScript(site.stores));
+    assert.ok(html.includes(getStores(site.stores.rider, "CampusRide")));
+    // The other pages don't load it.
+    for (const { slug } of pages) assert.ok(!read(pageFile(slug)).includes("/get.js"), slug || "home");
   });
 });
