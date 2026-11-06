@@ -30,16 +30,25 @@ export const site = {
    * The apps' store listings. While a link is "" nothing is shown for that
    * store (Apple and Google allow their badges only for apps people can
    * download). Paste a listing's address here and its official badge shows on
-   * the home page, linked to it.
+   * the home page, linked to it. The rider links are also where
+   * https://campusride.app/get (the QR code on flyers) sends phones.
    */
   stores: {
     rider: {
-      appStore: "",
+      appStore: "https://apps.apple.com/app/id6827157564",
       googlePlay: "",
     },
     driver: {
       appStore: "",
       googlePlay: "",
     },
+    /**
+     * Apple's provider ID (App Store Connect, Analytics, "Campaigns": the
+     * `pt=` in a campaign link it generates). Not secret. Once set, /get adds
+     * it and the visit's ?src= (as `ct=`) to the App Store link, so App Store
+     * Connect counts store visits and downloads per source. While "", the App
+     * Store link goes out as it is.
+     */
+    appleProviderToken: "",
   },
 };

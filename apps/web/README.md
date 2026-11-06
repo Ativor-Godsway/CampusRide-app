@@ -13,8 +13,8 @@ npm test --workspace=apps/web        # builds into a temp folder and checks it
 Open `dist/index.html` through any static server to preview (the pages use
 `/styles.css`-style paths, so opening the file directly loses the styles).
 
-Every page works without JavaScript. The one script (`public/app.js`, home
-page only) plays the apps' welcome animation in the hero phone with
+Every page works without JavaScript. Besides `/get`'s redirect (below), the
+one script (`public/app.js`, home page only) plays the apps' welcome animation in the hero phone with
 lottie-web (`public/vendor/`, MIT); without it, with Reduce Motion or Data
 Saver on, the phone shows the animation's last frame. The FAQ is `<details>`.
 
@@ -48,11 +48,32 @@ So the site can't say something the apps and server don't do, `build.mjs` reads:
 ## Store links
 
 `stores` in `site.config.mjs` has an App Store and a Google Play address for
-each app, all `""` for now. Apple and Google allow their badges only for apps
-people can download, so a store with no address shows nothing (no "coming
-soon" placeholder). Paste a listing's address and that store's official badge
-appears, linked (the App Store badge first, as Apple asks), with the stores'
-trademark line in the footer.
+each app (`""` until the listing exists). Apple and Google allow their badges
+only for apps people can download, so on the home page a store with no
+address shows nothing (no "coming soon" placeholder). Paste a listing's
+address and that store's official badge appears, linked (the App Store badge
+first, as Apple asks), with the stores' trademark line in the footer.
+
+## /get: the download link on flyers
+
+`https://campusride.app/get` (`getPage` in `build.mjs`, `src/pages/get.html`)
+is the one link to print. The site is static, so there is no server-side
+redirect: `get.js`, built from the rider links in `site.config.mjs` and loaded
+from the page's `<head>` without `defer`, runs before anything is drawn and
+replaces the page with the store:
+
+- iPhone, iPad (including iPadOS asking for the desktop site), iPod: the App Store link.
+- Android: the Google Play link.
+- Anything else, a store with no link yet, or no JavaScript: the page itself,
+  with each store's badge or "Coming soon to ..." in its place.
+
+`?src=flyer` (letters, digits, `-`, `_`) is passed to the stores' own
+tracking, since the site has no server to count visits: Google Play gets it as
+the install referrer (`utm_source`, in Play Console's acquisition reports),
+and the App Store as a campaign (`ct`) once `stores.appleProviderToken` is set
+(App Store Connect, Analytics). The page is `noindex` and not in the sitemap.
+
+The QR code for it is in `assets/qr/` (`python3 scripts/qr/get-link.py`).
 
 ## Screenshots
 

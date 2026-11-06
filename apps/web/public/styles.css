@@ -1229,3 +1229,53 @@ tr:last-child td {
     animation: none !important;
   }
 }
+
+/* ── /get: the download link on flyers ───────────────────────────────── */
+
+.get-card {
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 48px var(--gutter) 64px;
+  text-align: center;
+}
+
+.get-icon {
+  display: block;
+  margin: 0 auto 20px;
+  border-radius: 22px;
+  box-shadow: var(--shadow-card);
+}
+
+.get-card h1 {
+  margin: 0;
+  font-size: clamp(28px, 7vw, 36px);
+  line-height: 1.15;
+}
+
+.get-tagline {
+  margin: 12px 0 0;
+  font-size: 18px;
+  color: var(--ink-2);
+}
+
+.get-stores {
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  margin-top: 32px;
+}
+
+.store-soon {
+  margin: 0;
+  padding: 12px 18px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  font-size: 15px;
+  color: var(--ink-3);
+}
+
+.get-more {
+  margin-top: 40px;
+  font-size: 15px;
+  color: var(--ink-3);
+}

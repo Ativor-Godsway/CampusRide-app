@@ -371,6 +371,99 @@ export function storeButtons(links, appName) {
   return live.length ? `<div class="stores">${live.join("")}</div>` : "";
 }
 
+// ─── /get: the download link on flyers ───────────────────────────────────────
+
+/**
+ * The page at /get. Not in `pages`: it isn't for search engines (noindex, not
+ * in the sitemap), only for people who scanned a code or followed a link.
+ */
+export const getPage = {
+  slug: "get",
+  title: "Get the CampusRide app",
+  description: "Download CampusRide, shared rides on the University of Ghana campus, from the App Store or Google Play.",
+};
+
+/**
+ * Which store a device should open: "appStore" (iPhone, iPad, iPod),
+ * "googlePlay" (Android) or null (a computer, or anything else). iPadOS 13
+ * and later asks for desktop sites with a Mac's user agent; only the iPad has
+ * a touch screen, so a "Mac" with several touch points is an iPad.
+ *
+ * Runs in the visitor's browser too: buildGetScript puts its source in
+ * /get.js, so keep it plain and self-contained.
+ */
+export function deviceStore(userAgent, maxTouchPoints) {
+  if (/iPhone|iPad|iPod/.test(userAgent)) return "appStore";
+  if (/Macintosh/.test(userAgent) && maxTouchPoints > 1) return "appStore";
+  if (/Android/.test(userAgent)) return "googlePlay";
+  return null;
+}
+
+/**
+ * A store link carrying the visit's ?src= (letters, digits, - and _, up to
+ * 40), so each store counts visits and downloads per source: Google Play as a
+ * UTM install referrer, the App Store as a campaign (`ct`), which App Store
+ * Connect needs the provider ID (`pt`) for. Without a usable src, or with no
+ * provider ID for the App Store, the link is returned as it is. "" stays "".
+ *
+ * Runs in the visitor's browser too (see deviceStore).
+ */
+export function storeLink(store, link, search, appleProviderToken) {
+  if (!link) return "";
+  const src = new URLSearchParams(search).get("src");
+  if (!src || !/^[A-Za-z0-9_-]{1,40}$/.test(src)) return link;
+  const url = new URL(link);
+  if (store === "googlePlay") {
+    url.searchParams.set("referrer", "utm_source=" + src + "&utm_medium=get-link");
+  } else if (appleProviderToken) {
+    url.searchParams.set("pt", appleProviderToken);
+    url.searchParams.set("ct", src);
+    url.searchParams.set("mt", "8");
+  } else {
+    return link;
+  }
+  return url.toString();
+}
+
+/**
+ * /get.js: on a phone whose store has a link, goes straight there (replacing
+ * /get in the history, so Back doesn't bounce into the store again). Loaded
+ * without `defer` from the page's <head>, so it runs before anything is drawn.
+ * Anything else stays on the page, which has both stores' buttons and needs no
+ * JavaScript. A file, not an inline script: the CSP allows only the site's own.
+ */
+export function buildGetScript(stores) {
+  const links = { appStore: stores.rider.appStore, googlePlay: stores.rider.googlePlay };
+  return `/* Made by apps/web/build.mjs (buildGetScript) from site.config.mjs: don't edit. */
+(function () {
+  "use strict";
+  var links = ${JSON.stringify(links)};
+  var appleProviderToken = ${JSON.stringify(stores.appleProviderToken ?? "")};
+  ${deviceStore.toString()}
+  ${storeLink.toString()}
+  var store = deviceStore(navigator.userAgent, navigator.maxTouchPoints || 0);
+  if (!store || !links[store]) return;
+  try {
+    location.replace(storeLink(store, links[store], location.search, appleProviderToken));
+  } catch (error) {
+    location.replace(links[store]);
+  }
+})();
+`;
+}
+
+/**
+ * The /get page's buttons: each store's official badge once its link is set,
+ * and until then a plain "Coming soon" line in its place (text, not a badge:
+ * Apple and Google allow badges only for apps people can download).
+ */
+export function getStores(links, appName) {
+  const soon = (store) => `<p class="store-soon">Coming soon to ${store}</p>`;
+  const appStore = links.appStore ? storeButtons({ appStore: links.appStore }, appName) : soon("the App Store");
+  const googlePlay = links.googlePlay ? storeButtons({ googlePlay: links.googlePlay }, appName) : soon("Google Play");
+  return `<div class="get-stores">${appStore}${googlePlay}</div>`;
+}
+
 /** schema.org Organization, for search engines. */
 function jsonLd(config) {
   const data = {
@@ -442,6 +535,7 @@ function values(config) {
 
     riderStores: storeButtons(config.stores.rider, "CampusRide"),
     driverStores: storeButtons(config.stores.driver, "CampusRide Driver"),
+    getStores: getStores(config.stores.rider, "CampusRide"),
     storeTrademarks: anyBadge
       ? "<p>App Store is a service mark of Apple Inc. Google Play and the Google Play logo are trademarks of Google LLC.</p>"
       : "",
@@ -484,15 +578,21 @@ export function renderPage(page, { layout, body, config }) {
   const vars = values(config);
   const isNotFound = page.slug === "404";
   const isHome = page.slug === "";
+  const isGet = page.slug === getPage.slug;
   const head = {
     title: escapeHtml(page.title),
     description: escapeHtml(fill(page.description, vars, `the ${page.slug || "home"} page's description`)),
     canonical: pageUrl(page.slug, config.url),
     ogImage: `${config.url}/og-image.png`,
-    robots: isNotFound ? "noindex" : "index, follow",
-    // The home page alone has the animation's script and the Organization data.
-    pageHead: isHome ? `${jsonLd(config)}\n    <script src="/app.js" defer></script>` : "",
-    bodyClass: isHome ? "home" : "inner",
+    robots: isNotFound || isGet ? "noindex" : "index, follow",
+    // The home page alone has the animation's script and the Organization
+    // data; /get has its redirect, deliberately not deferred.
+    pageHead: isHome
+      ? `${jsonLd(config)}\n    <script src="/app.js" defer></script>`
+      : isGet
+        ? `<script src="/get.js"></script>`
+        : "",
+    bodyClass: isHome ? "home" : isGet ? "inner get" : "inner",
   };
   return fill(
     layout,
@@ -568,7 +668,7 @@ export function build(outDir = join(here, "dist")) {
     title: "Page not found | CampusRide",
     description: "This page doesn't exist.",
   };
-  for (const page of [...pages, notFound]) {
+  for (const page of [...pages, getPage, notFound]) {
     const body = readFileSync(join(here, "src/pages", `${page.slug || "index"}.html`), "utf8");
     const html = renderPage(page, { layout, body, config });
     if (!page.slug) {
@@ -581,6 +681,7 @@ export function build(outDir = join(here, "dist")) {
     }
   }
   for (const [name, contents] of Object.entries(welcomeAnimation())) write(`welcome/${name}`, contents);
+  write("get.js", buildGetScript(config.stores));
   write("where.svg", whereMap(zones));
   write("site.webmanifest", manifest(config));
   write("sitemap.xml", sitemap(config));
