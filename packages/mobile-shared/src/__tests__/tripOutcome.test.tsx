@@ -209,6 +209,32 @@ describe("useRideTracking, Bill's trip screen", () => {
     expect(riderTripOutcome(result.current.data, BILL)).toBe("completed");
   });
 
+  it("Bill's drop-off undone by the driver: back on his trip, the fare summary gone", async () => {
+    mockServer.set("car", { ...carWith("DROPPED_OFF", "PICKED_UP", { status: "IN_PROGRESS" }), fareSummary: FARE });
+    const { result } = await track("car");
+    await waitFor(() => expect(riderTripOutcome(result.current.data, BILL)).toBe("completed"));
+
+    // The server's own answer from now on: Bill in the car, no fare summary.
+    mockServer.set("car", carWith("PICKED_UP", "PICKED_UP", { status: "IN_PROGRESS" }));
+    await send(RIDE_EVENTS.PASSENGER_STATUS, { rideId: "car", ridePassengerId: "seat-bill", riderId: BILL, status: "PICKED_UP" });
+    expect(result.current.data!.fareSummary).toBeUndefined();
+    expect(riderTripOutcome(result.current.data, BILL)).toBeNull();
+    await waitFor(() => expect(result.current.data!.ride.passengers.find((p) => p.riderId === BILL)?.status).toBe("PICKED_UP"));
+  });
+
+  it("Bill picked up before Ali (out of order): his screen goes to On trip; Ali's seat is untouched", async () => {
+    mockServer.set("car", carWith("WAITING", "WAITING", { status: "MATCHED" }));
+    const { result } = await track("car");
+    await waitFor(() => expect(result.current.data).toBeDefined());
+
+    await send(RIDE_EVENTS.PASSENGER_STATUS, { rideId: "car", ridePassengerId: "seat-bill", riderId: BILL, status: "PICKED_UP" });
+    await send(RIDE_EVENTS.STATUS, { rideId: "car", status: "IN_PROGRESS" });
+    const seats = result.current.data!.ride.passengers;
+    expect(seats.find((p) => p.riderId === BILL)?.status).toBe("PICKED_UP");
+    expect(seats.find((p) => p.riderId === ALI)?.status).toBe("WAITING");
+    expect(riderTripOutcome(result.current.data, BILL)).toBeNull();
+  });
+
   it("a real cancel still ends with Ride cancelled, once the server confirms it", async () => {
     mockServer.set("r", ride("r", { riderId: BILL, status: "REQUESTED", driverId: null }, [seat("s", BILL, "WAITING")]));
     const { result } = await track("r");

@@ -70,18 +70,27 @@ export function withRideStatus(current: GetRideResult | undefined, payload: Ride
   return { ...current, ride: { ...current.ride, status: payload.status } };
 }
 
+/** Seat statuses of a trip still going on (the driver undid a drop-off: back to PICKED_UP). */
+export function isLiveSeatStatus(status: string): boolean {
+  return status === "WAITING" || status === "ARRIVED" || status === "PICKED_UP";
+}
+
 /**
  * A `ride:passenger_status` event (sent only to the rider it is about)
  * applied to that rider's own seat — matched by seat id, so another
- * rider's seat in the same car is never touched.
+ * rider's seat in the same car is never touched. A live status for their
+ * seat means their trip is going on (a drop-off the driver undid), so a fare
+ * summary shown for it goes.
  */
 export function withSeatStatus(
   current: GetRideResult | undefined,
   payload: PassengerStatusPayload,
 ): GetRideResult | undefined {
   if (!current) return current;
+  const mine = current.ride.passengers.some((p) => p.id === payload.ridePassengerId);
+  const { fareSummary: _undone, ...rest } = current;
   return {
-    ...current,
+    ...(mine && isLiveSeatStatus(payload.status) ? rest : current),
     ride: {
       ...current.ride,
       passengers: current.ride.passengers.map((p) =>

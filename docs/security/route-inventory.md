@@ -133,6 +133,7 @@ The request names a resource. If it isn't the caller's: **404**, same body as
 | `POST /rides/:id/passengers/:passengerId/dropoff` | Yes | DRIVER | As above. | account default |
 | `POST /rides/:id/passengers/:passengerId/cancel` | Yes | DRIVER | As above. | account default |
 | `POST /rides/:id/passengers/:passengerId/no-show` | Yes | DRIVER | As above (older app builds). | account default |
+| `POST /rides/:id/passengers/:passengerId/undo` | Yes | DRIVER | As above; only shortly after the step, never the trip's last drop-off. | account default |
 
 ## Admin
 

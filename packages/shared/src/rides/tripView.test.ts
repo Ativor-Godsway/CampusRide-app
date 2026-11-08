@@ -217,3 +217,47 @@ describe("seat overlays", () => {
     expect(settleSeatOverlays(overlays, [{ id: "a", status: "WAITING" }])).toBe(overlays);
   });
 });
+
+describe("stops in any order, with undo", () => {
+  it("three riders done out of order: each pickup leaves the list, its drop-off stays; the main card moves on", () => {
+    const s = screen();
+    s.serverLists([A, B, C]);
+    expect(s.view().next).toBe("Pick up Ama at Balme");
+
+    // The driver reaches Esi first (from the Stops list).
+    s.step("c", "ARRIVED");
+    s.step("c", "PICKED_UP");
+    const afterEsi = s.view();
+    expect(afterEsi.upcoming).toBe(5);
+    expect(afterEsi.seatsTaken).toBe(3);
+
+    // Then Kofi; Ama's pickup is still to do and still shown.
+    s.step("b", "PICKED_UP");
+    expect(s.view().upcoming).toBe(4);
+    // Kofi dropped off before Ama is even picked up.
+    s.step("b", "DROPPED_OFF");
+    expect(s.view()).toMatchObject({ upcoming: 3, seatsTaken: 2 });
+  });
+
+  it("an undo puts the seat back at once, waits for the step it undoes, and settles once the server has it", () => {
+    const seats = [{ id: "a", status: "PICKED_UP" as PassengerStatus, arrivedAt: "t" }];
+    const undo: Record<string, SeatOverlay> = { a: { status: "ARRIVED", undoing: "PICKED_UP" } };
+    // Backwards on screen while the server still says picked up.
+    expect(applySeatOverlays(seats, undo)[0]!.status).toBe("ARRIVED");
+    expect(settleSeatOverlays(undo, seats)).toBe(undo);
+    // The pickup itself hasn't gone out yet: the server is behind (ARRIVED) —
+    // kept while seat actions are queued, so a late read can't flash it back.
+    const behind = [{ id: "a", status: "ARRIVED" as PassengerStatus }];
+    expect(settleSeatOverlays(undo, behind, new Set(["a"]))).toBe(undo);
+    // Queue empty and the server has moved off PICKED_UP: settled.
+    expect(settleSeatOverlays(undo, behind)).toEqual({});
+    // Anything else the server says (the rider cancelled) is shown as it is.
+    expect(applySeatOverlays([{ id: "a", status: "CANCELLED" as PassengerStatus }], undo)[0]!.status).toBe("CANCELLED");
+  });
+
+  it("undoing a pickup marked straight from WAITING clears the wait timer too", () => {
+    const seats = [{ id: "a", status: "PICKED_UP" as PassengerStatus, arrivedAt: "2026-11-08T10:00:00Z" }];
+    const [seat] = applySeatOverlays(seats, { a: { status: "WAITING", undoing: "PICKED_UP" } });
+    expect(seat).toMatchObject({ status: "WAITING", arrivedAt: null });
+  });
+});

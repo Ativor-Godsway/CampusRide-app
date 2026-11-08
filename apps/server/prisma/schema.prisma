@@ -460,6 +460,10 @@ model RidePassenger {
   arrivedAt      DateTime?
   /// Set when the driver cancelled this seat because the rider didn't show.
   noShowAt       DateTime?
+  /// When the driver marked this rider picked up / dropped off. "Undo" is
+  /// taken only shortly after (UNDO_ACCEPTED_FOR_MS); cleared by an undo.
+  pickedUpAt     DateTime?
+  droppedOffAt   DateTime?
   /// Set at join time; the stable ascending sort key for the driver's
   /// per-passenger list so first-added stays on top and order never shifts
   /// on a status change.

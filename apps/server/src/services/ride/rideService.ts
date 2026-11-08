@@ -1,10 +1,11 @@
 import type { PrismaClient, Prisma, Ride, RidePassenger } from "@prisma/client";
 import {
   NO_SHOW_AFTER_MS,
+  UNDO_ACCEPTED_FOR_MS,
   getSharedFarePerRider,
   validateSharedOccupancy,
 } from "@rida/shared";
-import type { PassengerStatus, RideStatus, RidePinFields } from "@rida/shared";
+import type { PassengerStatus, RideStatus, RidePinFields, UndoableStep } from "@rida/shared";
 import {
   isActivePassengerStatus,
   transitionPassenger,
@@ -12,7 +13,13 @@ import {
   type RideTransitionContext,
 } from "./stateMachine";
 import { recomputeLockedFares, type LockedFarePassenger } from "./lockedFare";
-import { InvalidTransitionError, NoShowTooEarlyError, NotRideOwnerError, PassengerNotFoundError } from "./errors";
+import {
+  InvalidTransitionError,
+  NoShowTooEarlyError,
+  NotRideOwnerError,
+  PassengerNotFoundError,
+  UndoRefusedError,
+} from "./errors";
 
 export type Tx = Prisma.TransactionClient | PrismaClient;
 
@@ -161,10 +168,15 @@ export interface PassengerTransitionOptions {
  * - WAITING -> ARRIVED: stamps arrivedAt (the rider's wait timer). If the ride
  *   is still MATCHED it moves to ARRIVED too, so a Ride-alone rider's app,
  *   which reads the ride status, says "your driver has arrived".
- * - ARRIVED -> PICKED_UP: the ride's first pickup walks it to IN_PROGRESS
- *   (through ARRIVED if needed — RIDE_TRANSITIONS is checked for each hop).
- * - PICKED_UP -> DROPPED_OFF: stamps fareCharged from lockedFare; the last
- *   active passenger's drop-off completes the ride.
+ * - ARRIVED -> PICKED_UP: stamps pickedUpAt; the ride's first pickup walks
+ *   it to IN_PROGRESS (through ARRIVED if needed — RIDE_TRANSITIONS is
+ *   checked for each hop).
+ * - PICKED_UP -> DROPPED_OFF: stamps fareCharged from lockedFare and
+ *   droppedOffAt; the last active passenger's drop-off completes the ride.
+ *
+ * Seats are independent: nothing here makes one rider wait for another, so
+ * the driver can pick up and drop off in any order (a drop-off still needs
+ * that rider's own pickup — the passenger state machine).
  * - -> CANCELLED: recomputes occupancy. If nobody is left in the car, the
  *   ride ends: COMPLETED if it is under way (someone was carried — a ride
  *   past the point of no return can only complete), otherwise CANCELLED
@@ -230,7 +242,8 @@ export async function applyPassengerTransition(
       data: {
         status: toStatus,
         ...(toStatus === "ARRIVED" ? { arrivedAt: now } : {}),
-        ...(toStatus === "DROPPED_OFF" ? { fareCharged: passenger.lockedFare } : {}),
+        ...(toStatus === "PICKED_UP" ? { pickedUpAt: now } : {}),
+        ...(toStatus === "DROPPED_OFF" ? { fareCharged: passenger.lockedFare, droppedOffAt: now } : {}),
         ...(options.noShow ? { noShowAt: now } : {}),
       },
     });
@@ -273,6 +286,131 @@ export async function applyPassengerTransition(
       }
     }
 
+    const finalRide =
+      Object.keys(rideData).length > 0 ? await tx.ride.update({ where: { id: ride.id }, data: rideData }) : ride;
+
+    return {
+      passenger: updatedPassenger,
+      ride: { ...finalRide, passengers: allPassengers },
+      changed: true,
+      rideStatusBefore,
+    };
+  }, PASSENGER_TX_OPTIONS);
+}
+
+export interface UndoStepOptions {
+  /** The ride id from the URL; a passenger on another ride is "not found". */
+  expectedRideId: string;
+  /** The acting driver; any other driver gets NotRideOwnerError. */
+  expectedDriverId: string;
+  /**
+   * Undoing a pickup marked straight from WAITING (the app sent "I'm here"
+   * with it): the arrival goes too, if it is as recent as the pickup.
+   */
+  withArrival?: boolean;
+}
+
+/**
+ * Undoes a driver's pickup or drop-off shortly after it (the trip screen's
+ * "Undo"), inside the same ride lock as every other seat action.
+ *
+ * Taken only while ALL of these hold, else UndoRefusedError says why:
+ * - the step happened at most UNDO_ACCEPTED_FOR_MS ago (pickedUpAt /
+ *   droppedOffAt, the server's own clock);
+ * - nothing later happened to that seat: a pickup can't be undone once the
+ *   rider is dropped off; a drop-off can't be undone once the rider has
+ *   rated the trip or booked another ride;
+ * - it wasn't the trip's last drop-off. That one closed the trip — every
+ *   rider's fare summary, the cash-owed entry, the driver's summary — and is
+ *   never undone (the ride is COMPLETED, which also refuses any drop-off
+ *   undone after another rider's later drop-off closed the trip).
+ *
+ * What is put back:
+ * - pickup: the seat to ARRIVED (or WAITING, `withArrival`), pickedUpAt
+ *   cleared. If no rider is in the car or dropped off any more, the ride
+ *   leaves IN_PROGRESS again (to ARRIVED, or MATCHED when no one is being
+ *   waited for) and departedAt is cleared — the one way back out of
+ *   IN_PROGRESS, so the car is exactly as it was before that pickup.
+ * - drop-off: the seat to PICKED_UP, fareCharged and droppedOffAt cleared;
+ *   their trip is going on again (riderTripComplete is false).
+ *
+ * Idempotent like the steps: a seat already where the undo puts it answers
+ * `changed: false` and nothing is written.
+ */
+export async function undoPassengerStep(
+  prisma: PrismaClient,
+  passengerId: string,
+  step: UndoableStep,
+  now: Date,
+  options: UndoStepOptions,
+): Promise<PassengerTransitionResult> {
+  return prisma.$transaction(async (tx) => {
+    const locked = await tx.$queryRaw<Ride[]>`
+      SELECT r.* FROM "Ride" r
+      WHERE r.id = (SELECT "rideId" FROM "RidePassenger" WHERE id = ${passengerId})
+      FOR UPDATE`;
+    const ride = locked[0];
+    if (!ride || ride.id !== options.expectedRideId) throw new PassengerNotFoundError(passengerId);
+    if (ride.driverId !== options.expectedDriverId) throw new NotRideOwnerError(ride.id, options.expectedDriverId);
+
+    const passengers = await tx.ridePassenger.findMany({
+      where: { rideId: ride.id },
+      orderBy: { createdAt: "asc" },
+    });
+    const passenger = passengers.find((p) => p.id === passengerId)!;
+    const rideStatusBefore = ride.status as RideStatus;
+    const unchanged = { passenger, ride: { ...ride, passengers }, changed: false, rideStatusBefore };
+    const recent = (at: Date | null) => !!at && now.getTime() - at.getTime() <= UNDO_ACCEPTED_FOR_MS;
+
+    if (ride.status === "COMPLETED" || ride.status === "CANCELLED") {
+      throw new UndoRefusedError("TRIP_ENDED", "This trip has ended, so it can't be undone.");
+    }
+
+    let data: Prisma.RidePassengerUpdateInput;
+    if (step === "pickup") {
+      if (passenger.status === "WAITING" || passenger.status === "ARRIVED") return unchanged;
+      if (passenger.status !== "PICKED_UP") {
+        throw new UndoRefusedError("UNDO_TOO_LATE", passenger.status === "DROPPED_OFF"
+          ? "This rider has already been dropped off."
+          : "This rider is no longer on your trip.");
+      }
+      if (!recent(passenger.pickedUpAt)) throw new UndoRefusedError("UNDO_EXPIRED", "Too late to undo this pickup.");
+      const clearArrival = !!options.withArrival && recent(passenger.arrivedAt);
+      data = { status: clearArrival ? "WAITING" : "ARRIVED", pickedUpAt: null, ...(clearArrival ? { arrivedAt: null } : {}) };
+    } else {
+      if (passenger.status === "PICKED_UP") return unchanged;
+      if (passenger.status !== "DROPPED_OFF") {
+        throw new UndoRefusedError("UNDO_TOO_LATE", "This rider isn't dropped off.");
+      }
+      if (!recent(passenger.droppedOffAt)) throw new UndoRefusedError("UNDO_EXPIRED", "Too late to undo this drop-off.");
+      const [rated, rebooked] = await Promise.all([
+        tx.rating.findFirst({ where: { rideId: ride.id, raterId: passenger.riderId }, select: { id: true } }),
+        tx.ride.findFirst({
+          where: { riderId: passenger.riderId, id: { not: ride.id }, createdAt: { gt: passenger.droppedOffAt! } },
+          select: { id: true },
+        }),
+      ]);
+      if (rated) throw new UndoRefusedError("UNDO_TOO_LATE", "This rider has already rated the trip.");
+      if (rebooked) throw new UndoRefusedError("UNDO_TOO_LATE", "This rider has already booked another ride.");
+      data = { status: "PICKED_UP", droppedOffAt: null, fareCharged: null };
+    }
+
+    const updatedPassenger = await tx.ridePassenger.update({ where: { id: passengerId }, data });
+    const allPassengers = passengers.map((p) => (p.id === passengerId ? updatedPassenger : p));
+
+    // A pickup undone: the car goes back to before its first pickup if no
+    // one is in it (or has been carried) any more.
+    const rideData: Prisma.RideUpdateInput = {};
+    const moving = allPassengers.some((p) => p.status === "PICKED_UP" || p.status === "DROPPED_OFF");
+    const waitedFor = allPassengers.some((p) => p.status === "ARRIVED");
+    if (step === "pickup" && !moving) {
+      if (ride.status === "IN_PROGRESS") {
+        rideData.status = waitedFor ? "ARRIVED" : "MATCHED";
+        rideData.departedAt = null;
+      } else if (ride.status === "ARRIVED" && !waitedFor) {
+        rideData.status = "MATCHED";
+      }
+    }
     const finalRide =
       Object.keys(rideData).length > 0 ? await tx.ride.update({ where: { id: ride.id }, data: rideData }) : ride;
 

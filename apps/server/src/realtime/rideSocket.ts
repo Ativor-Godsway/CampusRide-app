@@ -361,6 +361,14 @@ export function removeRiderFromRide(riderId: string, rideId: string): void {
   ioRef?.in(roomForRider(riderId)).socketsLeave(roomForRide(rideId));
 }
 
+/**
+ * The other way round, after a drop-off was undone: the rider is in the car
+ * again, so their sockets follow it again (as subscribing would allow).
+ */
+export function addRiderToRide(riderId: string, rideId: string): void {
+  ioRef?.in(roomForRider(riderId)).socketsJoin(roomForRide(rideId));
+}
+
 /** Emits a contract event to everyone subscribed to a ride's room. No-op if the socket server isn't initialized (e.g. tests). */
 export function emitRideEvent<E extends RideServerEvent>(
   rideId: string,

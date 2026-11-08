@@ -1,6 +1,8 @@
 import type { PrismaClient } from "@prisma/client";
 import { dropoffPin, pickupPin, type LatLng, type RideEtaPayload } from "@rida/shared";
 import { estimateRoute } from "../routing/campusRoutes";
+import { emitToRider } from "../../realtime/rideSocket";
+import { latestDriverPosition } from "../zones/livePositions";
 import { getZoneMap } from "../zones/zoneCache";
 import { ACTIVE_DRIVER_STATUSES } from "./stateMachine";
 
@@ -80,6 +82,29 @@ export async function riderEtas(
     });
   }
   return out;
+}
+
+/** A driver position older than this is too stale to work an ETA out from. */
+const POSITION_FRESH_MS = 60_000;
+
+/**
+ * After the driver changed a seat (picked Bill up out of order, dropped
+ * someone off, undid a step): each remaining rider's ETA at once, from the
+ * driver's last position, instead of on the next relayed position. Bill on
+ * board now gets the way to his drop-off; a rider still waiting keeps the
+ * way to their pickup. Nothing without a recent position.
+ */
+export async function sendRiderEtasNow(
+  prisma: PrismaClient,
+  rideId: string,
+  driverUserId: string,
+  now: number = Date.now(),
+): Promise<void> {
+  const position = latestDriverPosition(driverUserId, POSITION_FRESH_MS, now);
+  if (!position) return;
+  lastWorkedOut.set(rideId, now);
+  const etas = await riderEtas(prisma, rideId, driverUserId, position, now);
+  for (const eta of etas) emitToRider(eta.riderId, "ride:eta", eta.payload);
 }
 
 /** Tests only. */

@@ -1,11 +1,12 @@
 import type { PrismaClient, Ride, RidePassenger } from "@prisma/client";
 import type { PassengerStatus, RideStatus, RiderPushKind } from "@rida/shared";
-import { emitRideEvent, emitToRider, removeRiderFromRide } from "../../realtime/rideSocket";
+import { addRiderToRide, emitRideEvent, emitToRider, removeRiderFromRide } from "../../realtime/rideSocket";
 import { notifyRider } from "../push/notify";
 import { notifyUssdRider } from "../sms/notifyUssdRiders";
 import { getDriverInfo } from "../user/driverInfo";
 import { closeOffer } from "./dispatch";
 import { announceRiderTripComplete, finalizeRideCompletion } from "./completion";
+import { sendRiderEtasNow } from "./riderEta";
 import { isActivePassengerStatus } from "./stateMachine";
 
 /**
@@ -87,4 +88,37 @@ export async function announcePassengerChange(
   // Out of the car: their phone stops following it (after the events above,
   // so they still hear how their own trip ended).
   if (!isActivePassengerStatus(passenger.status)) removeRiderFromRide(passenger.riderId, ride.id);
+  // The riders still in or waiting for the car: fresh ETAs now.
+  if (ride.status !== "COMPLETED" && ride.status !== "CANCELLED") await sendRiderEtasNow(prisma, ride.id, driverUserId);
+}
+
+/**
+ * After a driver undid a pickup or drop-off (the trip screen's "Undo"): the
+ * rider's seat is back where it was, and so is the car's status if it
+ * moved. No push — the rider's screen follows the events, and a second
+ * notification for a slip of the finger would only confuse. A drop-off
+ * undone puts the rider back in the car, so their phone follows it again
+ * (the rider app clears the fare summary it was shown).
+ */
+export async function announcePassengerUndo(
+  prisma: PrismaClient,
+  change: {
+    passenger: RidePassenger;
+    ride: Ride & { passengers: RidePassenger[] };
+    rideStatusBefore: RideStatus;
+    driverUserId: string;
+  },
+): Promise<void> {
+  const { passenger, ride, rideStatusBefore, driverUserId } = change;
+  if (passenger.status === "PICKED_UP") addRiderToRide(passenger.riderId, ride.id);
+  emitToRider(passenger.riderId, "ride:passenger_status", {
+    rideId: ride.id,
+    ridePassengerId: passenger.id,
+    riderId: passenger.riderId,
+    status: passenger.status as PassengerStatus,
+  });
+  if (ride.status !== rideStatusBefore) {
+    emitRideEvent(ride.id, "ride:status", { rideId: ride.id, status: ride.status as RideStatus });
+  }
+  await sendRiderEtasNow(prisma, ride.id, driverUserId);
 }

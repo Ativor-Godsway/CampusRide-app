@@ -58,6 +58,12 @@ export function recordDriverPosition(
   }
 }
 
+/** One driver's last position, if heard from within `freshMs`. */
+export function latestDriverPosition(userId: string, freshMs: number, now: number = Date.now()): LivePosition | null {
+  const p = positions.get(userId);
+  return p && now - p.at <= freshMs ? p : null;
+}
+
 /** Every driver heard from within `freshMs`, with where they are. */
 export function freshDriverPositions(freshMs: number, now: number = Date.now()): Map<string, LivePosition> {
   const out = new Map<string, LivePosition>();

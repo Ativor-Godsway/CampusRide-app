@@ -120,6 +120,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /rides/:id/passengers/:passengerId/dropoff": "owner",
   "POST /rides/:id/passengers/:passengerId/cancel": "owner",
   "POST /rides/:id/passengers/:passengerId/no-show": "owner",
+  "POST /rides/:id/passengers/:passengerId/undo": "owner",
 
   "GET /admin/drivers/pending": "admin",
   "POST /admin/drivers/:id/approve": "admin",
@@ -505,6 +506,13 @@ function cases(): OwnershipCase[] {
       unchanged: async () => expect(await seatStatus(seatA)).toBe("WAITING"),
     }),
   );
+  passengerActions.push({
+    route: "POST /rides/:id/passengers/:passengerId/undo",
+    name: "another driver can't undo a step on D1's car",
+    run: () => as(driver2, "POST", `/rides/${car.id}/passengers/${seatA}/undo`, { step: "pickup" }),
+    expectStatus: 404,
+    unchanged: async () => expect(await seatStatus(seatA)).toBe("WAITING"),
+  });
 
   return [
     // Rider vs rider
