@@ -10,7 +10,7 @@ import {
   type CarNoticePayload,
 } from "@rida/shared";
 import { getRide, type GetRideResult } from "./api";
-import { withFareSummary, withRideStatus, withSeatStatus } from "./tripOutcome";
+import { isLiveSeatStatus, withFareSummary, withRideStatus, withSeatStatus } from "./tripOutcome";
 import { getRideSocket, subscribeToRide, unsubscribeFromRide } from "../realtime/socket";
 
 export function rideQueryKey(rideId: string) {
@@ -98,8 +98,13 @@ export function useRideTracking(rideId: string | undefined) {
      */
     const onPassengerStatus = (payload: PassengerStatusPayload) => {
       if (payload.rideId !== rideId) return;
+      const hadFare = !!queryClient.getQueryData<GetRideResult>(queryKey)?.fareSummary;
       queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current) => withSeatStatus(current, payload));
-      if (payload.status === "DROPPED_OFF" || payload.status === "CANCELLED") refetch();
+      // A drop-off undone (back in the car): read the ride again, which also
+      // starts the poll again (it stops once a fare summary is in hand).
+      if (payload.status === "DROPPED_OFF" || payload.status === "CANCELLED" || (hadFare && isLiveSeatStatus(payload.status))) {
+        refetch();
+      }
     };
 
     socket.on(RIDE_EVENTS.STATUS, onStatus);

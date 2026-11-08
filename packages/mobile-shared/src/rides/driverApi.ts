@@ -1,4 +1,4 @@
-import type { LatLng, PassengerStatus, Ride, RidePinFields, RideSource, RideType, Zone } from "@rida/shared";
+import type { LatLng, PassengerStatus, Ride, RidePinFields, RideSource, RideType, UndoableStep, Zone } from "@rida/shared";
 import { asArray, readList } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
@@ -500,6 +500,27 @@ export interface ZoneRoute {
 export async function getZoneRoutes(): Promise<ZoneRoute[]> {
   const res = await api.get<{ routes: ZoneRoute[] }>("/zones/routes");
   return readList<ZoneRoute>(res.data, "routes");
+}
+
+/**
+ * Undo a pickup or drop-off just made ("Undo" on the trip screen). The
+ * server takes it only shortly after the step and only if nothing later
+ * happened to that seat; never for the trip's last drop-off. `withArrival`:
+ * the pickup was marked straight from WAITING, so the arrival sent with it
+ * goes too.
+ */
+export async function passengerUndo(
+  rideId: string,
+  passengerId: string,
+  step: UndoableStep,
+  options?: { timeoutMs?: number; withArrival?: boolean },
+): Promise<PassengerLifecycleResult> {
+  const res = await api.post<PassengerLifecycleResult>(
+    `/rides/${rideId}/passengers/${passengerId}/undo`,
+    { step, ...(options?.withArrival ? { withArrival: true } : {}) },
+    options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
+  );
+  return res.data;
 }
 
 /**

@@ -27,7 +27,9 @@ import {
   riderName,
   stepToast,
   isOutsideServiceArea,
+  markStopPrompt,
   planTripStops,
+  UNDO_WINDOW_MS,
   formatDistance,
   getSharedFarePerRider,
   routeAttribution,
@@ -83,6 +85,7 @@ import {
   overlayPassengers,
   runAddRider,
   runPassengerAction,
+  runUndo,
   settleWith,
   useTripActions,
 } from "../../lib/tripActions";
@@ -513,20 +516,53 @@ export default function TripScreen() {
   const [menuOpen, setMenuOpen] = useState(false);
 
 
-  const now = useNow(next?.kind === "PICKUP" && next.passengerStatus === "ARRIVED");
+  const now = useNow((next?.kind === "PICKUP" && next.passengerStatus === "ARRIVED") || stopsOpen);
 
   // After each step, a short note: "Ama is in the car · next: pick up Kofi".
   const { showToast, toast } = useToast();
-  const onStep = useCallback(
-    (stop: TripStop, step: "arrived" | "pickup" | "dropoff") => {
-      if (step === "arrived") {
-        showToast(`${riderName(stop)} has been told you're here`);
-        return;
-      }
+  const onArrived = useCallback(
+    (stop: TripStop) => showToast(`${riderName(stop)} has been told you're here`),
+    [showToast],
+  );
+
+  /**
+   * A pickup or drop-off, from the slide or the Stops list, at ANY stop: the
+   * arrival goes first if the rider was still waiting (marked out of order,
+   * before auto-arrival). Then the note, with "Undo" for 10 seconds — except
+   * on the trip's last drop-off, which ends the trip and isn't undone.
+   */
+  const markStop = useCallback(
+    (stop: TripStop) => {
+      if (!ride) return;
+      const step = stop.kind === "PICKUP" ? "pickup" : "dropoff";
+      const withArrival = step === "pickup" && stop.passengerStatus === "WAITING";
+      if (withArrival) runPassengerAction(ride.id, stop.passengerId, "arrived");
+      runPassengerAction(ride.id, stop.passengerId, step);
       const after = plan.upcoming.filter((s) => s.key !== stop.key && !(step === "pickup" && s.key === `${stop.passengerId}:PICKUP`));
-      showToast(stepToast(stop, after[0]));
+      const lastDropoff = step === "dropoff" && after.length === 0;
+      showToast({
+        message: stepToast(stop, after[0]),
+        ...(lastDropoff
+          ? {}
+          : {
+              durationMs: UNDO_WINDOW_MS,
+              action: { label: "Undo", onPress: () => runUndo(ride.id, stop.passengerId, step, withArrival) },
+            }),
+      });
     },
-    [plan.upcoming, showToast],
+    [ride, plan.upcoming, showToast],
+  );
+
+  /** From the Stops list: ask first, and say so if the driver is far (300 m) from that rider's stop. */
+  const confirmMark = useCallback(
+    (stop: TripStop) => {
+      const prompt = markStopPrompt(stop, position);
+      Alert.alert(prompt.title, prompt.message, [
+        { text: "Cancel", style: "cancel" },
+        { text: prompt.confirmLabel, onPress: () => markStop(stop) },
+      ]);
+    },
+    [position, markStop],
   );
 
   const goHome = useCallback(() => {
@@ -652,15 +688,18 @@ export default function TripScreen() {
       { text: "Keep", style: "cancel" },
       { text: "Remove", style: "destructive", onPress: () => actOnNext("cancel") },
     ]);
-  const confirmNoShow = () =>
-    Alert.alert(`${nextName} didn't show?`, "Their pickup is cancelled and they're told why.", [
+  const confirmNoShowAt = (stop: TripStop) =>
+    Alert.alert(`${riderName(stop)} didn't show?`, "Their pickup is cancelled and they're told why.", [
       { text: "Keep waiting", style: "cancel" },
-      { text: "Cancel pickup", style: "destructive", onPress: () => actOnNext("no-show") },
+      { text: "Cancel pickup", style: "destructive", onPress: () => runPassengerAction(ride.id, stop.passengerId, "no-show") },
     ]);
+  const confirmNoShow = () => {
+    if (next) confirmNoShowAt(next);
+  };
   const tellHere = () => {
     if (!next) return;
     actOnNext("arrived");
-    onStep(next, "arrived");
+    onArrived(next);
   };
 
   return (
@@ -708,7 +747,7 @@ export default function TripScreen() {
             atStop={atNextStop}
             now={now}
             canNoShow={canNoShow}
-            onStep={onStep}
+            onMark={markStop}
             onTellHere={tellHere}
             onNoShow={confirmNoShow}
             onStops={() => setStopsOpen(true)}
@@ -795,6 +834,9 @@ export default function TripScreen() {
         stops={plan.upcoming}
         passengers={passengers}
         nextEtaMinutes={etaMinutes}
+        now={now}
+        onMark={confirmMark}
+        onNoShow={confirmNoShowAt}
       />
       <AddRiderSheet
         visible={addOpen}
@@ -858,7 +900,7 @@ function NextStopCard({
   atStop,
   now,
   canNoShow,
-  onStep,
+  onMark,
   onTellHere,
   onNoShow,
   onStops,
@@ -874,13 +916,13 @@ function NextStopCard({
   now: number;
   /** "Rider didn't show" is open (NO_SHOW_AFTER_MS after arriving). */
   canNoShow: boolean;
-  onStep: (stop: TripStop, step: "arrived" | "pickup" | "dropoff") => void;
+  /** The slide finished: picked up / dropped off (with "Undo"). */
+  onMark: (stop: TripStop) => void;
   onTellHere: () => void;
   onNoShow: () => void;
   onStops: () => void;
 }) {
   const name = riderName(stop);
-  const act = (action: Parameters<typeof runPassengerAction>[2]) => runPassengerAction(ride.id, stop.passengerId, action);
   const pickup = stop.kind === "PICKUP";
   const arrived = pickup && stop.passengerStatus === "ARRIVED";
   const arrivedAt = stop.arrivedAt ? Date.parse(stop.arrivedAt) : null;
@@ -1001,11 +1043,7 @@ function NextStopCard({
           key={stop.key}
           label={`Slide when ${name} is in`}
           doneLabel="Picked up"
-          onConfirm={() => {
-            if (stop.passengerStatus === "WAITING") act("arrived");
-            act("pickup");
-            onStep(stop, "pickup");
-          }}
+          onConfirm={() => onMark(stop)}
         />
       ) : (
         <SlideToConfirm
@@ -1013,10 +1051,7 @@ function NextStopCard({
           label={cash ? `Slide when you have ${fare ?? "the fare"}` : `Slide when ${name} is out`}
           doneLabel={cash ? "Cash collected" : "Dropped off"}
           tone="dark"
-          onConfirm={() => {
-            act("dropoff");
-            onStep(stop, "dropoff");
-          }}
+          onConfirm={() => onMark(stop)}
         />
       )}
     </View>

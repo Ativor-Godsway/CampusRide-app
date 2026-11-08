@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
-import type { PassengerStatus } from "@rida/shared";
+import type { PassengerStatus, UndoableStep } from "@rida/shared";
 import {
   DISPATCH_WINDOW_MS,
   DRIVER_OUTSIDE_AREA_MESSAGE,
@@ -30,9 +30,9 @@ import { paidFareTotal, requestFare } from "../services/ride/fares";
 import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
-import { applyRideTransition, applyPassengerTransition } from "../services/ride/rideService";
+import { applyRideTransition, applyPassengerTransition, undoPassengerStep } from "../services/ride/rideService";
 import { finalizeRideCompletion } from "../services/ride/completion";
-import { announceClaim, announcePassengerChange } from "../services/ride/driverActionEvents";
+import { announceClaim, announcePassengerChange, announcePassengerUndo } from "../services/ride/driverActionEvents";
 import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
 import {
   DetourTooLongError,
@@ -44,6 +44,7 @@ import {
   NoSeatsAvailableError,
   RequestRideUnavailableError,
   RideNotReadyToDepartError,
+  UndoRefusedError,
 } from "../services/ride/errors";
 import { emitRideEvent, emitToRider } from "../realtime/rideSocket";
 import { notifyUssdRider } from "../services/sms/notifyUssdRiders";
@@ -101,6 +102,10 @@ const SCHEMAS = {
   passengerAction: {
     params: object({ id, passengerId: id }, ["id", "passengerId"]),
     body: object({ reason: oneOf(["NO_SHOW"]) }),
+  },
+  passengerUndo: {
+    params: object({ id, passengerId: id }, ["id", "passengerId"]),
+    body: object({ step: oneOf(["pickup", "dropoff"]), withArrival: boolean }, ["step"]),
   },
 };
 
@@ -1355,6 +1360,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * - cancel   WAITING -> CANCELLED   (not once "I'm here" is tapped)
    * - no-show  ARRIVED -> CANCELLED   (3 minutes after arriving)
    *
+   * Seats are independent, so stops can be done in any order (Bill picked
+   * up before Ali); only a rider's own drop-off waits for their own pickup.
+   *
    * Every one is safe to repeat: asking for the status the rider already has
    * answers 200 and changes nothing. Refusals come back as { error, code }
    * with the reason in plain words. Rider notifications go out after the
@@ -1432,4 +1440,46 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply;
     });
   }
+  /**
+   * "Undo" on the trip screen, shortly after a pickup or drop-off:
+   * { step: "pickup" | "dropoff", withArrival? }. The rules (the time
+   * window, nothing later on that seat, never the trip's last drop-off) are
+   * undoPassengerStep's. Safe to repeat like the steps; a refusal is
+   * { error, code } with the reason in plain words.
+   */
+  app.post(
+    "/rides/:id/passengers/:passengerId/undo",
+    { onRequest: requireAuth, schema: SCHEMAS.passengerUndo },
+    async (request, reply) => {
+      if (!(await requireDriver(request, reply))) return;
+
+      const { id: rideId, passengerId } = request.params as { id: string; passengerId: string };
+      const { step, withArrival } = request.body as { step: UndoableStep; withArrival?: boolean };
+      const userId = request.user!.userId;
+
+      let result;
+      try {
+        result = await undoPassengerStep(prisma, passengerId, step, new Date(), {
+          expectedRideId: rideId,
+          expectedDriverId: userId,
+          withArrival,
+        });
+      } catch (err) {
+        if (err instanceof PassengerNotFoundError || err instanceof NotRideOwnerError) {
+          return refuse(reply, 404, "PASSENGER_NOT_FOUND", "This rider is no longer on your trip.");
+        }
+        if (err instanceof UndoRefusedError) return refuse(reply, 409, err.code, err.message);
+        throw err;
+      }
+
+      const { passenger, ride, changed, rideStatusBefore } = result;
+      reply.code(200).send({ passenger, ride });
+      if (!changed) return reply;
+
+      announcePassengerUndo(prisma, { passenger, ride, rideStatusBefore, driverUserId: userId }).catch((err) =>
+        request.log.error({ err, rideId, passengerId }, "passenger undo: follow-up failed"),
+      );
+      return reply;
+    },
+  );
 }

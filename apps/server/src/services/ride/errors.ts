@@ -166,6 +166,20 @@ export class PassengerNotFoundError extends Error {
   }
 }
 
+/**
+ * A driver's "Undo" was refused (services/ride/rideService.ts
+ * undoPassengerStep): too late, something later happened to the seat, or the
+ * trip has ended. `code` and `message` go to the app as they are.
+ */
+export class UndoRefusedError extends Error {
+  readonly code: "UNDO_EXPIRED" | "UNDO_TOO_LATE" | "TRIP_ENDED";
+  constructor(code: UndoRefusedError["code"], message: string) {
+    super(message);
+    this.name = "UndoRefusedError";
+    this.code = code;
+  }
+}
+
 /** "Rider didn't show" tapped before the rider has had their 3 minutes. */
 export class NoShowTooEarlyError extends Error {
   readonly availableAt: Date | null;

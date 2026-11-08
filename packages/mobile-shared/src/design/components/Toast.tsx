@@ -23,6 +23,8 @@ export interface ToastOptions {
   tone?: ToastTone;
   icon?: keyof typeof Ionicons.glyphMap;
   action?: { label: string; onPress: () => void };
+  /** How long it stays up; TOAST_MS when not given (e.g. the driver's 10-second "Undo"). */
+  durationMs?: number;
 }
 
 interface UseToastResult {
@@ -73,7 +75,7 @@ export function useToast(): UseToastResult {
       AccessibilityInfo.announceForAccessibility(
         options.subtitle ? `${options.message}. ${options.subtitle}` : options.message,
       );
-      timer.current = setTimeout(hide, TOAST_MS);
+      timer.current = setTimeout(hide, options.durationMs ?? TOAST_MS);
     },
     [progress, hide],
   );

@@ -7,9 +7,11 @@ import {
   classifyClaimFailure,
   refusalMessage,
   settleSeatOverlays,
+  undoneStatus,
   type ClaimOutcome,
   type PassengerStatus,
   type SeatOverlay,
+  type UndoableStep,
 } from "@rida/shared";
 import {
   addPassenger,
@@ -20,6 +22,7 @@ import {
   passengerCancel,
   passengerDropoff,
   passengerPickup,
+  passengerUndo,
   rejectRide,
   serverReason,
   type EligibleRideItem,
@@ -148,6 +151,8 @@ interface Snapshot {
 let state: Snapshot = { rideId: null, seats: {}, adds: {}, retrying: false, refusal: null, claim: null };
 const listeners = new Set<() => void>();
 let chain: Promise<void> = Promise.resolve();
+/** Seat actions queued or on their way (an undo overlay waits for them before it settles). */
+let seatJobs = 0;
 let retryingCount = 0;
 let refusalId = 0;
 /** Bumped per seat on a refusal, so queued follow-ups for it are dropped. */
@@ -216,7 +221,8 @@ function moveSeat(fromId: string, toId: string) {
   if (!o) return;
   const { [fromId]: _moved, ...rest } = state.seats;
   const existing = rest[toId];
-  set({ seats: { ...rest, [toId]: existing && RANK[existing.status] >= RANK[o.status] ? existing : o } });
+  // An undo always wins: it is the driver's latest word on the seat.
+  set({ seats: { ...rest, [toId]: existing && !o.undoing && RANK[existing.status] >= RANK[o.status] ? existing : o } });
 }
 
 function dropSeat(id: string) {
@@ -239,36 +245,74 @@ export function runPassengerAction(rideId: string, passengerId: string, action: 
       },
     },
   });
+  enqueueSeatCall(rideId, passengerId, (realId, timeoutMs) => CALL[action](rideId, realId, { timeoutMs }), FALLBACK[action]);
+}
+
+/**
+ * Undo a pickup or drop-off just made ("Undo" on the trip screen): the seat
+ * goes back on screen at once, and the undo follows the step it undoes in
+ * the queue. If that step was refused, there is nothing to undo and nothing
+ * is sent. A refused undo (too late, the rider was dropped off meanwhile)
+ * puts the server's state back with its reason.
+ */
+export function runUndo(rideId: string, passengerId: string, step: UndoableStep, withArrival = false) {
+  forRide(rideId);
+  set({
+    seats: {
+      ...state.seats,
+      [passengerId]: { status: undoneStatus(step, withArrival), undoing: step === "pickup" ? "PICKED_UP" : "DROPPED_OFF" },
+    },
+  });
+  enqueueSeatCall(
+    rideId,
+    passengerId,
+    (realId, timeoutMs) => passengerUndo(rideId, realId, step, { timeoutMs, withArrival }),
+    "Couldn't undo that.",
+  );
+}
+
+/** One seat request in the queue, sent until answered; a refusal puts the seat back with the reason. */
+function enqueueSeatCall(
+  rideId: string,
+  passengerId: string,
+  call: (realId: string, timeoutMs: number) => Promise<unknown>,
+  fallback: string,
+) {
   const generation = seatGeneration.get(passengerId) ?? 0;
   let retrying = false;
+  seatJobs += 1;
   enqueue(async () => {
-    if ((seatGeneration.get(passengerId) ?? 0) !== generation) return;
-    // A provisional seat whose accept/add was refused: that refusal has
-    // already been shown; just drop the step.
-    const realId = resolveId(passengerId);
-    if (!realId) {
-      dropSeat(passengerId);
-      return;
-    }
-    if (realId !== passengerId) moveSeat(passengerId, realId);
     try {
-      await sendUntilAnswered(
-        (timeoutMs) => CALL[action](rideId, realId, { timeoutMs }),
-        FALLBACK[action],
-        (on) => {
-          if (on !== retrying) setRetrying(on);
-          retrying = on;
-        },
-      );
-    } catch (err) {
-      seatGeneration.set(passengerId, generation + 1);
-      seatGeneration.set(realId, (seatGeneration.get(realId) ?? 0) + 1);
-      dropSeat(passengerId);
-      dropSeat(realId);
-      refuse((err as Error).message);
+      if ((seatGeneration.get(passengerId) ?? 0) !== generation) return;
+      // A provisional seat whose accept/add was refused: that refusal has
+      // already been shown; just drop the step.
+      const realId = resolveId(passengerId);
+      if (!realId) {
+        dropSeat(passengerId);
+        return;
+      }
+      if (realId !== passengerId) moveSeat(passengerId, realId);
+      try {
+        await sendUntilAnswered(
+          (timeoutMs) => call(realId, timeoutMs),
+          fallback,
+          (on) => {
+            if (on !== retrying) setRetrying(on);
+            retrying = on;
+          },
+        );
+      } catch (err) {
+        seatGeneration.set(passengerId, generation + 1);
+        seatGeneration.set(realId, (seatGeneration.get(realId) ?? 0) + 1);
+        dropSeat(passengerId);
+        dropSeat(realId);
+        refuse((err as Error).message);
+      } finally {
+        if (retrying) setRetrying(false);
+        hooks.refresh();
+      }
     } finally {
-      if (retrying) setRetrying(false);
-      hooks.refresh();
+      seatJobs -= 1;
     }
   });
 }
@@ -462,7 +506,9 @@ export function settleWith(rideId: string, passengers: readonly PassengerInCar[]
     set({ claim: { ...state.claim, serverSeen: true } });
   }
   if (state.rideId !== rideId) return;
-  const seats = settleSeatOverlays(state.seats, passengers) as Record<string, SeatOverlay>;
+  // While seat actions are still to go out, an undo isn't settled yet.
+  const busy = new Set(seatJobs > 0 ? Object.keys(state.seats) : []);
+  const seats = settleSeatOverlays(state.seats, passengers, busy) as Record<string, SeatOverlay>;
   let changed = seats !== state.seats;
   const adds = { ...state.adds };
   for (const [key, { passengerId }] of Object.entries(adds)) {
