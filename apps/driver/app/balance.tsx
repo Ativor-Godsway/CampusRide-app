@@ -136,7 +136,8 @@ function PaySection({ data, pay }: { data: DriverBalance; pay: ReturnType<typeof
   }
 
   if (!data.canPay) {
-    return <Notice icon="information-circle-outline" message="Paying in the app isn't available yet. Pay CampusRide in person for now." />;
+    // Paystack isn't set up on the server (canPay false).
+    return <Notice icon="information-circle-outline" message="Pay now isn't working right now. Try again later or call support." />;
   }
   if (!data.quote) {
     return (
