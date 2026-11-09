@@ -20,6 +20,7 @@ const GOOD = {
   MOOLRE_SMS_SENDER_ID: "CampusRide",
   CLOUDINARY_URL: "cloudinary://1234:abcd@campusride",
   SENTRY_DSN: "https://examplePublicKey@o0.ingest.sentry.io/0",
+  PAYSTACK_SECRET_KEY: "sk_live_not_a_real_key_0000000000000000",
 };
 
 const without = (name: keyof typeof GOOD) => {
@@ -104,6 +105,16 @@ describe("checkProductionEnv", () => {
     const { errors, warnings } = checkProductionEnv(without("SENTRY_DSN"));
     expect(errors).toEqual([]);
     expect(warnings).toEqual([expect.stringContaining("SENTRY_DSN is not set")]);
+  });
+
+  it("warns, without refusing, when Paystack has no key or a test key", () => {
+    const missing = checkProductionEnv(without("PAYSTACK_SECRET_KEY"));
+    expect(missing.errors).toEqual([]);
+    expect(missing.warnings).toEqual([expect.stringContaining("PAYSTACK_SECRET_KEY is not set")]);
+    const test = checkProductionEnv({ ...GOOD, PAYSTACK_SECRET_KEY: "sk_test_not_a_real_key" });
+    expect(test.errors).toEqual([]);
+    expect(test.warnings).toEqual([expect.stringContaining("TEST key")]);
+    expect(JSON.stringify(test)).not.toContain("sk_test_not_a_real_key");
   });
 
   it("never repeats a value in what it says", () => {

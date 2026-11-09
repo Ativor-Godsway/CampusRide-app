@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 import type { CashPaymentMethod, Prisma, PrismaClient } from "@prisma/client";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
-import { bodyOptional, empty, id, idParams, integer, object, oneOf, text } from "../http/schemas";
+import { bodyOptional, boolean, empty, id, idParams, integer, object, oneOf, text } from "../http/schemas";
 import { normalizePhone } from "../lib/phone";
 import { RULES } from "../rateLimit/rules";
 import { ACTIVE_DRIVER_STATUSES } from "../services/ride/stateMachine";
@@ -15,7 +15,13 @@ import {
   paymentStatus,
   recordCashPayment,
   reverseCashPayment,
+  waiveAllBalances,
+  waiveBalance,
 } from "../services/admin/cash";
+import { driverLedger } from "../services/commission/ledger";
+import { PAYSTACK_RECORDER } from "../services/commission/payments";
+import { commissionRulesProblem, getCommissionSettings, saveCommissionSettings } from "../services/commission/settings";
+import { config } from "../config";
 import { loadCompletedTrips, loadSessions } from "../services/admin/facts";
 import { acceptance, clippedMs, type OfferRecord } from "../services/admin/metrics";
 import { accraDay, daysIn, periodKey, startOfAccraDay, type Period } from "../services/admin/period";
@@ -43,7 +49,23 @@ const SCHEMAS = {
   suspend: { params: idParams, body: reasonBody },
   cash: periodQuery,
   payments: {
-    querystring: object({ ...period, driverId: id, page: integer(1, 10_000), pageSize: integer(1, 2_000) }),
+    querystring: object({ ...period, driverId: id, kind: oneOf(["PAYMENT", "WAIVER"]), page: integer(1, 10_000), pageSize: integer(1, 2_000) }),
+  },
+  ledger: { params: idParams, querystring: empty },
+  waive: { params: idParams, body: object({ amountPesewas: integer(1, 10_000_000), reason: text(500, { nonEmpty: true }) }, ["amountPesewas", "reason"]) },
+  waiveAll: { body: reasonBody },
+  commissionSettings: { querystring: empty },
+  saveCommissionSettings: {
+    body: object(
+      {
+        debtLimitPesewas: integer(1, 10_000_000),
+        warningPercent: integer(0, 1_000),
+        enforcementEnabled: boolean,
+        feeBps: integer(0, 10_000),
+        feeCapPesewas: { type: ["integer", "null"], minimum: 0, maximum: 10_000_000 },
+      },
+      ["debtLimitPesewas", "warningPercent", "enforcementEnabled", "feeBps", "feeCapPesewas"],
+    ),
   },
   recordPayment: {
     body: object(
@@ -254,6 +276,7 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         balance: {
           owedPesewas: balance?.owedPesewas ?? 0,
           paidPesewas: balance?.paidPesewas ?? 0,
+          waivedPesewas: balance?.waivedPesewas ?? 0,
           balancePesewas: balance?.balancePesewas ?? 0,
           oldestUnpaidAt: owedSince.get(userId)?.toISOString() ?? null,
         },
@@ -372,13 +395,23 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
     const p = periodOr400(request.query, reply);
     if (!p) return;
     const body = await cached(`cash:${periodKey(p)}`, async () => {
-      const [balances, since, trips, paidRows, drivers] = await Promise.all([
+      const [balances, since, trips, creditRows, drivers, paystackFees] = await Promise.all([
         driverBalances(prisma),
         oldestUnpaid(prisma),
         loadCompletedTrips(prisma, p),
-        prisma.driverCashPayment.findMany({ where: { paidAt: { gte: p.from, lt: p.to } }, select: { driverUserId: true, amountPesewas: true, reversesId: true } }),
+        prisma.driverCashPayment.findMany({
+          where: { paidAt: { gte: p.from, lt: p.to } },
+          select: { driverUserId: true, kind: true, method: true, amountPesewas: true, reversesId: true },
+        }),
         prisma.driver.findMany({ select: { id: true, userId: true, plate: true, user: { select: { name: true, isReviewDemo: true } } } }),
+        prisma.driverPaystackPayment.aggregate({
+          where: { status: "SUCCESS", credit: { is: { paidAt: { gte: p.from, lt: p.to } } } },
+          _sum: { feePesewas: true, paystackFeePesewas: true },
+        }),
       ]);
+      // "Paid" counts money received (payments, in person and Paystack); waivers are counted apart.
+      const paidRows = creditRows.filter((r) => r.kind === "PAYMENT");
+      const sum = (rows: typeof creditRows) => rows.reduce((total, r) => total + r.amountPesewas, 0);
       const owedInPeriod = new Map<string, number>();
       for (const t of trips) if (t.driverId) owedInPeriod.set(t.driverId, (owedInPeriod.get(t.driverId) ?? 0) + t.commissionPesewas);
       const paidInPeriod = new Map<string, number>();
@@ -412,8 +445,16 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         oldestUnpaidAt: oldest,
         earnedInPeriodPesewas: trips.reduce((s, t) => s + t.commissionPesewas, 0),
         faresInPeriodPesewas: trips.reduce((s, t) => s + t.farePesewas, 0),
-        paidInPeriodPesewas: paidRows.reduce((s, r) => s + r.amountPesewas, 0),
+        paidInPeriodPesewas: sum(paidRows),
         paymentsInPeriod: paidRows.filter((r) => r.reversesId === null).length,
+        collectedPaystackPesewas: sum(paidRows.filter((r) => r.method === "PAYSTACK")),
+        collectedInPersonPesewas: sum(paidRows.filter((r) => r.method !== "PAYSTACK")),
+        waivedInPeriodPesewas: sum(creditRows.filter((r) => r.kind === "WAIVER")),
+        adjustedInPeriodPesewas: sum(creditRows.filter((r) => r.kind === "ADJUSTMENT")),
+        /** The payment fees drivers added on top (what they paid beyond their balance). */
+        paystackFeesPaidByDriversPesewas: paystackFees._sum.feePesewas ?? 0,
+        /** What Paystack reports it kept. */
+        paystackFeesChargedPesewas: paystackFees._sum.paystackFeePesewas ?? 0,
         drivers: rows,
       };
     });
@@ -423,8 +464,8 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
   /** The payments ledger, newest first: by period (paidAt) and driver. Reversals show what they cancel. */
   app.get("/admin/cash/payments", { ...gate, schema: SCHEMAS.payments }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
-    const q = request.query as { from?: string; to?: string; driverId?: string; page?: number; pageSize?: number };
-    const where: Prisma.DriverCashPaymentWhereInput = {};
+    const q = request.query as { from?: string; to?: string; driverId?: string; kind?: "PAYMENT" | "WAIVER"; page?: number; pageSize?: number };
+    const where: Prisma.DriverCashPaymentWhereInput = q.kind ? { kind: q.kind } : {};
     if (q.from || q.to) {
       const p = periodOr400(q, reply);
       if (!p) return;
@@ -443,7 +484,11 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
         skip: (page - 1) * pageSize,
         take: pageSize,
-        include: { driver: { select: { id: true, name: true } }, reversal: { select: { id: true, createdAt: true, reversalReason: true } } },
+        include: {
+          driver: { select: { id: true, name: true } },
+          reversal: { select: { id: true, createdAt: true, reversalReason: true } },
+          paystackPayment: { select: { reference: true, grossPesewas: true, feePesewas: true, momoNetwork: true, phoneLast4: true } },
+        },
       }),
       prisma.driverCashPayment.count({ where }),
     ]);
@@ -458,7 +503,12 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         note: r.note,
         paidAt: r.paidAt.toISOString(),
         createdAt: r.createdAt.toISOString(),
-        recordedBy: byId.get(r.recordedBy) ?? { id: r.recordedBy, name: "Unknown admin" },
+        kind: r.kind,
+        recordedBy:
+          r.recordedBy === PAYSTACK_RECORDER
+            ? { id: PAYSTACK_RECORDER, name: "Paystack" }
+            : (byId.get(r.recordedBy) ?? { id: r.recordedBy, name: "Unknown admin" }),
+        paystack: r.paystackPayment,
         reversesId: r.reversesId,
         reversalReason: r.reversalReason,
         reversedBy: r.reversal ? { id: r.reversal.id, at: r.reversal.createdAt.toISOString(), reason: r.reversal.reversalReason } : null,
@@ -507,6 +557,60 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
     } catch (err) {
       return sendCashError(reply, err);
     }
+  });
+
+  /** One driver's balance history: each trip's commission, payments, waivers and reversals, newest first. */
+  app.get("/admin/drivers/:id/ledger", { ...gate, schema: SCHEMAS.ledger }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const driver = await findDriver(prisma, (request.params as { id: string }).id);
+    if (!driver) return reply.code(404).send({ error: "Driver not found" });
+    return reply.send({ entries: await driverLedger(prisma, driver.userId, { limit: 500, forAdmin: true }) });
+  });
+
+  /** Forgives some or all of one driver's balance. A reason is required; audit-logged with the admin. */
+  app.post("/admin/drivers/:id/waive", { ...gate, schema: SCHEMAS.waive, config: write }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const body = request.body as { amountPesewas: number; reason: string };
+    const driver = await findDriver(prisma, (request.params as { id: string }).id);
+    if (!driver) return reply.code(404).send({ error: "Driver not found" });
+    try {
+      const waiver = await waiveBalance(prisma, {
+        driverUserId: driver.userId,
+        amountPesewas: body.amountPesewas,
+        reason: body.reason,
+        adminId: request.user!.userId,
+      });
+      return reply.code(201).send({ waiver: { id: waiver.id, amountPesewas: waiver.amountPesewas } });
+    } catch (err) {
+      return sendCashError(reply, err);
+    }
+  });
+
+  /** Waives every driver's whole balance (the commission-free launch). A reason is required; one audit row. */
+  app.post("/admin/cash/waive-all", { ...gate, schema: SCHEMAS.waiveAll, config: write }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    try {
+      const result = await waiveAllBalances(prisma, { reason: (request.body as { reason: string }).reason, adminId: request.user!.userId });
+      return reply.code(201).send(result);
+    } catch (err) {
+      return sendCashError(reply, err);
+    }
+  });
+
+  /** The commission rules: the debt limit, the warning level, enforcement, and Paystack's fee. */
+  app.get("/admin/commission-settings", { ...gate, schema: SCHEMAS.commissionSettings }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    return reply.send(await commissionSettingsBody(prisma));
+  });
+
+  app.put("/admin/commission-settings", { ...gate, schema: SCHEMAS.saveCommissionSettings, config: write }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const rules = request.body as { debtLimitPesewas: number; warningPercent: number; enforcementEnabled: boolean; feeBps: number; feeCapPesewas: number | null };
+    const problem = commissionRulesProblem(rules);
+    if (problem) return reply.code(400).send({ error: problem });
+    await saveCommissionSettings(prisma, rules, request.user!.userId);
+    clearAdminCache();
+    return reply.send(await commissionSettingsBody(prisma));
   });
 
   // ─── Riders ───────────────────────────────────────────────────────────
@@ -741,4 +845,24 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
     clearAdminCache();
     return reply.send({ handled: true });
   });
+}
+
+/** The rules in force, who last saved them, and the env defaults (for the "Check your rate" note). */
+async function commissionSettingsBody(prisma: PrismaClient) {
+  const settings = await getCommissionSettings(prisma);
+  const by = settings.updatedBy ? await prisma.user.findUnique({ where: { id: settings.updatedBy }, select: { id: true, name: true } }) : null;
+  return {
+    settings: {
+      debtLimitPesewas: settings.debtLimitPesewas,
+      warningPercent: settings.warningPercent,
+      enforcementEnabled: settings.enforcementEnabled,
+      feeBps: settings.feeBps,
+      feeCapPesewas: settings.feeCapPesewas,
+      updatedAt: settings.updatedAt?.toISOString() ?? null,
+      updatedBy: by,
+    },
+    envDefaults: { feeBps: config.paystack.feeBps, feeCapPesewas: config.paystack.feeCapPesewas },
+    paystackConfigured: config.paystack.secretKey.length > 0,
+    paystackTestMode: config.paystack.secretKey.startsWith("sk_test_"),
+  };
 }

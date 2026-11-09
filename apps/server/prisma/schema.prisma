@@ -145,15 +145,15 @@ model User {
   earlyAccessAt         DateTime?
 
   driver                 Driver?
-  ridesAsRider           Ride[]                @relation("RiderRides")
-  ridesAsDriver          Ride[]                @relation("DriverRides")
+  ridesAsRider           Ride[]                  @relation("RiderRides")
+  ridesAsDriver          Ride[]                  @relation("DriverRides")
   ridePassengers         RidePassenger[]
   payments               Payment[]
   refreshTokens          RefreshToken[]
-  ratingsGiven           Rating[]              @relation("RatingsGiven")
-  ratingsReceived        Rating[]              @relation("RatingsReceived")
-  driverCommissionLedger CommissionLedger[]    @relation("DriverCommission")
-  rideRejections         RideRejection[]       @relation("DriverRejections")
+  ratingsGiven           Rating[]                @relation("RatingsGiven")
+  ratingsReceived        Rating[]                @relation("RatingsReceived")
+  driverCommissionLedger CommissionLedger[]      @relation("DriverCommission")
+  rideRejections         RideRejection[]         @relation("DriverRejections")
   pushTokens             PushToken[]
   trackingLinks          TrackingLink[]
   accountDeletion        AccountDeletion?
@@ -162,6 +162,7 @@ model User {
   driverLocationPoints   DriverLocationPoint[]
   adminPasskeys          AdminPasskey[]
   cashPayments           DriverCashPayment[]
+  paystackPayments       DriverPaystackPayment[]
   sosEvents              SosEvent[]
 
   /// Sign-ups per day (admin Riders page).
@@ -898,37 +899,138 @@ enum CashPaymentMethod {
   CASH
   MOMO
   OTHER
+  /// Paid by the driver in the app, confirmed by Paystack (DriverPaystackPayment).
+  PAYSTACK
 }
 
-/// Money a driver handed over to CampusRide against the 15% commission they
-/// owe on cash rides (CommissionLedger). Recorded by an admin on the Cash
-/// owed page. A ledger: rows are never edited or deleted. A mistake is put
-/// right by a REVERSAL — a new row with the negative amount, `reversesId`
-/// pointing at the row it cancels, and a reason. A driver's balance is
-/// Σ CommissionLedger.amountPesewas − Σ amountPesewas here
+/// What a DriverCashPayment row takes off a driver's balance.
+enum DriverCreditKind {
+  /// Money received: in person (an admin records it) or through Paystack.
+  PAYMENT
+  /// Forgiven by an admin, with a reason (e.g. the commission-free launch).
+  WAIVER
+  /// A correction an admin makes. Reserved: nothing writes it yet.
+  ADJUSTMENT
+}
+
+/// Everything that takes money off what a driver owes CampusRide for the 15%
+/// commission on cash rides (CommissionLedger): payments (in person, recorded
+/// by an admin, or through Paystack in the driver app), waivers and
+/// adjustments (`kind`). A ledger: rows are never edited or deleted. A mistake
+/// is put right by a REVERSAL — a new row of the same kind with the negative
+/// amount, `reversesId` pointing at the row it cancels, and a reason. A
+/// driver's balance is Σ CommissionLedger.amountPesewas − Σ amountPesewas here
 /// (docs/admin-metrics.md).
 model DriverCashPayment {
-  id             String            @id @default(cuid())
-  driverUserId   String
-  /// Pesewas. Positive for a payment, negative for a reversal.
-  amountPesewas  Int
-  method         CashPaymentMethod
-  note           String?           @db.VarChar(500)
-  /// When the driver paid (chosen by the admin, default: when recorded).
-  paidAt         DateTime
-  /// User.id of the admin who recorded it. Plain column, like AdminAuditLog.actor.
-  recordedBy     String
-  createdAt      DateTime          @default(now())
+  id                String             @id @default(cuid())
+  driverUserId      String
+  kind              DriverCreditKind   @default(PAYMENT)
+  /// Pesewas. Positive for a payment or waiver, negative for a reversal.
+  amountPesewas     Int
+  /// How it was paid; null for a waiver or adjustment (no money moved).
+  method            CashPaymentMethod?
+  /// The admin's note; a waiver's required reason.
+  note              String?            @db.VarChar(500)
+  /// When the driver paid (chosen by the admin, default: when recorded; Paystack's paid time).
+  paidAt            DateTime
+  /// User.id of the admin who recorded it, or "paystack" for a payment Paystack confirmed. Plain column, like AdminAuditLog.actor.
+  recordedBy        String
+  createdAt         DateTime           @default(now())
   /// A reversal: the payment it cancels (at most one reversal per payment).
-  reversesId     String?           @unique
-  reversalReason String?           @db.VarChar(500)
+  reversesId        String?            @unique
+  reversalReason    String?            @db.VarChar(500)
+  /// A Paystack payment: the attempt it settles. Unique, so one reference is never counted twice.
+  paystackPaymentId String?            @unique
 
-  driver   User               @relation(fields: [driverUserId], references: [id], onDelete: Restrict)
-  reverses DriverCashPayment? @relation("CashPaymentReversal", fields: [reversesId], references: [id], onDelete: Restrict)
-  reversal DriverCashPayment? @relation("CashPaymentReversal")
+  driver          User                   @relation(fields: [driverUserId], references: [id], onDelete: Restrict)
+  reverses        DriverCashPayment?     @relation("CashPaymentReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversal        DriverCashPayment?     @relation("CashPaymentReversal")
+  paystackPayment DriverPaystackPayment? @relation(fields: [paystackPaymentId], references: [id], onDelete: Restrict)
 
   @@index([driverUserId, paidAt])
   @@index([paidAt])
+}
+
+enum PaystackPaymentStatus {
+  /// Started; waiting for the driver to approve (or for Paystack to say).
+  PENDING
+  /// Paystack confirmed it (verify endpoint) and the DriverCashPayment row is written.
+  SUCCESS
+  FAILED
+  /// Replaced by a newer attempt before it was paid. Still credited if Paystack later confirms it.
+  ABANDONED
+  /// Paystack says paid, but the amount, currency or reference didn't match: never credited by itself.
+  MISMATCH
+}
+
+enum MomoNetwork {
+  MTN
+  TELECEL
+  AIRTELTIGO
+}
+
+/// One attempt by a driver to pay their whole commission balance through
+/// Paystack (services/commission/payments.ts). The amount owed is locked
+/// when it starts: commission that arrives meanwhile stays owed. Only the
+/// webhook or a status check that Paystack's verify endpoint confirms turns
+/// it SUCCESS and writes the DriverCashPayment row — the app is never
+/// trusted to say "paid". No phone number is kept, only its last 4 digits.
+model DriverPaystackPayment {
+  id                 String                @id @default(cuid())
+  driverUserId       String
+  /// Our reference, sent to Paystack.
+  reference          String                @unique @db.VarChar(100)
+  status             PaystackPaymentStatus @default(PENDING)
+  /// "MOMO": the charge API (approve on the phone). "CHECKOUT": Paystack's hosted page.
+  channel            String                @db.VarChar(20)
+  /// The balance locked at the start: what a success clears.
+  owedPesewas        Int
+  /// The payment fee the driver adds, so CampusRide gets owedPesewas after Paystack's fee.
+  feePesewas         Int
+  /// What the driver pays: owed + fee.
+  grossPesewas       Int
+  /// The fee rate and cap used (basis points; pesewas, null = no cap).
+  feeBps             Int
+  feeCapPesewas      Int?
+  momoNetwork        MomoNetwork?
+  phoneLast4         String?               @db.VarChar(4)
+  /// Paystack's last word on the charge ("pay_offline", "send_otp", "success"…).
+  paystackStatus     String?               @db.VarChar(40)
+  /// What Paystack asks the driver to do, or why it failed. Shown in the app.
+  message            String?               @db.VarChar(300)
+  /// The hosted checkout page (CHECKOUT only).
+  checkoutUrl        String?               @db.VarChar(500)
+  /// The fee Paystack reports it took, once confirmed.
+  paystackFeePesewas Int?
+  confirmedAt        DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  driver User               @relation(fields: [driverUserId], references: [id], onDelete: Restrict)
+  credit DriverCashPayment?
+
+  @@index([driverUserId, createdAt])
+  @@index([status, createdAt])
+}
+
+/// Commission rules (services/commission/settings.ts): at most one row, id
+/// "commission", written when an admin first saves the rules on the admin
+/// site (Settings). No row means the defaults: limit GH₵100, warning at 80%,
+/// enforcement off, and the Paystack fee from PAYSTACK_FEE_PERCENT /
+/// PAYSTACK_FEE_CAP_GHS (0 and no cap when unset).
+model CommissionSetting {
+  id                 String   @id @default("commission")
+  debtLimitPesewas   Int      @default(10000)
+  warningPercent     Int      @default(80)
+  /// Off: commission still piles up, but no driver is ever refused going online.
+  enforcementEnabled Boolean  @default(false)
+  /// Paystack's fee in basis points (195 = 1.95%).
+  feeBps             Int      @default(0)
+  /// Paystack's fee cap in pesewas; null = no cap.
+  feeCapPesewas      Int?
+  updatedAt          DateTime @updatedAt
+  /// User.id of the admin who last changed it.
+  updatedBy          String?
 }
 
 /// One SOS a rider raised (services/safety/sos.ts): who was told, and

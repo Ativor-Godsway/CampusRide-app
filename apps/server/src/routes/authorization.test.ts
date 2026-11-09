@@ -65,6 +65,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /demo/otp/send": "public",
   "POST /demo/otp/verify": "public",
   "POST /webhooks/moolre": "public",
+  "POST /webhooks/paystack": "public",
   "POST /ussd/callback": "public",
   "GET /track/:token": "public",
 
@@ -89,6 +90,10 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "PATCH /driver/zone": "self",
   "GET /driver/rides/active": "self",
   "GET /driver/rides/history": "self",
+  "GET /driver/balance": "self",
+  "POST /driver/balance/payments": "self",
+  "GET /driver/balance/payments/:reference": "owner",
+  "POST /driver/balance/payments/:reference/otp": "owner",
   "GET /driver/rides/eligible": "self",
   "GET /rides/mine": "self",
   "GET /rides/active": "self",
@@ -169,6 +174,11 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /admin/cash/payments": "admin",
   "POST /admin/cash/payments": "admin",
   "POST /admin/cash/payments/:id/reverse": "admin",
+  "POST /admin/cash/waive-all": "admin",
+  "GET /admin/drivers/:id/ledger": "admin",
+  "POST /admin/drivers/:id/waive": "admin",
+  "GET /admin/commission-settings": "admin",
+  "PUT /admin/commission-settings": "admin",
   "GET /admin/riders": "admin",
   "GET /admin/riders/:id": "admin",
   "GET /admin/safety": "admin",
@@ -357,6 +367,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await prisma.driverPaystackPayment.deleteMany({ where: { driverUserId: { in: userIds } } });
   await prisma.ride.deleteMany({
     where: { OR: [{ riderId: { in: userIds } }, { driverId: { in: userIds } }] },
   });
@@ -395,7 +406,8 @@ function urlFor(route: string): { method: string; url: string } {
   const url = pattern
     .replace(":passengerId", w.car.seatIds[w.riderA.user.id]!)
     .replace(":id", pattern.startsWith("/admin/drivers") ? "some-driver" : w.car.id)
-    .replace(":token", "0".repeat(32));
+    .replace(":token", "0".repeat(32))
+    .replace(":reference", "CRC-not-a-payment");
   return { method, url };
 }
 
@@ -514,7 +526,37 @@ function cases(): OwnershipCase[] {
     unchanged: async () => expect(await seatStatus(seatA)).toBe("WAITING"),
   });
 
+  // A commission payment of D1's: D2 can't read it or send its code.
+  const d1Payment = async () => {
+    const reference = `CRC-auth-${driver1.user.id}`;
+    await prisma.driverPaystackPayment.upsert({
+      where: { reference },
+      create: { driverUserId: driver1.user.id, reference, channel: "MOMO", owedPesewas: 1_000, feePesewas: 0, grossPesewas: 1_000, feeBps: 0, paystackStatus: "send_otp" },
+      update: {},
+    });
+    return reference;
+  };
+  const paymentNotFound = { error: "Payment not found", code: "PAYMENT_NOT_FOUND" };
+  const paymentUnchanged = async () =>
+    expect((await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { reference: `CRC-auth-${driver1.user.id}` } })).status).toBe("PENDING");
+
   return [
+    {
+      route: "GET /driver/balance/payments/:reference",
+      name: "another driver can't read D1's commission payment",
+      run: async () => as(driver2, "GET", `/driver/balance/payments/${await d1Payment()}`),
+      expectStatus: 404,
+      expectBody: paymentNotFound,
+      unchanged: paymentUnchanged,
+    },
+    {
+      route: "POST /driver/balance/payments/:reference/otp",
+      name: "another driver can't send the code for D1's commission payment",
+      run: async () => as(driver2, "POST", `/driver/balance/payments/${await d1Payment()}/otp`, { otp: "123456" }),
+      expectStatus: 404,
+      expectBody: paymentNotFound,
+      unchanged: paymentUnchanged,
+    },
     // Rider vs rider
     {
       route: "GET /rides/:id",

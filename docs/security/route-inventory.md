@@ -57,6 +57,7 @@ Last reviewed: 2026-10-16 (pre-launch hardening, Stages 1–5).
 | `POST /demo/otp/send` | No | — | Showcase demo only, separate table from real logins. | its own (per phone 1 / min and 5 / day, per IP 10 / hour, all phones 300 / day); IP backstop |
 | `POST /demo/otp/verify` | No | — | As above. 5 wrong tries burns the code. | IP backstop |
 | `POST /webhooks/moolre` | No | — | **Not registered in production** (payments are off). When on, Moolre's shared secret is the credential, compared in constant time. | IP backstop |
+| `POST /webhooks/paystack` | No | — | Paystack's payment events. The credential is the `x-paystack-signature` header: HMAC-SHA512 of the raw body with `PAYSTACK_SECRET_KEY`, compared in constant time; anything else gets 401. Even then nothing is trusted from the body but the reference: a payment is credited only after Paystack's verify endpoint confirms it (amount, GHS, reference), once per reference. | IP backstop |
 | `POST /ussd/callback` | No | — | **Not registered in production** (`ENABLE_USSD` is off). Has no authentication of its own; must not be switched on until Moolre's gateway IPs or a secret are checked. | per subscriber: 30 / min; IP backstop |
 | `GET /track/:token` | No | — | The 32-character random token is the credential. Shows one rider's own SOS trip: their name and stops (place names only), driver name, vehicle and plate, status. Never coordinates, fares, the driver's number or other riders. Works while the ride is going on and for `TRACKING_LINK_TTL_HOURS` (default 24) after it ends, then answers 410. | per link: 120 / 15 min (the page refreshes every 15 s); IP backstop |
 
@@ -94,6 +95,10 @@ always the one in the token.
 | `PATCH /driver/zone` | Yes | DRIVER | Own current zone. | account default |
 | `GET /driver/rides/active` | Yes | DRIVER | Own current trip. Riders' phone numbers only for riders still to be picked up or in the car. | account default |
 | `GET /driver/rides/history` | Yes | DRIVER | Own completed trips; place names only. | account default |
+| `GET /driver/balance` | Yes | DRIVER | Own commission balance, the rules (limit, warning, enforcement, fee), the payment quote, a payment still going, and the history. No admin notes. | account default |
+| `POST /driver/balance/payments` | Yes | DRIVER | Starts paying own whole balance through Paystack (MoMo charge, or the hosted checkout page). The amount is locked on the server; only the last 4 digits of the number are kept. | account default; plus 5 / 15 min |
+| `GET /driver/balance/payments/:reference` | Yes | DRIVER | One of own commission payments; asks Paystack's verify endpoint while it's unfinished. Another driver's reference is "not found". | account default |
+| `POST /driver/balance/payments/:reference/otp` | Yes | DRIVER | The code a network asked for, for own payment. Another driver's reference is "not found". | account default; plus 5 / 15 min |
 | `GET /driver/rides/eligible` | Yes | DRIVER | Requests offered to this driver (online, approved, nearby zone, not declined). First names and place names, never pins. | account default |
 | `GET /rides/mine` | Yes | RIDER | Own bookings only. | account default |
 | `GET /rides/active` | Yes | RIDER | Own current ride (as booker or passenger), own stops only. | account default |
@@ -193,6 +198,11 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/cash/payments` | Yes | ADMIN | The payments ledger by period and driver, with reversals. Paginated. | account default |
 | `POST /admin/cash/payments` | Yes | ADMIN | Records cash a driver handed over (amount, method, note, date). Never edited or deleted. Audit-logged (`cash.payment.record`). | account default; plus 60 changes / 15 min |
 | `POST /admin/cash/payments/:id/reverse` | Yes | ADMIN | Reverses a payment with a negative entry and a required reason; once per payment. Audit-logged (`cash.payment.reverse`). | account default; plus 60 changes / 15 min |
+| `POST /admin/cash/waive-all` | Yes | ADMIN | Waives every driver's whole balance (a WAIVER row each) with a required reason. Audit-logged (`cash.waive.all`). | account default; plus 60 changes / 15 min |
+| `GET /admin/drivers/:id/ledger` | Yes | ADMIN | One driver's balance history: commissions, payments, waivers, reversals, with notes and who recorded each. | account default |
+| `POST /admin/drivers/:id/waive` | Yes | ADMIN | Waives some or all of one driver's balance (never more than owed) with a required reason. Audit-logged (`cash.waive`). | account default; plus 60 changes / 15 min |
+| `GET /admin/commission-settings` | Yes | ADMIN | The commission rules: debt limit, warning level, enforcement, Paystack fee and cap; whether a Paystack key is set (never the key). | account default |
+| `PUT /admin/commission-settings` | Yes | ADMIN | Saves the commission rules (bounds checked). Audit-logged (`commission.settings`, before → after). | account default; plus 60 changes / 15 min |
 | `GET /admin/riders` | Yes | ADMIN | Rider totals for a period, sign-ups per day, and a page of riders (phones masked; search by phone or name). | account default |
 | `GET /admin/riders/:id` | Yes | ADMIN | One rider in full, incl. their phone number: rides, ratings given, SOS. | account default |
 | `GET /admin/safety` | Yes | ADMIN | Open SOS (any date) and the period's handled ones, SOS from before records, 1–2 star ratings. Cached 60 s per period. | account default |

@@ -37,6 +37,7 @@ import { driverActiveRideQueryKey } from "./activeTrip";
 import { useDriverLocation, useLocationDemand } from "./location";
 import { zonesQueryKey } from "./zones";
 import { eligibleRidesQueryKey } from "./requests";
+import { driverBalanceQueryKey } from "./balance";
 import { currentLocationAccessPlan, requestDriverLocationAccess } from "./backgroundLocation";
 import { useLocationDisclosure } from "../components/LocationDisclosure";
 
@@ -71,7 +72,20 @@ interface DriverPresence {
    * with an "Open Settings" button), or null. Cleared by the next try.
    */
   locationProblem: LocationProblem | null;
+  /**
+   * The server refused going online because the driver owes the commission
+   * limit or more (enforcement on). Home shows it with "Pay now". Cleared by
+   * the next try, or by `clearCommissionBlock`.
+   */
+  commissionBlock: CommissionBlock | null;
+  clearCommissionBlock: () => void;
   toggle: () => void;
+}
+
+export interface CommissionBlock {
+  owedPesewas: number;
+  limitPesewas: number;
+  message: string;
 }
 
 const PresenceContext = createContext<DriverPresence | null>(null);
@@ -95,6 +109,17 @@ function httpStatus(err: unknown): number | undefined {
   return (err as { response?: { status?: number } } | null)?.response?.status;
 }
 
+/** The server refused to put the driver online: they owe the commission limit or more. */
+function refusedForCommission(err: unknown): CommissionBlock | null {
+  const data = (err as { response?: { data?: { code?: unknown; error?: unknown; owedPesewas?: unknown; limitPesewas?: unknown } } } | null)?.response?.data;
+  if (data?.code !== "COMMISSION_LIMIT") return null;
+  return {
+    owedPesewas: typeof data.owedPesewas === "number" ? data.owedPesewas : 0,
+    limitPesewas: typeof data.limitPesewas === "number" ? data.limitPesewas : 0,
+    message: typeof data.error === "string" ? data.error : "Pay what you owe CampusRide to go online again.",
+  };
+}
+
 /** The server refused to put the driver online: their position is off campus. */
 function refusedOffCampus(err: unknown): boolean {
   return (err as { response?: { data?: { code?: unknown } } } | null)?.response?.data?.code === "OUTSIDE_SERVICE_AREA";
@@ -112,6 +137,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   const [confirmed, setConfirmed] = useState(true);
   const [waking, setWaking] = useState(false);
   const [locationProblem, setLocationProblem] = useState<LocationProblem | null>(null);
+  const [commissionBlock, setCommissionBlock] = useState<CommissionBlock | null>(null);
   const location = useDriverLocation();
   const askDisclosure = useLocationDisclosure();
 
@@ -220,6 +246,12 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
               Alert.alert("Outside campus", DRIVER_OUTSIDE_AREA_MESSAGE);
               return;
             }
+            const owing = refusedForCommission(err);
+            if (owing) {
+              setCommissionBlock(owing);
+              void queryClient.invalidateQueries({ queryKey: driverBalanceQueryKey });
+              return;
+            }
             Alert.alert(
               next ? "Couldn't go online" : "Couldn't go offline",
               transient
@@ -241,6 +273,7 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
     applyOnline(next);
     setConfirmed(false);
     setLocationProblem(null);
+    setCommissionBlock(null);
 
     if (!next) {
       sendAvailability(seq, false, undefined);
@@ -366,8 +399,17 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   const outsideServiceArea = Boolean(isDriver && isOnline && zones && isOutsideServiceArea(location.position, zones));
 
   const value = useMemo(
-    () => ({ isOnline: isDriver && isOnline, waking, outsideServiceArea, position, locationProblem, toggle }),
-    [isDriver, isOnline, waking, outsideServiceArea, position, locationProblem, toggle],
+    () => ({
+      isOnline: isDriver && isOnline,
+      waking,
+      outsideServiceArea,
+      position,
+      locationProblem,
+      commissionBlock,
+      clearCommissionBlock: () => setCommissionBlock(null),
+      toggle,
+    }),
+    [isDriver, isOnline, waking, outsideServiceArea, position, locationProblem, commissionBlock, toggle],
   );
 
   return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>;

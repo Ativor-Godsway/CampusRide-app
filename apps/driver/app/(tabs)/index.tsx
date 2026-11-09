@@ -74,6 +74,8 @@ import { useZones } from "../../lib/zones";
 import { RequestCard, type HomeRequest } from "../../components/home/RequestCard";
 import { OfferTakeover } from "../../components/offers/OfferTakeover";
 import { useOfferQueue } from "../../lib/offers";
+import { useDriverBalance } from "../../lib/balance";
+import { CommissionBlockModal } from "../../components/balance/CommissionBlockModal";
 
 const FILTERS: { value: RequestTypeFilter; label: string }[] = [
   { value: "ALL", label: "All" },
@@ -119,7 +121,7 @@ export default function DriverHomeScreen() {
   const { isLoading: authLoading, user } = useAuth();
   // Before the public launch: a small reminder (drivers still go online, for early-access riders).
   const launch = useLaunchView();
-  const { isOnline, waking, outsideServiceArea, position, locationProblem, toggle } =
+  const { isOnline, waking, outsideServiceArea, position, locationProblem, commissionBlock, clearCommissionBlock, toggle } =
     useDriverPresence();
   const location = useDriverLocation();
   const { data: trip, isLoading: tripLoading } = useDriverActiveTrip();
@@ -168,6 +170,14 @@ export default function DriverHomeScreen() {
     if (focused) void refetchHistory();
   }, [focused, refetchHistory]);
   const today = history.data ? todayEarnings(history.data.rides) : null;
+
+  // ─── Commission owed ────────────────────────────────────────────────────
+  // Near the limit (enforcement on): "You owe GH₵85. Pay before GH₵100…".
+  const balance = useDriverBalance();
+  const { refetch: refetchBalance } = balance;
+  useEffect(() => {
+    if (focused) void refetchBalance();
+  }, [focused, refetchBalance]);
 
   // ─── Requests when free ─────────────────────────────────────────────────
   const free = isOnline && !trip;
@@ -406,6 +416,13 @@ export default function DriverHomeScreen() {
 
         {launch.kind === "countdown" ? <LaunchBanner parts={launch.parts} /> : null}
 
+        {!trip && balance.data?.warning ? (
+          <View style={styles.problem}>
+            <Notice tone={balance.data.blocked ? "error" : "warning"} icon="wallet-outline" message={balance.data.warning} />
+            <Button label="Pay now" variant="secondary" size="md" onPress={() => router.push("/balance")} />
+          </View>
+        ) : null}
+
         {!isOnline && locationProblem ? (
           <View style={styles.problem}>
             <Notice
@@ -545,6 +562,14 @@ export default function DriverHomeScreen() {
       ) : null}
 
       {toast}
+      <CommissionBlockModal
+        block={commissionBlock}
+        onClose={clearCommissionBlock}
+        onPay={() => {
+          clearCommissionBlock();
+          router.push("/balance");
+        }}
+      />
     </View>
   );
 }

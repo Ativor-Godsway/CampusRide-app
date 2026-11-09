@@ -39,7 +39,7 @@ function Badge({ item, summary }: { item: NavItem; summary: Summary | null }) {
  * The admin site's frame. Wide screens (≥ 900 px): the left sidebar with
  * every page, badges (open SOS, cash still owed, drivers to approve) and the
  * signed-in admin. Narrow screens (an iPhone): a bottom tab bar (Overview,
- * Live map, Rides, Cash owed, More), safe areas respected.
+ * Live map, Rides, Finances, More), safe areas respected.
  */
 export function Shell({ children }: { children: ReactNode }) {
   const token = useToken();
@@ -104,7 +104,7 @@ export function Shell({ children }: { children: ReactNode }) {
                 <Icon name={item.icon} size={22} />
                 {item.badge ? <Badge item={item} summary={summary} /> : null}
               </span>
-              <span>{item.label === "Cash owed" ? "Cash" : item.label}</span>
+              <span>{item.label}</span>
             </Link>
           ))}
           <Link to="/more" className={moreActive ? "tab active" : "tab"} aria-current={path === "/more" ? "page" : undefined}>

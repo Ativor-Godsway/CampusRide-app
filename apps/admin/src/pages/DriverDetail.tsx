@@ -19,6 +19,7 @@ import { usePagePeriod } from "../lib/usePeriod";
 import { usePolled } from "../lib/usePolled";
 import { useShell } from "../shell/ShellContext";
 import { rideColumns } from "./rideColumns";
+import { DriverBalancePanel } from "./DriverBalance";
 
 function Trail({ driverId, days }: { driverId: string; days: string[] }) {
   const token = useToken();
@@ -177,7 +178,7 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
 
             <div className="button-row">
               <Link to={`/cash?driverId=${x.driver.userId}`} className="tonal-button">
-                Cash owed and payments
+                Payments on Finances
               </Link>
               {x.driver.suspendedAt ? (
                 <button type="button" className="tonal-button" onClick={() => setConfirm("unsuspend")}>
@@ -189,6 +190,15 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
                 </button>
               ) : null}
             </div>
+
+            <DriverBalancePanel
+              driver={{ userId: x.driver.userId, name: x.driver.name }}
+              balance={x.balance}
+              onChanged={() => {
+                detail.refresh();
+                refreshSummary();
+              }}
+            />
 
             <h3>Recent trips</h3>
             <DataTable columns={rideColumns({ compact: "driver" })} rows={x.recentTrips} rowKey={(r) => r.id} onRowClick={(r) => navigate(withParams(path, search, { driver: null, ride: r.id }))} rowLabel={(r) => `Open ride by ${r.rider.name}`} empty="No trips yet." pageSize={10} />

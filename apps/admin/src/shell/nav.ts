@@ -17,7 +17,7 @@ export const NAV: NavItem[] = [
   { path: "/supply", label: "Supply & demand", icon: "chart" },
   { path: "/cancellations", label: "Cancellations", icon: "cancel" },
   { path: "/drivers", label: "Drivers", icon: "driver", badge: "approvals" },
-  { path: "/cash", label: "Cash owed", icon: "cash", badge: "cash", tab: true },
+  { path: "/cash", label: "Finances", icon: "cash", badge: "cash", tab: true },
   { path: "/riders", label: "Riders", icon: "riders" },
   { path: "/places", label: "Places", icon: "pin" },
   { path: "/safety", label: "Safety", icon: "shield", badge: "safety" },

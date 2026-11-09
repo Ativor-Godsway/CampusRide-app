@@ -190,6 +190,12 @@ export function checkProductionEnv(env: Env): EnvCheck {
       !blank(env.CLOUDINARY_API_SECRET));
   if (!cloudinary)
     warnings.push("Cloudinary is not configured: driver photo uploads will answer 503");
+  if (blank(env.PAYSTACK_SECRET_KEY))
+    warnings.push(
+      "PAYSTACK_SECRET_KEY is not set: drivers can't pay their commission in the app (Pay now answers 503)",
+    );
+  else if (env.PAYSTACK_SECRET_KEY!.trim().startsWith("sk_test_"))
+    warnings.push("PAYSTACK_SECRET_KEY is a Paystack TEST key: no real money is collected");
   if (blank(env.SENTRY_DSN))
     warnings.push(
       "SENTRY_DSN is not set: errors and alerts are only logged, not sent to Sentry (DEPLOY.md, Monitoring)",

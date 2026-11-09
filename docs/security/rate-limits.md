@@ -79,12 +79,13 @@ site's tighter limits can't be dodged by logging in through the rider app.
 | Account deletion attempts | 5 / hour | `RATE_LIMIT_ACCOUNT_DELETE_HOUR` |
 | Route drawings (each a campus route on our server) | 120 / 15 min | `RATE_LIMIT_ROUTE_LEGS` |
 | Payment attempts (each calls Moolre) | 15 / 15 min | `RATE_LIMIT_PAYMENT_INIT` |
+| Commission payments started, and codes sent for them (each calls Paystack) | 5 / 15 min | `RATE_LIMIT_COMMISSION_PAY_15M` |
 | Live-ride subscriptions (socket) | 60 / minute | `RATE_LIMIT_SOCKET_SUBSCRIBE_MINUTE` |
 | Driver GPS (socket) | 1 per 2 s per driver; extras dropped silently, never a disconnect | `RATE_LIMIT_DRIVER_LOCATION_SECONDS` |
 | Driver position without a trip (socket, for riders' Home map cars) | 1 per 2 s per driver, counted apart from trip GPS; extras dropped silently | `RATE_LIMIT_DRIVER_LOCATION_SECONDS` |
 | Home map cars (`GET /rides/nearby-cars`) | 1 / 5 s; counts against this one only, not the default above (the app asks by itself every 10 s) | `RATE_LIMIT_NEARBY_CARS_5S` |
 | Admin dashboard: big exports (a CSV of more than 200 rows) | 20 / 15 min per admin | `RATE_LIMIT_ADMIN_EXPORT_15M` |
-| Admin dashboard: changes (cash payments and reversals, suspending drivers, marking an SOS handled) | 60 / 15 min per admin | `RATE_LIMIT_ADMIN_WRITE_15M` |
+| Admin dashboard: changes (cash payments and reversals, waivers, commission rules, suspending drivers, marking an SOS handled) | 60 / 15 min per admin | `RATE_LIMIT_ADMIN_WRITE_15M` |
 | Admin dashboard: a driver's location trail viewed (one driver, one day each) | 60 / hour per admin | `RATE_LIMIT_ADMIN_TRAIL_HOUR` |
 
 The busiest screen (a driver on a trip) makes about 30 requests a minute, so

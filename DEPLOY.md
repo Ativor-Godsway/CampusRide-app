@@ -228,6 +228,15 @@ Routes: worked out on the server by the campus route engine
 `RATE_LIMIT_ROUTE_LEGS`. The old `OSRM_BASE_URL` and `ROUTING_*` variables
 are no longer read: delete them from Render if they were ever set.
 
+Driver commission payments (Paystack, [docs/admin-metrics.md](docs/admin-metrics.md#cash-owed-finances)):
+`PAYSTACK_SECRET_KEY` (a test key `sk_test_…` first, the live `sk_live_…`
+once tested; unset = drivers can't pay in the app, and the server says so at
+start-up). `PAYSTACK_FEE_PERCENT` (e.g. `1.95`) and `PAYSTACK_FEE_CAP_GHS`
+(e.g. `10`, optional) are only the starting fee until an admin saves the
+commission rules in Settings. No public key is needed. The webhook URL to
+paste in the Paystack dashboard (Settings → API Keys & Webhooks) is
+`https://api.campusride.app/webhooks/paystack`. Moolre stays for SMS only.
+
 Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each
 offer, so changing it needs no app release.

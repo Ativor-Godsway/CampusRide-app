@@ -178,6 +178,13 @@ function buildRules(c: typeof config.rateLimit) {
       c.paymentInitPer15Min,
       15 * MINUTE,
     ),
+    commissionPay: rule(
+      "commission.pay",
+      "Commission payments started, 15 minutes",
+      "user",
+      c.commissionPayPer15Min,
+      15 * MINUTE,
+    ),
     socketSubscribe: rule(
       "socket.subscribe",
       "Live ride subscriptions, per minute",

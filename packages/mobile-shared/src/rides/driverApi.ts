@@ -1,4 +1,17 @@
-import type { LatLng, PassengerStatus, Ride, RidePinFields, RideSource, RideType, UndoableStep, Zone } from "@rida/shared";
+import type {
+  BalanceEntryKind,
+  CommissionPaymentStatus,
+  LatLng,
+  MomoNetwork,
+  PassengerStatus,
+  PaystackQuote,
+  Ride,
+  RidePinFields,
+  RideSource,
+  RideType,
+  UndoableStep,
+  Zone,
+} from "@rida/shared";
 import { asArray, readList } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
@@ -602,4 +615,101 @@ export async function getAddRiderPreview(
     },
   });
   return { ...res.data, stops: readList<AddRiderPreviewStop>(res.data, "stops") };
+}
+
+// ─── Commission balance (GET /driver/balance) and paying it ────────────────
+
+/** One row of the driver's balance history: + adds to what they owe, − takes it off. */
+export interface DriverBalanceEntry {
+  id: string;
+  kind: BalanceEntryKind;
+  effectPesewas: number;
+  at: string;
+  rideId: string | null;
+  /** "Night Market → Pent Hostel", for a trip's commission. */
+  route: string | null;
+  /** How a payment was made: "CASH", "MOMO", "OTHER" (in person) or "PAYSTACK" (in the app). */
+  method: string | null;
+  reference: string | null;
+  momoNetwork: string | null;
+  phoneLast4: string | null;
+  grossPesewas: number | null;
+  feePesewas: number | null;
+  isReversal: boolean;
+}
+
+/** A payment through Paystack, as the server sees it now. */
+export interface CommissionPayment {
+  reference: string;
+  status: CommissionPaymentStatus;
+  channel: "MOMO" | "CHECKOUT";
+  owedPesewas: number;
+  feePesewas: number;
+  grossPesewas: number;
+  momoNetwork: MomoNetwork | null;
+  phoneLast4: string | null;
+  /** The network asked for a code: send it with submitCommissionOtp. */
+  needsOtp: boolean;
+  /** What to tell the driver: approve on the phone, enter the code, or why it failed. */
+  message: string | null;
+  /** Paystack's page to open in the browser, while it can still be paid. */
+  checkoutUrl: string | null;
+  createdAt: string;
+  confirmedAt: string | null;
+}
+
+export interface DriverBalance {
+  /** What the driver owes now (commissions − payments − waivers). Below 0: paid ahead. */
+  balancePesewas: number;
+  commissionPesewas: number;
+  paidPesewas: number;
+  waivedPesewas: number;
+  rules: {
+    debtLimitPesewas: number;
+    warningPercent: number;
+    warningPesewas: number;
+    enforcementEnabled: boolean;
+    feeBps: number;
+    feeCapPesewas: number | null;
+  };
+  /** Going online is refused until they pay. */
+  blocked: boolean;
+  /** "You owe GH₵85. Pay before GH₵100 to keep driving.", or null. */
+  warning: string | null;
+  /** False until the server has a Paystack key. */
+  canPay: boolean;
+  minPaymentPesewas: number;
+  /** What paying now would cost (null when too little is owed). */
+  quote: PaystackQuote | null;
+  pendingPayment: CommissionPayment | null;
+  history: DriverBalanceEntry[];
+}
+
+export async function getDriverBalance(): Promise<DriverBalance> {
+  const res = await api.get<DriverBalance>("/driver/balance");
+  return res.data;
+}
+
+/** Starts paying the whole balance: MoMo (the driver approves on their phone) or Paystack's checkout page. */
+export async function startCommissionPayment(
+  input: { channel: "MOMO"; phone: string; network: MomoNetwork } | { channel: "CHECKOUT" },
+): Promise<CommissionPayment> {
+  const res = await api.post<{ payment: CommissionPayment }>("/driver/balance/payments", input, { timeout: 45_000 });
+  return res.data.payment;
+}
+
+/** The payment as it stands; the server asks Paystack while it's unfinished. */
+export async function getCommissionPayment(reference: string): Promise<CommissionPayment> {
+  const res = await api.get<{ payment: CommissionPayment }>(`/driver/balance/payments/${encodeURIComponent(reference)}`);
+  return res.data.payment;
+}
+
+/** The code a network asked for (Telecel's voucher, an OTP). */
+export async function submitCommissionOtp(reference: string, otp: string): Promise<CommissionPayment> {
+  const res = await api.post<{ payment: CommissionPayment }>(
+    `/driver/balance/payments/${encodeURIComponent(reference)}/otp`,
+    { otp },
+    { timeout: 45_000 },
+  );
+  return res.data.payment;
 }
