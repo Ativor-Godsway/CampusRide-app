@@ -371,6 +371,8 @@ export const SCENARIOS: Scenario[] = [
       check(ledger?.amountPesewas === commission, `cash-owed ledger should be ${commission}, got ${ledger?.amountPesewas}`);
       check(ledger.driverUserId === d.id, "owed by Driver A");
       for (const r of [r1!, r2!, r3!]) {
+        // Sent just after the drop-off's reply (and the ledger write).
+        await r.hear(RIDE_EVENTS.COMPLETED, (p) => p.rideId === carId, 0);
         const mine = r.fareSummaries().filter((s) => s.rideId === carId);
         check(mine.length >= 1 && mine.every((s) => s.yourFarePesewas === fare), `${r.name} should be told their own fare (${fare})`);
       }

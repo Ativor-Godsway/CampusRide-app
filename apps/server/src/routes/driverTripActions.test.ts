@@ -16,7 +16,8 @@ import { registerDriverRoutes } from "./driver";
 import { signAccessToken } from "../services/auth/tokens";
 import { cleanupDriver, createTestDriver, createTestRide, createTestUser } from "../services/ride/testFixtures";
 import * as rideSocket from "../realtime/rideSocket";
-import { haversineDistanceMeters } from "@rida/shared";
+import { DISPATCH_WINDOW_MS, haversineDistanceMeters } from "@rida/shared";
+import { config } from "../config";
 
 vi.mock("../services/sms/sendSms", () => ({ sendSms: vi.fn().mockResolvedValue({ success: true }) }));
 
@@ -277,7 +278,9 @@ describe("add-rider route preview", () => {
     expect(body.dropoffIndex).toBeGreaterThan(body.pickupIndex);
     expect(typeof body.proposedPolyline).toBe("string");
     expect(body.proposedPolyline.length).toBeGreaterThan(body.currentPolyline.length);
-    expect(Date.parse(body.expiresAt) - request.broadcastStartedAt!.getTime()).toBe(90_000);
+    expect(Date.parse(body.expiresAt) - request.broadcastStartedAt!.getTime()).toBe(DISPATCH_WINDOW_MS);
+    // The trip screen's pop-up counts down for the same setting as Home's.
+    expect(body.offerSeconds).toBe(config.driverOfferSeconds);
     // Read-only: nothing changed.
     expect((await prisma.ride.findUniqueOrThrow({ where: { id: request.id } })).status).toBe("REQUESTED");
   });

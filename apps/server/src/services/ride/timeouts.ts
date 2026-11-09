@@ -24,7 +24,7 @@ interface RideTimeoutFields {
 }
 
 /**
- * True if a REQUESTED ride has been broadcast for >= 90s with no claim and
+ * True if a REQUESTED ride has been broadcast for >= DISPATCH_WINDOW_MS (2 min) with no claim and
  * should move to AWAITING_RIDER_DECISION. Pure — driven by an injected `now`
  * so it's testable without wall-clock delays.
  */
@@ -80,7 +80,7 @@ interface TimeoutLogger {
 /**
  * Finds rides needing a timeout-driven transition as of `now` and applies
  * them:
- * - REQUESTED rides broadcast >= 90s with no claim -> AWAITING_RIDER_DECISION
+ * - REQUESTED rides broadcast >= 2 min with no claim -> AWAITING_RIDER_DECISION
  * - AWAITING_RIDER_DECISION rides idle >= 90s -> CANCELLED (NO_DRIVERS_AVAILABLE)
  * - IN_PROGRESS rides under way >= RIDE_AUTO_COMPLETE_HOURS (3) -> COMPLETED
  *   (a driver who never tapped "complete": ./staleRides.ts)

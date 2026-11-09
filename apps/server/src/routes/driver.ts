@@ -693,7 +693,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   /**
    * Phase 4: the driver explicitly declines a broadcast ride.
    *
-   * Before this, a driver could only ignore a request and let the 90s
+   * Before this, a driver could only ignore a request and let the dispatch
    * dispatch window expire — indistinguishable from a driver who never saw
    * it, and the request kept occupying their list until it timed out. A
    * rejection removes it from THIS driver's eligible list immediately and
@@ -816,7 +816,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   /**
    * Returns the list of REQUESTED rides this driver is currently eligible to claim.
    * Eligible = ride's pickupZone is in the driver's zone or an adjacent zone, ride is
-   * unclaimed, and the broadcast window (90 s) hasn't expired. Each ride includes a
+   * unclaimed, and the broadcast window (2 min) hasn't expired. Each ride includes a
    * `bestFit` flag derived from the existing Phase-2e bestFit scoring logic.
    *
    * Shared-ride dispatch rules (2026-11, services/ride/requestFit): a request
@@ -864,7 +864,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const [allAdjacencies, zoneMap] = await Promise.all([getZoneAdjacency(prisma), getZoneMap(prisma)]);
 
     // Unclaimed requests picked up in this driver's zone or one next to it,
-    // still within their 90-second window, minus the ones THIS driver
+    // still within their 2-minute window, minus the ones THIS driver
     // declined (Phase 4; it stays live for everyone else).
     const rides = await requestsForFreeDriver(prisma, { userId, currentZoneId: driver.currentZoneId, isReviewDemo: driver.isReviewDemo });
 
@@ -966,7 +966,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * car's capacity less riders on board and riders still waiting for their
    * pickup, so a drop-off frees a seat at once — and the detour check the
    * add itself makes, so a request listed is one "Add" accepts. Still
-   * searching only (the 90 s window), never one this driver declined (a
+   * searching only (the 2-minute window), never one this driver declined (a
    * pop-up that ran out doesn't count), nothing for an offline driver.
    *
    * Phase-2c compatible ones (same-or-adjacent pickup and drop-off zones,
@@ -1174,6 +1174,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       /** How much later the most-delayed rider already in the car is dropped off. */
       maxOnboardDelayMinutes: Math.ceil(preview.maxOnboardDelaySeconds / 60),
       expiresAt: new Date(startedAt + DISPATCH_WINDOW_MS).toISOString(),
+      /** How long the trip screen's pop-up counts down: the same setting as Home's (DRIVER_OFFER_SECONDS). */
+      offerSeconds: config.driverOfferSeconds,
       pickupIndex: preview.pickupIndex,
       dropoffIndex: preview.dropoffIndex,
       stops: preview.stops.map((st) => ({

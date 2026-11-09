@@ -51,7 +51,7 @@ import { reviewDemoConfig } from "./services/reviewDemo/config";
 installFatalHandlers();
 
 // 15s was too aggressive for Neon's pooled connection budget alongside
-// request traffic; 30s still keeps the 90s dispatch/decision timeouts
+// request traffic; 30s still keeps the 2-minute dispatch and 90s decision timeouts
 // responsive (worst case +30s) while halving the steady-state query load.
 const TIMEOUT_POLL_INTERVAL_MS = 30_000;
 
@@ -248,8 +248,9 @@ async function bootstrap() {
   // it calls out to Cloudinary and must never hold up or crash startup.
   void checkCloudinaryAtStartup(config.cloudinary, app.log);
 
-  // Periodically sweep REQUESTED/AWAITING_RIDER_DECISION rides for the 90s
-  // dispatch and decision-grace timeouts (see services/ride/timeouts.ts).
+  // Periodically sweep REQUESTED/AWAITING_RIDER_DECISION rides for the
+  // 2-minute dispatch window (each request also has its own exact timer:
+  // scheduleRequestExpiry) and the 90s decision grace (see services/ride/timeouts.ts).
   const timeoutSweep = setInterval(() => {
     processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
       app.log.error({ err }, "processTimeouts failed");

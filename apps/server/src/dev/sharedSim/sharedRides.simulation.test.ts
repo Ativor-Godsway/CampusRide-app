@@ -5,6 +5,7 @@
  * scenarios themselves are in ./scenarios.ts, shared with
  * `npm run simulate:shared`, which prints the same timeline.
  */
+import { DISPATCH_WINDOW_MS } from "@rida/shared";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { prisma } from "../../db/prisma";
 import { resetLivePositionsForTests } from "../../services/zones/livePositions";
@@ -43,8 +44,8 @@ describe("the search ends exactly when its window does", () => {
   it("not at the next sweep: the rider gets 'no drivers' straight away", async () => {
     const rider = await world.rider("Rider 1");
     const id = await rider.request("SHARED");
-    // Make it 90 s old, then let the request's own timer run (as broadcastRide sets it).
-    const started = new Date(Date.now() - 90_000);
+    // Make it a whole window old, then let the request's own timer run (as broadcastRide sets it).
+    const started = new Date(Date.now() - DISPATCH_WINDOW_MS);
     await prisma.ride.update({ where: { id }, data: { broadcastStartedAt: started } });
     scheduleRequestExpiry(prisma, id, started);
     await vi.waitFor(async () => expect(await rider.screen()).toBe("no drivers"), { timeout: 5_000 });

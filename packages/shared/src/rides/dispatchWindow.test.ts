@@ -4,10 +4,10 @@ import { DISPATCH_WINDOW_MS, dispatchSecondsLeft } from "./dispatchWindow";
 const START = new Date("2026-09-28T10:00:00.000Z");
 
 describe("dispatchSecondsLeft", () => {
-  it("counts down the 90s window", () => {
-    expect(DISPATCH_WINDOW_MS).toBe(90_000);
-    expect(dispatchSecondsLeft(START, START.getTime())).toBe(90);
-    expect(dispatchSecondsLeft(START.toISOString(), START.getTime() + 30_500)).toBe(60);
+  it("counts down the 2-minute window", () => {
+    expect(DISPATCH_WINDOW_MS).toBe(120_000);
+    expect(dispatchSecondsLeft(START, START.getTime())).toBe(120);
+    expect(dispatchSecondsLeft(START.toISOString(), START.getTime() + 30_500)).toBe(90);
   });
 
   it("stops at 0 rather than going negative", () => {

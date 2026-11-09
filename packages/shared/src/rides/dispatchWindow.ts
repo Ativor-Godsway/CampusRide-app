@@ -1,9 +1,9 @@
 /**
  * How long a ride is offered to drivers before the rider is asked what to do
- * (REQUESTED -> AWAITING_RIDER_DECISION). The server enforces it
+ * (REQUESTED -> AWAITING_RIDER_DECISION): 2 minutes (90 s until 2026-11). The server enforces it
  * (services/ride/timeouts.ts); the rider app shows the countdown from it.
  */
-export const DISPATCH_WINDOW_MS = 90_000;
+export const DISPATCH_WINDOW_MS = 120_000;
 
 /**
  * Whole seconds left in the dispatch window, never negative. Null when the

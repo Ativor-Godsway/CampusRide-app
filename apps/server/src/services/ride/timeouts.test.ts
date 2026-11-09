@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach, afterAll } from "vitest";
+import { DISPATCH_WINDOW_MS } from "@rida/shared";
 import { prisma } from "../../db/prisma";
 import { shouldTimeout, shouldExpireDecision, processTimeouts } from "./timeouts";
 import { riderDecision } from "./riderDecision";
@@ -21,20 +22,20 @@ const T0 = new Date("2026-01-01T00:00:00.000Z");
 // ─── Pure functions ──────────────────────────────────────────────────────────
 
 describe("shouldTimeout", () => {
-  it("is false for a REQUESTED ride at 89s since broadcastStartedAt", () => {
+  it("is false for a REQUESTED ride just before the 2-minute window ends", () => {
     const ride = { status: "REQUESTED", createdAt: T0, broadcastStartedAt: T0, decisionStartedAt: null };
-    expect(shouldTimeout(ride, new Date(T0.getTime() + 89_000))).toBe(false);
+    expect(shouldTimeout(ride, new Date(T0.getTime() + DISPATCH_WINDOW_MS - 1_000))).toBe(false);
   });
 
-  it("is true for a REQUESTED ride at 90s since broadcastStartedAt", () => {
+  it("is true for a REQUESTED ride when the 2-minute window ends", () => {
     const ride = { status: "REQUESTED", createdAt: T0, broadcastStartedAt: T0, decisionStartedAt: null };
-    expect(shouldTimeout(ride, new Date(T0.getTime() + 90_000))).toBe(true);
+    expect(shouldTimeout(ride, new Date(T0.getTime() + DISPATCH_WINDOW_MS))).toBe(true);
   });
 
   it("falls back to createdAt when broadcastStartedAt is null", () => {
     const ride = { status: "REQUESTED", createdAt: T0, broadcastStartedAt: null, decisionStartedAt: null };
-    expect(shouldTimeout(ride, new Date(T0.getTime() + 90_000))).toBe(true);
-    expect(shouldTimeout(ride, new Date(T0.getTime() + 89_000))).toBe(false);
+    expect(shouldTimeout(ride, new Date(T0.getTime() + DISPATCH_WINDOW_MS))).toBe(true);
+    expect(shouldTimeout(ride, new Date(T0.getTime() + DISPATCH_WINDOW_MS - 1_000))).toBe(false);
   });
 
   it("is false for non-REQUESTED rides regardless of elapsed time", () => {
@@ -77,7 +78,7 @@ describe("processTimeouts", () => {
     expect(reloaded.status).toBe("REQUESTED");
   });
 
-  it("REQUESTED ride at 90s moves to AWAITING_RIDER_DECISION and stamps decisionStartedAt", async () => {
+  it("REQUESTED ride at the end of its 2-minute window moves to AWAITING_RIDER_DECISION and stamps decisionStartedAt", async () => {
     const { ride } = await createTestRide({
       type: "LONE",
       status: "REQUESTED",
@@ -85,7 +86,7 @@ describe("processTimeouts", () => {
     });
     createdRideIds.push(ride.id);
 
-    const now = new Date(T0.getTime() + 90_000);
+    const now = new Date(T0.getTime() + DISPATCH_WINDOW_MS);
     await processTimeouts(prisma, now, { rideIds: [ride.id] });
 
     const reloaded = await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } });
@@ -101,7 +102,7 @@ describe("processTimeouts", () => {
     });
     createdRideIds.push(ride.id);
 
-    const timeoutAt = new Date(T0.getTime() + 90_000);
+    const timeoutAt = new Date(T0.getTime() + DISPATCH_WINDOW_MS);
     await processTimeouts(prisma, timeoutAt, { rideIds: [ride.id] });
 
     let reloaded = await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } });
@@ -113,8 +114,8 @@ describe("processTimeouts", () => {
     expect(reloaded.status).toBe("REQUESTED");
     expect(reloaded.broadcastStartedAt?.getTime()).toBe(timeoutAt.getTime());
 
-    // Without the reset, now - T0 (original broadcastStartedAt) would be 91s >= 90s.
-    // With the reset, now - timeoutAt = 1s < 90s, so no re-timeout.
+    // Without the reset, now - T0 (original broadcastStartedAt) would be past the window.
+    // With the reset, now - timeoutAt = 1s, so no re-timeout.
     const oneSecondLater = new Date(timeoutAt.getTime() + 1_000);
     await processTimeouts(prisma, oneSecondLater, { rideIds: [ride.id] });
 

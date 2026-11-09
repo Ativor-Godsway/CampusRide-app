@@ -24,7 +24,7 @@ export interface QueueableOffer {
   pickupDistanceMeters: number | null;
   /** ISO time the request was made. */
   createdAt: string;
-  /** ISO time the request stops being offered at all (the 90 s dispatch window). */
+  /** ISO time the request stops being offered at all (the 2-minute dispatch window). */
   expiresAt: string;
 }
 

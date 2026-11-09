@@ -605,6 +605,8 @@ export interface AddRiderPreviewResult {
   maxOnboardDelayMinutes: number;
   /** When the request stops being offered (ISO). */
   expiresAt: string;
+  /** How long the trip screen's pop-up counts down, set by the server (newer servers; 15 s otherwise). */
+  offerSeconds?: number;
   pickupIndex: number;
   dropoffIndex: number;
   /** Every remaining stop with the new rider slotted in, in order. */

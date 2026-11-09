@@ -7,7 +7,7 @@
  *
  * Time is simulated: `advance(ms)` moves the clock by back-dating the
  * world's own requests (broadcastStartedAt, arrivedAt) and running the
- * timeout sweep for them, so "90 seconds later" takes no real time. Only
+ * timeout sweep for them, so "2 minutes later" takes no real time. Only
  * the world's own accounts and rides are touched, and cleanup() deletes
  * them.
  */

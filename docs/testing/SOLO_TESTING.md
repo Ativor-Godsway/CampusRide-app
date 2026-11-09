@@ -237,7 +237,7 @@ simulator aims requests at wherever you are.
 - **Cancellations:** about 15% of fake riders give up if nobody accepts within
   20–60 seconds, with a reason. They never cancel after you've accepted, and
   never after pickup.
-- **Nobody accepts in 90 seconds:** the fake rider decides, like a real one
+- **Nobody accepts in 2 minutes:** the fake rider decides, like a real one
   would. Keep waiting, switch Shared to Ride alone, or give up.
 - The simulator never has more than 4 unaccepted requests open, so it doesn't
   flood you.

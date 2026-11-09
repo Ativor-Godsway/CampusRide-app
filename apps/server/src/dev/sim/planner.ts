@@ -71,7 +71,7 @@ export function pickSearchingCancelReason(rng: Rng): RiderCancelReason {
 }
 
 /**
- * What the rider does when the 90s search runs out: mostly keep waiting, a
+ * What the rider does when the 2-minute search runs out: mostly keep waiting, a
  * Shared rider sometimes switches to Ride alone, and some give up.
  */
 export function pickDecision(type: RideType, rng: Rng): RiderDecisionAction {

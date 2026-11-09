@@ -176,7 +176,7 @@ export interface RideBroadcastPayload {
   farePesewas: number;
   /** Driver's 85% share in integer pesewas. */
   driverSharePesewas: number;
-  /** Unix ms timestamp when the 90s broadcast window expires. */
+  /** Unix ms timestamp when the 2-minute broadcast window (DISPATCH_WINDOW_MS) expires. */
   expiresAt: number;
 }
 

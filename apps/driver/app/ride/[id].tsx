@@ -7,6 +7,7 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   CAR_SEATS,
   DEFAULT_OFFER_SECONDS,
+  offerDeadline,
   chooseTripSource,
   summaryGivesWay,
   NO_SHOW_AFTER_MS,
@@ -428,9 +429,11 @@ export default function TripScreen() {
   // ─── Mid-trip OFFER: a rider who fits, offered with a countdown ─────────
   // Only once the server's preview has passed the detour check (seats and
   // the 5-minute limit): an offer that would break it is never shown. It
-  // counts down like a Home offer; Skip or running out records it on the
-  // server so this rider isn't offered to this driver again. A rider the
-  // driver opened themselves (Add rider / See route) has no countdown.
+  // counts down like a Home offer, for the server's DRIVER_OFFER_SECONDS;
+  // Skip records it on the server so this rider isn't offered to this
+  // driver again, and running out only stops it popping up (the rider stays
+  // in the Add rider list while they search). A rider the driver opened
+  // themselves (Add rider / See route) has no countdown.
   const autoOffer = previewing !== null && !previewing.manual;
   const [offerClock, setOfferClock] = useState<{
     rideId: string;
@@ -442,9 +445,9 @@ export default function TripScreen() {
   useEffect(() => {
     if (!autoOffer || !previewData || offerClock?.rideId === previewData.requestRideId) return;
     const shownAt = Date.now();
-    const own = shownAt + DEFAULT_OFFER_SECONDS * 1000;
-    const requestEnds = Date.parse(previewData.expiresAt);
-    setOfferClock({ rideId: previewData.requestRideId, shownAt, deadline: Number.isFinite(requestEnds) ? Math.min(own, requestEnds) : own });
+    // The same countdown as a Home offer (DRIVER_OFFER_SECONDS on the server).
+    const seconds = previewData.offerSeconds ?? DEFAULT_OFFER_SECONDS;
+    setOfferClock({ rideId: previewData.requestRideId, shownAt, deadline: offerDeadline(shownAt, seconds, previewData.expiresAt) });
     alertNewOffer();
   }, [autoOffer, previewData, offerClock?.rideId]);
   useEffect(() => {
