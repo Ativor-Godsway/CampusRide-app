@@ -10,7 +10,10 @@ hosting.
 
 - **A restart or deploy can't leave a ride stuck.** Every ride's state and
   timing lives in the database. The timeout sweep reads it from there, runs
-  once at startup and then every 30 seconds.
+  once at startup and then every 30 seconds. Each searching request also
+  has a timer in memory that ends its search the moment its 2-minute window
+  runs out (`scheduleRequestExpiry`, services/ride/timeouts.ts); a restart
+  loses those timers and the sweep does it instead, up to 30 s later.
 - **A ride a driver leaves in progress is completed after 3 hours**
   (`RIDE_AUTO_COMPLETE_HOURS`), so its riders can book again. Before this,
   once a ride was in progress only the driver could end it, so a dead phone

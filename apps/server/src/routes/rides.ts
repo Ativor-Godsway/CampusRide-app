@@ -17,7 +17,7 @@ import { InvalidTransitionError, RideSwitchNotAllowedError } from "../services/r
 import { fareForType, switchRideType } from "../services/ride/switchRideType";
 import { findActiveRideForRider, riderTripComplete } from "../services/ride/activeRide";
 import { emitRideEvent, emitToRider, removeRiderFromRide } from "../realtime/rideSocket";
-import { broadcastRide, closeOffer } from "../services/ride/dispatch";
+import { broadcastRide, closeOffer, reofferToDriver } from "../services/ride/dispatch";
 import {
   createRide,
   ActiveRideExistsError,
@@ -591,6 +591,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         emitRideEvent(id, "ride:status", { rideId: id, status: rideRow.status as RideStatus });
         notifyRiderCancelled(prisma, ride);
         removeRiderFromRide(userId, id);
+        // A seat freed: requests that fit the car now reach its driver at once.
+        reofferToDriver(prisma, rideRow.driverId);
         logCancel("ride_seat_cancelled_by_rider", "Rider left a shared car; it carries on for the others");
       }
       return reply;
@@ -608,6 +610,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       if (ride.status === "REQUESTED" || ride.status === "AWAITING_RIDER_DECISION") {
         closeOffer(prisma, ride, "CANCELLED");
       }
+      // A driver who had it is free again: their list is worked out at once.
+      reofferToDriver(prisma, ride.driverId);
 
       logCancel("ride_cancelled_by_rider", "Rider cancelled their ride");
       return reply.code(200).send({ ride: updated });

@@ -144,6 +144,11 @@ export const DRIVER_EVENTS = {
   RIDE_BROADCAST: "ride:broadcast",
   /** A request offered to this driver was taken, cancelled or expired: drop it from the offer queue. */
   OFFER_CLOSED: "ride:offer_closed",
+  /**
+   * A seat in this driver's car changed (a drop-off, a cancel, an undo, a
+   * rider added, the trip ended): refetch the requests lists now. No payload.
+   */
+  REQUESTS_CHANGED: "driver:requests_changed",
 } as const;
 
 /** Sent to the drivers a request was offered to when it stops being available. */
@@ -171,7 +176,7 @@ export interface RideBroadcastPayload {
   farePesewas: number;
   /** Driver's 85% share in integer pesewas. */
   driverSharePesewas: number;
-  /** Unix ms timestamp when the 90s broadcast window expires. */
+  /** Unix ms timestamp when the 2-minute broadcast window (DISPATCH_WINDOW_MS) expires. */
   expiresAt: number;
 }
 

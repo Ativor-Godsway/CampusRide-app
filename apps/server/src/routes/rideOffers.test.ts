@@ -102,7 +102,7 @@ describe("two drivers accept the same ride at the same moment", () => {
     const codes = [ra.statusCode, rb.statusCode].sort();
     expect(codes).toEqual([200, 409]);
     const loser = ra.statusCode === 409 ? ra : rb;
-    expect(loser.json()).toEqual({ code: "RIDE_NOT_AVAILABLE", reason: "TAKEN", error: "Ride taken by another driver." });
+    expect(loser.json()).toEqual({ code: "RIDE_NOT_AVAILABLE", reason: "TAKEN", error: "Already taken by another driver." });
     const winnerId = ra.statusCode === 200 ? a.id : b.id;
     expect((await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } })).driverId).toBe(winnerId);
   });
@@ -143,33 +143,51 @@ describe("two drivers accept the same ride at the same moment", () => {
   });
 });
 
-describe("a declined or timed-out ride is never offered to that driver again", () => {
-  for (const reason of ["DECLINED", "TIMED_OUT"] as const) {
-    it(`${reason}: gone from that driver's list and re-broadcasts, still offered to others, reason kept`, async () => {
-      const { ride } = await request();
-      const a = await driver(ride.pickupZoneId);
-      const b = await driver(ride.pickupZoneId);
-      expect((await eligible(a.auth)).map((r) => r.rideId)).toContain(ride.id);
+describe("a declined ride is never offered to that driver again; a timed-out pop-up stays listed", () => {
+  it("DECLINED: gone from that driver's list and re-broadcasts, still offered to others, reason kept", async () => {
+    const { ride } = await request();
+    const a = await driver(ride.pickupZoneId);
+    const b = await driver(ride.pickupZoneId);
+    expect((await eligible(a.auth)).map((r) => r.rideId)).toContain(ride.id);
 
-      const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/reject`, headers: a.auth, payload: { reason } });
-      expect(res.statusCode).toBe(200);
-      expect((await eligible(a.auth)).map((r) => r.rideId)).not.toContain(ride.id);
-      expect((await eligible(b.auth)).map((r) => r.rideId)).toContain(ride.id);
+    const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/reject`, headers: a.auth, payload: { reason: "DECLINED" } });
+    expect(res.statusCode).toBe(200);
+    expect((await eligible(a.auth)).map((r) => r.rideId)).not.toContain(ride.id);
+    expect((await eligible(b.auth)).map((r) => r.rideId)).toContain(ride.id);
 
-      // A re-broadcast (e.g. the rider chose "Keep waiting") skips driver A.
-      const emit = vi.spyOn(rideSocket, "emitDriverBroadcast").mockImplementation(() => {});
-      await broadcastRide(prisma, ride.id);
-      const recipients = emit.mock.calls.at(-1)?.[0] ?? [];
-      expect(recipients).toContain(b.id);
-      expect(recipients).not.toContain(a.id);
+    // A re-broadcast (e.g. the rider chose "Keep waiting") skips driver A.
+    const emit = vi.spyOn(rideSocket, "emitDriverBroadcast").mockImplementation(() => {});
+    await broadcastRide(prisma, ride.id);
+    const recipients = emit.mock.calls.at(-1)?.[0] ?? [];
+    expect(recipients).toContain(b.id);
+    expect(recipients).not.toContain(a.id);
 
-      const row = await prisma.rideRejection.findUniqueOrThrow({ where: { rideId_driverUserId: { rideId: ride.id, driverUserId: a.id } } });
-      expect(row.reason).toBe(reason);
-      // A second answer (a retry, or a tap racing the timeout) doesn't change it.
-      await app.inject({ method: "POST", url: `/rides/${ride.id}/reject`, headers: a.auth, payload: { reason: reason === "DECLINED" ? "TIMED_OUT" : "DECLINED" } });
-      expect((await prisma.rideRejection.findUniqueOrThrow({ where: { id: row.id } })).reason).toBe(reason);
-    });
-  }
+    const row = await prisma.rideRejection.findUniqueOrThrow({ where: { rideId_driverUserId: { rideId: ride.id, driverUserId: a.id } } });
+    expect(row.reason).toBe("DECLINED");
+    // A second answer (a retry, or a tap racing the timeout) doesn't change it.
+    await app.inject({ method: "POST", url: `/rides/${ride.id}/reject`, headers: a.auth, payload: { reason: "TIMED_OUT" } });
+    expect((await prisma.rideRejection.findUniqueOrThrow({ where: { id: row.id } })).reason).toBe("DECLINED");
+  });
+
+  it("TIMED_OUT: still in that driver's list, flagged so it doesn't pop up again, reason kept", async () => {
+    const { ride } = await request();
+    const a = await driver(ride.pickupZoneId);
+    const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/reject`, headers: a.auth, payload: { reason: "TIMED_OUT" } });
+    expect(res.statusCode).toBe(200);
+    const listed = (await eligible(a.auth)).find((r) => r.rideId === ride.id);
+    expect(listed).toMatchObject({ offerTimedOut: true });
+
+    // A re-broadcast still reaches driver A.
+    const emit = vi.spyOn(rideSocket, "emitDriverBroadcast").mockImplementation(() => {});
+    await broadcastRide(prisma, ride.id);
+    expect(emit.mock.calls.at(-1)?.[0] ?? []).toContain(a.id);
+
+    // Declining it afterwards (from the list) does take it off.
+    await app.inject({ method: "POST", url: `/rides/${ride.id}/reject`, headers: a.auth, payload: { reason: "DECLINED" } });
+    const row = await prisma.rideRejection.findUniqueOrThrow({ where: { rideId_driverUserId: { rideId: ride.id, driverUserId: a.id } } });
+    expect(row.reason).toBe("DECLINED");
+    expect((await eligible(a.auth)).map((r) => r.rideId)).not.toContain(ride.id);
+  });
 
   it("refuses an unknown reason", async () => {
     const { ride } = await request();

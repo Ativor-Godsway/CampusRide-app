@@ -25,11 +25,18 @@ import {
 import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
-import { claimIfOpen, closeOffer } from "../services/ride/dispatch";
+import { claimIfOpen, closeOffer, reofferToDriver } from "../services/ride/dispatch";
 import { paidFareTotal, requestFare, type RideKind } from "../services/ride/fares";
 import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
+import {
+  carSeats,
+  computeEligibleZoneSet,
+  requestsForFreeDriver,
+  requestsThatFitCar,
+  seatFit,
+} from "../services/ride/requestFit";
 import { applyRideTransition, applyPassengerTransition, undoPassengerStep } from "../services/ride/rideService";
 import { finalizeRideCompletion } from "../services/ride/completion";
 import { announceClaim, announcePassengerChange, announcePassengerUndo } from "../services/ride/driverActionEvents";
@@ -74,6 +81,11 @@ import {
   text,
 } from "../http/schemas";
 
+/** A request another driver got first (claim, add). */
+const ALREADY_TAKEN_MESSAGE = "Already taken by another driver.";
+/** Seats re-checked at the add: the car filled up since the list showed it. */
+const NO_LONGER_FITS_MESSAGE = "No longer fits your car.";
+
 /** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
 const SCHEMAS = {
   // latitude/longitude: the driver's position (apps from 2026-10-29); the server checks it.
@@ -110,21 +122,6 @@ const SCHEMAS = {
     body: object({ step: oneOf(["pickup", "dropoff"]), withArrival: boolean }, ["step"]),
   },
 };
-
-/** Returns the set of zone IDs a driver in `zoneId` is eligible to serve (same zone + 1 hop). */
-function computeEligibleZoneSet(
-  zoneId: string,
-  adjacencies: Array<{ zoneId: string; adjacentZoneId: string }>,
-): Set<string> {
-  const zones = new Set<string>([zoneId]);
-  for (const adj of adjacencies) {
-    if (adj.zoneId === zoneId || adj.adjacentZoneId === zoneId) {
-      zones.add(adj.zoneId);
-      zones.add(adj.adjacentZoneId);
-    }
-  }
-  return zones;
-}
 
 async function requireDriver(request: Parameters<typeof requireAuth>[0], reply: Parameters<typeof requireAuth>[1]): Promise<boolean> {
   if (request.user?.role !== "DRIVER") {
@@ -666,7 +663,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     const ride = await claimIfOpen(prisma, rideId, userId);
     if (!ride) {
-      // Say which: the pop-up closes with "Ride taken by another driver",
+      // Say which: the pop-up closes with "Already taken",
       // not a vague "unavailable". One extra read, on the losing path only.
       const gone = await prisma.ride.findUnique({ where: { id: rideId }, select: { status: true, driverId: true, cancelReason: true } });
       const reason =
@@ -680,7 +677,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         reason,
         error:
           reason === "TAKEN"
-            ? "Ride taken by another driver."
+            ? ALREADY_TAKEN_MESSAGE
             : reason === "CANCELLED"
               ? "The rider cancelled this request."
               : "This request has expired.",
@@ -696,7 +693,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   /**
    * Phase 4: the driver explicitly declines a broadcast ride.
    *
-   * Before this, a driver could only ignore a request and let the 90s
+   * Before this, a driver could only ignore a request and let the dispatch
    * dispatch window expire — indistinguishable from a driver who never saw
    * it, and the request kept occupying their list until it timed out. A
    * rejection removes it from THIS driver's eligible list immediately and
@@ -708,9 +705,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    *
    * Ride offers (2026-10): body `{ reason: "DECLINED" | "TIMED_OUT" }` says
    * whether the driver tapped Decline or let the countdown run out (default
-   * DECLINED). Stored for stats — never a penalty. Either way the ride is
-   * never offered to this driver again (eligible list, broadcast,
-   * fill-suggestions all skip it).
+   * DECLINED). Stored for stats — never a penalty. A decline means the ride
+   * is never offered to this driver again (eligible list, broadcast,
+   * fill-suggestions all skip it); a timeout (2026-11) only stops the
+   * pop-up — the request stays in their list while the rider is searching.
    */
   app.post(
     "/rides/:id/reject",
@@ -739,10 +737,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply.code(409).send({ error: "Ride is no longer open for offers" });
     }
 
-    // The first answer stands (a retry, or a timeout racing a tap, changes nothing).
+    // A decline stands (a retry, or a timeout racing the tap, changes
+    // nothing); a decline after a pop-up ran out takes it off the list.
     await prisma.rideRejection.upsert({
       where: { rideId_driverUserId: { rideId, driverUserId: userId } },
-      update: {},
+      update: reason === "DECLINED" ? { reason } : {},
       create: { rideId, driverUserId: userId, reason },
     });
     void recordOfferAnswer(prisma, rideId, userId, reason === "TIMED_OUT" ? "TIMED_OUT" : "DECLINED");
@@ -817,8 +816,14 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   /**
    * Returns the list of REQUESTED rides this driver is currently eligible to claim.
    * Eligible = ride's pickupZone is in the driver's zone or an adjacent zone, ride is
-   * unclaimed, and the broadcast window (90 s) hasn't expired. Each ride includes a
+   * unclaimed, and the broadcast window (2 min) hasn't expired. Each ride includes a
    * `bestFit` flag derived from the existing Phase-2e bestFit scoring logic.
+   *
+   * Shared-ride dispatch rules (2026-11, services/ride/requestFit): a request
+   * whose pop-up ran out on this driver stays listed for the rest of its
+   * search, flagged `offerTimedOut` so the app doesn't pop it up again; only
+   * a Decline takes it off. A driver on a trip gets nothing here: a Shared
+   * car's fitting requests are its fill-suggestions.
    */
   app.get("/driver/rides/eligible", { onRequest: requireAuth, schema: SCHEMAS.eligible }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
@@ -858,35 +863,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // Adjacency and zones never change at runtime: served from memory.
     const [allAdjacencies, zoneMap] = await Promise.all([getZoneAdjacency(prisma), getZoneMap(prisma)]);
 
-    // Zones where this driver is eligible to pick up.
-    const driverEligibleZones = driver.currentZoneId ? computeEligibleZoneSet(driver.currentZoneId, allAdjacencies) : new Set<string>();
-
-    // All unclaimed REQUESTED rides whose pickup is in those zones and are still within
-    // the 90-second broadcast window.
-    const BROADCAST_WINDOW_MS = 90_000;
-    const cutoff = new Date(Date.now() - BROADCAST_WINDOW_MS);
-
-    const rides = await prisma.ride.findMany({
-      where: {
-        status: "REQUESTED",
-        driverId: null,
-        // Demo requests for demo drivers only, real ones for real drivers only.
-        isReviewDemo: driver.isReviewDemo,
-        ...(driver.isReviewDemo ? {} : { pickupZoneId: { in: Array.from(driverEligibleZones) } }),
-        broadcastStartedAt: { gte: cutoff },
-        // Phase 4: hide rides THIS driver explicitly declined. Scoped to the
-        // rejecting driver only — the ride stays live for everyone else, which
-        // is the whole point of an explicit reject over letting it time out.
-        rejections: { none: { driverUserId: userId } },
-      },
-      // First name only, so the trip can say "Pick up Ama" from the moment
-      // the driver accepts; the seat for the fare the rider was quoted.
-      include: {
-        rider: { select: { name: true } },
-        passengers: { select: { riderId: true, status: true, lockedFare: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    // Unclaimed requests picked up in this driver's zone or one next to it,
+    // still within their 2-minute window, minus the ones THIS driver
+    // declined (Phase 4; it stays live for everyone else).
+    const rides = await requestsForFreeDriver(prisma, { userId, currentZoneId: driver.currentZoneId, isReviewDemo: driver.isReviewDemo });
 
     if (rides.length === 0) {
       return reply.code(200).send({ rides: [] });
@@ -906,7 +886,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // Riders' ratings (as given by drivers) and, for rides with pins, the
     // named places to measure to — never the pins themselves.
     const anyPins = rides.some((r) => r.pickupLat != null);
-    const [allEligibleDrivers, ratings, places] = await Promise.all([
+    const [allEligibleDrivers, ratings, places, timedOut] = await Promise.all([
       prisma.driver.findMany({
         where: {
           isOnline: true,
@@ -921,7 +901,12 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         _avg: { stars: true },
       }),
       anyPins ? getActivePlaces(prisma) : Promise.resolve([]),
+      prisma.rideRejection.findMany({
+        where: { driverUserId: userId, reason: "TIMED_OUT", rideId: { in: rides.map((r) => r.id) } },
+        select: { rideId: true },
+      }),
     ]);
+    const poppedUp = new Set(timedOut.map((t) => t.rideId));
     const ratingOf = new Map(ratings.map((r) => [r.rateeId, r._avg.stars]));
     const from = driverPoint ?? zoneMap.get(driver.currentZoneId!) ?? null;
 
@@ -967,6 +952,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         ...trip,
         expiresAt: new Date((ride.broadcastStartedAt ?? ride.createdAt).getTime() + DISPATCH_WINDOW_MS).toISOString(),
         offerSeconds: config.driverOfferSeconds,
+        /** Its pop-up already ran out on this driver: listed, never popped up again. */
+        offerTimedOut: poppedUp.has(ride.id),
       };
     }));
 
@@ -974,17 +961,17 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
   });
 
   /**
-   * Returns ALL pending, addable SHARED requests for the driver's claimed
-   * anchor ride (MATCHED or ARRIVED) — compatible ones (per the existing
-   * Phase-2c `suggestFillsForRide` ranking) first, flagged `compatible: true`
-   * (badge-eligible), every other still-pending SHARED request after,
-   * flagged `compatible: false`, ordered by createdAt desc. Compatibility is
-   * a SORT HINT only, not a filter — the driver may add any of them.
+   * The open SHARED requests this driver's car can take now (shared-ride
+   * dispatch rules, 2026-11, services/ride/requestFit): free seats — the
+   * car's capacity less riders on board and riders still waiting for their
+   * pickup, so a drop-off frees a seat at once — and the detour check the
+   * add itself makes, so a request listed is one "Add" accepts. Still
+   * searching only (the 2-minute window), never one this driver declined (a
+   * pop-up that ran out doesn't count), nothing for an offline driver.
    *
-   * Hard addable boundary (the only real filter): status REQUESTED, unclaimed,
-   * SHARED, anchor has a free seat (occupancy < 4), anchor still assembling
-   * (MATCHED/ARRIVED, checked above). No fare-impact preview — shared fare
-   * is flat per rider, unaffected by who's added.
+   * Phase-2c compatible ones (same-or-adjacent pickup and drop-off zones,
+   * `suggestFillsForRide`) come first, flagged `compatible: true` (the Home
+   * list and the trip screen's pop-up use those); the rest after.
    */
   app.get("/rides/:id/fill-suggestions", { onRequest: requireAuth, schema: SCHEMAS.fillSuggestions }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
@@ -992,20 +979,12 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
 
-    const [anchor, allCandidates, adjacency, zones] = await Promise.all([
+    const [anchor, driver, adjacency, zones] = await Promise.all([
       prisma.ride.findUnique({
         where: { id: rideId },
         include: { passengers: { orderBy: { createdAt: "asc" } } },
       }),
-      prisma.ride.findMany({
-        // Not ones this driver declined or let time out: never offered twice.
-        where: { status: "REQUESTED", driverId: null, type: "SHARED", rejections: { none: { driverUserId: userId } } },
-        include: {
-          rider: { select: { name: true } },
-          passengers: { select: { riderId: true, status: true, lockedFare: true } },
-        },
-        orderBy: { createdAt: "desc" },
-      }),
+      prisma.driver.findUnique({ where: { userId }, select: { userId: true, isOnline: true, lastLat: true, lastLng: true } }),
       getZoneAdjacency(prisma),
       getZoneMap(prisma),
     ]);
@@ -1015,21 +994,15 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply.code(400).send({ error: "Riders can't be added to this trip now" });
     }
 
-    // suggestFillsForRide's internal areCombinable filter is exactly what
-    // makes this the "compatible, ranked" subset — left untouched.
-    const compatibleRanked = suggestFillsForRide(
-      anchor,
-      // Demo riders only fill demo cars, real riders real cars.
-      allCandidates.filter((candidate) => candidate.isReviewDemo === anchor.isReviewDemo),
-      adjacency,
-      new Date(),
-    );
+    const fitting = driver ? await requestsThatFitCar(prisma, anchor, driver) : [];
+    // suggestFillsForRide's areCombinable filter is exactly what makes this
+    // the "compatible, ranked" subset. It reads seats from occupancy, which
+    // a drop-off doesn't lower: here the seats are already checked.
+    const compatibleRanked = suggestFillsForRide({ ...anchor, occupancy: 0 }, fitting, adjacency, new Date());
     const compatibleIds = new Set(compatibleRanked.map((r) => r.id));
-    const byId = new Map(allCandidates.map((r) => [r.id, r]));
-    const existingRiderIds = new Set(anchor.passengers.map((p) => p.riderId));
-    const isFull = anchor.occupancy >= PRICING.MAX_SHARED_OCCUPANCY;
+    const byId = new Map(fitting.map((r) => [r.id, r]));
 
-    const toSuggestion = (r: (typeof allCandidates)[number], compatible: boolean) => {
+    const toSuggestion = (r: (typeof fitting)[number], compatible: boolean) => {
       const pickupZoneName = zones.get(r.pickupZoneId)?.name ?? "";
       const dropoffZoneName = zones.get(r.dropoffZoneId)?.name ?? "";
       return {
@@ -1045,20 +1018,18 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         compatible,
         /** What this rider was quoted, and pays if added (services/ride/fares). */
         farePesewas: requestFare("SHARED", r.passengers, r.riderId),
+        /** Seats this request needs (1 from every app today). */
+        seats: r.occupancy,
       };
     };
 
-    const suggestions = isFull
-      ? []
-      : [
-          ...compatibleRanked
-            .map((r) => byId.get(r.id))
-            .filter((r): r is NonNullable<typeof r> => r !== undefined)
-            .map((r) => toSuggestion(r, true)),
-          ...allCandidates
-            .filter((r) => !compatibleIds.has(r.id) && !existingRiderIds.has(r.riderId))
-            .map((r) => toSuggestion(r, false)),
-        ];
+    const suggestions = [
+      ...compatibleRanked
+        .map((r) => byId.get(r.id))
+        .filter((r): r is NonNullable<typeof r> => r !== undefined)
+        .map((r) => toSuggestion(r, true)),
+      ...fitting.filter((r) => !compatibleIds.has(r.id)).map((r) => toSuggestion(r, false)),
+    ];
 
     // isActivePassengerStatus (WAITING/ARRIVED/PICKED_UP) — a passenger the
     // driver has marked ARRIVED still occupies a seat.
@@ -1066,8 +1037,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       .filter((p) => isActivePassengerStatus(p.status))
       .map((p) => passengerForApp(p, zones));
 
+    const seats = carSeats(anchor.passengers);
     return reply.code(200).send({
       occupancy: anchor.occupancy,
+      /** Seats left now: capacity less riders on board and riders waiting for pickup. */
+      freeSeats: seats.free,
       passengers: currentPassengers,
       suggestions,
     });
@@ -1130,7 +1104,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return refuse(reply, 409, "CAR_CLOSED", "Riders can't be added to this trip now.");
     }
     const seated = car.passengers.filter((p) => isActivePassengerStatus(p.status)).length;
-    if (seated >= PRICING.MAX_SHARED_OCCUPANCY) return refuse(reply, 409, "CAR_FULL", "Your car is full.");
+    if (seated >= PRICING.MAX_SHARED_OCCUPANCY) return refuse(reply, 409, "CAR_FULL", NO_LONGER_FITS_MESSAGE);
     if (
       !requestRide ||
       requestRide.isReviewDemo !== car.isReviewDemo ||
@@ -1145,6 +1119,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         "This rider's request is no longer open — another driver took it or the rider cancelled.",
       );
     }
+    if (seatFit(requestRide, car)) return refuse(reply, 409, "CAR_FULL", NO_LONGER_FITS_MESSAGE);
 
     // Only a request with pins needs the places (to approximate them); from memory once warm.
     const places = requestRide.pickupLat != null || requestRide.dropoffLat != null ? await getActivePlaces(prisma) : [];
@@ -1199,6 +1174,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       /** How much later the most-delayed rider already in the car is dropped off. */
       maxOnboardDelayMinutes: Math.ceil(preview.maxOnboardDelaySeconds / 60),
       expiresAt: new Date(startedAt + DISPATCH_WINDOW_MS).toISOString(),
+      /** How long the trip screen's pop-up counts down: the same setting as Home's (DRIVER_OFFER_SECONDS). */
+      offerSeconds: config.driverOfferSeconds,
       pickupIndex: preview.pickupIndex,
       dropoffIndex: preview.dropoffIndex,
       stops: preview.stops.map((st) => ({
@@ -1240,11 +1217,16 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const from = Number.isFinite(lat) && Number.isFinite(lng) && body.lat !== undefined ? { latitude: lat, longitude: lng } : null;
 
     try {
-      const [zones, storedRoutes, places] = await Promise.all([
+      const [zones, storedRoutes, places, standing] = await Promise.all([
         getZoneMap(prisma),
         getStoredZoneRoutes(prisma),
         getActivePlaces(prisma),
+        prisma.driver.findUnique({ where: { userId }, select: { isOnline: true, isApproved: true } }),
       ]);
+      // Offline drivers are offered nothing, so they add no one either.
+      if (!standing?.isOnline || !standing.isApproved) {
+        return refuse(reply, 403, "NOT_ONLINE", "Go online to accept requests.");
+      }
       // Worked out inside the transaction, with the car locked, so it is
       // exactly the car the rider joins.
       let onboardDelaySeconds: Record<string, number> = {};
@@ -1295,6 +1277,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           mergedIntoRideId: rideId,
         });
         if (requestRiderId) notifyRider(prisma, requestRiderId, "DRIVER_ASSIGNED", rideId, { driverUserId: userId });
+        // One seat fewer: this driver's lists are worked out again.
+        reofferToDriver(prisma, userId);
         // Riders already in the car hear about the detour.
         for (const p of car.passengers) {
           const delay = onboardDelaySeconds[p.id];
@@ -1324,15 +1308,24 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         return refuse(reply, 409, "DETOUR_TOO_LONG", DETOUR_TOO_LONG_MESSAGE);
       }
       if (err instanceof NoSeatsAvailableError) {
-        return refuse(reply, 409, "CAR_FULL", "Your car is full.");
+        // Seats are checked again at the add: one may have filled since the list.
+        return refuse(reply, 409, "CAR_FULL", NO_LONGER_FITS_MESSAGE);
       }
       if (err instanceof RequestRideUnavailableError) {
-        return refuse(
-          reply,
-          409,
-          "REQUEST_UNAVAILABLE",
-          "This rider's request is no longer open — another driver took it or the rider cancelled.",
-        );
+        // Say which, as the claim does: two drivers adding the same rider
+        // at once, the one who lost hears it was taken.
+        const gone = await prisma.ride.findUnique({ where: { id: requestRideId }, select: { status: true, driverId: true, cancelReason: true } });
+        const reason = gone?.driverId || gone?.cancelReason === "MERGED_INTO_ANOTHER_RIDE" ? "TAKEN" : gone?.status === "CANCELLED" ? "CANCELLED" : "EXPIRED";
+        return reply.code(409).send({
+          code: "REQUEST_UNAVAILABLE",
+          reason,
+          error:
+            reason === "TAKEN"
+              ? ALREADY_TAKEN_MESSAGE
+              : reason === "CANCELLED"
+                ? "The rider cancelled this request."
+                : "This request has expired.",
+        });
       }
       throw err;
     }

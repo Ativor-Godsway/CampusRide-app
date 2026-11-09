@@ -19,9 +19,9 @@ export const SAFETY_TIP = "Check the car's plate matches before you get in.";
 /**
  * "Finding your driver": a compact sheet over the map, where the pickup
  * pulses. Everything shown is real state: the thin line along the top of the
- * card is the 90 s dispatch window running down from the server's
- * broadcastStartedAt ("usually under 2 minutes" is that window, plus the few
- * seconds the server takes to say no one was free).
+ * card is the 2-minute dispatch window running down from the server's
+ * broadcastStartedAt ("up to 2 minutes" is that window: the server ends the
+ * search the moment it runs out).
  */
 export function SearchingPanel({
   pickupZoneName,
@@ -58,7 +58,7 @@ export function SearchingPanel({
           Finding your driver
         </Text>
         <Text variant="subhead" color="secondary">
-          Asking drivers near {pickupPlaceName ?? "you"} · usually under 2 minutes
+          Asking drivers near {pickupPlaceName ?? "you"} · up to 2 minutes
         </Text>
       </View>
 

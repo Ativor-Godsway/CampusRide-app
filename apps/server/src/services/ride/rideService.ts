@@ -1,6 +1,7 @@
 import type { PrismaClient, Prisma, Ride, RidePassenger } from "@prisma/client";
 import {
   NO_SHOW_AFTER_MS,
+  PRICING,
   UNDO_ACCEPTED_FOR_MS,
   getSharedFarePerRider,
   validateSharedOccupancy,
@@ -392,6 +393,11 @@ export async function undoPassengerStep(
       ]);
       if (rated) throw new UndoRefusedError("UNDO_TOO_LATE", "This rider has already rated the trip.");
       if (rebooked) throw new UndoRefusedError("UNDO_TOO_LATE", "This rider has already booked another ride.");
+      // The freed seat went to a new rider: putting this one back would seat five.
+      const seated = passengers.filter((p) => isActivePassengerStatus(p.status)).length;
+      if (seated >= PRICING.MAX_SHARED_OCCUPANCY) {
+        throw new UndoRefusedError("CAR_FULL", "That seat has gone to another rider, so this drop-off can't be undone.");
+      }
       data = { status: "PICKED_UP", droppedOffAt: null, fareCharged: null };
     }
 

@@ -6,6 +6,7 @@ import { notifyUssdRider } from "../sms/notifyUssdRiders";
 import { closeOffer } from "./dispatch";
 import { notifyRider } from "../push/notify";
 import { config } from "../../config";
+import { logger as appLogger } from "../../lib/logger";
 import { completeStaleRide, isStaleInProgress, staleCutoff } from "./staleRides";
 
 /** Shared with the rider app's countdown, so the two can never disagree. */
@@ -23,7 +24,7 @@ interface RideTimeoutFields {
 }
 
 /**
- * True if a REQUESTED ride has been broadcast for >= 90s with no claim and
+ * True if a REQUESTED ride has been broadcast for >= DISPATCH_WINDOW_MS (2 min) with no claim and
  * should move to AWAITING_RIDER_DECISION. Pure — driven by an injected `now`
  * so it's testable without wall-clock delays.
  */
@@ -43,6 +44,34 @@ export function shouldExpireDecision(ride: RideTimeoutFields, now: Date): boolea
   return now.getTime() - ride.decisionStartedAt.getTime() >= DECISION_GRACE_MS;
 }
 
+const timerLogger: TimeoutLogger = {
+  info: (obj, msg) => appLogger.info(msg ?? "request expiry", obj as Record<string, unknown>),
+  warn: (obj, msg) => appLogger.warn(msg ?? "request expiry", obj as Record<string, unknown>),
+};
+
+/** One timer per searching request (memory only; the sweep stays the backstop). */
+const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/**
+ * Ends a request's search the moment its window runs out (2026-11), instead
+ * of at the next 30 s sweep: until then a request could sit REQUESTED for
+ * up to 30 s more, the rider still "searching" while no driver's list
+ * showed it any more. Best effort and idempotent — processTimeouts re-reads
+ * the ride, so a request taken, cancelled or re-broadcast meanwhile is left
+ * alone; after a restart the sweep (index.ts) does it as before.
+ */
+export function scheduleRequestExpiry(prisma: PrismaClient, rideId: string, broadcastStartedAt: Date): void {
+  const previous = expiryTimers.get(rideId);
+  if (previous) clearTimeout(previous);
+  const delay = Math.max(0, broadcastStartedAt.getTime() + BROADCAST_TIMEOUT_MS - Date.now()) + 250;
+  const timer = setTimeout(() => {
+    expiryTimers.delete(rideId);
+    processTimeouts(prisma, new Date(), { rideIds: [rideId], logger: timerLogger }).catch(() => {});
+  }, delay);
+  timer.unref?.();
+  expiryTimers.set(rideId, timer);
+}
+
 interface TimeoutLogger {
   info: (obj: unknown, msg?: string) => void;
   warn: (obj: unknown, msg?: string) => void;
@@ -51,7 +80,7 @@ interface TimeoutLogger {
 /**
  * Finds rides needing a timeout-driven transition as of `now` and applies
  * them:
- * - REQUESTED rides broadcast >= 90s with no claim -> AWAITING_RIDER_DECISION
+ * - REQUESTED rides broadcast >= 2 min with no claim -> AWAITING_RIDER_DECISION
  * - AWAITING_RIDER_DECISION rides idle >= 90s -> CANCELLED (NO_DRIVERS_AVAILABLE)
  * - IN_PROGRESS rides under way >= RIDE_AUTO_COMPLETE_HOURS (3) -> COMPLETED
  *   (a driver who never tapped "complete": ./staleRides.ts)

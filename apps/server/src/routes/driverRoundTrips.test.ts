@@ -45,11 +45,20 @@ const BUDGET = {
   "GET /driver/rides/active": 4,
   // 5 since ride offers (2026-10): + riders' ratings for the offer card
   // (read in parallel with the drivers query, so no extra latency).
-  "GET /driver/rides/eligible": 6,
-  "GET /rides/:id/fill-suggestions": 5,
+  // 7 since the shared-ride dispatch rules (2026-11): + which requests'
+  // pop-ups already ran out on this driver (offerTimedOut), read in
+  // parallel with the ratings, so no extra latency.
+  "GET /driver/rides/eligible": 7,
+  // 7 since the shared-ride dispatch rules (2026-11): + the driver (online,
+  // position; in parallel with the car), and the open requests are read
+  // after the car instead of beside it, since only its free seats and the
+  // detour check decide which ones it is shown.
+  "GET /rides/:id/fill-suggestions": 7,
   "GET /rides/:id/add-preview": 6,
   "POST /rides/:id/claim": 2,
-  "POST /rides/:id/add-passenger": 7,
+  // 8 since the shared-ride dispatch rules (2026-11): + the driver is
+  // online (read in parallel with the zones and routes).
+  "POST /rides/:id/add-passenger": 8,
   "POST passenger arrived": 6,
   "POST passenger pickup": 6,
   "POST passenger dropoff (not last)": 5,

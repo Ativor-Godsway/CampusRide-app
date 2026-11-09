@@ -78,8 +78,10 @@ export function recordOffersClosed(
     "close",
     (async () => {
       if (reason === "TAKEN" && takenBy) {
+        // A pop-up that ran out leaves the request in the list (2026-11): the
+        // driver may still take it from there.
         await prisma.rideOffer.updateMany({
-          where: { rideId, driverUserId: takenBy, outcome: null },
+          where: { rideId, driverUserId: takenBy, OR: [{ outcome: null }, { outcome: "TIMED_OUT" }] },
           data: { outcome: "ACCEPTED", decidedAt: now },
         });
       }

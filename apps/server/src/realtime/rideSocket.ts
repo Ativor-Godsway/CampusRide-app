@@ -400,6 +400,11 @@ export function emitOfferClosed(driverUserIds: string[], payload: OfferClosedPay
   ioRef.to(driverUserIds.map(roomForDriver)).emit(DRIVER_EVENTS.OFFER_CLOSED, payload);
 }
 
+/** This driver's seats changed: their app refetches its requests lists (dispatch.reofferToDriver). */
+export function emitRequestsChanged(driverUserId: string): void {
+  ioRef?.to(roomForDriver(driverUserId)).emit(DRIVER_EVENTS.REQUESTS_CHANGED, {});
+}
+
 export function emitDriverBroadcast(
   driverUserIds: string[],
   payload: RideBroadcastPayload,
