@@ -40,7 +40,6 @@ import {
   Text,
   colors,
   formatCedis,
-  getDriverRideHistory,
   getFillSuggestions,
   getRideSocket,
   haptics,
@@ -75,6 +74,7 @@ import { RequestCard, type HomeRequest } from "../../components/home/RequestCard
 import { OfferTakeover } from "../../components/offers/OfferTakeover";
 import { useOfferQueue } from "../../lib/offers";
 import { useDriverBalance } from "../../lib/balance";
+import { driverRideHistoryQueryKey, fetchRecentRideHistory } from "../../lib/earnings";
 import { CommissionBlockModal } from "../../components/balance/CommissionBlockModal";
 
 const FILTERS: { value: RequestTypeFilter; label: string }[] = [
@@ -95,7 +95,7 @@ const SHEET_ESTIMATE = 220;
 /** The Go online pill (64) and its gap above the sheet. */
 const GO_ONLINE_BLOCK = 64 + spacing[4];
 /** The earnings history is shared with the Earnings tab (same cache entry). */
-const HISTORY_QUERY_KEY = ["driverRideHistory"];
+const HISTORY_QUERY_KEY = driverRideHistoryQueryKey;
 
 /**
  * Home, map-first (docs/mockups/08-driver-home-offline.png and
@@ -161,7 +161,7 @@ export default function DriverHomeScreen() {
   // driver's share of today's completed trips (todayEarnings).
   const history = useQuery({
     queryKey: HISTORY_QUERY_KEY,
-    queryFn: getDriverRideHistory,
+    queryFn: fetchRecentRideHistory,
     enabled: Boolean(user),
   });
   const { refetch: refetchHistory } = history;

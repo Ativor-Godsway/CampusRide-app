@@ -94,10 +94,10 @@ always the one in the token.
 | `PATCH /driver/availability` | Yes | DRIVER | Own online status; going online needs an approved, complete profile. | account default |
 | `PATCH /driver/zone` | Yes | DRIVER | Own current zone. | account default |
 | `GET /driver/rides/active` | Yes | DRIVER | Own current trip. Riders' phone numbers only for riders still to be picked up or in the car. | account default |
-| `GET /driver/rides/history` | Yes | DRIVER | Own completed trips; place names only. | account default |
-| `GET /driver/balance` | Yes | DRIVER | Own commission balance, the rules (limit, warning, enforcement, fee), the payment quote, a payment still going, and the history. No admin notes. | account default |
+| `GET /driver/rides/history` | Yes | DRIVER | Own completed trips; place names only. Optional `since` lists only trips since then (at most 8 days back); the summary is always all time. | account default |
+| `GET /driver/balance` | Yes | DRIVER | Own commission balance, the rules (limit, warning, enforcement, fee), the payment quote, a payment still going, the latest payment or waiver, and the history. First brings own unfinished payments up to date with Paystack's verify endpoint (each at most every 10 s). No admin notes. | account default |
 | `POST /driver/balance/payments` | Yes | DRIVER | Starts paying own whole balance through Paystack (MoMo charge, or the hosted checkout page). The amount is locked on the server; only the last 4 digits of the number are kept. | account default; plus 5 / 15 min |
-| `GET /driver/balance/payments/:reference` | Yes | DRIVER | One of own commission payments; asks Paystack's verify endpoint while it's unfinished. Another driver's reference is "not found". | account default |
+| `GET /driver/balance/payments/:reference` | Yes | DRIVER | One of own commission payments; while it's unfinished, asks Paystack's verify endpoint about own unfinished payments (each at most every 10 s), expires ones over 30 minutes old, and stops one overtaken by a waiver or another payment. Another driver's reference is "not found". | account default |
 | `POST /driver/balance/payments/:reference/otp` | Yes | DRIVER | The code a network asked for, for own payment. Another driver's reference is "not found". | account default; plus 5 / 15 min |
 | `GET /driver/rides/eligible` | Yes | DRIVER | Requests offered to this driver (online, approved, nearby zone, not declined). First names and place names, never pins. | account default |
 | `GET /rides/mine` | Yes | RIDER | Own bookings only. | account default |

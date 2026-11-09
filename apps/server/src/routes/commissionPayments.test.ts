@@ -18,7 +18,7 @@ import { signAccessToken } from "../services/auth/tokens";
 import { getTestZones } from "../services/ride/testFixtures";
 import { uniqueGhanaPhone } from "../test/testPhone";
 import { clearAdminCache } from "../services/admin/cache";
-import { resetPaymentChecksForTests } from "../services/commission/payments";
+import { CHECK_EVERY_MS, PENDING_GIVE_UP_MS, resetPaymentChecksForTests } from "../services/commission/payments";
 import type { ChargeAnswer, PaystackClient, VerifyAnswer } from "../services/commission/paystack";
 
 const SECRET = "sk_test_commission_payments_suite";
@@ -296,7 +296,9 @@ describe("paying with Paystack", () => {
     expect((await webhook(payment.reference, "nope")).statusCode).toBe(401);
     const body = JSON.stringify({ event: "charge.success", data: { reference: payment.reference } });
     expect((await webhook(payment.reference, sign(body, "sk_test_wrong_key"))).statusCode).toBe(401);
-    expect((await balance(d)).balancePesewas).toBe(5_000);
+    // Nothing credited by those (opening Balance would ask Paystack itself).
+    expect(await prisma.driverCashPayment.count({ where: { driverUserId: d.id } })).toBe(0);
+    expect((await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { reference: payment.reference } })).status).toBe("PENDING");
   });
 
   it("never credits a payment whose amount, currency or reference doesn't match", async () => {
@@ -401,6 +403,175 @@ describe("paying with Paystack", () => {
     } finally {
       paystack.configured = true;
     }
+  });
+});
+
+describe("status checks ask Paystack themselves (the webhook may never come)", () => {
+  const status = (d: User, reference: string) => get(`/driver/balance/payments/${reference}`, d);
+  /** Moves a payment back in time (as if it started `ms` ago), and lets Paystack be asked again. */
+  async function startedAgo(reference: string, ms: number) {
+    await prisma.driverPaystackPayment.update({ where: { reference }, data: { createdAt: new Date(Date.now() - ms) } });
+    resetPaymentChecksForTests();
+  }
+
+  it("records a payment Paystack confirms on a check, once, and the later webhook adds nothing", async () => {
+    const d = await driver("Esi PollPaid");
+    await trip(d, 105);
+    const payment = await payMomo(d);
+    expect((await status(d, payment.reference)).json().payment.status).toBe("PENDING");
+
+    paystack.pay(payment.reference);
+    resetPaymentChecksForTests();
+    const paid = (await status(d, payment.reference)).json().payment;
+    expect(paid).toMatchObject({ status: "SUCCESS", owedPesewas: 105 });
+    expect((await status(d, payment.reference)).json().payment.status).toBe("SUCCESS");
+    expect((await webhook(payment.reference)).statusCode).toBe(200);
+    expect((await webhook(payment.reference)).statusCode).toBe(200);
+
+    expect(await prisma.driverCashPayment.count({ where: { driverUserId: d.id } })).toBe(1);
+    const b = await balance(d);
+    expect(b.balancePesewas).toBe(0);
+    expect(b.pendingPayment).toBeNull();
+    expect(b.lastCredit).toMatchObject({ kind: "PAYMENT", amountPesewas: 105 });
+  });
+
+  it(`asks Paystack about one payment at most every ${CHECK_EVERY_MS / 1000} s`, async () => {
+    const d = await driver("Kofi PollOften");
+    await trip(d, 2_000);
+    const payment = await payMomo(d);
+    resetPaymentChecksForTests();
+    const before = paystack.verifyCalls;
+    for (let i = 0; i < 4; i += 1) await status(d, payment.reference);
+    await balance(d);
+    expect(paystack.verifyCalls - before).toBe(1);
+  });
+
+  it("rejects a payment whose amount doesn't match on a check, and never credits it", async () => {
+    const d = await driver("Ama PollMismatch");
+    await trip(d, 3_000);
+    const payment = await payMomo(d);
+    paystack.pay(payment.reference, { amountPesewas: 300 });
+    resetPaymentChecksForTests();
+    expect((await status(d, payment.reference)).json().payment.status).toBe("MISMATCH");
+    await webhook(payment.reference);
+    expect(await prisma.driverCashPayment.count({ where: { driverUserId: d.id } })).toBe(0);
+    expect((await balance(d)).balancePesewas).toBe(3_000);
+  });
+
+  it("stops waiting once an admin waives the balance, and Balance shows the waiver", async () => {
+    const d = await driver("Yaw Waived");
+    await trip(d, 4_020);
+    const payment = await payMomo(d);
+    expect((await post(`/admin/drivers/${d.id}/waive`, { amountPesewas: 4_020, reason: "Launch week" }, admin)).statusCode).toBe(201);
+
+    resetPaymentChecksForTests();
+    expect((await status(d, payment.reference)).json().payment.status).toBe("ABANDONED");
+    const b = await balance(d);
+    expect(b.balancePesewas).toBe(0);
+    expect(b.pendingPayment).toBeNull();
+    expect(b.lastCredit).toMatchObject({ kind: "WAIVER", amountPesewas: 4_020 });
+  });
+
+  it("drops a stale payment as soon as Balance opens after Mark as paid", async () => {
+    const d = await driver("Afia MarkedPaid");
+    await trip(d, 1_000);
+    await payMomo(d);
+    expect((await post("/admin/cash/payments", { driverId: d.id, amountPesewas: 1_000, method: "CASH" }, admin)).statusCode).toBe(201);
+    resetPaymentChecksForTests();
+    const b = await balance(d);
+    expect(b.pendingPayment).toBeNull();
+    expect(b.lastCredit).toMatchObject({ kind: "PAYMENT", amountPesewas: 1_000 });
+  });
+
+  it(`expires a payment after ${PENDING_GIVE_UP_MS / 60_000} minutes, never blocking a new one`, async () => {
+    const d = await driver("Kwesi Expired");
+    await trip(d, 2_000);
+    const old = await payMomo(d);
+    await startedAgo(old.reference, PENDING_GIVE_UP_MS + 60_000);
+
+    const b = await balance(d);
+    expect(b.pendingPayment).toBeNull();
+    expect((await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { reference: old.reference } })).status).toBe("ABANDONED");
+    const fresh = await payMomo(d);
+    expect(fresh.reference).not.toBe(old.reference);
+    expect(fresh.status).toBe("PENDING");
+  });
+
+  it("still credits a replaced payment approved late, once, and the newer one stops waiting", async () => {
+    const d = await driver("Adjoa LatePrompt");
+    await trip(d, 105);
+    const first = await payMomo(d);
+    await startedAgo(first.reference, 60_000);
+    const second = await payMomo(d);
+    expect(second.reference).not.toBe(first.reference);
+    expect((await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { reference: first.reference } })).status).toBe("ABANDONED");
+
+    // The driver approves the FIRST prompt; the app is polling the second.
+    paystack.pay(first.reference);
+    resetPaymentChecksForTests();
+    expect((await status(d, second.reference)).json().payment.status).toBe("ABANDONED");
+    expect((await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { reference: first.reference } })).status).toBe("SUCCESS");
+    await webhook(first.reference);
+    expect(await prisma.driverCashPayment.count({ where: { driverUserId: d.id } })).toBe(1);
+    expect((await balance(d)).balancePesewas).toBe(0);
+  });
+
+  it("says nothing about a last payment when there is none", async () => {
+    const d = await driver("Ekua NoCredit");
+    await trip(d, 500);
+    expect((await balance(d)).lastCredit).toBeNull();
+  });
+});
+
+describe("earnings: GET /driver/rides/history", () => {
+  const DAY = 24 * 60 * 60_000;
+  /** A completed trip `daysAgo` days back, fare = commission × 7 (as trip() books it). */
+  async function tripDaysAgo(d: User, commission: number, daysAgo: number) {
+    const ride = await trip(d, commission);
+    const at = new Date(Date.now() - daysAgo * DAY);
+    await prisma.ride.update({ where: { id: ride.id }, data: { completedAt: at } });
+    return ride;
+  }
+
+  it("lists only the trips since `since` (at most 8 days back), with the totals still all time", async () => {
+    const d = await driver("Kojo Earner");
+    const recent = await tripDaysAgo(d, 100, 0); // fare GH₵7
+    const yesterday = await tripDaysAgo(d, 200, 1); // GH₵14
+    const old = await tripDaysAgo(d, 300, 30); // GH₵21, a month ago
+
+    const all = (await get("/driver/rides/history", d)).json();
+    expect(all.rides.map((r: { rideId: string }) => r.rideId)).toEqual([recent.id, yesterday.id, old.id]);
+
+    const since = new Date(Date.now() - 6 * DAY).toISOString();
+    const week = (await get(`/driver/rides/history?since=${encodeURIComponent(since)}`, d)).json();
+    expect(week.rides.map((r: { rideId: string }) => r.rideId)).toEqual([recent.id, yesterday.id]);
+    // All time, both ways: 3 trips, GH₵42 gross, 15% commission, 85% kept.
+    for (const body of [all, week]) {
+      expect(body.summary).toMatchObject({ totalRides: 3, totalGrossPesewas: 4_200, totalCommissionPesewas: 630, netPesewas: 3_570 });
+    }
+
+    // Asking for more than 8 days still lists only 8.
+    const ancient = (await get(`/driver/rides/history?since=${encodeURIComponent(new Date(0).toISOString())}`, d)).json();
+    expect(ancient.rides).toHaveLength(2);
+    expect((await get("/driver/rides/history?since=yesterday", d)).statusCode).toBe(400);
+
+    // Nothing was deleted: the old trip is still on file.
+    expect(await prisma.ride.count({ where: { id: old.id } })).toBe(1);
+  });
+
+  it("shows a driver only their own trips and totals", async () => {
+    const mine = await driver("Abena Mine");
+    const theirs = await driver("Kwame Theirs");
+    await tripDaysAgo(mine, 100, 0);
+    const other = await tripDaysAgo(theirs, 500, 0);
+
+    const since = encodeURIComponent(new Date(Date.now() - 6 * DAY).toISOString());
+    const body = (await get(`/driver/rides/history?since=${since}`, mine)).json();
+    expect(body.rides.map((r: { rideId: string }) => r.rideId)).not.toContain(other.id);
+    expect(body.summary).toMatchObject({ totalRides: 1, totalGrossPesewas: 700 });
+    // A rider can't read a driver's history at all.
+    const rider = await user("RIDER", "Curious Rider");
+    expect((await get(`/driver/rides/history?since=${since}`, rider)).statusCode).toBe(403);
   });
 });
 

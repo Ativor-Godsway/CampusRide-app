@@ -72,6 +72,22 @@ export function debtWarningText(balancePesewas: number, debtLimitPesewas: number
   return `You owe ${formatCedis(balancePesewas)}. Pay before ${formatCedis(debtLimitPesewas)} to keep driving.`;
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+/** The latest payment or waiver that still stands (GET /driver/balance `lastCredit`). */
+export interface LastCredit {
+  kind: "PAYMENT" | "WAIVER";
+  amountPesewas: number;
+  at: string;
+}
+
+/** "Last paid GH₵40.20 · 9 Nov", "Last waived GH₵40.20 · 9 Nov" (phone's own date; the year when it isn't this year). */
+export function lastCreditText(credit: LastCredit, now: Date = new Date()): string {
+  const at = new Date(credit.at);
+  const date = `${at.getDate()} ${MONTHS[at.getMonth()]}${at.getFullYear() === now.getFullYear() ? "" : ` ${at.getFullYear()}`}`;
+  return `${credit.kind === "WAIVER" ? "Last waived" : "Last paid"} ${formatCedis(credit.amountPesewas)} · ${date}`;
+}
+
 export interface PaystackQuote {
   /** What is cleared off the balance: the whole balance. */
   owedPesewas: number;

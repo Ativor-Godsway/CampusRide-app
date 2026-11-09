@@ -26,7 +26,7 @@ import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
 import { claimIfOpen, closeOffer } from "../services/ride/dispatch";
-import { paidFareTotal, requestFare } from "../services/ride/fares";
+import { paidFareTotal, requestFare, type RideKind } from "../services/ride/fares";
 import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { suggestFillsForRide } from "../services/ride/ranking";
@@ -80,7 +80,8 @@ const SCHEMAS = {
   availability: { body: object({ isOnline: boolean, zoneId: nullableId, latitude, longitude }, ["isOnline"]) },
   zone: { body: object({ zoneId: nullableId, latitude, longitude }, ["zoneId"]) },
   activeRide: noInput,
-  history: noInput,
+  // since: the oldest trip to list (the app sends its last 7 days); the totals stay all-time.
+  history: { querystring: object({ since: text(40) }) },
   profile: {
     body: object({
       name: text(MAX.name),
@@ -134,6 +135,9 @@ async function requireDriver(request: Parameters<typeof requireAuth>[0], reply: 
 }
 
 /** What a suspended driver's app shows when they try to go online. */
+/** GET /driver/rides/history?since= lists at most this far back (8 days: a phone's 7 calendar days in any time zone). */
+const HISTORY_LIST_MAX_MS = 8 * 24 * 60 * 60_000;
+
 export const DRIVER_SUSPENDED_MESSAGE =
   "Your driver account is suspended, so you can't go online. Contact CampusRide to find out why.";
 
@@ -451,39 +455,52 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     if (!(await requireDriver(request, reply))) return;
 
     const userId = request.user!.userId;
+    const sinceText = (request.query as { since?: string }).since;
+    let since: Date | null = null;
+    if (sinceText) {
+      const parsed = new Date(sinceText);
+      if (Number.isNaN(parsed.getTime())) return reply.code(400).send({ error: "since must be a date", code: "INVALID_SINCE" });
+      // A week's list, never more: older trips stay on file (and in the totals), just not listed.
+      since = new Date(Math.max(parsed.getTime(), Date.now() - HISTORY_LIST_MAX_MS));
+    }
 
-    const rides = await prisma.ride.findMany({
-      where: { driverId: userId, status: "COMPLETED" },
-      include: {
-        pickupZone: { select: { name: true } },
-        dropoffZone: { select: { name: true } },
-        passengers: { select: { status: true, lockedFare: true, fareCharged: true } },
-      },
-      orderBy: { completedAt: "desc" },
-    });
+    const completed = { driverId: userId, status: "COMPLETED" as const };
+    const seatFares = { select: { status: true, lockedFare: true, fareCharged: true } };
+    const [rides, allRides] = await Promise.all([
+      prisma.ride.findMany({
+        where: since ? { ...completed, OR: [{ completedAt: { gte: since } }, { completedAt: null, createdAt: { gte: since } }] } : completed,
+        include: {
+          pickupZone: { select: { name: true } },
+          dropoffZone: { select: { name: true } },
+          passengers: seatFares,
+        },
+        orderBy: { completedAt: "desc" },
+      }),
+      // All time, for the totals: only what the fares need.
+      since ? prisma.ride.findMany({ where: completed, select: { type: true, passengers: seatFares } }) : null,
+    ]);
 
-    const items = rides.map((ride) => {
+    const money = (ride: { type: RideKind; passengers: Parameters<typeof paidFareTotal>[1] }) => {
       const facePesewas = paidFareTotal(ride.type, ride.passengers);
-      const driverGrossPesewas = splitFare(facePesewas).driverShare;
+      return { facePesewas, driverGrossPesewas: splitFare(facePesewas).driverShare };
+    };
 
-      return {
-        rideId: ride.id,
-        pickupZoneName: ride.pickupZone.name,
-        dropoffZoneName: ride.dropoffZone.name,
-        // The trip is over: where it went, by name only.
-        ...requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name),
-        type: ride.type as "LONE" | "SHARED",
-        source: ride.source as "APP" | "USSD",
-        completedAt: (ride.completedAt ?? ride.createdAt).toISOString(),
-        facePesewas,
-        driverGrossPesewas,
-      };
-    });
+    const items = rides.map((ride) => ({
+      rideId: ride.id,
+      pickupZoneName: ride.pickupZone.name,
+      dropoffZoneName: ride.dropoffZone.name,
+      // The trip is over: where it went, by name only.
+      ...requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name),
+      type: ride.type as "LONE" | "SHARED",
+      source: ride.source as "APP" | "USSD",
+      completedAt: (ride.completedAt ?? ride.createdAt).toISOString(),
+      ...money(ride),
+    }));
 
     // The summary follows the ONE earnings rule the driver app uses too
     // (earningsTotals, @rida/shared): gross = the fares, commission = 15% of
     // them, net = the driver's shares. The commission comes out once.
-    const totals = earningsTotals(items);
+    const totals = earningsTotals(allRides ? allRides.map(money) : items);
 
     // Phase 4: commission OWED comes from CommissionLedger — the 15% recorded
     // on each completed CASH ride (see finalizeRideCompletion): the driver

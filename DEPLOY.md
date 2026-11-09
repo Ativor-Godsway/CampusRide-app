@@ -235,7 +235,10 @@ start-up). `PAYSTACK_FEE_PERCENT` (e.g. `1.95`) and `PAYSTACK_FEE_CAP_GHS`
 (e.g. `10`, optional) are only the starting fee until an admin saves the
 commission rules in Settings. No public key is needed. The webhook URL to
 paste in the Paystack dashboard (Settings → API Keys & Webhooks) is
-`https://api.campusride.app/webhooks/paystack`. Moolre stays for SMS only.
+`https://api.campusride.app/webhooks/paystack`. Paystack keeps a separate
+webhook URL for Test and Live mode: paste it in both. The app's status checks
+ask Paystack themselves, so a payment is still credited without the webhook;
+the webhook just makes it instant. Moolre stays for SMS only.
 
 Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each

@@ -10,6 +10,8 @@
  * `driverGrossPesewas` is the API's (older) name for the driver's 85% share
  * of one trip; it is not a gross. Phone's own clock for days.
  */
+import { dayLabel } from "../format/dates";
+
 export interface EarningTrip {
   completedAt: string;
   /** The rider fare(s) for the trip, pesewas (all riders on a shared trip). */
@@ -29,7 +31,7 @@ export interface EarningsTotals {
 }
 
 /** Gross, commission and after-commission for any set of trips (all time, a day, a week). */
-export function earningsTotals(trips: readonly EarningTrip[]): EarningsTotals {
+export function earningsTotals(trips: readonly Omit<EarningTrip, "completedAt">[]): EarningsTotals {
   let gross = 0;
   let net = 0;
   for (const t of trips) {
@@ -75,6 +77,54 @@ export function weekEarnings(trips: readonly EarningTrip[], now: Date = new Date
       ...earningsTotals(trips.filter((t) => startOfDay(t.completedAt) === start)),
     };
   });
+}
+
+/** How many calendar days the Earnings trip list goes back (today included). */
+export const RECENT_TRIP_DAYS = 7;
+
+/** Midnight at the start of the oldest day the trip list shows: what the app asks the server `since`. */
+export function recentTripsSince(now: Date = new Date(), days: number = RECENT_TRIP_DAYS): Date {
+  const start = new Date(startOfDay(now));
+  start.setDate(start.getDate() - (days - 1));
+  return start;
+}
+
+export interface EarningsTripDay<T> extends EarningsTotals {
+  /** "Today", "Yesterday", "Mon 19 Oct". */
+  label: string;
+  /** Midnight at the start of the day (epoch ms). */
+  start: number;
+  isToday: boolean;
+  /** That day's trips, newest first. */
+  items: T[];
+}
+
+/**
+ * The trips of the last `days` calendar days (today included), one entry per
+ * day that has any, newest first, each with its own totals. Older trips are
+ * left out: they stay on file, the app just doesn't list them.
+ */
+export function recentTripDays<T extends EarningTrip>(
+  trips: readonly T[],
+  now: Date = new Date(),
+  days: number = RECENT_TRIP_DAYS,
+): EarningsTripDay<T>[] {
+  const oldest = recentTripsSince(now, days).getTime();
+  const today = startOfDay(now);
+  const byDay = new Map<number, T[]>();
+  for (const t of trips) {
+    const start = startOfDay(t.completedAt);
+    if (start < oldest || start > today) continue;
+    const list = byDay.get(start);
+    if (list) list.push(t);
+    else byDay.set(start, [t]);
+  }
+  return [...byDay.entries()]
+    .sort(([a], [b]) => b - a)
+    .map(([start, items]) => {
+      const sorted = [...items].sort((a, b) => Date.parse(b.completedAt) - Date.parse(a.completedAt));
+      return { label: dayLabel(start, now), start, isToday: start === today, items: sorted, ...earningsTotals(sorted) };
+    });
 }
 
 /** Today's, or this week's (Monday on), totals. */
