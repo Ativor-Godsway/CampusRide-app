@@ -4,7 +4,7 @@ import { addRiderToRide, emitRideEvent, emitToRider, removeRiderFromRide } from 
 import { notifyRider } from "../push/notify";
 import { notifyUssdRider } from "../sms/notifyUssdRiders";
 import { getDriverInfo } from "../user/driverInfo";
-import { closeOffer } from "./dispatch";
+import { closeOffer, reofferToDriver } from "./dispatch";
 import { announceRiderTripComplete, finalizeRideCompletion } from "./completion";
 import { sendRiderEtasNow } from "./riderEta";
 import { isActivePassengerStatus } from "./stateMachine";
@@ -88,6 +88,9 @@ export async function announcePassengerChange(
   // Out of the car: their phone stops following it (after the events above,
   // so they still hear how their own trip ended).
   if (!isActivePassengerStatus(passenger.status)) removeRiderFromRide(passenger.riderId, ride.id);
+  // A seat freed (drop-off, cancel, no-show) or the trip ended: requests
+  // that fit the car now reach this driver at once.
+  if (!isActivePassengerStatus(passenger.status)) reofferToDriver(prisma, driverUserId);
   // The riders still in or waiting for the car: fresh ETAs now.
   if (ride.status !== "COMPLETED" && ride.status !== "CANCELLED") await sendRiderEtasNow(prisma, ride.id, driverUserId);
 }
@@ -120,5 +123,7 @@ export async function announcePassengerUndo(
   if (ride.status !== rideStatusBefore) {
     emitRideEvent(ride.id, "ride:status", { rideId: ride.id, status: ride.status as RideStatus });
   }
+  // An undone drop-off takes its seat back: the lists are worked out again.
+  reofferToDriver(prisma, driverUserId);
   await sendRiderEtasNow(prisma, ride.id, driverUserId);
 }

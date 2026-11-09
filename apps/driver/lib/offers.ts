@@ -39,8 +39,8 @@ const GONE_NOTICE: Record<OfferClosedReason, string> = REQUEST_GONE_TOAST;
 /**
  * Offers this driver has dealt with this session — accepted, declined,
  * timed out, or seen withdrawn. Kept outside the screen so leaving Home and
- * coming back never brings one back. (The server never re-offers a declined
- * or timed-out ride either; this just makes it instant.)
+ * coming back never pops one up again. (The server never lists a declined
+ * ride again, and flags a timed-out one; this just makes it instant.)
  */
 const handled = new Set<string>();
 
@@ -56,8 +56,10 @@ export function asOfferItem(r: EligibleRideItem): OfferItem {
  * The offer pop-up's queue (Bolt/Uber style): ONE offer at a time, nearest
  * pickup first, with a countdown set by the server. Taken, cancelled or
  * expired requests leave the queue live — and if one is on screen, it
- * closes with a short note. Decline and timeout are recorded on the server
- * (never re-offered), Accept hands the request to `onAccept`.
+ * closes with a short note. Decline and timeout are recorded on the server:
+ * a declined request leaves this driver's list, a timed-out one only stops
+ * popping up (it stays listed while the rider searches). Accept hands the
+ * request to `onAccept`.
  *
  * Coming back from the background: an offer whose countdown ran out while
  * the app was away closes as timed out, and nothing with under 4 s left is
@@ -137,7 +139,9 @@ export function useOfferQueue({
   useEffect(() => {
     if (!enabled || current) return;
     const t = Date.now();
-    const exclude = new Set([...handled, ...withdrawn.keys()]);
+    // A request whose pop-up ran out on this driver stays in the list but
+    // never pops up again, even after the app restarts (the server says so).
+    const exclude = new Set([...handled, ...withdrawn.keys(), ...queue.filter((o) => o.offerTimedOut).map((o) => o.rideId)]);
     const next = nextOffer(queue, exclude, t);
     if (!next) return;
     setCurrent({
@@ -162,6 +166,7 @@ export function useOfferQueue({
         o.rideId !== current?.item.rideId &&
         !handled.has(o.rideId) &&
         !withdrawn.has(o.rideId) &&
+        !o.offerTimedOut &&
         Date.parse(o.expiresAt) - t >= MIN_OFFER_SHOW_MS,
     ).length;
     // `now` re-runs it as time passes.
@@ -172,7 +177,7 @@ export function useOfferQueue({
     offer: current,
     /** How many more offers are lined up behind this one. */
     waiting,
-    /** "That request was taken" etc., for a moment after an offer went away. */
+    /** "Already taken by another driver" etc., for a moment after an offer went away. */
     notice,
     /** Accept tapped: the offer is held (see ShownOffer.heldAt) and handed to `onAccept`. */
     accept: () => {

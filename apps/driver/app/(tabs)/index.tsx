@@ -237,7 +237,7 @@ export default function DriverHomeScreen() {
         .map((s) => ({
           rideId: s.requestRideId,
           type: "SHARED" as const,
-          seats: 1,
+          seats: s.seats ?? 1,
           farePesewas: s.farePesewas ?? sharedFare,
           pickupZoneId: s.pickupZoneId,
           pickupZoneName: s.pickupZoneName,

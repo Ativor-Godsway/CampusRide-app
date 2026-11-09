@@ -35,7 +35,7 @@ describe("classifyClaimFailure", () => {
   });
 
   it("says what happened in the toast", () => {
-    expect(REQUEST_GONE_TOAST.TAKEN).toBe("That request was taken");
+    expect(REQUEST_GONE_TOAST.TAKEN).toBe("Already taken by another driver");
     expect(REQUEST_GONE_TOAST.EXPIRED).toBe("That request expired");
   });
 });

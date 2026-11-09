@@ -246,6 +246,11 @@ export interface EligibleRideItem {
   expiresAt?: string;
   /** How long the offer's countdown runs, set by the server. */
   offerSeconds?: number;
+  /**
+   * Its pop-up already ran out on this driver (servers from 2026-11): it
+   * stays in the list while the rider searches, but never pops up again.
+   */
+  offerTimedOut?: boolean;
 }
 
 /**
@@ -384,10 +389,14 @@ export interface FillSuggestion {
    * older servers: today's shared fare then.
    */
   farePesewas?: number;
+  /** Seats this request needs (servers from 2026-11; 1 from every app). */
+  seats?: number;
 }
 
 export interface FillSuggestionsResult {
   occupancy: number;
+  /** Seats left now: capacity less riders on board and waiting (servers from 2026-11). */
+  freeSeats?: number;
   passengers: PassengerInCar[];
   suggestions: FillSuggestion[];
 }

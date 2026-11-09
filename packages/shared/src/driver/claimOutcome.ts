@@ -19,7 +19,7 @@ export type ClaimOutcome =
 
 /** The toast after a request went away. */
 export const REQUEST_GONE_TOAST: Record<RequestGoneReason, string> = {
-  TAKEN: "That request was taken",
+  TAKEN: "Already taken by another driver",
   CANCELLED: "The rider cancelled that request",
   EXPIRED: "That request expired",
 };

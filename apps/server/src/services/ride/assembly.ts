@@ -75,7 +75,8 @@ export interface AddRiderOptions {
  * Throws (nothing kept):
  * - NotRideOwnerError: someone else's car
  * - RideNotFillableError: car not MATCHED/ARRIVED/IN_PROGRESS
- * - NoSeatsAvailableError: 4 riders already in the car
+ * - NoSeatsAvailableError: 4 riders already in the car, or fewer seats left
+ *   than the request asks for
  * - RequestRideUnavailableError: request no longer open
  * - whatever checkCar throws
  *
@@ -139,6 +140,10 @@ export async function addRiderToCar(
       if (seated >= PRICING.MAX_SHARED_OCCUPANCY) throw new NoSeatsAvailableError(anchorRideId);
       throw new RequestRideUnavailableError(requestRideId);
     }
+
+    // Seats are counted again here, with the car locked: a request for more
+    // seats than are left (none from today's apps) is refused, not squeezed in.
+    if (request.occupancy > PRICING.MAX_SHARED_OCCUPANCY - seated) throw new NoSeatsAvailableError(anchorRideId);
 
     // The rider's own pins, note and quoted fare travel with them onto their new seat.
     const candidate: AddCandidate = {

@@ -144,6 +144,11 @@ export const DRIVER_EVENTS = {
   RIDE_BROADCAST: "ride:broadcast",
   /** A request offered to this driver was taken, cancelled or expired: drop it from the offer queue. */
   OFFER_CLOSED: "ride:offer_closed",
+  /**
+   * A seat in this driver's car changed (a drop-off, a cancel, an undo, a
+   * rider added, the trip ended): refetch the requests lists now. No payload.
+   */
+  REQUESTS_CHANGED: "driver:requests_changed",
 } as const;
 
 /** Sent to the drivers a request was offered to when it stops being available. */

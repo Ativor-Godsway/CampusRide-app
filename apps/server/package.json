@@ -23,6 +23,7 @@
     "sim:riders": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/riders.ts",
     "sim:driver": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/fakeDriver.ts",
     "sim:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/cleanupCli.ts",
+    "simulate:shared": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sharedSim/cli.ts",
     "sim:approve-driver": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/approveDriverCli.ts",
     "loadtest": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/loadtest.ts",
     "sentry:test": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/sentryTest.ts",

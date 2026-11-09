@@ -1,5 +1,5 @@
 import type { PrismaClient, Ride } from "@prisma/client";
-import { splitFare } from "@rida/shared";
+import { DISPATCH_WINDOW_MS, splitFare } from "@rida/shared";
 import { requestFare } from "./fares";
 import { emitDriverBroadcast, emitOfferClosed } from "../../realtime/rideSocket";
 import { logger } from "../../lib/logger";
@@ -11,6 +11,10 @@ import { notifyRideRequest } from "../push/notify";
 import { dispatchDemoRide, isServedBySimDriver } from "../reviewDemo/simulation";
 import { recordOffers, recordOffersClosed } from "../stats/rideOffers";
 import { noteRequestClosed, noteRequestOffered } from "../admin/liveRequests";
+import { emitRequestsChanged } from "../../realtime/rideSocket";
+import { carsThatFitRequest, requestsForDriver, type RequestRow } from "./requestFit";
+import { scheduleRequestExpiry } from "./timeouts";
+import { getZoneMap } from "../zones/zoneCache";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -18,11 +22,11 @@ import { noteRequestClosed, noteRequestOffered } from "../admin/liveRequests";
  * adjacent to it. This is the candidate set only — ranking/"perfect match"
  * ordering of these candidates is Phase 2c, not handled here.
  *
- * With the ride's `id` (ride offers, 2026-10), drivers who already declined
- * or let this ride's offer time out are left out: it is never offered to
- * them again. Drivers on a trip stay in: a shared car with a free seat is
- * offered riders mid-trip (fill-suggestions); the broadcast only tells the
- * app to look.
+ * With the ride's `id` (ride offers, 2026-10), drivers who declined it are
+ * left out: it is never offered to them again. A pop-up that only ran out
+ * (TIMED_OUT) doesn't count (2026-11): the request stays in that driver's
+ * list for the rest of its search. Drivers on a trip are still in this set;
+ * driversOfferedTo is the one that applies the seat rules.
  */
 export async function getEligibleDrivers(
   prisma: PrismaClient,
@@ -35,7 +39,7 @@ export async function getEligibleDrivers(
       where: {
         isOnline: true,
         isApproved: true,
-        user: { isReviewDemo: true, ...(ride.id ? { rideRejections: { none: { rideId: ride.id } } } : {}) },
+        user: { isReviewDemo: true, ...(ride.id ? declinedNone(ride.id) : {}) },
       },
     });
   }
@@ -62,16 +66,42 @@ export async function getEligibleDrivers(
       isApproved: true,
       currentZoneId: { in: Array.from(zoneIds) },
       currentZone: { retiredAt: null },
-      user: { isReviewDemo: false, ...(ride.id ? { rideRejections: { none: { rideId: ride.id } } } : {}) },
+      user: { isReviewDemo: false, ...(ride.id ? declinedNone(ride.id) : {}) },
     },
   });
 }
 
+/** "Hasn't declined this ride" (requestFit.notDeclinedBy, from the driver's side). */
+function declinedNone(rideId: string) {
+  return { rideRejections: { none: { rideId, OR: [{ reason: null }, { reason: { not: "TIMED_OUT" } }] } } };
+}
+
+/**
+ * The drivers a request is offered to now (shared-ride dispatch rules,
+ * services/ride/requestFit): online drivers nearby with no trip, and
+ * drivers whose Shared car it fits — free seats and the detour check. A
+ * full car, a Ride alone car and an offline driver are never in it.
+ */
+export async function driversOfferedTo(prisma: PrismaClient, ride: RequestRow): Promise<string[]> {
+  const nearby = await getEligibleDrivers(prisma, ride);
+  const onTrip = nearby.length
+    ? await prisma.ride.findMany({
+        where: { driverId: { in: nearby.map((d) => d.userId) }, status: { in: [...ACTIVE_DRIVER_STATUSES] } },
+        select: { driverId: true },
+      })
+    : [];
+  const busy = new Set(onTrip.map((r) => r.driverId));
+  const free = nearby.filter((d) => !busy.has(d.userId)).map((d) => d.userId);
+  return [...new Set([...free, ...(await carsThatFitRequest(prisma, ride))])];
+}
+
 /**
  * A request stopped being available — another driver took it, the rider
- * cancelled, or its window ran out. Every driver it could have been offered
- * to hears `ride:offer_closed` and drops it from their offer queue and list
- * at once, instead of on the next poll. Fire-and-forget: never throws.
+ * cancelled, or its window ran out. Every online driver hears
+ * `ride:offer_closed` and drops it from their offer queue and lists at
+ * once, instead of on the next poll: the Home list, and the mid-trip list
+ * of a Shared car, which isn't limited to nearby zones. Fire-and-forget:
+ * never throws.
  */
 export function closeOffer(
   prisma: PrismaClient,
@@ -82,7 +112,11 @@ export function closeOffer(
   void recordOffersClosed(prisma, ride.id, reason, reason === "TAKEN" ? (ride.driverId ?? null) : null);
   // The admin live map stops showing it as waiting.
   noteRequestClosed(ride.id);
-  void getEligibleDrivers(prisma, { pickupZoneId: ride.pickupZoneId, isReviewDemo: ride.isReviewDemo })
+  void prisma.driver
+    .findMany({
+      where: { isOnline: true, isApproved: true, user: { isReviewDemo: ride.isReviewDemo ?? false } },
+      select: { userId: true },
+    })
     .then((drivers) => emitOfferClosed(drivers.map((d) => d.userId), { rideId: ride.id, reason }))
     .catch((err) => logger.warn("closeOffer failed", { rideId: ride.id, err }));
 }
@@ -109,7 +143,9 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
     dispatchDemoRide(prisma, ride.id);
     return [];
   }
-  const eligible = await getEligibleDrivers(prisma, { id: ride.id, pickupZoneId: ride.pickupZoneId, isReviewDemo: ride.isReviewDemo });
+  // The search ends exactly when its window does, not at the next sweep.
+  if (ride.status === "REQUESTED") scheduleRequestExpiry(prisma, ride.id, ride.broadcastStartedAt ?? ride.createdAt);
+  const eligible = (await driversOfferedTo(prisma, ride)).map((userId) => ({ userId }));
   // The admin live map's "waiting for a driver" (memory only), offered or not.
   if (!ride.isReviewDemo) {
     noteRequestOffered(
@@ -132,33 +168,59 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
   }
 
   if (eligible.length > 0) {
-    // The fare the rider was quoted, stored on their seat (services/ride/fares).
-    const farePesewas = requestFare(ride.type, ride.passengers, ride.riderId);
-    const { driverShare } = splitFare(farePesewas);
-    const expiresAt = (ride.broadcastStartedAt?.getTime() ?? Date.now()) + 90_000;
-    const placeNames = requestPlaceNames(ride, ride.pickupZone.name, ride.dropoffZone.name);
-
+    const payload = broadcastPayload(ride, ride.pickupZone.name, ride.dropoffZone.name);
     emitDriverBroadcast(
       eligible.map((d) => d.userId),
-      {
-        rideId: ride.id,
-        pickupZoneName: ride.pickupZone.name,
-        dropoffZoneName: ride.dropoffZone.name,
-        // Names only: no driver gets a rider's coordinates before accepting.
-        ...placeNames,
-        type: ride.type,
-        farePesewas,
-        driverSharePesewas: driverShare,
-        expiresAt,
-      },
+      payload,
     );
     // Drivers whose app is in the background or closed get it as a push.
-    notifyRideRequest(prisma, ride.id, eligible.map((d) => d.userId), placeNames.pickupPlaceName);
+    notifyRideRequest(prisma, ride.id, eligible.map((d) => d.userId), payload.pickupPlaceName!);
     // Stats: who it was offered to, and when (services/stats/rideOffers.ts).
     void recordOffers(prisma, ride.id, eligible.map((d) => d.userId));
   }
 
   return eligible;
+}
+
+/** The ride:broadcast payload: names and money, never a rider's coordinates. */
+function broadcastPayload(ride: RequestRow, pickupZoneName: string, dropoffZoneName: string) {
+  // The fare the rider was quoted, stored on their seat (services/ride/fares).
+  const farePesewas = requestFare(ride.type, ride.passengers, ride.riderId);
+  const { driverShare } = splitFare(farePesewas);
+  return {
+    rideId: ride.id,
+    pickupZoneName,
+    dropoffZoneName,
+    ...requestPlaceNames(ride, pickupZoneName, dropoffZoneName),
+    type: ride.type,
+    farePesewas,
+    driverSharePesewas: driverShare,
+    expiresAt: (ride.broadcastStartedAt?.getTime() ?? Date.now()) + DISPATCH_WINDOW_MS,
+  };
+}
+
+/**
+ * A seat in this driver's car changed — a drop-off, a cancel or no-show, an
+ * undo, a rider added, the trip ending. Their lists are worked out again
+ * at once: `driver:requests_changed` makes the app refetch, and every open
+ * request that fits now is sent as `ride:broadcast` (which app builds from
+ * before this event also refetch on), including requests that started
+ * searching while the car was full. No push: the driver is in the app.
+ * Fire-and-forget: never throws.
+ */
+export function reofferToDriver(prisma: PrismaClient, driverUserId: string | null | undefined): void {
+  if (!driverUserId) return;
+  emitRequestsChanged(driverUserId);
+  void Promise.all([requestsForDriver(prisma, driverUserId), getZoneMap(prisma)])
+    .then(([rides, zones]) => {
+      for (const ride of rides) {
+        emitDriverBroadcast(
+          [driverUserId],
+          broadcastPayload(ride, zones.get(ride.pickupZoneId)?.name ?? "", zones.get(ride.dropoffZoneId)?.name ?? ""),
+        );
+      }
+    })
+    .catch((err) => logger.warn("reofferToDriver failed", { driverUserId, err }));
 }
 
 /**

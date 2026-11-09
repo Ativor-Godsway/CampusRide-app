@@ -266,6 +266,25 @@ npm run sim:riders -- --shared-ratio 1           # Shared only, to practise fill
 npm run sim:riders -- --zone "Akuafo"            # pickups at Akuafo Hall
 ```
 
+### Shared-ride dispatch, without a phone
+
+`npm run simulate:shared` (in `apps/server`) plays out whole Shared trips —
+cars filling up, drop-offs freeing seats, pop-ups timing out, two drivers
+accepting at once — against a server it starts on this computer, with real
+socket connections for every driver and rider, and prints what each phone
+would see, minute by minute. It needs no phone and no simulator running.
+
+```bash
+npm run simulate:shared                 # every scenario, on the local dev database
+npm run simulate:shared -- b f          # only scenarios b and f
+npm run simulate:shared -- --test-db    # on the local test database instead
+```
+
+It refuses to run unless the database is a local Postgres (never
+production), and deletes every account and ride it made. If the local dev
+database is behind on migrations, run `npm run db:deploy:dev` first or use
+`--test-db`.
+
 ## Step 7 — Stop the simulator
 
 Press **Ctrl+C** in Terminal 2. The simulator:
@@ -556,8 +575,10 @@ O9. **Mid-trip offer (Shared):** accept a Shared request, then keep the
     FULL names, one big **Add**, and a small **✕** in the corner. The map
     shows the dotted route with the new pickup (green) and drop-off (black
     square) ringed in orange and tagged "New". The NEXT STOP card and slider
-    stay visible. **Add** → the new stops join the stop list; **✕** or the
-    bar running out → closes, never offered again.
+    stay visible. **Add** → the new stops join the stop list; **✕** →
+    closes, never offered again; the bar running out → closes and doesn't
+    pop up again, but the rider stays in the "Add rider" list (and Home's)
+    until their search ends.
 
 ### The end of a shared trip (fixed 2026-10-13)
 

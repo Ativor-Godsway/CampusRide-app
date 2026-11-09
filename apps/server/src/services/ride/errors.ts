@@ -172,7 +172,7 @@ export class PassengerNotFoundError extends Error {
  * trip has ended. `code` and `message` go to the app as they are.
  */
 export class UndoRefusedError extends Error {
-  readonly code: "UNDO_EXPIRED" | "UNDO_TOO_LATE" | "TRIP_ENDED";
+  readonly code: "UNDO_EXPIRED" | "UNDO_TOO_LATE" | "TRIP_ENDED" | "CAR_FULL";
   constructor(code: UndoRefusedError["code"], message: string) {
     super(message);
     this.name = "UndoRefusedError";
