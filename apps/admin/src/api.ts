@@ -859,7 +859,7 @@ export interface DriverDetail {
   };
   rating: number | null;
   ratings: number;
-  balance: { owedPesewas: number; paidPesewas: number; balancePesewas: number; oldestUnpaidAt: string | null };
+  balance: { owedPesewas: number; paidPesewas: number; waivedPesewas: number; balancePesewas: number; oldestUnpaidAt: string | null };
   recentTrips: RideRow[];
   sessions: Array<{ startedAt: string; endedAt: string | null; endReason: string | null; ms: number }>;
   offers: Array<{ rideId: string; offeredAt: string; outcome: string | null; responseMs: number | null }>;
@@ -903,18 +903,31 @@ export interface CashOwed {
   faresInPeriodPesewas: number;
   paidInPeriodPesewas: number;
   paymentsInPeriod: number;
+  collectedPaystackPesewas: number;
+  collectedInPersonPesewas: number;
+  waivedInPeriodPesewas: number;
+  adjustedInPeriodPesewas: number;
+  /** The payment fees drivers added on top of their balance. */
+  paystackFeesPaidByDriversPesewas: number;
+  /** What Paystack reports it kept. */
+  paystackFeesChargedPesewas: number;
   drivers: CashDriverRow[];
 }
 
 export const getCash = (token: string, period: string) => get<CashOwed>(token, `/admin/cash?${period}`);
 
 export type CashMethod = "CASH" | "MOMO" | "OTHER";
+/** How a payment was made; PAYSTACK only for payments drivers made in the app. */
+export type PaymentMethodLabel = CashMethod | "PAYSTACK";
+export type CreditKind = "PAYMENT" | "WAIVER" | "ADJUSTMENT";
 
 export interface CashPayment {
   id: string;
   driver: { id: string; name: string };
+  kind: CreditKind;
   amountPesewas: number;
-  method: CashMethod;
+  /** Null for a waiver. */
+  method: PaymentMethodLabel | null;
   note: string | null;
   paidAt: string;
   createdAt: string;
@@ -922,11 +935,14 @@ export interface CashPayment {
   reversesId: string | null;
   reversalReason: string | null;
   reversedBy: { id: string; at: string; reason: string | null } | null;
+  /** A payment made in the driver app. */
+  paystack: { reference: string; grossPesewas: number; feePesewas: number; momoNetwork: string | null; phoneLast4: string | null } | null;
 }
 
-export function getPayments(token: string, q: { period?: string; driverId?: string; page?: number; pageSize?: number }) {
+export function getPayments(token: string, q: { period?: string; driverId?: string; kind?: "PAYMENT" | "WAIVER"; page?: number; pageSize?: number }) {
   const params = new URLSearchParams(q.period ?? "");
   if (q.driverId) params.set("driverId", q.driverId);
+  if (q.kind) params.set("kind", q.kind);
   if (q.page) params.set("page", String(q.page));
   if (q.pageSize) params.set("pageSize", String(q.pageSize));
   return get<{ payments: CashPayment[]; total: number; page: number; pageSize: number }>(token, `/admin/cash/payments?${params.toString()}`);
@@ -935,6 +951,51 @@ export function getPayments(token: string, q: { period?: string; driverId?: stri
 export const recordPayment = (token: string, input: { driverId: string; amountPesewas: number; method: CashMethod; note: string | null; paidAt: string }) =>
   post<{ payment: { id: string } }>(token, "/admin/cash/payments", input);
 export const reversePayment = (token: string, id: string, reason: string) => post(token, `/admin/cash/payments/${encodeURIComponent(id)}/reverse`, { reason });
+
+export const waiveBalance = (token: string, driverId: string, amountPesewas: number, reason: string) =>
+  post<{ waiver: { id: string; amountPesewas: number } }>(token, `/admin/drivers/${encodeURIComponent(driverId)}/waive`, { amountPesewas, reason });
+export const waiveAllBalances = (token: string, reason: string) => post<{ drivers: number; totalPesewas: number }>(token, "/admin/cash/waive-all", { reason });
+
+/** One row of a driver's balance history: + adds to what they owe, − takes it off. */
+export interface LedgerEntry {
+  id: string;
+  kind: "COMMISSION" | CreditKind;
+  effectPesewas: number;
+  at: string;
+  rideId: string | null;
+  route: string | null;
+  method: PaymentMethodLabel | null;
+  reference: string | null;
+  momoNetwork: string | null;
+  phoneLast4: string | null;
+  grossPesewas: number | null;
+  feePesewas: number | null;
+  isReversal: boolean;
+  note: string | null;
+  recordedBy: string | null;
+}
+
+export const getDriverLedger = (token: string, id: string) => get<{ entries: LedgerEntry[] }>(token, `/admin/drivers/${encodeURIComponent(id)}/ledger`);
+
+export interface CommissionRulesInput {
+  debtLimitPesewas: number;
+  warningPercent: number;
+  enforcementEnabled: boolean;
+  /** Basis points: 195 = 1.95%. */
+  feeBps: number;
+  feeCapPesewas: number | null;
+}
+
+export interface CommissionSettings {
+  settings: CommissionRulesInput & { updatedAt: string | null; updatedBy: { id: string; name: string } | null };
+  envDefaults: { feeBps: number; feeCapPesewas: number | null };
+  paystackConfigured: boolean;
+  paystackTestMode: boolean;
+}
+
+export const getCommissionSettings = (token: string) => get<CommissionSettings>(token, "/admin/commission-settings");
+export const saveCommissionSettings = (token: string, rules: CommissionRulesInput) =>
+  request<CommissionSettings>("/admin/commission-settings", { method: "PUT", body: JSON.stringify(rules) }, token);
 
 export interface RiderRow {
   id: string;

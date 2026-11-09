@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { RefreshControl, StyleSheet, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
 import { clockTime, groupByDay, periodEarnings, weekEarnings } from "@rida/shared";
 import {
   Button,
@@ -23,6 +24,7 @@ import {
   type DriverRideHistoryItem,
 } from "@rida/mobile-shared";
 import { WeekBars } from "../../components/earnings/WeekBars";
+import { useDriverBalance } from "../../lib/balance";
 
 type Period = "today" | "week";
 const PERIODS = [
@@ -56,11 +58,13 @@ function route(item: DriverRideHistoryItem): string {
  * day. All from GET /driver/rides/history: its own summary is all-time, so
  * the periods are added up here by the same rule (earningsTotals,
  * @rida/shared): Gross = the fares, Commission = 15% of them, After
- * commission = the sum of "You earn". Accrued, not paid out (see the note).
+ * commission = the sum of "You earn". What the driver owes CampusRide is on Balance.
  */
 export default function EarningsTab() {
   const { isAuthenticated } = useAuth();
   const [period, setPeriod] = useState<Period>("today");
+  const router = useRouter();
+  const balance = useDriverBalance();
 
   const { data, isLoading, isError, refetch, isRefetching } = useQuery({
     queryKey: ["driverRideHistory"],
@@ -108,7 +112,7 @@ export default function EarningsTab() {
     );
   }
 
-  const { rides, summary } = data;
+  const { rides } = data;
 
   if (rides.length === 0) {
     return (
@@ -186,16 +190,18 @@ export default function EarningsTab() {
           }
           showChevron={false}
         />
-        {summary.commissionOwedPesewas > 0 ? (
-          <Text variant="caption" color="secondary" style={styles.note}>
-            {/* All time, not this period: the running total still owed from cash trips. */}
-            You collect the whole fare in cash, so CampusRide&apos;s 15% is still with you (
-            {formatCedis(summary.commissionOwedPesewas)} in total so far, from{" "}
-            {summary.commissionRidesCount} cash{" "}
-            {summary.commissionRidesCount === 1 ? "trip" : "trips"}). We&apos;ll tell you how to
-            settle it before any collection starts.
-          </Text>
-        ) : null}
+        <ListRow
+          divider
+          title="Balance owed to CampusRide"
+          subtitle="You collect the whole fare in cash, so CampusRide's 15% is still with you"
+          trailing={
+            <Text variant="bodyStrong" tabular>
+              {balance.data ? formatCedis(Math.max(0, balance.data.balancePesewas)) : "—"}
+            </Text>
+          }
+          onPress={() => router.push("/balance")}
+          accessibilityHint="See what you owe and pay it"
+        />
       </View>
 
       <View style={styles.section}>

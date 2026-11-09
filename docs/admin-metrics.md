@@ -63,32 +63,78 @@ All amounts are stored as integer pesewas and shown as `GH₵15`, `GH₵12.75`,
 - **Driver earned** = fares − CampusRide's 15%, for the driver's trips
   completed in the period (the driver's 85%).
 
-## Cash owed
+## Cash owed (Finances)
 
-Riders pay drivers in cash; drivers owe CampusRide 15% of each fare.
+Riders pay drivers in cash; drivers owe CampusRide 15% of each fare. All
+money is integer pesewas, and no row is ever edited or deleted.
 
 ```
-still owed (a driver, all time) = Σ CommissionLedger.amountPesewas (their completed cash rides)
-                                 − Σ DriverCashPayment.amountPesewas (their payments; reversals are negative)
+still owed (a driver, all time) = Σ CommissionLedger.amountPesewas     (COMMISSION: one row per completed cash ride)
+                                 − Σ DriverCashPayment.amountPesewas   (PAYMENT, WAIVER, ADJUSTMENT; reversals are negative)
+                                 = commissions − payments − waivers (− adjustments)
 ```
 
 - A **cancelled ride** has no ledger row, so it owes nothing.
-- A **partial payment** simply lowers the balance. Paying more than owed leaves
-  a negative balance, shown as "paid ahead".
-- Payments are **never edited or deleted**. A mistake is put right by a
-  **reversal**: a new row with the same amount negated, `reversesId` pointing
-  at the original and a required reason. A payment can be reversed once; a
-  reversal can't be reversed (record a new payment instead).
+- **Payments** (`kind` PAYMENT) are cash handed over in person (an admin
+  records it: "Mark as paid" on the Driver page, or "Record payment" on
+  Finances; method Cash, MoMo or Other) or paid by the driver in the app
+  through Paystack (method `PAYSTACK`, recorded by "paystack" once Paystack
+  confirms it).
+- **Waivers** (`kind` WAIVER) forgive some or all of a balance, with a
+  required reason, saved with the admin: one driver at a time (never more
+  than they owe), or **Waive all balances** for the commission-free launch.
+  Commission recorded after a waiver stays owed. **Adjustments** are
+  reserved for corrections; nothing writes them yet.
+- A **partial payment** recorded by an admin simply lowers the balance.
+  Paying more than owed leaves a negative balance, shown as "paid ahead".
+  In the driver app a driver always pays the **whole** balance.
+- A mistake is put right by a **reversal**: a new row of the same kind with
+  the amount negated, `reversesId` pointing at the original and a required
+  reason. A row can be reversed once; a reversal can't be reversed.
 - **Still owed to CampusRide** (the hero) = the sum of every driver's balance
   that is above zero.
-- **Oldest unpaid** = payments pay off the oldest commission first; the
-  earliest ledger row not yet covered by a driver's payments.
-- **15% earned in the period** = commission of trips completed in the period.
-  **Paid in the period** = payments (and reversals) dated in the period
-  (`paidAt`, which the admin chooses; default: when recorded).
+- **Oldest unpaid** = payments and waivers pay off the oldest commission
+  first; the earliest ledger row not yet covered.
+- In the period (by `paidAt`): **Commission earned** = commission of trips
+  completed in the period. **Collected** = payments (and their reversals),
+  split into **via Paystack** and **in person**. **Waived** = waivers (and
+  their reversals). **Paystack fees paid by drivers** = the fee drivers added
+  on top of their balance on confirmed Paystack payments (what Paystack
+  reports it kept is shown beside it).
 - **Status** on a driver's row: **Paid** when they owe nothing now; **Part
   paid** when they still owe but paid something in the period; **Not paid**
   otherwise.
+
+### Paying in the driver app (Paystack)
+
+- **Fee.** The driver pays `gross = ceil(owed ÷ (1 − rate))`, but never more
+  than `owed + cap` when the fee is capped, so CampusRide receives the whole
+  balance after Paystack's fee. The rate and cap are admin settings (Settings
+  → Driver commission), starting from `PAYSTACK_FEE_PERCENT` /
+  `PAYSTACK_FEE_CAP_GHS`. Balances under GH₵1 can't be paid in the app.
+- **The amount is locked** when the payment starts
+  (`DriverPaystackPayment.owedPesewas`). Commission from a trip that ends
+  during the payment stays owed; only the locked amount is cleared.
+- **Only Paystack says "paid".** A payment is credited when Paystack's
+  verify endpoint says success for our reference, in GHS, for exactly the
+  gross asked: reached from the webhook (`charge.success`, after its
+  HMAC-SHA512 signature checks out) or from the app's status checks. A
+  reference is credited at most once. Anything that doesn't match is marked
+  **MISMATCH** and never credited by itself.
+- MoMo goes through Paystack's charge API (MTN, Telecel, AirtelTigo; the
+  driver approves on their phone, or enters a code when the network asks).
+  If Paystack refuses the charge outright, the app opens Paystack's hosted
+  checkout page instead. Only the number's last 4 digits are kept.
+
+### Limits (Settings → Driver commission)
+
+- **Debt limit** (default GH₵100) and **warning level** (default 80% of it).
+- **Enforcement** (default off, for the commission-free launch). Off:
+  commission still adds up, but nobody is warned or blocked. On: the driver
+  app warns from the warning level ("You owe GH₵85. Pay before GH₵100 to keep
+  driving."), and a driver who owes the limit or more is refused **going
+  online** (`COMMISSION_LIMIT`). A driver already online is never taken
+  offline, and one with a trip under way is never blocked or interrupted.
 
 ## Drivers
 

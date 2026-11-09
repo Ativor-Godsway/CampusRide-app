@@ -207,6 +207,8 @@ async function main() {
     // Cash handed over (admin site, Cash owed): reversals before the payments they cancel.
     await tx.driverCashPayment.deleteMany({ where: { driverUserId: { in: ids }, reversesId: { not: null } } });
     await tx.driverCashPayment.deleteMany({ where: { driverUserId: { in: ids } } });
+    // Their Paystack payment attempts, after the payments that point at them.
+    await tx.driverPaystackPayment.deleteMany({ where: { driverUserId: { in: ids } } });
     await tx.rideRejection.deleteMany({ where: { driverUserId: { in: ids } } });
     await tx.refreshToken.deleteMany({ where: { userId: { in: ids } } });
     await tx.otpCode.deleteMany({ where: { phone: { in: phones } } });

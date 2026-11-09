@@ -56,6 +56,7 @@ import { estimateRoute } from "../services/routing/campusRoutes";
 import { RULES } from "../rateLimit/rules";
 import { checkDriverPosition, hasActiveTrip, lastPositionData, parseDriverPoint } from "../services/zones/driverPosition";
 import { closeDriverSession, openDriverSession } from "../services/stats/driverSessions";
+import { commissionBlock } from "../services/commission/enforcement";
 import { recordOfferAnswer } from "../services/stats/rideOffers";
 import {
   MAX,
@@ -279,6 +280,20 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // Suspended by an admin (admin site, Drivers): going offline still works.
     if (body.isOnline && driver.suspendedAt) {
       return refuse(reply, 403, "DRIVER_SUSPENDED", DRIVER_SUSPENDED_MESSAGE);
+    }
+    // Commission owed at or over the limit with enforcement on (admin site,
+    // Settings): refused only when GOING online — a driver already online is
+    // never taken offline, and one with a trip under way is let through.
+    if (body.isOnline && !driver.isOnline) {
+      const block = await commissionBlock(prisma, userId);
+      if (block && !(await hasActiveTrip(prisma, userId))) {
+        return reply.code(403).send({
+          error: block.message,
+          code: "COMMISSION_LIMIT",
+          owedPesewas: block.owedPesewas,
+          limitPesewas: block.limitPesewas,
+        });
+      }
     }
 
     const requestedZoneId = typeof body.zoneId === "string" && body.zoneId.length > 0

@@ -8,6 +8,7 @@ import { usePolled } from "../lib/usePolled";
 import { dayAndTime, ago } from "../lib/time";
 import { AdminLoginsScreen } from "../screens/AdminLoginsScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
+import { CommissionRulesCard } from "../screens/CommissionRulesCard";
 import { Page, Section } from "../shell/Page";
 
 function AuditLog() {
@@ -128,11 +129,14 @@ function SystemFacts() {
   );
 }
 
-/** Settings: launch mode and early access, the launch push, passkeys, admin sign-ins, the audit log, and read-only facts. */
+/** Settings: launch mode and early access, the launch push, passkeys, the driver commission rules, admin sign-ins, the audit log, and read-only facts. */
 export function SettingsPage() {
   return (
-    <Page title="Settings" subtitle="Launch, access, sign-ins and the audit log">
+    <Page title="Settings" subtitle="Launch, access, commission, sign-ins and the audit log">
       <SettingsScreen />
+      <div className="settings-stack">
+        <CommissionRulesCard />
+      </div>
       <Section title="Admin sign-ins" className="anchor" >
         <span id="logins" />
         <AdminLoginsScreen />

@@ -80,6 +80,7 @@ async function main() {
     const rideIds = oldRides.map((r) => r.id);
     await prisma.driverCashPayment.deleteMany({ where: { driverUserId: { in: oldIds }, reversesId: { not: null } } });
     await prisma.driverCashPayment.deleteMany({ where: { driverUserId: { in: oldIds } } });
+    await prisma.driverPaystackPayment.deleteMany({ where: { driverUserId: { in: oldIds } } });
     await prisma.commissionLedger.deleteMany({ where: { OR: [{ driverUserId: { in: oldIds } }, { rideId: { in: rideIds } }] } });
     await prisma.rating.deleteMany({ where: { OR: [{ rideId: { in: rideIds } }, { raterId: { in: oldIds } }, { rateeId: { in: oldIds } }] } });
     await prisma.ridePassenger.deleteMany({ where: { OR: [{ rideId: { in: rideIds } }, { riderId: { in: oldIds } }] } });

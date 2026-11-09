@@ -25,6 +25,8 @@ import { registerAdminPasskeyRoutes } from "./adminPasskeys";
 import { registerAdminDashboardRoutes } from "./adminDashboard";
 import { registerAdminInsightRoutes } from "./adminInsights";
 import { registerAdminPeopleRoutes } from "./adminPeople";
+import { registerDriverBalanceRoutes } from "./driverBalance";
+import { createPaystackClient, type PaystackClient } from "../services/commission/paystack";
 import { installRateLimits } from "../rateLimit/http";
 import { installErrorHandling } from "../http/errors";
 import { useRequestValidation } from "../http/validation";
@@ -35,6 +37,8 @@ export interface RouteDeps {
   /** Defaults to config; tests switch the dormant channels on to see every route. */
   paymentsEnabled?: boolean;
   ussdEnabled?: boolean;
+  /** Paystack (driver commission payments); tests pass a fake. Defaults to the real client from config. */
+  paystack?: PaystackClient;
 }
 
 /**
@@ -74,6 +78,8 @@ export function registerAllRoutes(
   registerRideRoutes(app, prisma);
   registerRatingRoutes(app, prisma);
   registerDriverRoutes(app, prisma);
+  // The driver's commission balance, paying it through Paystack, and Paystack's webhook.
+  registerDriverBalanceRoutes(app, prisma, deps.paystack ?? createPaystackClient());
   registerAdminRoutes(app, prisma);
   registerAdminAccountDeletionRoutes(app, prisma, deps.otpService);
   registerUssdRoutes(app, prisma, deps.ussdEnabled ?? config.enableUssd);

@@ -92,6 +92,7 @@ export async function cleanupSimulatorData(prisma: PrismaClient): Promise<SimCle
       // Cash a fake driver "handed over" in the admin site: reversals first.
       await tx.driverCashPayment.deleteMany({ where: { driverUserId: { in: ids }, reversesId: { not: null } } });
       await tx.driverCashPayment.deleteMany({ where: { driverUserId: { in: ids } } });
+      await tx.driverPaystackPayment.deleteMany({ where: { driverUserId: { in: ids } } });
       report.refreshTokens = (await tx.refreshToken.deleteMany({ where: { userId: { in: ids } } })).count;
       report.otpCodes = (await tx.otpCode.deleteMany({ where: { phone: { in: phones } } })).count;
 

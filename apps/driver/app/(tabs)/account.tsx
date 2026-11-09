@@ -227,6 +227,13 @@ export default function AccountTab() {
 
       <View>
         <ListRow
+          title="Balance"
+          subtitle="Commission you owe CampusRide, and paying it"
+          leading={<ListRow.Icon name="wallet-outline" />}
+          onPress={() => router.push("/balance")}
+        />
+        <ListRow
+          divider
           title="Notifications"
           subtitle="Ride requests when the app is closed"
           leading={<ListRow.Icon name="notifications-outline" />}

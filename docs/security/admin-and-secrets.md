@@ -175,7 +175,9 @@ merging).
 | On Render | `NODE_ENV=production` (every production safeguard depends on it) |
 
 Warnings only: Cloudinary not configured (driver photo uploads answer 503),
-`TRUST_PROXY` set at all, payments pointed at Moolre's sandbox.
+`TRUST_PROXY` set at all, payments pointed at Moolre's sandbox,
+`PAYSTACK_SECRET_KEY` unset (drivers can't pay their commission in the app)
+or a Paystack test key (`sk_test_…`, no real money).
 
 ## Secrets to rotate before launch
 
@@ -189,6 +191,7 @@ development. After each change on Render, the server restarts by itself.
 | **`MOOLRE_VAS_KEY`** (SMS) | Render | Moolre dashboard → API keys → regenerate the VAS key → Render | Login codes pause for the seconds between the two steps. |
 | `MOOLRE_PRIVATE_KEY`, `MOOLRE_PUBLIC_KEY`, `MOOLRE_API_USER` (payments; off today) | Render, if set | Moolre dashboard → regenerate → Render | None while payments are off. |
 | `MOOLRE_WEBHOOK_SECRET` (payments) | Render and Moolre's webhook settings | Choose a new 32+ character value, set it in both places | None while payments are off. |
+| **`PAYSTACK_SECRET_KEY`** (driver commission payments; also signs Paystack's webhooks) | Render | Paystack dashboard → Settings → API Keys & Webhooks → generate new secret key → Render. The webhook signature uses the same key, so nothing else changes | Payments started in the seconds between may fail; drivers try again. Webhooks signed with the old key are refused, but each payment is still confirmed by the app's status check. |
 | `MNOTIFY_API_KEY` | Render, if set | mNotify dashboard → API → regenerate | Only matters if mNotify is used. |
 | **`CLOUDINARY_API_SECRET`** (+ `CLOUDINARY_API_KEY`) | Render | Cloudinary console → Settings → API Keys → generate a new pair → Render → delete the old pair | Driver photo uploads pause for those seconds. |
 | `EXPO_ACCESS_TOKEN` | Render, if set | expo.dev → Account settings → Access tokens → create a new one, revoke the old | Push sends pause for those seconds. |

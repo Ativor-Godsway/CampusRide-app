@@ -34,6 +34,18 @@ function positiveInt(raw: string | undefined, fallback: number): number {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+/** "1.95" (percent) → 195 basis points; 0 when unset or not a percentage from 0 to 10. */
+function percentToBps(raw: string | undefined): number {
+  const value = Number(raw);
+  return raw && Number.isFinite(value) && value >= 0 && value <= 10 ? Math.round(value * 100) : 0;
+}
+
+/** "10" (cedis) → 1000 pesewas; null when unset or not a positive amount. */
+function cedisToPesewas(raw: string | undefined): number | null {
+  const value = Number(raw);
+  return raw && Number.isFinite(value) && value > 0 ? Math.round(value * 100) : null;
+}
+
 /**
  * How much looser every rate limit is: 10x by default in development and
  * test (RATE_LIMIT_MULTIPLIER changes it), and ALWAYS 1 in production — no
@@ -162,6 +174,20 @@ export const config = {
     /** Warn (Sentry + logs) when the SMS balance drops below this (services/sms/moolreBalance.ts). */
     smsLowBalance: positive("MOOLRE_SMS_LOW_BALANCE", 100),
   },
+  /**
+   * Paystack: drivers pay the commission they owe from the driver app
+   * (services/commission). Payments only; Moolre stays for SMS. Test keys
+   * (sk_test_…) work the same against Paystack's test mode. Never log.
+   */
+  paystack: {
+    /** Calls Paystack and checks the webhook signature (HMAC-SHA512). Empty: paying is unavailable. */
+    secretKey: process.env.PAYSTACK_SECRET_KEY ?? "",
+    baseUrl: process.env.PAYSTACK_BASE_URL ?? "https://api.paystack.co",
+    /** The default payment fee rate until an admin sets one (percent, "1.95"). */
+    feeBps: percentToBps(process.env.PAYSTACK_FEE_PERCENT),
+    /** The default fee cap until an admin sets one (cedis, "10"); null = no cap. */
+    feeCapPesewas: cedisToPesewas(process.env.PAYSTACK_FEE_CAP_GHS),
+  },
   /** A ride still IN_PROGRESS after this many hours is completed by the sweep (services/ride/staleRides.ts). 1–24. */
   rideAutoCompleteHours: Math.min(24, positive("RIDE_AUTO_COMPLETE_HOURS", 3)),
   /**
@@ -223,6 +249,8 @@ export const config = {
     adminExportPer15Min: positive("RATE_LIMIT_ADMIN_EXPORT_15M", 20),
     adminWritePer15Min: positive("RATE_LIMIT_ADMIN_WRITE_15M", 60),
     adminTrailPerHour: positive("RATE_LIMIT_ADMIN_TRAIL_HOUR", 60),
+    /** POST /driver/balance/payments — each starts a Paystack charge. */
+    commissionPayPer15Min: positive("RATE_LIMIT_COMMISSION_PAY_15M", 5),
     /** POST /rides/:id/initiate-payment — each hits Moolre. */
     paymentInitPer15Min: positive("RATE_LIMIT_PAYMENT_INIT", 15),
 
