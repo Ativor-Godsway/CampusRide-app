@@ -1,6 +1,7 @@
 import type {
   BalanceEntryKind,
   CommissionPaymentStatus,
+  LastCredit,
   LatLng,
   MomoNetwork,
   PassengerStatus,
@@ -318,9 +319,15 @@ const EMPTY_HISTORY_SUMMARY: DriverRideHistorySummary = {
   commissionRidesCount: 0,
 };
 
-/** Fetch the authenticated driver's completed rides + derived earnings summary. */
-export async function getDriverRideHistory(): Promise<DriverRideHistory> {
-  const res = await api.get<DriverRideHistory>("/driver/rides/history");
+/**
+ * Fetch the authenticated driver's completed rides + derived earnings
+ * summary (always all time). With `since`, only the rides completed since
+ * then are listed (the server lists at most 8 days back).
+ */
+export async function getDriverRideHistory(options: { since?: Date } = {}): Promise<DriverRideHistory> {
+  const res = await api.get<DriverRideHistory>("/driver/rides/history", {
+    params: options.since ? { since: options.since.toISOString() } : undefined,
+  });
   return {
     rides: readList<DriverRideHistoryItem>(res.data, "rides"),
     summary: { ...EMPTY_HISTORY_SUMMARY, ...res.data?.summary },
@@ -682,12 +689,15 @@ export interface DriverBalance {
   /** What paying now would cost (null when too little is owed). */
   quote: PaystackQuote | null;
   pendingPayment: CommissionPayment | null;
+  /** The latest payment or waiver that still stands ("Last paid GH₵40.20 · 9 Nov"); null from servers before 2026-11-09's redesign. */
+  lastCredit: LastCredit | null;
+  /** Every entry, newest first. The Balance screen no longer lists it. */
   history: DriverBalanceEntry[];
 }
 
 export async function getDriverBalance(): Promise<DriverBalance> {
   const res = await api.get<DriverBalance>("/driver/balance");
-  return res.data;
+  return { ...res.data, lastCredit: res.data?.lastCredit ?? null };
 }
 
 /** Starts paying the whole balance: MoMo (the driver approves on their phone) or Paystack's checkout page. */

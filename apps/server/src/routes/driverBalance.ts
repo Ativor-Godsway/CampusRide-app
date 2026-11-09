@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyBaseLogger, FastifyInstance, FastifyReply } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { debtWarningText, paystackQuote, showsDebtWarning, blocksGoingOnline, warningLevelPesewas, type MomoNetwork } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
@@ -18,6 +18,8 @@ import {
   paymentView,
   startCommissionPayment,
   submitCommissionOtp,
+  syncDriverPayments,
+  type SyncedPayment,
 } from "../services/commission/payments";
 
 const referenceParams = object({ reference: text(100, { nonEmpty: true }) }, ["reference"]);
@@ -39,6 +41,16 @@ const SCHEMAS = {
   webhook: { body: empty },
   otp: { params: referenceParams, body: object({ otp: text(20, { nonEmpty: true }) }, ["otp"]) },
 };
+
+/** What Paystack said when asked about a driver's payments: the reference and outcome only. */
+function logChecks(log: FastifyBaseLogger, checked: readonly SyncedPayment[]) {
+  for (const c of checked) {
+    if (c.outcome === "skipped" || c.outcome === "not_paid") continue;
+    const entry = { event: "commission_payment_checked", reference: c.reference, outcome: c.outcome };
+    if (c.outcome === "mismatch") log.error(entry, "Paystack payment didn't match what was asked: not credited");
+    else log.info(entry, "Commission payment checked with Paystack");
+  }
+}
 
 function sendPaymentError(reply: FastifyReply, err: unknown) {
   if (err instanceof CommissionPaymentError) return reply.code(err.status).send({ error: err.message, code: err.code });
@@ -65,15 +77,26 @@ export function registerDriverBalanceRoutes(app: FastifyInstance, prisma: Prisma
     return true;
   };
 
-  /** What the driver owes, the rules, what paying it would cost, a payment still going, and the history. */
+  /**
+   * What the driver owes, the rules, what paying it would cost, a payment
+   * still going, and the latest payment or waiver. Unfinished payments are
+   * brought up to date with Paystack first (syncDriverPayments).
+   */
   app.get("/driver/balance", { onRequest: requireAuth, schema: SCHEMAS.balance }, async (request, reply) => {
     if (!requireDriver(request, reply)) return;
     const userId = request.user!.userId;
-    const [balance, settings, history, pending] = await Promise.all([
+    logChecks(request.log, await syncDriverPayments(prisma, paystack, userId));
+    const [balance, settings, history, pending, lastCredit] = await Promise.all([
       driverBalance(prisma, userId),
       getCommissionSettings(prisma),
       driverLedger(prisma, userId),
       prisma.driverPaystackPayment.findFirst({ where: { driverUserId: userId, status: "PENDING" }, orderBy: { createdAt: "desc" } }),
+      // A payment or waiver that still stands (not a reversal, not reversed).
+      prisma.driverCashPayment.findFirst({
+        where: { driverUserId: userId, kind: { in: ["PAYMENT", "WAIVER"] }, amountPesewas: { gt: 0 }, reversesId: null, reversal: { is: null } },
+        orderBy: [{ paidAt: "desc" }, { createdAt: "desc" }],
+        select: { kind: true, amountPesewas: true, paidAt: true },
+      }),
     ]);
     const owed = balance.balancePesewas;
     return reply.send({
@@ -95,6 +118,10 @@ export function registerDriverBalanceRoutes(app: FastifyInstance, prisma: Prisma
       minPaymentPesewas: MIN_PAYMENT_PESEWAS,
       quote: owed >= MIN_PAYMENT_PESEWAS ? paystackQuote(owed, settings.feeBps, settings.feeCapPesewas) : null,
       pendingPayment: pending ? paymentView(pending) : null,
+      lastCredit: lastCredit
+        ? { kind: lastCredit.kind as "PAYMENT" | "WAIVER", amountPesewas: lastCredit.amountPesewas, at: lastCredit.paidAt.toISOString() }
+        : null,
+      // Driver builds before 2026-11-09's redesign list it on Balance; newer ones don't.
       history: history.map(({ note: _note, recordedBy: _by, ...entry }) => entry),
     });
   });
@@ -130,7 +157,8 @@ export function registerDriverBalanceRoutes(app: FastifyInstance, prisma: Prisma
   app.get("/driver/balance/payments/:reference", { onRequest: requireAuth, schema: SCHEMAS.status }, async (request, reply) => {
     if (!requireDriver(request, reply)) return;
     try {
-      const payment = await commissionPaymentStatus(prisma, paystack, request.user!.userId, (request.params as { reference: string }).reference);
+      const { payment, checked } = await commissionPaymentStatus(prisma, paystack, request.user!.userId, (request.params as { reference: string }).reference);
+      logChecks(request.log, checked);
       return reply.send({ payment });
     } catch (err) {
       return sendPaymentError(reply, err);

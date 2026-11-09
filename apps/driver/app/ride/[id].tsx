@@ -56,7 +56,6 @@ import {
   colors,
   errorStatus,
   getAddRiderPreview,
-  getDriverRideHistory,
   getFillSuggestions,
   serverReason,
   getRideSocket,
@@ -95,6 +94,7 @@ import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
 import { AddRiderTakeover } from "../../components/trip/AddRiderTakeover";
 import { TripCompleteView, TripEndedView } from "../../components/trip/TripEndScreens";
 import { useDriverPresence } from "../../lib/presence";
+import { driverRideHistoryQueryKey, fetchRecentRideHistory } from "../../lib/earnings";
 
 /** The trip screen checks its trip more often than the rest of the app (a rider may cancel). */
 const TRIP_POLL_MS = 5_000;
@@ -574,8 +574,8 @@ export default function TripScreen() {
   // "Today" pill and the Earnings tab, fetched again once the trip is done.
   const finished = Boolean(done && done.rideId === rideId);
   const history = useQuery({
-    queryKey: ["driverRideHistory"],
-    queryFn: getDriverRideHistory,
+    queryKey: driverRideHistoryQueryKey,
+    queryFn: fetchRecentRideHistory,
     enabled: finished,
   });
   const today = history.data ? todayEarnings(history.data.rides) : null;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { splitFare } from "../pricing/pricing";
-import { earningsTotals, periodEarnings, weekEarnings } from "./periodEarnings";
+import { earningsTotals, periodEarnings, recentTripDays, recentTripsSince, weekEarnings } from "./periodEarnings";
 import { todayEarnings } from "./todayEarnings";
 
 // Local times, so the tests mean the same in any time zone. Wed 21 Oct 2026.
@@ -107,5 +107,29 @@ describe("todayEarnings: Home pill and trip-complete card", () => {
       pesewas: 0,
       trips: 0,
     });
+  });
+});
+
+describe("recentTripDays: the Earnings trip list", () => {
+  it("groups the last 7 days by day, newest first, each with its after-commission total", () => {
+    const days = recentTripDays([trip(20, 8, 700), lone, trip(20, 19, 700), shared, trip(15, 12, 1500)], now);
+    expect(days.map((d) => [d.label, d.trips, d.netPesewas, d.isToday])).toEqual([
+      ["Today", 2, 1870, true],
+      ["Yesterday", 2, 1190, false],
+      ["Thu 15 Oct", 1, 1275, false],
+    ]);
+    // Within a day, newest first.
+    expect(days[1]!.items.map((t) => new Date(t.completedAt).getHours())).toEqual([19, 8]);
+  });
+
+  it("leaves out trips older than 7 calendar days (they stay on file, just not listed)", () => {
+    // Today is Wed 21; the 7 days are Thu 15 … Wed 21.
+    expect(recentTripsSince(now)).toEqual(new Date(2026, 9, 15));
+    const days = recentTripDays([shared, trip(15, 0, 700), trip(14, 23, 700), trip(1, 9, 700)], now);
+    expect(days.map((d) => d.label)).toEqual(["Today", "Thu 15 Oct"]);
+  });
+
+  it("is empty with no recent trips", () => {
+    expect(recentTripDays([trip(1, 9, 700)], now)).toEqual([]);
   });
 });

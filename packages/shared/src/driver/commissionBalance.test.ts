@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  lastCreditText,
   DEFAULT_DEBT_LIMIT_PESEWAS,
   DEFAULT_WARNING_PERCENT,
   blocksGoingOnline,
@@ -91,5 +92,16 @@ describe("fee percent", () => {
     expect(feePercentText(150)).toBe("1.5%");
     expect(feePercentText(105)).toBe("1.05%");
     expect(feePercentText(0)).toBe("0%");
+  });
+});
+
+describe("lastCreditText (Balance's one line)", () => {
+  const now = new Date(2026, 10, 9, 18, 0);
+  it("says paid or waived, how much, and the day", () => {
+    expect(lastCreditText({ kind: "PAYMENT", amountPesewas: 4020, at: new Date(2026, 10, 9, 10).toISOString() }, now)).toBe("Last paid GH₵40.20 · 9 Nov");
+    expect(lastCreditText({ kind: "WAIVER", amountPesewas: 4020, at: new Date(2026, 9, 31, 10).toISOString() }, now)).toBe("Last waived GH₵40.20 · 31 Oct");
+  });
+  it("adds the year when it isn't this year", () => {
+    expect(lastCreditText({ kind: "PAYMENT", amountPesewas: 100, at: new Date(2025, 11, 30).toISOString() }, now)).toBe("Last paid GH₵1 · 30 Dec 2025");
   });
 });

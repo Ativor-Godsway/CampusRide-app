@@ -18,6 +18,10 @@ import { isValidPaystackSignature, type ChargeAnswer, type PaystackClient } from
  *   the amount asked (gross). The webhook and the app's status checks both
  *   end in confirmCommissionPayment, which writes the PAYMENT row at most
  *   once per reference (a conditional update plus a unique column).
+ * - The webhook isn't relied on: whenever the driver looks (Balance, the
+ *   "Waiting for payment…" checks, a new Pay), syncDriverPayments asks
+ *   Paystack about their unfinished payments itself, expires old ones, and
+ *   drops one whose balance was paid or waived some other way meanwhile.
  * - A charge Paystack refuses outright falls back to its hosted checkout
  *   page (a new reference), opened in the browser.
  */
@@ -37,12 +41,19 @@ export class CommissionPaymentError extends Error {
 export const MIN_PAYMENT_PESEWAS = 100;
 /** A second "Pay" this soon after one still going returns that one (a double tap). */
 const DUPLICATE_START_MS = 15_000;
-/** An unfinished payment older than this is given up. */
-const PENDING_GIVE_UP_MS = 30 * 60_000;
+/** An unfinished payment older than this expires (ABANDONED): it never blocks a new one. */
+export const PENDING_GIVE_UP_MS = 30 * 60_000;
 /** A charge Paystack has never heard of, this long after it started, never started. */
 const NOT_FOUND_GIVE_UP_MS = 2 * 60_000;
-/** Status checks ask Paystack at most this often per payment. */
-const CHECK_EVERY_MS = 4_000;
+/** Paystack is asked about one payment at most this often. */
+export const CHECK_EVERY_MS = 10_000;
+/**
+ * A payment given up (replaced, expired, dropped) is still asked about for
+ * this long: a MoMo prompt approved late is credited without the webhook.
+ */
+const RECHECK_ABANDONED_MS = 2 * 60 * 60_000;
+/** At most this many of a driver's payments are asked about at once. */
+const SYNC_AT_MOST = 3;
 
 /** Who recorded a PAYMENT row Paystack confirmed (DriverCashPayment.recordedBy). */
 export const PAYSTACK_RECORDER = "paystack";
@@ -128,23 +139,21 @@ export async function startCommissionPayment(
     localPhone = `0${canonical.slice(-9)}`;
   }
 
-  // Payments still going: a double tap gets the same one back; older ones
-  // are checked with Paystack (one may have been paid) and otherwise given up.
-  const pending = await prisma.driverPaystackPayment.findMany({
-    where: { driverUserId: input.driverUserId, status: "PENDING" },
+  // A double tap gets the payment still going back. Otherwise every
+  // unfinished one is brought up to date first (one may just have been
+  // paid: that answers this Pay), and whatever is still going is replaced.
+  const recent = await prisma.driverPaystackPayment.findFirst({
+    where: { driverUserId: input.driverUserId, status: "PENDING", createdAt: { gt: new Date(now.getTime() - DUPLICATE_START_MS) } },
     orderBy: { createdAt: "desc" },
   });
-  const recent = pending.find((p) => now.getTime() - p.createdAt.getTime() < DUPLICATE_START_MS);
   if (recent) return paymentView(recent);
-  for (const p of pending) {
-    if ((await confirmCommissionPayment(prisma, client, p.reference, now)) === "credited") {
-      return paymentView(await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { id: p.id } }));
-    }
-    await prisma.driverPaystackPayment.updateMany({
-      where: { id: p.id, status: "PENDING" },
-      data: { status: "ABANDONED", message: "Replaced by a newer payment." },
-    });
-  }
+  const synced = await syncDriverPayments(prisma, client, input.driverUserId, now);
+  const paid = synced.find((s) => s.outcome === "credited");
+  if (paid) return paymentView(await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { id: paid.id } }));
+  await prisma.driverPaystackPayment.updateMany({
+    where: { driverUserId: input.driverUserId, status: "PENDING" },
+    data: { status: "ABANDONED", message: "Replaced by a newer payment." },
+  });
 
   const settings = await getCommissionSettings(prisma);
   const created = await prisma.$transaction(async (tx) => {
@@ -285,8 +294,9 @@ export async function submitCommissionOtp(
 
 /**
  * The payment as it stands, for the app's "Waiting for payment…" screen.
- * While it is unfinished this asks Paystack's verify endpoint (at most every
- * few seconds), so a payment is confirmed even if the webhook is late.
+ * The driver's unfinished payments are brought up to date first
+ * (syncDriverPayments), so a payment is confirmed even if the webhook never
+ * comes, and one replaced, expired or overtaken by a waiver stops waiting.
  */
 export async function commissionPaymentStatus(
   prisma: PrismaClient,
@@ -294,22 +304,89 @@ export async function commissionPaymentStatus(
   driverUserId: string,
   reference: string,
   now: Date = new Date(),
-): Promise<CommissionPaymentView> {
+): Promise<{ payment: CommissionPaymentView; checked: SyncedPayment[] }> {
   const row = await ownPayment(prisma, driverUserId, reference);
-  if (row.status !== "PENDING") return paymentView(row);
-  const last = lastChecked.get(reference) ?? 0;
-  if (now.getTime() - last >= CHECK_EVERY_MS) {
-    lastChecked.set(reference, now.getTime());
-    if (lastChecked.size > 5_000) lastChecked.clear();
-    const outcome = await confirmCommissionPayment(prisma, client, reference, now);
-    const age = now.getTime() - row.createdAt.getTime();
-    if (outcome === "not_found" && age > NOT_FOUND_GIVE_UP_MS) {
-      await giveUp(prisma, row.id, "FAILED", "The payment didn't start. Try again.");
-    } else if ((outcome === "not_paid" || outcome === "not_found") && age > PENDING_GIVE_UP_MS) {
-      await giveUp(prisma, row.id, "ABANDONED", "This payment wasn't finished. Start again when you're ready.");
-    }
+  if (row.status === "SUCCESS" || row.status === "MISMATCH") return { payment: paymentView(row), checked: [] };
+  const checked = await syncDriverPayments(prisma, client, driverUserId, now);
+  return { payment: paymentView(await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { id: row.id } })), checked };
+}
+
+export interface SyncedPayment {
+  id: string;
+  reference: string;
+  /** What Paystack said, or "skipped" (asked too recently). */
+  outcome: ConfirmOutcome | "skipped";
+}
+
+/**
+ * Brings one driver's unfinished payments up to date. Run whenever the
+ * driver looks (Balance, the status checks, a new Pay):
+ *
+ * 1. Each one still PENDING, or given up in the last RECHECK_ABANDONED_MS,
+ *    is asked about on Paystack's verify endpoint (each at most every
+ *    CHECK_EVERY_MS): one paid is credited by confirmCommissionPayment,
+ *    the same once-only path as the webhook.
+ * 2. A PENDING one Paystack never heard of after NOT_FOUND_GIVE_UP_MS
+ *    failed to start; any older than PENDING_GIVE_UP_MS expires.
+ * 3. A PENDING one stops waiting (ABANDONED) once the balance was paid or
+ *    waived some other way after it started: an admin's waiver or Mark as
+ *    paid, or another payment of the driver's.
+ *
+ * A payment given up is still credited if Paystack confirms it later.
+ */
+export async function syncDriverPayments(
+  prisma: PrismaClient,
+  client: PaystackClient,
+  driverUserId: string,
+  now: Date = new Date(),
+): Promise<SyncedPayment[]> {
+  const rows = await prisma.driverPaystackPayment.findMany({
+    where: {
+      driverUserId,
+      OR: [{ status: "PENDING" }, { status: "ABANDONED", createdAt: { gt: new Date(now.getTime() - RECHECK_ABANDONED_MS) } }],
+    },
+    orderBy: { createdAt: "desc" },
+    take: SYNC_AT_MOST,
+  });
+
+  const synced = await Promise.all(
+    rows.map(async (row): Promise<SyncedPayment> => {
+      const last = lastChecked.get(row.reference) ?? 0;
+      if (now.getTime() - last < CHECK_EVERY_MS) return { id: row.id, reference: row.reference, outcome: "skipped" };
+      lastChecked.set(row.reference, now.getTime());
+      if (lastChecked.size > 5_000) lastChecked.clear();
+      const outcome = await confirmCommissionPayment(prisma, client, row.reference, now);
+      if (row.status === "PENDING" && outcome === "not_found" && now.getTime() - row.createdAt.getTime() > NOT_FOUND_GIVE_UP_MS) {
+        await giveUp(prisma, row.id, "FAILED", "The payment didn't start. Try again.");
+      }
+      return { id: row.id, reference: row.reference, outcome };
+    }),
+  );
+
+  // Old ones expire, whatever Paystack said (or if it couldn't be asked).
+  await prisma.driverPaystackPayment.updateMany({
+    where: { driverUserId, status: "PENDING", createdAt: { lt: new Date(now.getTime() - PENDING_GIVE_UP_MS) } },
+    data: { status: "ABANDONED", message: "This payment wasn't finished. Start again when you're ready." },
+  });
+
+  // Paid or waived some other way since it started: nothing left to wait for.
+  const stillPending = await prisma.driverPaystackPayment.findMany({
+    where: { driverUserId, status: "PENDING" },
+    select: { id: true, createdAt: true },
+  });
+  for (const p of stillPending) {
+    const creditSince = await prisma.driverCashPayment.findFirst({
+      where: {
+        driverUserId,
+        amountPesewas: { gt: 0 },
+        createdAt: { gt: p.createdAt },
+        OR: [{ paystackPaymentId: null }, { paystackPaymentId: { not: p.id } }],
+      },
+      select: { id: true },
+    });
+    if (creditSince) await giveUp(prisma, p.id, "ABANDONED", "Your balance changed, so this payment was stopped.");
   }
-  return paymentView(await prisma.driverPaystackPayment.findUniqueOrThrow({ where: { id: row.id } }));
+  return synced;
 }
 
 async function giveUp(prisma: PrismaClient, id: string, status: "FAILED" | "ABANDONED", message: string) {

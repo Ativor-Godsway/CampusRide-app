@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RefreshControl, StyleSheet, View } from "react-native";
-import { MOMO_NETWORKS, clockTime, groupByDay, paystackQuoteText, type MomoNetwork } from "@rida/shared";
+import { MOMO_NETWORKS, lastCreditText, paystackQuoteText, type MomoNetwork } from "@rida/shared";
 import {
   BackButton,
   Button,
@@ -19,48 +19,27 @@ import {
   useAuth,
   type CommissionPayment,
   type DriverBalance,
-  type DriverBalanceEntry,
 } from "@rida/mobile-shared";
 import { useCommissionPayment, useDriverBalance } from "../lib/balance";
 
 const NETWORK_LABEL: Record<MomoNetwork, string> = { MTN: "MTN", TELECEL: "Telecel", AIRTELTIGO: "AirtelTigo" };
 
-/** "Trip commission", "Paid with MoMo", "Paid in person", "Waived by CampusRide". */
-function entryTitle(e: DriverBalanceEntry): string {
-  const base =
-    e.kind === "COMMISSION"
-      ? "Trip commission"
-      : e.kind === "WAIVER"
-        ? "Waived by CampusRide"
-        : e.kind === "ADJUSTMENT"
-          ? "Correction"
-          : e.method === "PAYSTACK"
-            ? "Paid with MoMo"
-            : "Paid in person";
-  return e.isReversal ? `${base} (cancelled)` : base;
-}
-
-function entrySubtitle(e: DriverBalanceEntry): string {
-  const time = clockTime(e.at);
-  if (e.kind === "COMMISSION") return e.route ? `${time} · ${e.route}` : time;
-  if (e.method === "PAYSTACK" && e.momoNetwork) {
-    const network = NETWORK_LABEL[e.momoNetwork as MomoNetwork] ?? e.momoNetwork;
-    return `${time} · ${network}${e.phoneLast4 ? ` •••${e.phoneLast4}` : ""}`;
-  }
-  return time;
-}
-
-/** "+GH₵1.50" for what adds to the balance, "−GH₵85" for what takes it off. */
-function signed(pesewas: number): string {
-  return pesewas > 0 ? `+${formatCedis(pesewas)}` : formatCedis(pesewas);
+/** Under the amount: the limit, or how close to it the driver is. */
+function limitLine(data: DriverBalance): string {
+  const owed = data.balancePesewas;
+  if (owed < 0) return `${formatCedis(-owed)} paid ahead: it counts against your next trips.`;
+  if (!data.rules.enforcementEnabled) return "Commission-free launch: you can keep driving whatever you owe.";
+  if (data.blocked) return `You're at the ${formatCedis(data.rules.debtLimitPesewas)} limit. Pay to go online again.`;
+  return data.warning ?? `Limit ${formatCedis(data.rules.debtLimitPesewas)}. At the limit you can't go online until you pay.`;
 }
 
 /**
  * Balance: what the driver owes CampusRide (15% of each cash fare), the
- * limit, the history, and paying it. Paying is the whole balance at once,
- * by MoMo through Paystack: Paystack's fee is added on top ("Owed X +
- * payment fee Y = Pay Z") so CampusRide receives X. The driver approves on
- * their phone; the screen waits until the server says Paystack confirmed it.
+ * limit, paying it, and one line for the latest payment or waiver. Paying is
+ * the whole balance at once, by MoMo through Paystack: Paystack's fee is
+ * added on top ("Owed X + payment fee Y = Pay Z") so CampusRide receives X.
+ * The driver approves on their phone; the screen waits until the server
+ * says Paystack confirmed it. The full history is on the admin site.
  */
 export default function BalanceScreen() {
   const { data, isLoading, isError, refetch, isRefetching } = useDriverBalance();
@@ -94,6 +73,7 @@ export default function BalanceScreen() {
   }
 
   const owed = data.balancePesewas;
+  const paid = pay.payment?.status === "SUCCESS" ? pay.payment : null;
   return (
     <Screen
       scroll
@@ -103,67 +83,39 @@ export default function BalanceScreen() {
       {title}
 
       <View style={styles.hero}>
-        <Text variant="eyebrow" color="secondary">
-          {owed > 0 ? "You owe CampusRide" : "Your balance"}
-        </Text>
-        <Text variant="display" tabular accessibilityLabel={owed > 0 ? `You owe ${formatCedis(owed)}` : "Nothing owed"}>
-          {formatCedis(Math.max(0, owed))}
-        </Text>
-        <Text variant="subhead" color="secondary">
-          {owed < 0
-            ? `${formatCedis(-owed)} paid ahead: it counts against your next trips.`
-            : data.rules.enforcementEnabled
-              ? `Limit ${formatCedis(data.rules.debtLimitPesewas)}. At the limit you can't go online until you pay.`
-              : "Commission-free launch: you can keep driving whatever you owe."}
-        </Text>
+        {owed > 0 ? (
+          <>
+            <Text variant="eyebrow" color="secondary">
+              You owe CampusRide
+            </Text>
+            <Text variant="display" tabular accessibilityLabel={`You owe ${formatCedis(owed)}`}>
+              {formatCedis(owed)}
+            </Text>
+          </>
+        ) : (
+          <Text variant="title2" accessibilityRole="header">
+            You&apos;re all paid up
+          </Text>
+        )}
+        {owed !== 0 ? (
+          <Text variant="subhead" color={data.blocked ? "danger" : "secondary"}>
+            {limitLine(data)}
+          </Text>
+        ) : null}
+        {data.lastCredit ? (
+          <Text variant="caption" color="secondary">
+            {lastCreditText(data.lastCredit)}
+          </Text>
+        ) : null}
       </View>
 
-      {data.blocked ? (
-        <Notice tone="error" icon="alert-circle-outline" message={`You owe ${formatCedis(owed)}. Pay it to go online again.`} />
-      ) : data.warning ? (
-        <Notice icon="alert-circle-outline" message={data.warning} />
+      {paid ? (
+        <Text variant="bodyStrong" color="brand" accessibilityLiveRegion="polite">
+          {`Paid ✓ ${formatCedis(paid.grossPesewas)}`}
+        </Text>
       ) : null}
 
-      {owed > 0 ? <PaySection data={data} pay={pay} /> : null}
-
-      <View style={styles.section}>
-        <Text variant="title3" accessibilityRole="header">
-          History
-        </Text>
-        <Text variant="caption" color="secondary">
-          Riders pay you the whole fare in cash; CampusRide&apos;s 15% of each trip adds to what you owe.
-        </Text>
-        {data.history.length === 0 ? (
-          <Text variant="body" color="secondary">
-            Nothing yet. Each trip&apos;s commission shows up here.
-          </Text>
-        ) : (
-          groupByDay(data.history, (e) => e.at).map((day) => (
-            <View key={day.label} style={styles.day}>
-              <Text variant="bodyStrong" color="secondary" accessibilityRole="header">
-                {day.label}
-              </Text>
-              <View>
-                {day.items.map((e, i) => (
-                  <ListRow
-                    key={e.id}
-                    divider={i > 0}
-                    title={entryTitle(e)}
-                    subtitle={entrySubtitle(e)}
-                    trailing={
-                      <Text variant="bodyStrong" tabular color={e.effectPesewas < 0 ? "brand" : undefined}>
-                        {signed(e.effectPesewas)}
-                      </Text>
-                    }
-                    showChevron={false}
-                    accessibilityLabel={`${entryTitle(e)}, ${entrySubtitle(e)}, ${signed(e.effectPesewas)}`}
-                  />
-                ))}
-              </View>
-            </View>
-          ))
-        )}
-      </View>
+      {owed > 0 || pay.payment?.status === "PENDING" ? <PaySection data={data} pay={pay} /> : null}
     </Screen>
   );
 }
@@ -173,9 +125,14 @@ function PaySection({ data, pay }: { data: DriverBalance; pay: ReturnType<typeof
   const [open, setOpen] = useState(false);
   const [digits, setDigits] = useState(() => (user?.phone ?? "").replace(/\D/g, "").slice(-9));
   const [network, setNetwork] = useState<MomoNetwork>("MTN");
+  const succeeded = pay.payment?.status === "SUCCESS";
+  useEffect(() => {
+    if (succeeded) setOpen(false);
+  }, [succeeded]);
 
-  if (pay.payment && pay.payment.status !== "SUCCESS" && (pay.payment.status === "PENDING" || open)) {
-    return <PaymentProgress payment={pay.payment} pay={pay} />;
+  // Waiting, or why it didn't go through (Try again comes back to the form).
+  if (pay.payment && pay.payment.status !== "SUCCESS") {
+    return <PaymentProgress payment={pay.payment} pay={pay} onTryAgain={() => setOpen(true)} />;
   }
 
   if (!data.canPay) {
@@ -192,11 +149,6 @@ function PaySection({ data, pay }: { data: DriverBalance; pay: ReturnType<typeof
   const quote = data.quote;
   return (
     <View style={styles.card}>
-      {pay.payment?.status === "SUCCESS" ? (
-        <Text variant="bodyStrong" color="brand" accessibilityLiveRegion="polite">
-          Paid {formatCedis(pay.payment.owedPesewas)}. Thank you!
-        </Text>
-      ) : null}
       <View>
         <ListRow title="Owed" trailing={<Text variant="bodyStrong" tabular>{formatCedis(quote.owedPesewas)}</Text>} showChevron={false} />
         <ListRow divider title="Payment fee" subtitle="Paystack's fee, so CampusRide receives what you owe" trailing={<Text variant="bodyStrong" tabular>{formatCedis(quote.feePesewas)}</Text>} showChevron={false} />
@@ -232,22 +184,68 @@ function PaySection({ data, pay }: { data: DriverBalance; pay: ReturnType<typeof
   );
 }
 
-/** "Waiting for payment…": what Paystack asks for (approve, a code, its page), or why it failed. */
-function PaymentProgress({ payment, pay }: { payment: CommissionPayment; pay: ReturnType<typeof useCommissionPayment> }) {
+/**
+ * "Waiting for payment…": what Paystack asks for (approve, a code, its page);
+ * after two minutes "Didn't get the prompt?"; or why it didn't go through.
+ */
+function PaymentProgress({
+  payment,
+  pay,
+  onTryAgain,
+}: {
+  payment: CommissionPayment;
+  pay: ReturnType<typeof useCommissionPayment>;
+  onTryAgain: () => void;
+}) {
   const [code, setCode] = useState("");
   const pending = payment.status === "PENDING";
-  const failed = payment.status === "FAILED" || payment.status === "ABANDONED";
+  const mismatch = payment.status === "MISMATCH";
+  const slow = pending && pay.slow && !payment.needsOtp;
+  const from = `${payment.momoNetwork ? ` from ${NETWORK_LABEL[payment.momoNetwork]}${payment.phoneLast4 ? ` •••${payment.phoneLast4}` : ""}` : ""}`;
+
+  if (!pending && !mismatch) {
+    return (
+      <View style={styles.card} accessibilityLiveRegion="polite">
+        <Text variant="title3" accessibilityRole="header">
+          Payment didn&apos;t go through
+        </Text>
+        <Text variant="body" color="secondary">
+          {payment.message ?? "Nothing was taken from your account. Try again."}
+        </Text>
+        <Button
+          label="Try again"
+          onPress={() => {
+            pay.dismiss();
+            onTryAgain();
+          }}
+          fullWidth
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.card} accessibilityLiveRegion="polite">
       <Text variant="title3" accessibilityRole="header">
-        {pending ? "Waiting for payment…" : payment.status === "MISMATCH" ? "We're checking this payment" : "Payment didn't go through"}
+        {mismatch
+          ? "We're checking this payment"
+          : slow
+            ? payment.channel === "CHECKOUT"
+              ? "Not confirmed yet"
+              : "Didn't get the prompt?"
+            : "Waiting for payment…"}
       </Text>
       <Text variant="body" color="secondary">
-        {payment.message ??
-          (pending ? "Approve the payment on your phone." : payment.status === "MISMATCH" ? "CampusRide will check it and update your balance." : "Try again.")}
+        {mismatch
+          ? "CampusRide will check it and update your balance."
+          : slow
+            ? payment.channel === "CHECKOUT"
+              ? "If you've paid, check again. Otherwise start over."
+              : "If you approved it, check again. If no prompt came, start over to send a new one."
+            : (payment.message ?? "Approve the payment on your phone.")}
       </Text>
       <Text variant="subhead" tabular>
-        {`Paying ${formatCedis(payment.grossPesewas)}${payment.momoNetwork ? ` from ${NETWORK_LABEL[payment.momoNetwork]}${payment.phoneLast4 ? ` •••${payment.phoneLast4}` : ""}` : ""}`}
+        {`Paying ${formatCedis(payment.grossPesewas)}${from}`}
       </Text>
 
       {payment.needsOtp ? (
@@ -258,12 +256,29 @@ function PaymentProgress({ payment, pay }: { payment: CommissionPayment; pay: Re
       ) : null}
       {pending && payment.checkoutUrl ? <Button label="Open the Paystack page" variant="secondary" onPress={() => void pay.openPage()} fullWidth /> : null}
       {pay.error ? <Notice tone="error" message={pay.error} /> : null}
-      {pending ? (
-        <Text variant="caption" color="secondary">
-          This updates by itself once Paystack confirms it. You can leave this screen.
-        </Text>
-      ) : null}
-      <Button label={failed ? "Try again" : pending ? "Start over" : "OK"} variant={failed ? "primary" : "text"} onPress={pay.dismiss} />
+      {slow ? (
+        <View style={styles.form}>
+          <Button label="Check again" onPress={() => void pay.checkAgain()} loading={pay.checking} fullWidth />
+          <Button
+            label="Start over"
+            variant="secondary"
+            onPress={() => {
+              pay.dismiss();
+              onTryAgain();
+            }}
+            fullWidth
+          />
+        </View>
+      ) : pending ? (
+        <>
+          <Text variant="caption" color="secondary">
+            This updates by itself once Paystack confirms it. You can leave this screen.
+          </Text>
+          <Button label="Start over" variant="text" onPress={pay.dismiss} />
+        </>
+      ) : (
+        <Button label="OK" variant="text" onPress={pay.dismiss} />
+      )}
     </View>
   );
 }
@@ -272,8 +287,6 @@ const styles = StyleSheet.create({
   header: { gap: spacing[2], marginTop: spacing[2] },
   content: { gap: spacing[5], paddingBottom: spacing[10] },
   hero: { gap: spacing[1] },
-  section: { gap: spacing[3] },
-  day: { gap: spacing[1] },
   card: { gap: spacing[3], padding: spacing[4], borderRadius: radii.lg, backgroundColor: colors.surface2 },
   form: { gap: spacing[3] },
 });
