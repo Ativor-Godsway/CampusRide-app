@@ -36,7 +36,7 @@ export function NoDriversPanel({
           No drivers available right now
         </Text>
         <Text variant="body" color="secondary" style={styles.centered}>
-          Campus availability changes quickly — searching again often finds someone.
+          Searching again often finds someone.
         </Text>
       </View>
 

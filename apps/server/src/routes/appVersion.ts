@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import type { AppMinVersions } from "@rida/shared";
+import { APP_CONFIG_PATH, type AppConfig, type AppMinVersions } from "@rida/shared";
 import { config } from "../config";
 import { noInput } from "../http/schemas";
 
@@ -15,9 +15,20 @@ import { noInput } from "../http/schemas";
 export function registerAppVersionRoutes(
   app: FastifyInstance,
   versions: AppMinVersions = config.appMinVersions,
+  appConfig: AppConfig = { supportPhone: config.supportPhone },
 ): void {
   app.get("/app/min-version", { schema: noInput }, async (_request, reply) => {
     // Always the current answer: a minimum raised on Render reaches every phone at its next check.
     return reply.header("cache-control", "no-store").send(versions);
+  });
+
+  /**
+   * GET /app/config — public, no login: settings the apps read from the
+   * server so they change without an app update. Today only the number
+   * "Call support" dials (SUPPORT_PHONE on Render; the apps keep a built-in
+   * one for when this can't be reached). Not secret, the same for everyone.
+   */
+  app.get(APP_CONFIG_PATH, { schema: noInput }, async (_request, reply) => {
+    return reply.header("cache-control", "no-store").send(appConfig);
   });
 }

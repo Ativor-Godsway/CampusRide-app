@@ -44,6 +44,7 @@ Last reviewed: 2026-10-16 (pre-launch hardening, Stages 1–5).
 | `GET /health` | No | — | Returns `{status, app}` only. Render's liveness check; never touches the database. | none (Render polls it) |
 | `GET /health/ready` | No | — | Also checks the database (`SELECT 1`, at most 3 s): `{status, app, database}`, 503 when it can't be reached. No error details. For UptimeRobot. | none (UptimeRobot polls it) |
 | `GET /app/min-version` | No | — | Per app and platform, the lowest store version still allowed and the store link, from the `MIN_VERSION_*` / `STORE_URL_*` Render variables (docs/runbooks/releasing.md). Not secret, the same for everyone; reads nothing from the database. | IP backstop |
+| `GET /app/config` | No | — | The number the apps' "Call support" dials, from the `SUPPORT_PHONE` Render variable (default +233548608146). Not secret, the same for everyone; reads nothing from the database. | IP backstop |
 | `GET /launch-status` | No | — | Launch mode in force (`OFF`, `COUNTDOWN`, `LIVE`), the launch time during a countdown, and the server's clock. Not secret, the same for everyone; one cached database read (10 s). | IP backstop |
 | `POST /auth/request-otp` | No | — | Sends a code to the phone given. | per number: 1 per 60 s, 5 / 15 min, 10 / 24 h (an admin's number: 3 / 15 min, 6 / 24 h); per IP: 200 codes / 15 min; IP backstop |
 | `POST /auth/verify-otp` | No | — | Returns a 5-minute verification token for that phone only. 5 wrong tries burns the code. | per number: 10 / 15 min (an admin's: 5); IP backstop |

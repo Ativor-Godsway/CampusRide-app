@@ -35,6 +35,7 @@ import {
   LoadingState,
   LaunchBanner,
   Notice,
+  NotificationsOffNotice,
   Screen,
   StatusChip,
   Text,
@@ -49,6 +50,7 @@ import {
   spacing,
   useAuth,
   useLaunchView,
+  usePushPermission,
   useToast,
   type EligibleRideItem,
   type RideWithZones,
@@ -80,7 +82,7 @@ import { CommissionBlockModal } from "../../components/balance/CommissionBlockMo
 const FILTERS: { value: RequestTypeFilter; label: string }[] = [
   { value: "ALL", label: "All" },
   { value: "SHARED", label: "Shared" },
-  { value: "LONE", label: "Private" },
+  { value: "LONE", label: "Ride alone" },
 ];
 
 /** The whole campus: the map's view before we know where the car is. */
@@ -105,7 +107,7 @@ const HISTORY_QUERY_KEY = driverRideHistoryQueryKey;
  * - Offline: "You're offline" in a short sheet, and the green Go online
  *   pill above it.
  * - Online and free: the car pulses; the sheet says it's looking, with the
- *   All / Shared / Private chips, Go offline, and every request near you
+ *   All / Shared / Ride alone chips, Go offline, and every request near you
  *   (nearest first, Accept opens the trip at once — lib/tripActions). New
  *   requests also open full screen (OfferTakeover).
  * - On a trip: a dark row at the top of the sheet opens it. On a Shared trip,
@@ -178,6 +180,9 @@ export default function DriverHomeScreen() {
   useEffect(() => {
     if (focused) void refetchBalance();
   }, [focused, refetchBalance]);
+
+  // Notifications turned off ("Don't allow"): said on Home while offline.
+  const pushPermission = usePushPermission();
 
   // ─── Requests when free ─────────────────────────────────────────────────
   const free = isOnline && !trip;
@@ -439,6 +444,11 @@ export default function DriverHomeScreen() {
           </View>
         ) : null}
 
+        {/* "Don't allow" was chosen: requests can't reach a closed app. */}
+        {!isOnline && pushPermission === "denied" ? (
+          <NotificationsOffNotice message="Notifications are off, so ride requests can't reach you when the app is closed." />
+        ) : null}
+
         {!isOnline ? (
           <View style={styles.heading}>
             <View style={styles.offlineTitle}>
@@ -505,7 +515,7 @@ export default function DriverHomeScreen() {
               <Notice
                 tone="warning"
                 icon="navigate-outline"
-                message="You're outside campus. Requests only reach drivers on the University of Ghana (Legon) campus: head back onto campus."
+                message="You're outside campus. Head back onto the Legon campus to get requests."
               />
             ) : null}
 
@@ -591,7 +601,7 @@ function OnlineHeading({
     : trip?.type === "LONE"
       ? [
           "You're on a Ride alone trip",
-          "A private trip takes one rider, so new requests show here once it ends.",
+          "New requests show here when this trip ends.",
         ]
       : freeSeats === 0
         ? ["Your car is full", "Riders on your route show here again when a seat frees up."]
