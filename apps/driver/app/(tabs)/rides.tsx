@@ -133,7 +133,7 @@ export default function EarningsTab() {
             No trips yet
           </Text>
           <Text variant="body" color="secondary" style={styles.centered}>
-            Your earnings and completed trips show up here after your first trip.
+            Your trips and earnings show here after your first trip.
           </Text>
         </View>
       </Screen>

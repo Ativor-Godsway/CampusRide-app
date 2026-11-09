@@ -1,7 +1,8 @@
 import { useRouter } from "expo-router";
-import { PRIVACY_URL, TERMS_URL, WEBSITE_URL, formatGhanaPhone, initialsOf, stopLabel } from "@rida/shared";
+import { PRIVACY_URL, TERMS_URL, formatGhanaPhone, initialsOf, stopLabel } from "@rida/shared";
 import { Alert, StyleSheet, View } from "react-native";
 import {
+  CallSupportRow,
   ListRow,
   Screen,
   Text,
@@ -16,12 +17,10 @@ import {
 import { TAB_SCREEN_BOTTOM_PADDING } from "../../lib/layout";
 import { useActiveRide } from "../../lib/activeRide";
 
-const SUPPORT_URL = `${WEBSITE_URL}/support`;
-
 /**
  * Account tab: who's signed in, then grouped rows — the account itself
- * (profile, safety, notifications), help and the legal pages, and leaving
- * (log out, delete account). The app's version is at the bottom.
+ * (profile, safety, notifications), Call support and the legal pages, and
+ * leaving (log out, delete account). About (version, licences) at the bottom.
  */
 export default function AccountTab() {
   const router = useRouter();
@@ -85,11 +84,7 @@ export default function AccountTab() {
       </View>
 
       <View>
-        <ListRow
-          title="Help and support"
-          leading={<ListRow.Icon name="help-circle-outline" />}
-          onPress={() => void openLegalPage(SUPPORT_URL)}
-        />
+        <CallSupportRow />
         <ListRow
           divider
           title="Terms"
@@ -101,12 +96,6 @@ export default function AccountTab() {
           title="Privacy"
           leading={<ListRow.Icon name="lock-closed-outline" />}
           onPress={() => void openLegalPage(PRIVACY_URL)}
-        />
-        <ListRow
-          divider
-          title="Open-source licenses"
-          leading={<ListRow.Icon name="code-slash-outline" />}
-          onPress={() => router.push("/licenses")}
         />
       </View>
 
@@ -129,16 +118,24 @@ export default function AccountTab() {
         />
       </View>
 
-      {/* Which build/update this phone runs — docs/runbooks/releasing.md. Long-press: About this app. */}
-      <Text
-        variant="caption"
-        color="tertiary"
-        style={styles.versionLabel}
-        onLongPress={showAppAbout}
-        accessibilityHint="Long-press for the build number and update ID"
-      >
-        {getAppVersionLabel()}
-      </Text>
+      {/* About: which build this phone runs (docs/runbooks/releasing.md; long-press for the
+          build number and update ID) and the licences notice the libraries require. */}
+      <View style={styles.about} accessibilityRole="summary">
+        <Text variant="caption" color="tertiary" accessibilityRole="header">
+          About
+        </Text>
+        <Text
+          variant="caption"
+          color="tertiary"
+          onLongPress={showAppAbout}
+          accessibilityHint="Long-press for the build number and update ID"
+        >
+          {getAppVersionLabel()}
+        </Text>
+        <Text variant="caption" color="secondary" accessibilityRole="link" onPress={() => router.push("/licenses")}>
+          Open-source licenses
+        </Text>
+      </View>
     </Screen>
   );
 }
@@ -166,7 +163,8 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
   },
-  versionLabel: {
-    textAlign: "center",
+  about: {
+    alignItems: "center",
+    gap: spacing[1],
   },
 });

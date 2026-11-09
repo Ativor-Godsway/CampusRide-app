@@ -45,7 +45,8 @@
     <li>Riders' <strong>pickup and drop-off points</strong> are stored with each trip.</li>
     <li>While a driver is <strong>online</strong>, the Driver app uses their location, <strong>even when the app is closed or not in use</strong>, to match them with nearby requests and show riders on their trip where the car is. It stops when they go offline.</li>
     <li>The other person on your trip sees your name and phone number so you can find and call each other.</li>
-    <li>We don't sell your data, show ads or use advertising or analytics trackers. Payments are in cash: we collect no card or mobile money details.</li>
+    <li>We don't sell your data, show ads or use advertising or analytics trackers.</li>
+    <li>Riders pay drivers in <strong>cash</strong>: CampusRide never takes payments from riders. Drivers can pay their CampusRide commission in the app with <strong>mobile money through Paystack</strong>; we keep only the last 4 digits of the number.</li>
     <li>You can <a href="/delete-account">delete your account</a> in the app at any time.</li>
   </ul>
 
@@ -75,6 +76,14 @@
     <li>For drivers: requests you declined or let time out, and the commission you owe on cash trips.</li>
   </ul>
 
+  <h3>Commission payments (drivers only)</h3>
+  <ul>
+    <li>Drivers can pay what they owe CampusRide in the Driver app with <strong>mobile money, through Paystack</strong>. Your MoMo number and network pass through our server to Paystack to start the payment, and Paystack processes it under its own privacy policy (see section 6).</li>
+    <li>We keep: the <strong>amount, the payment fee, Paystack's reference, your MoMo network, the last 4 digits of your MoMo number, the date and time, and the status</strong>. We never see or store your PIN, and we never store the full number. If you pay on Paystack's own page instead, you enter your details there and we keep the same record without the number.</li>
+    <li>Paystack needs an email address, and drivers don't give us one, so it gets a made-up address that identifies only your account and receives no mail.</li>
+    <li>CampusRide staff can also record a cash payment you made to us, or waive part of what you owe, with a short note. These are kept as records.</li>
+  </ul>
+
   <h3>Safety (SOS)</h3>
   <p>
     If a rider asks for help during a trip with the <strong>Safety</strong> button (<strong>Alert
@@ -85,6 +94,11 @@
     drop-off places, the trip status and the driver's name, car and plate. It never shows the
     driver's phone number, exact map coordinates or other passengers. The link stops working
     24 hours after the trip ends.
+  </p>
+  <p>
+    We also keep a record of each alert: when it was sent, the trip, where the car was (if we
+    knew), and who was notified (whether the emergency contact and our support line were texted).
+    CampusRide staff use it to follow up, and note when it was dealt with.
   </p>
 
   <h3>Sign-in and your phone</h3>
@@ -142,10 +156,11 @@
         <tr><td>Drivers' location in the background</td><td>Driver location</td><td>Your consent (the location permission), which you can withdraw in your phone's settings</td></tr>
         <tr><td>Safety and service quality: looking into reports about trips, and seeing where and when drivers are available</td><td>Drivers' location history (90 days), when drivers were online, how ride requests were answered</td><td>Legitimate interest in a safe, reliable service</td></tr>
         <tr><td>Approving drivers</td><td>Driver profile and photo</td><td>Contract; our legitimate interest in rider safety</td></tr>
-        <tr><td>SOS alerts</td><td>Rider's and driver's details, emergency contact</td><td>Protecting the vital interests of the rider; consent (you add the contact)</td></tr>
+        <tr><td>SOS alerts, and following them up</td><td>Rider's and driver's details, emergency contact, the alert record</td><td>Protecting the vital interests of the rider; consent (you add the contact)</td></tr>
         <tr><td>Trip notifications</td><td>Push token, names, place names</td><td>Contract; consent (notification permission)</td></tr>
         <tr><td>Ratings, safety reports and disputes</td><td>Trips, ratings, kept details after deletion</td><td>Legitimate interest in a safe, fair service</td></tr>
         <tr><td>Drivers' commission and our accounts</td><td>Trip fares, commission records</td><td>Legal obligation (record keeping); contract</td></tr>
+        <tr><td>Drivers paying their commission in the app, and staff recording payments or waivers</td><td>Amount, fee, Paystack reference, MoMo network, last 4 digits of the MoMo number, date and time, status, staff notes</td><td>Contract; legal obligation (record keeping)</td></tr>
         <tr><td>Fixing crashes, preventing abuse and keeping the service secure</td><td>Crash reports, logs, IP addresses, rate-limit counters</td><td>Legitimate interest</td></tr>
         <tr><td>Responding to lawful requests from authorities</td><td>What the request covers</td><td>Legal obligation</td></tr>
       </tbody>
@@ -166,20 +181,21 @@
         <li><strong>Neon</strong>: hosts our database (Frankfurt, Germany).</li>
         <li><strong>Cloudinary</strong>: stores drivers' profile photos.</li>
         <li><strong>Sentry</strong> (Functional Software, Inc.): receives crash and error reports, stored in Frankfurt, Germany.</li>
+        <li><strong>Paystack</strong>: processes drivers' commission payments, so receives the driver's MoMo number and network, the amount, our payment reference and the made-up email address. Paystack handles them under its own privacy policy: <a href="https://paystack.com/privacy">Paystack's privacy policy</a>.</li>
       </ul>
     </li>
     <li><strong>Authorities</strong>, such as the Ghana Police Service, when the law requires it or when it's needed to protect someone's life or safety.</li>
     <li><strong>A future company or buyer.</strong> If CampusRide becomes a company or is transferred, your data would move with it under this policy, and we would tell you first.</li>
   </ul>
   <p>We do not sell personal data, share it with advertisers or let others use it for their own marketing.</p>
-  <p><strong>Payments.</strong> All trips are paid in cash. We don't use a payment provider and don't collect card or mobile money details. If we add mobile money payments, we will update this policy first.</p>
+  <p><strong>Payments.</strong> Riders pay drivers in cash; CampusRide never takes payments from riders and never asks riders for card or mobile money details. The only payments in the app are drivers paying their commission, through Paystack (above).</p>
 
   <h2 id="where">7. Where it is stored</h2>
   <p>
     Our database and server are in the <strong>European Union (Frankfurt, Germany)</strong>, and
     crash reports are stored there too. Some providers listed above are in the United States or
-    operate worldwide (Expo, Google, Apple, Cloudinary), and text messages go through Moolre in
-    Ghana. Where data leaves Ghana, we use providers that protect it with security measures at
+    operate worldwide (Expo, Google, Apple, Cloudinary), text messages go through Moolre in
+    Ghana, and drivers' commission payments through Paystack. Where data leaves Ghana, we use providers that protect it with security measures at
     least as strong as those Act 843 requires, and we send them only what their job needs.
   </p>
 
@@ -193,11 +209,12 @@
         <tr><td>Account: name, phone number, driver profile</td><td>While your account is open. When you delete it, removed from the service at once; see below for what's kept.</td></tr>
         <tr><td>Name, phone number, and a driver's plate and photo, after you delete your account</td><td>Kept separately for <strong>{{retentionDays}} days</strong>, only for safety reports or police requests about a trip, then erased</td></tr>
         <tr><td>Exact pickup and drop-off points, pickup notes, cancel notes and rating comments you wrote</td><td>While your account is open, then erased {{retentionDays}} days after you delete it</td></tr>
-        <tr><td>Trip records (time, area, fare, stars) and drivers' commission records</td><td>Kept as our business records, without your name once the {{retentionDays}} days are over</td></tr>
+        <tr><td>Trip records (time, area, fare, stars) and drivers' commission records, including commission payments (in the app or recorded by staff) and waivers</td><td>Kept as our business records, without your name once the {{retentionDays}} days are over</td></tr>
         <tr><td>Your 18+ and terms confirmation (when, and which version)</td><td>While your account is open; after you delete it, kept without your name or number with the anonymous record that the account existed</td></tr>
         <tr><td>Emergency contact</td><td>Until you change or remove it, or delete your account</td></tr>
         <tr><td>Drivers' location history (a position about every 30 seconds while online)</td><td><strong>90 days</strong>, then deleted automatically</td></tr>
         <tr><td>When drivers were online, and how they answered ride requests</td><td>Kept as our business records, without your name once the {{retentionDays}} days after you delete your account are over</td></tr>
+        <tr><td>SOS alert records (time, trip, where the car was, who was notified)</td><td>Kept as safety records while your account is open; after you delete it, kept without your name once the {{retentionDays}} days are over</td></tr>
         <tr><td>SOS tracking links</td><td>Stop working 24 hours after the trip ends; deleted with your account</td></tr>
         <tr><td>Sign-in codes</td><td>Work for 5 minutes. The hashed record is deleted after 7 days, or when your account is deleted</td></tr>
         <tr><td>Push notification tokens</td><td>Until you sign out, delete your account or uninstall the app</td></tr>

@@ -58,7 +58,7 @@ export default function SafetyScreen() {
     if (!name || !phone) {
       Alert.alert(
         "Both fields needed",
-        "We need a name and a number — the name tells them who's calling, the number is where we send the alert.",
+        "Add their name and phone number.",
       );
       return;
     }

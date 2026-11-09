@@ -3,7 +3,7 @@ import path from "node:path";
 import { resolveCloudinaryConfig } from "./services/uploads/cloudinaryConfig";
 import { normalizePhone } from "./lib/phone";
 import { resolveAppMinVersions } from "./lib/appMinVersions";
-import { ACCOUNT_DELETION_RETENTION_DAYS } from "@rida/shared";
+import { ACCOUNT_DELETION_RETENTION_DAYS, supportPhoneFrom } from "@rida/shared";
 
 // Per-environment .env loading (dev/test/prod split — see docs/environments.md).
 // NODE_ENV picks the file: `.env.development` (default), `.env.test` (vitest
@@ -377,6 +377,13 @@ export const config = {
    * lib/appMinVersions.ts). All unset = nobody is ever blocked.
    */
   appMinVersions: resolveAppMinVersions(process.env).versions,
+  /**
+   * The number the apps' "Call support" dials (GET /app/config). Any Ghana
+   * format; missing or not a Ghana number means the built-in +233548608146
+   * (@rida/shared config/support.ts). Not the same as SUPPORT_CONTACT_PHONE,
+   * which every SOS is texted to.
+   */
+  supportPhone: supportPhoneFrom(process.env.SUPPORT_PHONE),
   /**
    * How long a ride offer stays up on a driver's screen before it times out
    * (seconds). The app reads it from each offer, so changing it needs no app

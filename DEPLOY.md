@@ -240,6 +240,12 @@ webhook URL for Test and Live mode: paste it in both. The app's status checks
 ask Paystack themselves, so a payment is still credited without the webhook;
 the webhook just makes it instant. Moolre stays for SMS only.
 
+Support: `SUPPORT_PHONE` (optional, default `+233548608146`, any Ghana
+format) — the number the rider and driver apps' Account › "Call support"
+dials. The apps read it from `GET /app/config`, so changing it needs no app
+release; they keep the built-in number for when the server can't be reached.
+It is not `SUPPORT_CONTACT_PHONE` (the number every SOS is texted to).
+
 Ride offers: `DRIVER_OFFER_SECONDS` (default 15, 5–60) — how long a ride
 offer's countdown runs on the driver's screen. The app reads it from each
 offer, so changing it needs no app release.

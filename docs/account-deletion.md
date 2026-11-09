@@ -82,7 +82,12 @@ is kept for good and the number must be erased after 90 days.
 - Trip records: when, which zones, the fare, the stars given. They're the
   service's books and statistics; nothing in them identifies the person once
   the 90 days are over.
-- A driver's cash commission records (what they owe or paid).
+- A driver's commission records: what they owe, Paystack payments (amount,
+  fee, reference, MoMo network, last 4 digits, status) and payments or
+  waivers staff recorded.
+- A rider's SOS alert records (`SosEvent`: when, the trip, where the car was,
+  who was texted). The rider row is anonymised, not deleted, so they stay
+  without a name; their location is not erased at the purge.
 - The audit log entries saying the account was closed and erased.
 
 ## For the app store forms

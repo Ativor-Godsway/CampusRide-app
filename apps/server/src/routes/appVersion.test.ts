@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import Fastify from "fastify";
+import { DEFAULT_SUPPORT_PHONE, supportPhoneFrom } from "@rida/shared";
 import { resolveAppMinVersions } from "../lib/appMinVersions";
 import { registerAppVersionRoutes } from "./appVersion";
 
@@ -68,5 +69,27 @@ describe("resolveAppMinVersions", () => {
     expect(versions.rider.android).toEqual({ minVersion: null, storeUrl: `${PLAY}rider` });
     expect(versions.driver.ios.minVersion).toBeNull();
     expect(invalid).toEqual(["MIN_VERSION_RIDER_ANDROID", "STORE_URL_RIDER_ANDROID", "MIN_VERSION_DRIVER_IOS"]);
+  });
+});
+
+describe("GET /app/config", () => {
+  async function config(supportPhone: unknown) {
+    const app = Fastify();
+    registerAppVersionRoutes(app, resolveAppMinVersions({}).versions, { supportPhone: supportPhoneFrom(supportPhone) });
+    await app.ready();
+    return app.inject({ method: "GET", url: "/app/config" });
+  }
+
+  it("serves SUPPORT_PHONE as +233…", async () => {
+    const res = await config("020 123 4567");
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    expect(res.json()).toEqual({ supportPhone: "+233201234567" });
+  });
+
+  it("serves the built-in number when SUPPORT_PHONE is unset or not a Ghana number", async () => {
+    for (const value of [undefined, "", "call us"]) {
+      expect((await config(value)).json()).toEqual({ supportPhone: DEFAULT_SUPPORT_PHONE });
+    }
   });
 });

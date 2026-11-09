@@ -110,8 +110,8 @@ export function DeleteAccountScreen({ app }: { app: "rider" | "driver" }) {
   ];
   const keptWithoutName = [
     app === "driver"
-      ? "Your trip and cash commission records (date, area, fare) stay in CampusRide's accounts, without your name."
-      : "Your trip records (date, area, fare) stay in CampusRide's accounts, without your name.",
+      ? "Your trip and commission records (date, area, fare, and commission payments and waivers) stay in CampusRide's accounts, without your name."
+      : "Your trip records (date, area, fare) and any SOS alert records stay with CampusRide, without your name.",
   ];
 
   return (

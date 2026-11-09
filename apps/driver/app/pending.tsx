@@ -126,20 +126,18 @@ export default function PendingApprovalScreen() {
 
         <Text variant="body">We&apos;ll let you know as soon as you&apos;re approved.</Text>
 
-        <View style={styles.status} accessibilityLiveRegion="polite">
-          <Ionicons
-            name={checkFailed ? "cloud-offline-outline" : "time-outline"}
-            size={16}
-            color={checkFailed ? colors.red600 : colors.ink3}
-          />
-          <Text variant="subhead" color={checkFailed ? "danger" : "secondary"}>
-            {checkFailed
-              ? "Couldn't check your status. Pull down to try again."
-              : lastChecked
-                ? `Last checked ${clockTime(lastChecked)}`
-                : "Pull down to check your status."}
-          </Text>
-        </View>
+        {checkFailed || lastChecked ? (
+          <View style={styles.status} accessibilityLiveRegion="polite">
+            <Ionicons
+              name={checkFailed ? "cloud-offline-outline" : "time-outline"}
+              size={16}
+              color={checkFailed ? colors.red600 : colors.ink3}
+            />
+            <Text variant="subhead" color={checkFailed ? "danger" : "secondary"}>
+              {checkFailed ? "Couldn't check your status. Try again." : `Last checked ${clockTime(lastChecked!)}`}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.actions}>
           <Button label="Check status" onPress={() => void onRefresh()} loading={refreshing} />

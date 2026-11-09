@@ -29,6 +29,7 @@ import {
   LaunchCountdownCard,
   ListRow,
   Notice,
+  NotificationsOffNotice,
   Skeleton,
   SkeletonGroup,
   Text,
@@ -42,6 +43,7 @@ import {
   useAuth,
   useLaunchView,
   useNearbyCars,
+  useNotificationsOffReminderOnce,
   type ActiveRideSummary,
   type RideSummary,
 } from "@rida/mobile-shared";
@@ -96,6 +98,8 @@ export default function HomeTab() {
   // on (then the rider follows their own driver). Shown during the launch
   // countdown too: real cars on campus say CampusRide is real.
   const cars = useNearbyCars(activeRide === null, location.state === "here" ? location.coords : null);
+  // "Don't allow" was chosen: said once, never again (not during a ride).
+  const pushReminder = useNotificationsOffReminderOnce(activeRide === null);
 
   // Own cache key: the Rides tab caches history pages, a different shape.
   // Fetch a few more than we show so repeat trips still leave 3 distinct places.
@@ -227,6 +231,13 @@ export default function HomeTab() {
             icon="navigate-outline"
             message="You're outside campus. Pickups are on the University of Ghana (Legon) campus."
             style={styles.notice}
+          />
+        ) : null}
+
+        {pushReminder.show ? (
+          <NotificationsOffNotice
+            message="Notifications are off, so you'll only hear from your driver while the app is open."
+            onDismiss={pushReminder.dismiss}
           />
         ) : null}
 

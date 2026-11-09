@@ -4,7 +4,6 @@ import { ActivityIndicator, Alert, Image, StyleSheet, View } from "react-native"
 import {
   PRIVACY_URL,
   TERMS_URL,
-  WEBSITE_URL,
   cloudinaryAvatar,
   formatGhanaPhone,
   initialsOf,
@@ -13,6 +12,7 @@ import {
   Button,
   Card,
   Input,
+  CallSupportRow,
   ListRow,
   Screen,
   StatusChip,
@@ -37,13 +37,12 @@ import {
   type PhotoSource,
 } from "../../lib/useDriverPhotoUpload";
 
-const SUPPORT_URL = `${WEBSITE_URL}/support`;
-
 /**
  * Account tab: who's driving (photo, name, number, approval), their car as
- * riders will look for it with Edit, then grouped rows — notifications,
- * help, the legal pages and licences — and leaving (log out, delete
- * account). The version at the bottom; the dev-only fake location under it.
+ * riders will look for it with Edit, then grouped rows — balance,
+ * notifications, Call support, the legal pages — and leaving (log out,
+ * delete account). About (version, licences) at the bottom; the dev-only
+ * fake location under it.
  */
 export default function AccountTab() {
   const router = useRouter();
@@ -228,7 +227,7 @@ export default function AccountTab() {
       <View>
         <ListRow
           title="Balance"
-          subtitle="Commission you owe CampusRide, and paying it"
+          subtitle="Commission you owe"
           leading={<ListRow.Icon name="wallet-outline" />}
           onPress={() => router.push("/balance")}
         />
@@ -239,12 +238,7 @@ export default function AccountTab() {
           leading={<ListRow.Icon name="notifications-outline" />}
           onPress={() => router.push("/notifications")}
         />
-        <ListRow
-          divider
-          title="Help and support"
-          leading={<ListRow.Icon name="help-circle-outline" />}
-          onPress={() => void openLegalPage(SUPPORT_URL)}
-        />
+        <CallSupportRow divider />
         <ListRow
           divider
           title="Terms"
@@ -256,12 +250,6 @@ export default function AccountTab() {
           title="Privacy"
           leading={<ListRow.Icon name="lock-closed-outline" />}
           onPress={() => void openLegalPage(PRIVACY_URL)}
-        />
-        <ListRow
-          divider
-          title="Open-source licenses"
-          leading={<ListRow.Icon name="code-slash-outline" />}
-          onPress={() => router.push("/licenses")}
         />
       </View>
 
@@ -284,16 +272,24 @@ export default function AccountTab() {
         />
       </View>
 
-      {/* Which build/update this phone runs — docs/runbooks/releasing.md. Long-press: About this app. */}
-      <Text
-        variant="caption"
-        color="tertiary"
-        style={styles.versionLabel}
-        onLongPress={showAppAbout}
-        accessibilityHint="Long-press for the build number and update ID"
-      >
-        {getAppVersionLabel()}
-      </Text>
+      {/* About: which build this phone runs (docs/runbooks/releasing.md; long-press for the
+          build number and update ID) and the licences notice the libraries require. */}
+      <View style={styles.about} accessibilityRole="summary">
+        <Text variant="caption" color="tertiary" accessibilityRole="header">
+          About
+        </Text>
+        <Text
+          variant="caption"
+          color="tertiary"
+          onLongPress={showAppAbout}
+          accessibilityHint="Long-press for the build number and update ID"
+        >
+          {getAppVersionLabel()}
+        </Text>
+        <Text variant="caption" color="secondary" accessibilityRole="link" onPress={() => router.push("/licenses")}>
+          Open-source licenses
+        </Text>
+      </View>
 
       {/* Dev builds only (it renders nothing in a release build). */}
       <FakeLocationCard />
@@ -361,5 +357,5 @@ const styles = StyleSheet.create({
   },
   editPhoto: { alignItems: "center", gap: spacing[2] },
   editActions: { gap: spacing[2] },
-  versionLabel: { textAlign: "center" },
+  about: { alignItems: "center", gap: spacing[1] },
 });
