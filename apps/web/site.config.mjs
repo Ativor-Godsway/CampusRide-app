@@ -39,7 +39,7 @@ export const site = {
       googlePlay: "",
     },
     driver: {
-      appStore: "",
+      appStore: "https://apps.apple.com/app/id6827179216",
       googlePlay: "",
     },
     /**
