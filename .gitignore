@@ -35,3 +35,8 @@ coverage/
 # public repository: EAS builds get it from the secret GOOGLE_SERVICES_JSON
 # file variable (docs/runbooks/push-notifications.md).
 google-services*.json
+
+# The owner's local scratch folders: design previews, sketches and mockup
+# copies kept on this Mac only, never committed.
+Claude outputs/
+docs/mockups/admin/files/
