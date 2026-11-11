@@ -215,10 +215,30 @@ export async function destroyDriverPhoto(
   fetchFn: typeof fetch = fetch,
   now: Date = new Date(),
 ): Promise<boolean> {
-  if (!cfg.cloudName || !cfg.apiKey || !cfg.apiSecret) return false;
+  const result = await destroyCloudinaryImage(driverPhotoPublicId(userId), cfg, fetchFn, now);
+  if (result.ok || result.reason === "not configured") return result.ok;
+  logger.warn("Couldn't delete a closed account's driver photo from Cloudinary", {
+    userId,
+    ...(result.status ? { status: result.status } : { err: result.reason }),
+  });
+  return false;
+}
+
+/**
+ * Deletes one image from Cloudinary by its public id (signed destroy call).
+ * "not found" counts as done: it's already gone, which is what we want.
+ * Never throws; `reason` says why it didn't work, without any credential.
+ */
+export async function destroyCloudinaryImage(
+  publicId: string,
+  cfg: { cloudName: string; apiKey: string; apiSecret: string } = config.cloudinary,
+  fetchFn: typeof fetch = fetch,
+  now: Date = new Date(),
+): Promise<{ ok: boolean; status?: number; reason?: string }> {
+  if (!cfg.cloudName || !cfg.apiKey || !cfg.apiSecret) return { ok: false, reason: "not configured" };
   const params = {
     invalidate: true,
-    public_id: driverPhotoPublicId(userId),
+    public_id: publicId,
     timestamp: Math.floor(now.getTime() / 1000),
   };
   const body = new URLSearchParams({
@@ -236,16 +256,10 @@ export async function destroyDriverPhoto(
       },
     );
     const data = (await res.json().catch(() => ({}))) as { result?: string };
-    // "not found" means it's already gone, which is what we want.
-    if (res.ok && (data.result === "ok" || data.result === "not found")) return true;
-    logger.warn("Couldn't delete a closed account's driver photo from Cloudinary", {
-      userId,
-      status: res.status,
-    });
-    return false;
+    if (res.ok && (data.result === "ok" || data.result === "not found")) return { ok: true };
+    return { ok: false, status: res.status, reason: data.result ?? `HTTP ${res.status}` };
   } catch (err) {
-    logger.warn("Couldn't delete a closed account's driver photo from Cloudinary", { userId, err });
-    return false;
+    return { ok: false, reason: err instanceof Error ? err.name : "request failed" };
   }
 }
 
