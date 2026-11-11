@@ -107,14 +107,20 @@ describe("checkProductionEnv", () => {
     expect(warnings).toEqual([expect.stringContaining("SENTRY_DSN is not set")]);
   });
 
-  it("warns, without refusing, when Paystack has no key or a test key", () => {
+  it("warns, without refusing, when Paystack has no key", () => {
     const missing = checkProductionEnv(without("PAYSTACK_SECRET_KEY"));
     expect(missing.errors).toEqual([]);
     expect(missing.warnings).toEqual([expect.stringContaining("PAYSTACK_SECRET_KEY is not set")]);
-    const test = checkProductionEnv({ ...GOOD, PAYSTACK_SECRET_KEY: "sk_test_not_a_real_key" });
-    expect(test.errors).toEqual([]);
-    expect(test.warnings).toEqual([expect.stringContaining("TEST key")]);
-    expect(JSON.stringify(test)).not.toContain("sk_test_not_a_real_key");
+  });
+
+  it("refuses a Paystack test key in production, without repeating it", () => {
+    for (const key of ["sk_test_not_a_real_key", "  sk_test_not_a_real_key  "]) {
+      const test = checkProductionEnv({ ...GOOD, PAYSTACK_SECRET_KEY: key });
+      expect(test.errors).toEqual([expect.stringContaining("PAYSTACK_SECRET_KEY is a Paystack TEST key")]);
+      expect(test.warnings).toEqual([]);
+      expect(JSON.stringify(test)).not.toContain("not_a_real_key");
+    }
+    expect(checkProductionEnv(GOOD).errors).toEqual([]);
   });
 
   it("never repeats a value in what it says", () => {
