@@ -19,9 +19,10 @@ import { parsePhoneList } from "../config";
  *   with MOOLRE_PAYMENTS_ENABLED=true: MOOLRE_API_USER, MOOLRE_PUBLIC_KEY,
  *                MOOLRE_PRIVATE_KEY, MOOLRE_ACCOUNT_NUMBER, MOOLRE_WEBHOOK_SECRET
  * FORBIDDEN (errors): ENABLE_MOCK_DRIVER=true, ENABLE_USSD=true (the callback
- *   has no authentication yet), TRUST_PROXY=true (spoofable client IPs).
+ *   has no authentication yet), TRUST_PROXY=true (spoofable client IPs), a
+ *   Paystack test key (sk_test_…: drivers would "pay" with no real money).
  * WARNINGS: Cloudinary unset (driver photos answer 503), TRUST_PROXY set at
- *   all, payments on against Moolre's sandbox.
+ *   all, payments on against Moolre's sandbox, PAYSTACK_SECRET_KEY unset.
  */
 export interface EnvCheck {
   errors: string[];
@@ -195,7 +196,9 @@ export function checkProductionEnv(env: Env): EnvCheck {
       "PAYSTACK_SECRET_KEY is not set: drivers can't pay their commission in the app (Pay now answers 503)",
     );
   else if (env.PAYSTACK_SECRET_KEY!.trim().startsWith("sk_test_"))
-    warnings.push("PAYSTACK_SECRET_KEY is a Paystack TEST key: no real money is collected");
+    errors.push(
+      "PAYSTACK_SECRET_KEY is a Paystack TEST key (sk_test_…): production needs the live key (sk_live_…), or drivers' payments collect no real money",
+    );
   if (blank(env.SENTRY_DSN))
     warnings.push(
       "SENTRY_DSN is not set: errors and alerts are only logged, not sent to Sentry (DEPLOY.md, Monitoring)",
