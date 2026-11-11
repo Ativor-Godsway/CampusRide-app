@@ -515,4 +515,18 @@ describe("/get, the download link on flyers", () => {
     // The other pages don't load it.
     for (const { slug } of pages) assert.ok(!read(pageFile(slug)).includes("/get.js"), slug || "home");
   });
+
+  it("has both apps live on the App Store, and Google Play still Coming soon", () => {
+    const home = read("index.html");
+    for (const link of [site.stores.rider.appStore, site.stores.driver.appStore]) {
+      assert.match(link, /^https:\/\/apps\.apple\.com\/app\/id\d+$/);
+      assert.ok(home.includes(`href="${link}"`), link);
+    }
+    assert.notEqual(site.stores.rider.appStore, site.stores.driver.appStore);
+    assert.equal(site.stores.rider.googlePlay, "");
+    assert.equal(site.stores.driver.googlePlay, "");
+    const get = read("get.html");
+    assert.ok(get.includes(`href="${APPLE}"`) && get.includes("Coming soon to Google Play"));
+    assert.ok(!/google-play\.png/.test(home + get));
+  });
 });
