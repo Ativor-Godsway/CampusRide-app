@@ -58,7 +58,7 @@ Updated at the end of each stage.
 | ✅ | No stack traces, Prisma or SQL errors to clients, in any environment: one error shape with a plain sentence, a code and a request id; `X-Request-Id` on every response |
 | ✅ | No login codes, tokens, push tokens, credentials or full phone numbers in logs (`+233*****146`), including careless future log lines, URLs and error stacks |
 | ✅ | Unhandled rejections and exceptions logged (scrubbed), then a clean shutdown and exit 1 |
-| 🔶 | Graceful shutdown on deploy: in-flight requests finish, sockets and database close, 20 s safety limit. On Render it never ran (the stop signal arrived twice and the second killed the server); fixed on branch `fix-shutdown-signals`, waiting for merge |
+| ✅ | Graceful shutdown on deploy: in-flight requests finish, sockets and database close, 20 s safety limit (the double stop signal on Render fixed in PR #44) |
 
 ## Stage 5 — Monitoring ✅ (PR #42)
 
@@ -92,20 +92,56 @@ Updated at the end of each stage.
 | | Item |
 |---|---|
 | ✅ | In-app account deletion, both apps (store requirement): a screen saying what is deleted and kept, a texted code to confirm, refused during a ride; hidden at once, kept details erased after 90 days, audit-logged — [account-deletion.md](../account-deletion.md) (PR #46) |
-| ✅ | Deletion without the app (Google Play asks for a web link): campusride.app/delete-account (PR #50), and the admin site's Delete account tab to carry out an emailed request — look up the number, text a code, the person emails it back, delete exactly as the app does; admins and people on a ride refused; every step audit-logged — [account-deletion.md](../account-deletion.md#by-email-no-app) (branch `admin-email-account-deletion`) |
-| ✅ | 18+ and terms at sign-up, both apps: one required tick ("I'm 18 or older and I agree to the Terms and Privacy Policy", links open in the in-app browser), refused by the server without it, recorded with the terms version; accounts from before asked once (or log out / delete); review demo accounts pre-confirmed — migration `20261018120000_user_terms_confirmation` (branch `signup-age-terms-confirmation`) |
+| ✅ | Deletion without the app (Google Play asks for a web link): campusride.app/delete-account (PR #50), and the admin site's Delete account tab to carry out an emailed request — look up the number, text a code, the person emails it back, delete exactly as the app does; admins and people on a ride refused; every step audit-logged — [account-deletion.md](../account-deletion.md#by-email-no-app) (PR #51) |
+| ✅ | 18+ and terms at sign-up, both apps: one required tick ("I'm 18 or older and I agree to the Terms and Privacy Policy", links open in the in-app browser), refused by the server without it, recorded with the terms version; accounts from before asked once (or log out / delete); review demo accounts pre-confirmed — migration `20261018120000_user_terms_confirmation` (PR #52) |
 | ✅ | Driver background location to Google Play and Apple rules: full-screen disclosure before any prompt, asked only when going online, Android online notification (foreground service), stops when offline; rider app location only while open — [location-store-review.md](../runbooks/location-store-review.md) (PR #47) |
 | ⬜ | Play Console location and foreground-service declarations, with the screen recording (steps and script in location-store-review.md) |
-| ✅ | iOS build prepared: bundle IDs, export compliance, privacy manifest (required-reason APIs checked against every library's own manifest by a test), the libraries' placeholder permission texts replaced, driver background mode `location` only — [ios-first-build.md](../runbooks/ios-first-build.md) (branch `ios-first-build-prep`) |
-| ⬜ | First iOS builds, push key, TestFlight test, App Privacy answers and App Review information (steps 1–8 in ios-first-build.md) |
-| 🔶 | Store builds prepared: production = Android app bundle, remote build numbers counting up, production channel and server, Sentry DSN from EAS; test builds = APK; version 1.0.0; nothing development-only ships (checked, and pinned by a test); long-press the version line for build number and update ID — [releasing.md](../runbooks/releasing.md#7-what-a-production-build-leaves-out) (branch `store-build-prep`) |
+| ✅ | iOS build prepared: bundle IDs, export compliance, privacy manifest (required-reason APIs checked against every library's own manifest by a test), the libraries' placeholder permission texts replaced, driver background mode `location` only — [ios-first-build.md](../runbooks/ios-first-build.md) (PR #72) |
+| ✅ | First iOS builds, push key, TestFlight test, App Privacy answers and App Review information (steps 1–8 in ios-first-build.md): rider 1.0 build 8 and driver 1.0 build 4 approved, "Pending Developer Release" |
+| ✅ | Store builds prepared (PR #49): production = Android app bundle, remote build numbers counting up, production channel and server, Sentry DSN from EAS; test builds = APK; version 1.0.0; nothing development-only ships (checked, and pinned by a test); long-press the version line for build number and update ID — [releasing.md](../runbooks/releasing.md#7-what-a-production-build-leaves-out) |
 
 ## Store review
 
 | | Item |
 |---|---|
-| 🔶 | Review demo for App Store and Play reviewers: two numbers sign in with a fixed code (no SMS), simulated driver and rider, demo rides kept apart from real people and admin figures, kill switch `REVIEW_DEMO_ENABLED` — [review-notes.md](../store/review-notes.md) (branch `review-demo`) |
-| ⬜ | Before each review: set the four `REVIEW_DEMO_*` settings on Render and paste the reviewer notes; after it, `REVIEW_DEMO_ENABLED=false` |
+| ✅ | Review demo for App Store and Play reviewers (PR #48): two numbers sign in with a fixed code (no SMS), simulated driver and rider, demo rides kept apart from real people and admin figures, kill switch `REVIEW_DEMO_ENABLED` — [review-notes.md](../store/review-notes.md) |
+| ✅ | App Store review: done with the demo on (both apps approved) |
+| ⬜ | After Google Play's production review is approved: `REVIEW_DEMO_ENABLED=false` on Render ([launch-day.md](../runbooks/launch-day.md#after-launch)) |
+
+## Phase 4 — final pre-launch audit (2026-11-10)
+
+A check, not a feature pass. Launch-day steps: [launch-day.md](../runbooks/launch-day.md).
+Every server setting: [render-env-checklist.md](../runbooks/render-env-checklist.md).
+
+| | Item |
+|---|---|
+| ✅ | `main` clean and matching GitHub; only two old remote branches hold unmerged work (`driver-keep-awake-online`, 2026-10-13, replaced by the trip keep-awake and background presence; `fix-phone-canonicalisation`, 2026-09-24, test fixtures only): neither matters for launch |
+| ✅ | Local scratch folders (`Claude outputs/`, `docs/mockups/admin/files/`) not committed, now in `.gitignore` |
+| ✅ | Full git history scanned again (gitleaks over every branch, plus patterns for Paystack, Neon, Google, Expo, Sentry and GitHub keys): no real secrets; the only hits are made-up test values |
+| ✅ | Lint, typecheck, every test suite (server 1,226, shared 662, mobile-shared 183, admin 42, web 36), dependency audit (two accepted advisories with review dates) and `simulate:shared` (12 of 12 scenarios) all pass |
+| ✅ | Production, read-only: `/health` and `/health/ready` 200 (database ok, 0.5–1.2 s); `/app/config` gives +233548608146; `/launch-status` is a countdown to 16 Nov 2026 19:00 GMT; `/app/min-version` has both App Store links and no forced update |
+| ✅ | Website: every page live is byte-for-byte the build of `main`; Privacy Policy and Terms say "Last updated: 9 November 2026" with the Paystack and SOS sections; `/get` sends iPhones to the rider App Store listing, and shows the App Store badge with "Coming soon to Google Play" on Android and computers |
+| 🔶 | Both App Store links answer "not found" until the apps are released ("Pending Developer Release"): check again on launch day |
+| ✅ | Production refuses to start with any required setting missing or weak (names logged, never values); proven by the server running the latest `main` |
+| ✅ | Review demo kept apart: only the two configured numbers get the fixed code (same rate limits, a code burns after 5 wrong tries); demo rides only reach demo drivers and the other way round; demo accounts are left out of admin figures; a demo number on the admin allowlist switches the demo off |
+| ✅ | iOS over-the-air updates: the latest production updates of both apps target the App Store builds' runtimes (rider build 8 `e9605a61…`, driver build 4 `f9c76857…`), and `main` still has those fingerprints |
+| ⬜ | Render: `PAYSTACK_SECRET_KEY` is `sk_live_…`, `PAYSTACK_FEE_PERCENT` set, `DRIVER_OFFER_SECONDS=20`, `MOOLRE_BASE_URL` live, `SENTRY_DSN` ([render-env-checklist.md](../runbooks/render-env-checklist.md)) |
+| ⬜ | Admin Settings → Driver commission: enforcement off, limit GH₵100, warning 80%, Paystack fee not 0; Paystack live webhook `https://api.campusride.app/webhooks/paystack` |
+| ⬜ | Neon on a paid plan, or compute hours checked (the free 100 hours run out around the 17th of each month with this server) |
+| ⬜ | Render server off the free plan before launch (sleeps after 15 idle minutes; Stage 6 recommends Starter) |
+| ⬜ | UptimeRobot watching `/health/ready`; Sentry receiving events from all four projects |
+| ⬜ | `backup-YYYY-MM-DD` Neon branch right before release |
+
+### Phone tests still to do
+
+- [ ] A shared trip with 3 riders on 3 phones: all matched to one car, each
+      dropped off in turn, each trip ends on its own phone, fares GH₵7 each.
+- [ ] Capacity: fill one car to 4 riders; a 5th rider's request isn't
+      offered to that car.
+- [ ] Android: the notification permission prompt appears (Android 13+),
+      and a push arrives with the app closed.
+- [ ] Android driver: go online, lock the screen for 10 minutes; the rider
+      still sees the car move and the driver stays online.
 
 ## Things only you can do by hand
 
