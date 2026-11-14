@@ -44,7 +44,7 @@ Also needed for SMS, though the boot check doesn't name them:
 
 | ✓ | Setting | What it does | Value |
 |---|---|---|---|
-| ☐ | `PAYSTACK_SECRET_KEY` | Drivers paying their commission in the app (and checking Paystack's webhook). Unset: "Pay now" is unavailable. A test key starts without complaint but collects no real money: the boot log warns, and so does admin Settings → Driver commission. | Secret. Must start with `sk_live_` |
+| ☐ | `PAYSTACK_SECRET_KEY` | Drivers paying their commission in the app (and checking Paystack's webhook). Unset: "Pay now" is unavailable. A test key (`sk_test_…`) is refused: the server won't start with one. | Secret. Must start with `sk_live_` |
 | ☐ | `PAYSTACK_FEE_PERCENT` | The payment fee rate used until an admin sets one in Settings → Driver commission. Unset means 0. | `1.95` (Paystack Ghana's local rate; check your Paystack pricing page) |
 | ☐ | `PAYSTACK_FEE_CAP_GHS` | Optional cap on the fee, in cedis, until an admin sets one. | Unset, unless your Paystack plan has a cap |
 | ☐ | `SENTRY_DSN` | Server errors and alerts reach Sentry. Unset: only logged. | The `campusride-server` DSN (not a password, but keep it private) |

@@ -216,6 +216,30 @@ services:
 
       - key: CLOUDINARY_API_SECRET
         sync: false
+      # ── Driver commission payments (Paystack) ──────────────────────────────
+      # Paystack secret key. Production refuses to start with a test key
+      # (sk_test_…): it must be the live sk_live_… key. Unset, drivers can't
+      # pay their commission in the app. Never log or commit it.
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      # The starting payment fee, in percent (e.g. 1.95), until an admin
+      # saves the commission rules in Settings. Unset means 0.
+      - key: PAYSTACK_FEE_PERCENT
+        sync: false
+      # Optional cap on that fee, in cedis (e.g. 10). Unset means no cap.
+      - key: PAYSTACK_FEE_CAP_GHS
+        sync: false
+      # ── App settings the apps read from the server ─────────────────────────
+      # The number the apps' "Call support" dials (GET /app/config). Unset or
+      # not a Ghana number means the built-in +233548608146. Not the same as
+      # SUPPORT_CONTACT_PHONE, which every SOS is texted to.
+      - key: SUPPORT_PHONE
+        sync: false
+      # How long a ride offer stays on a driver's screen, in seconds (5–60,
+      # unset means 15). The apps read it from each offer: changing it needs
+      # no app release.
+      - key: DRIVER_OFFER_SECONDS
+        sync: false
 
       # ── Push notifications (Expo push service) ─────────────────────────────
       # Nothing to set for push to work. EXPO_ACCESS_TOKEN only if "Enhanced
