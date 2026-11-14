@@ -37,6 +37,7 @@
     "places:campus:dev": "dotenv -e .env.development.local -e .env.development -- sh -c 'npm run db:guard:dev && ts-node --transpile-only -r tsconfig-paths/register src/scripts/places/campusOnly.ts \"$@\"' --",
     "places:seed:dev": "dotenv -e .env.development.local -e .env.development -- sh -c 'npm run db:guard:dev && ts-node --transpile-only -r tsconfig-paths/register src/scripts/places/seedPlaces.ts \"$@\"' --",
     "zones:realign": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/realignZones.ts",
+    "reset:test-data": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/resetTestData.ts",
     "zones:check": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/checkZoneAdjacency.ts",
     "zones:link": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/linkZones.ts",
     "zones:realign:dev": "dotenv -e .env.development.local -e .env.development -- sh -c 'npm run db:guard:dev && ts-node --transpile-only -r tsconfig-paths/register src/scripts/realignZones.ts \"$@\"' --",
