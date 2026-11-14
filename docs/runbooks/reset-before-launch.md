@@ -1,98 +1,112 @@
-# Reset to zero before the public launch (one-off)
+# Reset trips to zero before the public launch (one-off)
 
-`apps/server/src/scripts/resetTestData.ts` deletes every rider and driver
-account created before a cutoff, every ride and trip record, and every
-commission and payment row, so Finances starts at zero on launch day. What it
-keeps and deletes, exactly, is at the top of the script.
+`apps/server/src/scripts/resetTestData.ts` with **`--trips-only`** deletes the
+test trips and the money around them, so the apps and the admin site start
+from zero on launch day. **It never deletes or changes an account.** Real
+people are already signing up from the App Store: `--trips-only` is the only
+mode to use.
 
-**Kept:** admin accounts, the review demo accounts and their data, the numbers
-you pass with `--keep`, accounts created at or after the cutoff, the admin
-audit log, and every setting (launch mode, commission rules, prices, zones,
-places).
+**Deleted** (only rows from before the cutoff you give, never the review
+demo's):
 
-It's a **dry run unless you add `--confirm=RESET-CAMPUSRIDE`**. The real run
-is one database transaction: all of it happens, or none of it. Deleted
-drivers' photos are removed from Cloudinary only after that, and any that
-fail are listed.
+- every ride, with its seats (each rider's stops, pins and fare), offers to
+  drivers, rejections, ratings, ride payments, SOS records and SOS tracking
+  links;
+- every commission owed, payment, waiver, adjustment and Paystack payment
+  attempt (Finances back to zero);
+- driver online sessions and location trails.
+
+**Untouched:** every account (riders, drivers, admins) and its profile,
+driver approval and car, photos (Cloudinary isn't used at all), emergency
+contacts, early access, sign-ins and push tokens, settings, zones, places,
+notification history, the audit log, and the review demo accounts with all
+their rides.
+
+Nothing on an account is worked out from rides and stored: ride counts,
+rating averages, earnings, commission balances and online hours are computed
+from the rows above each time they're shown. With those rows gone, every
+rider and driver reads as brand new, so no account field needs resetting
+(the script prints `Users deleted: 0, users modified: 0`).
+
+It's a **dry run unless you add `--confirm=RESET-TRIPS`**. The real run is
+one database transaction: all of it happens, or none of it. It also adds one
+`data.reset.trips` entry to the audit log.
+
+> The old full reset (`--delete-accounts`, confirm word `RESET-CAMPUSRIDE`)
+> also deletes accounts. Don't use it now. It refuses to run unless you name
+> it, and `RESET-TRIPS` doesn't confirm it.
 
 ## Before you start
 
 1. **Take a Neon backup branch** (`backup-YYYY-MM-DD`,
    [backup-and-restore.md](backup-and-restore.md#every-week-make-a-backup-branch-5-minutes)).
    This is the only way back.
-2. In a terminal on your Mac, from the repository folder, set these for
-   this terminal only (copy each value from Render → `campusride-server` →
-   Environment; never paste them into a file or a chat):
+2. In a terminal on your Mac, from the repository folder, set the database
+   URL for this terminal only (copy it from Render → `campusride-server` →
+   Environment → `DIRECT_URL`; never paste it into a file or a chat):
 
    ```bash
    export PROD_URL='<DIRECT_URL from Render>'
-   export PROD_CLOUDINARY_CLOUD_NAME='<CLOUDINARY_CLOUD_NAME>'
-   export PROD_CLOUDINARY_API_KEY='<CLOUDINARY_API_KEY>'
-   export PROD_CLOUDINARY_API_SECRET='<CLOUDINARY_API_SECRET>'
    ```
 
    Use the **direct** URL (no `-pooler` in the host): one long transaction
-   is better on a direct connection.
+   is better on a direct connection. No Cloudinary settings are needed.
 3. Pick the cutoff: an ISO time that has passed, e.g. the moment you start,
-   `2026-11-16T12:00:00Z`. Accounts created before it are deleted.
-4. Write down the numbers to keep (yours if you also have a rider account,
-   pilot testers), in the `+233XXXXXXXXX` form, comma-separated.
+   `2026-11-16T12:00:00Z`. Trips and money rows from before it are deleted;
+   anything after it stays.
 
 ## 1. Dry run
 
 ```bash
 cd apps/server
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" \
-CLOUDINARY_CLOUD_NAME="$PROD_CLOUDINARY_CLOUD_NAME" CLOUDINARY_API_KEY="$PROD_CLOUDINARY_API_KEY" CLOUDINARY_API_SECRET="$PROD_CLOUDINARY_API_SECRET" \
-npm run reset:test-data -- --before=2026-11-16T12:00:00Z --keep=+233XXXXXXXXX,+233YYYYYYYYY
+npm run reset:test-data -- --trips-only --before=2026-11-16T12:00:00Z
 ```
 
 Check, in what it prints:
 
-- `Database endpoint: ep-empty-violet-bay5yr3y  ← PRODUCTION`
-- `Cloudinary account:` your production account's name
+- the first line: `Database endpoint: ep-empty-violet-bay5yr3y  ← PRODUCTION`
+- `Mode: --trips-only` and `DRY RUN — nothing is written`
 - **Rows deleted**: the numbers look like your test data
-- **Accounts kept**: you, the admins, both review demo accounts and every
-  `--keep` number are listed (phones are masked: `+233*****146`)
-- **Photos left alone**: empty, or only photos you know are elsewhere
+- `Users deleted: 0, users modified: 0`, and the number of accounts
+- a **Note** about rides still open, if any: those are trips not yet
+  completed or cancelled; they disappear from the apps too. If one could be
+  a real trip happening now, pick an earlier cutoff.
 
 Nothing is written by a dry run. Run it as often as you like.
 
 ## 2. Real run
 
-The same command with `--confirm=RESET-CAMPUSRIDE` at the end:
+The same command with `--confirm=RESET-TRIPS` at the end:
 
 ```bash
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" \
-CLOUDINARY_CLOUD_NAME="$PROD_CLOUDINARY_CLOUD_NAME" CLOUDINARY_API_KEY="$PROD_CLOUDINARY_API_KEY" CLOUDINARY_API_SECRET="$PROD_CLOUDINARY_API_SECRET" \
-npm run reset:test-data -- --before=2026-11-16T12:00:00Z --keep=+233XXXXXXXXX,+233YYYYYYYYY --confirm=RESET-CAMPUSRIDE
+npm run reset:test-data -- --trips-only --before=2026-11-16T12:00:00Z --confirm=RESET-TRIPS
 ```
 
-It ends with `Database: committed.` and a Cloudinary line. If it stops with
-an error before that, nothing in the database changed. If some photos failed,
-they're listed; delete them by hand in Cloudinary → Media Library
-(`campusride/driver-photos/driver_<id>`) or ignore them.
+It prints the same counts and ends with `Database: committed.` If it stops
+with an error before that, nothing in the database changed.
 
 Then:
 
 1. **Restart the server:** Render → `campusride-server` → Manual Deploy →
    **Restart service**. This clears what it keeps in memory (rate limits,
    driver positions, cached admin figures).
-2. In the terminal: `unset PROD_URL PROD_CLOUDINARY_CLOUD_NAME PROD_CLOUDINARY_API_KEY PROD_CLOUDINARY_API_SECRET`.
+2. In the terminal: `unset PROD_URL`.
 
 ## 3. Check it in the admin site
 
-1. **Overview:** rides, riders and drivers at 0 (or only what came after
-   the cutoff). The review demo's trips never show here anyway.
-2. **Riders** and **Drivers:** only the kept accounts.
+1. **Overview:** rides at 0 (or only what came after the cutoff). Riders and
+   drivers are the same numbers as before.
+2. **Riders** and **Drivers:** everyone is still there, with no trips,
+   ratings or earnings. Approved drivers are still approved, photos intact.
 3. **Finances:** nothing owed, nothing paid, no Paystack payments.
-4. **Live map:** no cars from deleted drivers.
-5. **Safety:** no SOS records.
-6. **Settings → Audit log:** a `data.reset` entry by `script:resetTestData`
-   with the cutoff and the counts. Launch mode and the commission rules are
-   unchanged.
-7. On a phone: the review demo numbers still sign in, and a kept rider
-   account still works.
+4. **Safety:** no SOS records.
+5. **Settings → Audit log:** a `data.reset.trips` entry by
+   `script:resetTestData` with the cutoff and the counts. Launch mode and the
+   commission rules are unchanged.
+6. On a phone: a rider and a driver account still sign in, and the review
+   demo numbers still work, with their demo trips.
 
 ## If it went wrong
 
