@@ -36,7 +36,7 @@ export const site = {
   stores: {
     rider: {
       appStore: "https://apps.apple.com/app/id6827157564",
-      googlePlay: "",
+      googlePlay: "https://play.google.com/store/apps/details?id=com.campusride.rider",
     },
     driver: {
       appStore: "https://apps.apple.com/app/id6827179216",

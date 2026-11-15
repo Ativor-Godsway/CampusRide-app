@@ -516,17 +516,23 @@ describe("/get, the download link on flyers", () => {
     for (const { slug } of pages) assert.ok(!read(pageFile(slug)).includes("/get.js"), slug || "home");
   });
 
-  it("has both apps live on the App Store, and Google Play still Coming soon", () => {
+  it("has both apps live on the App Store, the rider app on Google Play, and the driver's still Coming soon", () => {
     const home = read("index.html");
     for (const link of [site.stores.rider.appStore, site.stores.driver.appStore]) {
       assert.match(link, /^https:\/\/apps\.apple\.com\/app\/id\d+$/);
       assert.ok(home.includes(`href="${link}"`), link);
     }
     assert.notEqual(site.stores.rider.appStore, site.stores.driver.appStore);
-    assert.equal(site.stores.rider.googlePlay, "");
+    const RIDER_PLAY = "https://play.google.com/store/apps/details?id=com.campusride.rider";
+    assert.equal(site.stores.rider.googlePlay, RIDER_PLAY);
     assert.equal(site.stores.driver.googlePlay, "");
+    assert.ok(home.includes(`href="${RIDER_PLAY}"`));
+    // The home page shows nothing for a store with no link, so one Play badge means the driver's is still off.
+    assert.equal(home.match(/google-play\.png/g)?.length, 1, "only the rider app has a Play badge");
+    // /get is rider-only: both badges, nothing coming soon, and Android phones go to Play.
     const get = read("get.html");
-    assert.ok(get.includes(`href="${APPLE}"`) && get.includes("Coming soon to Google Play"));
-    assert.ok(!/google-play\.png/.test(home + get));
+    assert.ok(get.includes(`href="${APPLE}"`) && get.includes(`href="${RIDER_PLAY}"`));
+    assert.ok(!/soon/i.test(get));
+    assert.equal(visit(read("get.js"), { userAgent: UA.android, maxTouchPoints: 5 }), RIDER_PLAY);
   });
 });
