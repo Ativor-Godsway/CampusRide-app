@@ -41,7 +41,13 @@
     "(lockfile only) fixed six new high advisories (node-forge GHSA-7wch-p9px-956x,",
     "GHSA-jc66-7q78-782g, GHSA-8hrf-8g6f-7xwp, GHSA-hqq3-7jhf-c5jx, GHSA-5x38-2vff-x55p;",
     "follow-redirects GHSA-mrwp-f3q8-3g9p). node-forge 1.4.2 also fixes",
-    "GHSA-86w9-cpqp-85rv, so its entry was removed as stale."
+    "GHSA-86w9-cpqp-85rv, so its entry was removed as stale.",
+    "",
+    "2026-11-17: picomatch GHSA-fc5q-39xc-vjpf (high, ReDoS) covers every release",
+    "up to 4.0.7, the latest, so there is nothing to update to; npm's suggested",
+    "jest 30 'fix' still leaves the vite/vitest/expo copies. Build/dev tooling only:",
+    "allowlisted below. Once a fixed version ships, `npm update picomatch` and",
+    "delete the entry."
   ],
   "allow": [
     {
@@ -55,6 +61,12 @@
       "package": "decode-uri-component",
       "reason": "Denial of service: decoding a long run of percent-encoded characters takes quadratic time. Reached only through expo-router -> query-string 7.1.3 -> decode-uri-component 0.2.2, in the rider and driver apps, where expo-router parses a URL's query string (our own navigation, and deep links). Not in the server, admin site or website. The worst case is a crafted campusride-rider:// or campusride-driver:// link that someone opens on their own phone, freezing that app until it is closed: no data exposed, nothing on the server. The fixed 0.5.1 is ESM-only and breaks query-string 7's require() (an override would break navigation); the real fix is expo-router 58, i.e. the next Expo SDK upgrade, which needs new store builds. Remove this entry then.",
       "reviewBy": "2027-01-29"
+    },
+    {
+      "id": "GHSA-fc5q-39xc-vjpf",
+      "package": "picomatch",
+      "reason": "ReDoS: a crafted glob pattern with repeated extglobs takes exponential time to compile. No patched release (4.0.7 and 2.3.2 are the latest of each line). Every copy is build/test tooling — jest, vitest, vite, chokidar, @expo/cli and @expo/metro-config — matching file globs from our own config. It is not in the deployed server (npm ls --omit=dev is empty), not bundled into the apps, admin site or website, and never sees user input. Run `npm update picomatch` and remove this entry once a fixed version ships.",
+      "reviewBy": "2027-01-17"
     }
   ]
 }
