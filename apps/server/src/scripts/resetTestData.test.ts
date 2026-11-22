@@ -10,7 +10,11 @@ import {
   parseArgs,
   parseCloudinaryUrl,
   planReset,
+  planTripsReset,
+  applyTripsReset,
+  TRIPS_CONFIRM_WORD,
   type ResetOptions,
+  type TripsResetOptions,
 } from "./resetTestData";
 
 // Everything here is dated 2001, and the cutoff is mid-2001: rows the rest of
@@ -24,27 +28,39 @@ const photo = (cloud: string, userId: string) => `https://res.cloudinary.com/${c
 
 describe("parseArgs", () => {
   const now = new Date("2026-11-20T00:00:00Z");
+  const B = "--before=2026-11-16T00:00:00Z";
 
-  it("is a dry run unless confirmed with the exact word", () => {
-    const dry = parseArgs(["--before=2026-11-16T00:00:00Z"], now);
+  it("needs a mode: --trips-only, or --delete-accounts for the full reset", () => {
+    expect(() => parseArgs([B], now)).toThrow(/--trips-only/);
+    expect(() => parseArgs([B, "--trips-only", "--delete-accounts"], now)).toThrow(/not both/);
+    expect(parseArgs([B, "--trips-only"], now).mode).toBe("trips-only");
+    expect(parseArgs(["--delete-accounts", B], now).mode).toBe("delete-accounts");
+  });
+
+  it("is a dry run unless confirmed with the mode's own word", () => {
+    const dry = parseArgs(["--trips-only", B], now);
     expect(dry.confirm).toBe(false);
     expect(dry.options).toEqual({ before: new Date("2026-11-16T00:00:00Z"), keepPhones: [] });
-    expect(parseArgs(["--before=2026-11-16T00:00:00Z", `--confirm=${CONFIRM_WORD}`], now).confirm).toBe(true);
-    expect(() => parseArgs(["--before=2026-11-16T00:00:00Z", "--confirm=yes"], now)).toThrow(/exactly/);
+    expect(parseArgs(["--trips-only", B, `--confirm=${TRIPS_CONFIRM_WORD}`], now).confirm).toBe(true);
+    expect(parseArgs(["--delete-accounts", B, `--confirm=${CONFIRM_WORD}`], now).confirm).toBe(true);
+    // Each mode refuses the other's word, so a full reset can't be confirmed by accident.
+    expect(() => parseArgs(["--trips-only", B, `--confirm=${CONFIRM_WORD}`], now)).toThrow(/exactly RESET-TRIPS/);
+    expect(() => parseArgs(["--delete-accounts", B, `--confirm=${TRIPS_CONFIRM_WORD}`], now)).toThrow(/exactly RESET-CAMPUSRIDE/);
+    expect(() => parseArgs(["--trips-only", B, "--confirm=yes"], now)).toThrow(/exactly/);
   });
 
   it("refuses a missing, malformed or future cutoff, unknown arguments and non-canonical keep numbers", () => {
-    expect(() => parseArgs([], now)).toThrow(/required/);
-    expect(() => parseArgs(["--before=16/11/2026"], now)).toThrow(/ISO/);
-    expect(() => parseArgs(["--before=2027-01-01T00:00:00Z"], now)).toThrow(/future/);
-    expect(() => parseArgs(["--before=2026-11-16T00:00:00Z", "--befor=x"], now)).toThrow(/Unknown/);
-    expect(() => parseArgs(["--before=2026-11-16T00:00:00Z", "--keep=0241234567"], now)).toThrow(/canonical/);
+    const full = "--delete-accounts";
+    expect(() => parseArgs([full], now)).toThrow(/required/);
+    expect(() => parseArgs([full, "--before=16/11/2026"], now)).toThrow(/ISO/);
+    expect(() => parseArgs([full, "--before=2027-01-01T00:00:00Z"], now)).toThrow(/future/);
+    expect(() => parseArgs([full, B, "--befor=x"], now)).toThrow(/Unknown/);
+    expect(() => parseArgs([full, B, "--keep=0241234567"], now)).toThrow(/canonical/);
     // The number is never printed in full.
-    expect(() => parseArgs(["--before=2026-11-16T00:00:00Z", "--keep=0241234567"], now)).not.toThrow(/0241234567/);
-    expect(parseArgs(["--before=2026-11-16T00:00:00Z", "--keep=+233241234567,+233541234567"], now).options.keepPhones).toEqual([
-      "+233241234567",
-      "+233541234567",
-    ]);
+    expect(() => parseArgs([full, B, "--keep=0241234567"], now)).not.toThrow(/0241234567/);
+    expect(parseArgs([full, B, "--keep=+233241234567,+233541234567"], now).options.keepPhones).toEqual(["+233241234567", "+233541234567"]);
+    // --trips-only deletes no account, so there's nothing to keep.
+    expect(() => parseArgs(["--trips-only", B, "--keep=+233241234567"], now)).toThrow(/--delete-accounts only/);
   });
 });
 
@@ -68,7 +84,7 @@ describe("parseCloudinaryUrl and endpointId", () => {
   });
 });
 
-describe("reset to zero (local test database)", () => {
+describe("--delete-accounts: reset to zero (local test database)", () => {
   let zoneA: string;
   let zoneB: string;
   const ids: Record<string, string> = {};
@@ -354,6 +370,203 @@ describe("reset to zero (local test database)", () => {
 
     // Running it again finds nothing left to delete.
     const again = await planReset(prisma, options);
+    expect(again.counts.every((c) => c.rows === 0)).toBe(true);
+  });
+});
+
+describe("--trips-only (local test database)", () => {
+  let zoneA: string;
+  let zoneB: string;
+  const ids: Record<string, string> = {};
+  const rides: Record<string, string> = {};
+  let options: TripsResetOptions;
+
+  async function user(key: string, role: "RIDER" | "DRIVER" | "ADMIN", extra: { isReviewDemo?: boolean } = {}) {
+    const u = await prisma.user.create({
+      data: {
+        phone: uniqueGhanaPhone(),
+        name: `Trips ${key}`,
+        role,
+        createdAt: OLD,
+        isReviewDemo: extra.isReviewDemo ?? false,
+        emergencyContactName: "Mum",
+        emergencyContactPhone: uniqueGhanaPhone(),
+        earlyAccessAt: OLD,
+      },
+    });
+    if (role === "DRIVER") {
+      await prisma.driver.create({
+        data: { userId: u.id, plate: `TR ${key}`, isApproved: true, photoUrl: photo(CLOUD, u.id) },
+      });
+    }
+    ids[key] = u.id;
+    return u.id;
+  }
+
+  async function ride(key: string, riderKey: string, driverKey: string, createdAt: Date, extra: { isReviewDemo?: boolean; status?: "COMPLETED" | "IN_PROGRESS" } = {}) {
+    const r = await prisma.ride.create({
+      data: {
+        riderId: ids[riderKey]!,
+        driverId: ids[driverKey]!,
+        type: "SHARED",
+        status: extra.status ?? "COMPLETED",
+        fareTotal: 700,
+        driverShare: 595,
+        pickupZoneId: zoneA,
+        dropoffZoneId: zoneB,
+        createdAt,
+        isReviewDemo: extra.isReviewDemo ?? false,
+      },
+    });
+    await prisma.ridePassenger.create({
+      data: { rideId: r.id, riderId: ids[riderKey]!, pickupZoneId: zoneA, dropoffZoneId: zoneB, fareCharged: 700, createdAt },
+    });
+    rides[key] = r.id;
+    return r.id;
+  }
+
+  /** Every account and driver record, column by column. */
+  const accounts = () =>
+    prisma.user.findMany({ where: { id: { in: Object.values(ids) } }, include: { driver: true }, orderBy: { id: "asc" } });
+
+  beforeAll(async () => {
+    const zones = await prisma.zone.findMany({ take: 2, select: { id: true } });
+    [zoneA, zoneB] = [zones[0]!.id, zones[1]!.id];
+
+    await user("admin", "ADMIN");
+    await user("rider", "RIDER");
+    await user("driver", "DRIVER");
+    await user("demoRider", "RIDER", { isReviewDemo: true });
+    await user("demoDriver", "DRIVER", { isReviewDemo: true });
+    await prisma.refreshToken.create({ data: { userId: ids.rider!, tokenHash: `trips-${ids.rider}`, familyId: "f", expiresAt: LATER } });
+    await prisma.pushToken.create({ data: { userId: ids.driver!, token: `ExponentPushToken[trips-${ids.driver}]`, app: "driver", platform: "android" } });
+
+    // A test trip with everything hanging off it.
+    const trip = await ride("trip", "rider", "driver", OLD);
+    await prisma.rating.create({ data: { rideId: trip, raterId: ids.rider!, rateeId: ids.driver!, stars: 4, createdAt: OLD } });
+    await prisma.rideOffer.create({ data: { rideId: trip, driverUserId: ids.driver!, offeredAt: OLD, outcome: "ACCEPTED" } });
+    await prisma.sosEvent.create({ data: { rideId: trip, riderId: ids.rider!, rideStatus: "IN_PROGRESS", createdAt: OLD } });
+    await prisma.trackingLink.create({ data: { token: `trips-${trip}`, rideId: trip, riderId: ids.rider!, createdAt: OLD } });
+    await prisma.commissionLedger.create({ data: { rideId: trip, driverUserId: ids.driver!, amountPesewas: 105, createdAt: OLD } });
+    await prisma.driverCashPayment.create({
+      data: { driverUserId: ids.driver!, amountPesewas: 50, method: "CASH", paidAt: OLD, recordedBy: ids.admin!, createdAt: OLD },
+    });
+    await prisma.driverCashPayment.create({
+      data: { driverUserId: ids.driver!, kind: "WAIVER", amountPesewas: 20, paidAt: OLD, recordedBy: ids.admin!, createdAt: OLD },
+    });
+    await prisma.driverPaystackPayment.create({
+      data: {
+        driverUserId: ids.driver!,
+        reference: `trips-${ids.driver}`,
+        channel: "mobile_money",
+        owedPesewas: 35,
+        feePesewas: 1,
+        grossPesewas: 36,
+        feeBps: 195,
+        status: "ABANDONED",
+        createdAt: OLD,
+      },
+    });
+    // The admin's own test ride, and one left open: both go.
+    await ride("adminTrip", "admin", "driver", OLD);
+    await ride("open", "rider", "driver", OLD, { status: "IN_PROGRESS" });
+    // After the cutoff: kept.
+    await ride("late", "rider", "driver", LATER);
+    await prisma.driverOnlineSession.create({ data: { driverUserId: ids.driver!, startedAt: OLD, endedAt: OLD } });
+    await prisma.driverOnlineSession.create({ data: { driverUserId: ids.driver!, startedAt: LATER } });
+    await prisma.driverLocationPoint.create({ data: { driverUserId: ids.driver!, latitude: 5.65, longitude: -0.18, recordedAt: OLD } });
+
+    // The review demo: its trip, money and presence all stay.
+    const demo = await ride("demo", "demoRider", "demoDriver", OLD, { isReviewDemo: true });
+    await prisma.rating.create({ data: { rideId: demo, raterId: ids.demoRider!, rateeId: ids.demoDriver!, stars: 5, createdAt: OLD } });
+    await prisma.commissionLedger.create({ data: { rideId: demo, driverUserId: ids.demoDriver!, amountPesewas: 105, createdAt: OLD } });
+    await prisma.driverCashPayment.create({
+      data: { driverUserId: ids.demoDriver!, amountPesewas: 50, method: "CASH", paidAt: OLD, recordedBy: ids.admin!, createdAt: OLD },
+    });
+    await prisma.driverOnlineSession.create({ data: { driverUserId: ids.demoDriver!, startedAt: OLD } });
+    await prisma.driverLocationPoint.create({ data: { driverUserId: ids.demoDriver!, latitude: 5.65, longitude: -0.18, recordedAt: OLD } });
+
+    options = { before: CUTOFF, demoPhones: [] };
+  });
+
+  afterAll(async () => {
+    const userIds = Object.values(ids);
+    const byDriver = { driverUserId: { in: userIds } };
+    const rideIds = (await prisma.ride.findMany({ where: { riderId: { in: userIds } }, select: { id: true } })).map((r) => r.id);
+    await prisma.rating.deleteMany({ where: { rideId: { in: rideIds } } });
+    await prisma.ridePassenger.deleteMany({ where: { rideId: { in: rideIds } } });
+    await prisma.commissionLedger.deleteMany({ where: byDriver });
+    await prisma.driverCashPayment.deleteMany({ where: byDriver });
+    await prisma.driverPaystackPayment.deleteMany({ where: byDriver });
+    await prisma.ride.deleteMany({ where: { id: { in: rideIds } } });
+    await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+    await prisma.adminAuditLog.deleteMany({ where: { actor: "script:resetTestData" } });
+  });
+
+  it("dry run: counts per table, no account deleted or changed, writes nothing", async () => {
+    const before = await accounts();
+    const plan = await planTripsReset(prisma, options);
+    const count = (label: string) => plan.counts.find((c) => c.label.trim().startsWith(label))?.rows;
+    expect(count("Rides")).toBe(3); // trip, adminTrip, open
+    expect(count("seats")).toBe(3);
+    expect(count("ratings")).toBe(1);
+    expect(count("SOS records")).toBe(1);
+    expect(count("Finances: commission owed")).toBe(1);
+    expect(count("payments, waivers, adjustments")).toBe(2);
+    expect(count("Paystack payment attempts")).toBe(1);
+    expect(count("Driver online sessions")).toBe(1);
+    expect(count("Driver location points")).toBe(1);
+    expect(plan.openRides).toBe(1);
+    expect(plan).toMatchObject({ usersDeleted: 0, usersModified: 0 });
+    expect(await accounts()).toEqual(before);
+    expect(await prisma.ride.count({ where: { id: { in: Object.values(rides) } } })).toBe(5);
+  });
+
+  it("real run: same users before and after, demo survives, Finances at zero", async () => {
+    const usersBefore = await prisma.user.count();
+    const before = await accounts();
+
+    await applyTripsReset(prisma, options);
+
+    // Accounts: the same number, and every column (approval, photo, emergency contact, early access) unchanged.
+    expect(await prisma.user.count()).toBe(usersBefore);
+    expect(await accounts()).toEqual(before);
+    expect(await prisma.refreshToken.count({ where: { userId: ids.rider! } })).toBe(1);
+    expect(await prisma.pushToken.count({ where: { userId: ids.driver! } })).toBe(1);
+
+    // Rides: only the review demo's and the one after the cutoff.
+    const left = await prisma.ride.findMany({ where: { id: { in: Object.values(rides) } }, select: { id: true } });
+    expect(new Set(left.map((r) => r.id))).toEqual(new Set([rides.demo, rides.late]));
+    expect(await prisma.rating.count({ where: { rideId: rides.demo! } })).toBe(1);
+    expect(await prisma.rating.count({ where: { rateeId: ids.driver! } })).toBe(0);
+    expect(await prisma.sosEvent.count({ where: { riderId: ids.rider! } })).toBe(0);
+    expect(await prisma.trackingLink.count({ where: { riderId: ids.rider! } })).toBe(0);
+
+    // Finances: nothing owed or paid; the demo's money untouched.
+    expect((await driverBalances(prisma, [ids.driver!])).get(ids.driver!) ?? { owedPesewas: 0, paidPesewas: 0, balancePesewas: 0 }).toMatchObject({
+      owedPesewas: 0,
+      paidPesewas: 0,
+      balancePesewas: 0,
+    });
+    expect(await prisma.driverPaystackPayment.count({ where: { driverUserId: ids.driver! } })).toBe(0);
+    const notDemo = { driverUserId: { notIn: [ids.demoDriver!] }, createdAt: { lt: CUTOFF } };
+    expect(await prisma.commissionLedger.count({ where: notDemo })).toBe(0);
+    expect(await prisma.driverCashPayment.count({ where: notDemo })).toBe(0);
+    expect((await driverBalances(prisma, [ids.demoDriver!])).get(ids.demoDriver!)).toMatchObject({ owedPesewas: 105, paidPesewas: 50 });
+
+    // Presence: the old session and trail go, the later session and the demo's stay.
+    expect(await prisma.driverOnlineSession.count({ where: { driverUserId: ids.driver! } })).toBe(1);
+    expect(await prisma.driverLocationPoint.count({ where: { driverUserId: ids.driver! } })).toBe(0);
+    expect(await prisma.driverOnlineSession.count({ where: { driverUserId: ids.demoDriver! } })).toBe(1);
+    expect(await prisma.driverLocationPoint.count({ where: { driverUserId: ids.demoDriver! } })).toBe(1);
+
+    const audit = await prisma.adminAuditLog.findFirst({ where: { action: "data.reset.trips" }, orderBy: { timestamp: "desc" } });
+    expect(audit?.reason).toContain("2001-06-01T00:00:00.000Z");
+    expect(audit?.reason).toContain("3 rides");
+    expect(audit?.reason).toContain("no account deleted or changed");
+
+    // Running it again finds nothing left to delete.
+    const again = await planTripsReset(prisma, options);
     expect(again.counts.every((c) => c.rows === 0)).toBe(true);
   });
 });
