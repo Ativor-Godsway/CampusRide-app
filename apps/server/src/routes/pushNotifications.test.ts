@@ -15,6 +15,7 @@ import {
   createTestDriver,
   createTestRide,
   createTestUser,
+  withRebookedRides,
 } from "../services/ride/testFixtures";
 import { broadcastRide } from "../services/ride/dispatch";
 import { processTimeouts } from "../services/ride/timeouts";
@@ -52,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  rideIds.splice(0, rideIds.length, ...(await withRebookedRides(rideIds)));
   const rides = await prisma.ride.findMany({
     where: { id: { in: rideIds } },
     include: { passengers: true },
@@ -165,8 +167,10 @@ describe("rider notifications from driver actions", () => {
       url: `/rides/${waiting.ride.id}/passengers/${waiting.seat.id}/cancel`,
       headers: waiting.auth,
     });
+    // A driver's cancel: the rider is searching again, and told so.
     await vi.waitFor(() => expect(kinds()).toEqual(["DRIVER_CANCELLED"]));
-    expect(fake.sent[0]!.body).toContain("request another ride");
+    expect(fake.sent[0]!.title).toBe("Your driver had to cancel");
+    expect(fake.sent[0]!.body).toContain("finding you another driver");
 
     const arrived = await carWithRider("ARRIVED", "ARRIVED");
     await prisma.ridePassenger.update({

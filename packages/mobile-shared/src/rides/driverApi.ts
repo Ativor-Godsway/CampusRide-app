@@ -1,6 +1,7 @@
 import type {
   BalanceEntryKind,
   CommissionPaymentStatus,
+  DriverCancelReason,
   LastCredit,
   LatLng,
   MomoNetwork,
@@ -553,21 +554,27 @@ export async function passengerUndo(
 }
 
 /**
- * Cancel a passenger before pickup (WAITING -> CANCELLED). Server enforces
- * WAITING-only and broadcasts the cancellation to the rider.
+ * Cancel a rider's pickup before they're picked up.
+ *
+ * - With a DriverCancelReason (and an optional note): "Cancel pickup", from
+ *   WAITING or ARRIVED. The rider's request goes back to searching for
+ *   another driver; it counts as this driver's cancellation.
+ * - With "NO_SHOW": "Rider didn't show" (3 minutes after arriving).
+ * - With neither (builds from before the reasons): WAITING only.
  */
 export async function passengerCancel(
   rideId: string,
   passengerId: string,
   options?: {
     timeoutMs?: number;
-    /** "NO_SHOW": the rider didn't come out (allowed 3 minutes after arriving). */
-    reason?: "NO_SHOW";
+    reason?: "NO_SHOW" | DriverCancelReason;
+    note?: string | null;
   },
 ): Promise<PassengerLifecycleResult> {
+  const note = options?.note?.trim();
   const res = await api.post<PassengerLifecycleResult>(
     `/rides/${rideId}/passengers/${passengerId}/cancel`,
-    options?.reason ? { reason: options.reason } : undefined,
+    options?.reason ? { reason: options.reason, ...(note && options.reason !== "NO_SHOW" ? { note } : {}) } : undefined,
     options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return res.data;

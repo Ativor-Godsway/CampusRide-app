@@ -1,8 +1,11 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { PassengerStatus, UndoableStep } from "@rida/shared";
 import {
+  DRIVER_CANCEL_NOTE_MAX,
+  DRIVER_CANCEL_REASONS,
+  parseDriverCancelInput,
   DISPATCH_WINDOW_MS,
   DRIVER_OUTSIDE_AREA_MESSAGE,
   PRICING,
@@ -40,6 +43,8 @@ import {
 import { applyRideTransition, applyPassengerTransition, undoPassengerStep } from "../services/ride/rideService";
 import { finalizeRideCompletion } from "../services/ride/completion";
 import { announceClaim, announcePassengerChange, announcePassengerUndo } from "../services/ride/driverActionEvents";
+import { driverCancelPickup } from "../services/ride/cancels";
+import { announceDriverCancel } from "../services/ride/cancelEvents";
 import { ACTIVE_DRIVER_STATUSES, isActivePassengerStatus } from "../services/ride/stateMachine";
 import {
   DetourTooLongError,
@@ -115,7 +120,8 @@ const SCHEMAS = {
   addPassenger: { params: idParams, body: object({ requestRideId: id, lat: latitude, lng: longitude }, ["requestRideId"]) },
   passengerAction: {
     params: object({ id, passengerId: id }, ["id", "passengerId"]),
-    body: object({ reason: oneOf(["NO_SHOW"]) }),
+    // reason/note: "Cancel pickup" (DRIVER_CANCEL_REASONS) or NO_SHOW.
+    body: object({ reason: oneOf(["NO_SHOW", ...DRIVER_CANCEL_REASONS]), note: text(DRIVER_CANCEL_NOTE_MAX, { nullable: true }) }),
   },
   passengerUndo: {
     params: object({ id, passengerId: id }, ["id", "passengerId"]),
@@ -1382,8 +1388,14 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * - arrived  WAITING -> ARRIVED     (first one also moves a MATCHED ride to ARRIVED)
    * - pickup   ARRIVED -> PICKED_UP   (first one walks the ride to IN_PROGRESS)
    * - dropoff  PICKED_UP -> DROPPED_OFF (last one completes the ride)
-   * - cancel   WAITING -> CANCELLED   (not once "I'm here" is tapped)
-   * - no-show  ARRIVED -> CANCELLED   (3 minutes after arriving)
+   * - cancel   "Cancel pickup", WAITING or ARRIVED, with { reason, note? }
+   *            (DRIVER_CANCEL_REASONS): the rider's request searches again
+   *            for another driver (services/ride/cancels.ts driverCancelPickup)
+   *            and it counts as this driver's cancellation. With no body (driver
+   *            app builds from before the reasons) WAITING only, as before.
+   * - cancel with { reason: "NO_SHOW" }, or no-show: ARRIVED -> CANCELLED,
+   *            3 minutes after arriving — the rider's booking ends and it is
+   *            not counted against the driver. Unchanged.
    *
    * Seats are independent, so stops can be done in any order (Bill picked
    * up before Ali); only a rider's own drop-off waits for their own pickup.
@@ -1419,6 +1431,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       // (allowed from ARRIVED, 3 minutes after arriving).
       const reason = (request.body as { reason?: unknown } | undefined)?.reason;
       const spec = action === "cancel" && reason === "NO_SHOW" ? NO_SHOW_CANCEL : baseSpec;
+
+      if (action === "cancel" && reason !== "NO_SHOW") {
+        return driverCancel(request, reply, rideId, passengerId, userId);
+      }
 
       let result;
       try {
@@ -1465,6 +1481,56 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply;
     });
   }
+  /** "Cancel pickup" (see PASSENGER_ACTIONS above). */
+  async function driverCancel(
+    request: FastifyRequest,
+    reply: FastifyReply,
+    rideId: string,
+    passengerId: string,
+    userId: string,
+  ) {
+    const input = parseDriverCancelInput(request.body);
+    if (!input.ok) return refuse(reply, 400, "INVALID_CANCEL_REASON", input.error);
+    let result;
+    try {
+      result = await driverCancelPickup(prisma, {
+        rideId,
+        passengerId,
+        driverUserId: userId,
+        reason: input.reason,
+        note: input.note,
+        // No body: a build from before "Cancel pickup" had reasons.
+        legacy: input.reason === null,
+      });
+    } catch (err) {
+      if (err instanceof PassengerNotFoundError || err instanceof NotRideOwnerError) {
+        return refuse(reply, 404, "PASSENGER_NOT_FOUND", "This rider is no longer on your trip.");
+      }
+      if (err instanceof InvalidTransitionError) {
+        return refuse(reply, 409, "INVALID_PASSENGER_STATE", passengerRefusal(err.from, err.to));
+      }
+      throw err;
+    }
+    reply.code(200).send({ passenger: result.passenger, ride: result.ride });
+    if (!result.changed) return reply;
+    request.log.info(
+      {
+        event: "pickup_cancelled_by_driver",
+        rideId,
+        passengerId,
+        driverId: userId,
+        reason: input.reason,
+        mode: result.mode,
+        ...(result.mode === "rebooked" ? { rebookedRideId: result.rebookedRide.id } : {}),
+      },
+      "Driver cancelled a pickup; the rider is searching again",
+    );
+    announceDriverCancel(prisma, result, userId).catch((err) =>
+      request.log.error({ err, rideId, passengerId }, "driver cancel: follow-up failed"),
+    );
+    return reply;
+  }
+
   /**
    * "Undo" on the trip screen, shortly after a pickup or drop-off:
    * { step: "pickup" | "dropoff", withArrival? }. The rules (the time

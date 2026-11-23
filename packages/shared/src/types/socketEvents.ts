@@ -58,6 +58,11 @@ export interface RideStatusPayload {
    */
   cancelReason?: RideCancelReason;
   mergedIntoRideId?: string;
+  /**
+   * With REQUESTED when the driver had to cancel and the ride is searching
+   * again for another (services/ride/cancels.ts). Absent otherwise.
+   */
+  driverCancelled?: boolean;
 }
 
 export interface RideCompletedFareSummary {
@@ -91,6 +96,14 @@ export interface PassengerStatusPayload {
   ridePassengerId: string;
   riderId: string;
   status: PassengerStatus;
+  /**
+   * With CANCELLED when the driver had to cancel and the rider's request is
+   * searching again on a new ride (services/ride/cancels.ts): the app
+   * follows it. Absent otherwise, and from older servers.
+   */
+  rebookedRideId?: string;
+  /** With CANCELLED: who cancelled this seat, when it wasn't the rider. Absent from older servers. */
+  cancelledBy?: "driver" | "admin";
 }
 
 /**

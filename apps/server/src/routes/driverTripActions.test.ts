@@ -14,7 +14,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { prisma } from "../db/prisma";
 import { registerDriverRoutes } from "./driver";
 import { signAccessToken } from "../services/auth/tokens";
-import { cleanupDriver, createTestDriver, createTestRide, createTestUser } from "../services/ride/testFixtures";
+import { cleanupDriver, createTestDriver, createTestRide, createTestUser, withRebookedRides } from "../services/ride/testFixtures";
 import * as rideSocket from "../realtime/rideSocket";
 import { DISPATCH_WINDOW_MS, haversineDistanceMeters } from "@rida/shared";
 import { config } from "../config";
@@ -32,6 +32,7 @@ beforeAll(async () => {
 });
 
 afterEach(async () => {
+  rideIds.splice(0, rideIds.length, ...(await withRebookedRides(rideIds)));
   const rides = await prisma.ride.findMany({ where: { id: { in: rideIds } }, include: { passengers: true } });
   const userIds = new Set(rides.flatMap((r) => [r.riderId, ...r.passengers.map((p) => p.riderId)]));
   await prisma.ridePassenger.deleteMany({ where: { rideId: { in: rideIds } } });

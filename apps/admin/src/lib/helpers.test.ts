@@ -105,3 +105,11 @@ describe("CSV", () => {
     expect(toCsv(["a", "b"], [[1, "x,y"]])).toBe('a,b\r\n1,"x,y"');
   });
 });
+
+describe("ride status labels (ride cancel fixes)", () => {
+  it("says an admin cancelled it, and offers the open-rides filter", async () => {
+    const { RIDE_STATUS_FILTERS, rideStatusChip } = await import("./labels");
+    expect(rideStatusChip({ status: "CANCELLED", cancelReason: "ADMIN_CANCELLED" })).toEqual({ label: "Cancelled by admin", tone: "red" });
+    expect(RIDE_STATUS_FILTERS.map((f) => f.value)).toContain("OPEN");
+  });
+});

@@ -185,6 +185,13 @@ export interface GetRideResult {
   ride: RideWithDetails;
   driver: RideDriverInfo | null;
   fareSummary?: RideCompletedFareSummary;
+  /**
+   * This rider's seat was cancelled by someone else (absent otherwise, and
+   * from older servers): their driver, who had to cancel, or CampusRide.
+   */
+  seatCancelledBy?: "driver" | "admin";
+  /** With seatCancelledBy "driver": the new request their search moved to. */
+  rebookedRideId?: string | null;
 }
 
 export async function getRide(rideId: string): Promise<GetRideResult> {

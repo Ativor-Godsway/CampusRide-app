@@ -1,4 +1,4 @@
-import { getCancellations } from "../api";
+import { getCancellations, type DriverCancelRow } from "../api";
 import { useToken } from "../auth";
 import { DataTable } from "../components/DataTable";
 import { PeriodPicker } from "../components/PeriodPicker";
@@ -9,12 +9,32 @@ import { PairedBars } from "../charts/PairedBars";
 import { count, percent } from "../lib/money";
 import { periodLabel, periodQuery } from "../lib/period";
 import { useRouter, withParams } from "../lib/router";
-import { hourLabel } from "../lib/time";
+import { hourLabel, whenShort } from "../lib/time";
+import { shortName } from "../lib/labels";
+import type { Column } from "../components/DataTable";
 import { usePagePeriod } from "../lib/usePeriod";
 import { usePolled } from "../lib/usePolled";
 import { Freshness, Page, Section } from "../shell/Page";
 import { DAY_HOURS } from "./Overview";
 import { rideColumns } from "./rideColumns";
+
+/** A driver's "Cancel pickup": who, which rider, why, when. */
+const DRIVER_CANCEL_COLUMNS: Column<DriverCancelRow>[] = [
+  { key: "time", header: "Time", render: (c) => <span className="num nowrap">{whenShort(c.at)}</span>, sortValue: (c) => c.at },
+  { key: "driver", header: "Driver", render: (c) => <span className="nowrap">{shortName(c.driver.name)}</span>, sortValue: (c) => c.driver.name },
+  { key: "rider", header: "Rider", render: (c) => <span className="nowrap">{shortName(c.riderName)}</span>, phoneHidden: true },
+  {
+    key: "reason",
+    header: "Reason",
+    render: (c) => (
+      <span>
+        {c.reasonLabel ?? <span className="muted">Not given (older app)</span>}
+        {c.note ? <span className="muted small"> “{c.note}”</span> : null}
+      </span>
+    ),
+    sortValue: (c) => c.reasonLabel,
+  },
+];
 
 const WHO = [
   { value: "", label: "Everyone" },
@@ -44,7 +64,7 @@ export function CancellationsPage() {
               <StatTile label="Cancellations" value={count(d.cancellations)} note={`of ${count(d.requests)} requests`} />
               <StatTile label="Share of requests" value={d.rate === null ? null : percent(d.rate)} />
               <StatTile label="By riders" value={count(d.byWho.rider)} />
-              <StatTile label="By drivers" value={count(d.byWho.driver)} noteTone={d.byWho.driver > 0 ? "warn" : undefined} note={d.byWho.driver > 0 ? "After taking the ride" : undefined} />
+              <StatTile label="By drivers" value={count(d.byWho.driver + (d.driverCancels?.count ?? 0))} noteTone={d.byWho.driver + (d.driverCancels?.count ?? 0) > 0 ? "warn" : undefined} note={d.driverCancels?.count ? `${count(d.driverCancels.count)} pickups cancelled, rider searched again` : d.byWho.driver > 0 ? "After taking the ride" : undefined} />
               <StatTile label="No driver / expired" value={count(d.byWho.system)} />
             </TileRow>
             <div className="grid-2">
@@ -65,6 +85,25 @@ export function CancellationsPage() {
                 />
               </Section>
             </div>
+            {d.driverCancels ? (
+              <Section title={`Pickups cancelled by drivers · ${count(d.driverCancels.count)}`}>
+                <p className="muted small">
+                  A driver&apos;s &ldquo;Cancel pickup&rdquo;: the rider was sent straight back to searching, so these aren&apos;t cancelled requests above. &ldquo;Rider
+                  didn&apos;t show&rdquo; isn&apos;t counted here.
+                </p>
+                {d.driverCancels.reasons.length ? (
+                  <BarList items={d.driverCancels.reasons.map((r) => ({ label: r.label, value: r.count }))} summary="Driver cancellations by reason" />
+                ) : null}
+                <DataTable
+                  columns={DRIVER_CANCEL_COLUMNS}
+                  rows={d.driverCancels.rows}
+                  rowKey={(c) => c.id}
+                  onRowClick={(c) => navigate(withParams(path, search, { ride: c.rideId }))}
+                  rowLabel={(c) => `Open the ride ${c.driver.name} cancelled ${c.riderName}'s pickup on`}
+                  empty="No driver cancelled a pickup in this period."
+                />
+              </Section>
+            ) : null}
             <Section title="By hour of the request">
               <PairedBars
                 series={[{ label: "Cancellations", color: "var(--red-600)", values: DAY_HOURS.map((h) => d.byHour[h] ?? 0) }]}

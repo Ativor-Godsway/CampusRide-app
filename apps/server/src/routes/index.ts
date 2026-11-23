@@ -25,6 +25,7 @@ import { registerAdminPasskeyRoutes } from "./adminPasskeys";
 import { registerAdminDashboardRoutes } from "./adminDashboard";
 import { registerAdminInsightRoutes } from "./adminInsights";
 import { registerAdminPeopleRoutes } from "./adminPeople";
+import { registerAdminRideCancelRoutes } from "./adminRideCancel";
 import { registerDriverBalanceRoutes } from "./driverBalance";
 import { createPaystackClient, type PaystackClient } from "../services/commission/paystack";
 import { installRateLimits } from "../rateLimit/http";
@@ -93,4 +94,5 @@ export function registerAllRoutes(
   registerAdminDashboardRoutes(app, prisma);
   registerAdminInsightRoutes(app, prisma);
   registerAdminPeopleRoutes(app, prisma);
+  registerAdminRideCancelRoutes(app, prisma);
 }

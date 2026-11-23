@@ -58,6 +58,8 @@ import {
   text,
 } from "../http/schemas";
 import { notifyRiderCancelled } from "../services/push/notify";
+import { resolveRiderCancelTarget, seatCancelledBy } from "../services/ride/cancels";
+import { finalizeRideCompletion } from "../services/ride/completion";
 import { nearbyCars } from "../services/ride/nearbyCars";
 import { LaunchNotOpenError } from "../services/launch/launchSettings";
 
@@ -447,9 +449,19 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       };
     }
 
-    return reply
-      .code(200)
-      .send({ ride: hideOtherRidersPins(ride, userId), driver, ...(fareSummary ? { fareSummary } : {}) });
+    // This rider's seat was cancelled by someone else: by their driver (who
+    // had to cancel — their request is searching again on `rebookedRideId`,
+    // which the app follows), or by CampusRide from the admin site. Older
+    // apps ignore both fields.
+    const cancelledSeat = ride.passengers.find((p) => p.riderId === userId && p.status === "CANCELLED");
+    const seatCancel = cancelledSeat ? await seatCancelledBy(prisma, ride.id, cancelledSeat.id) : null;
+
+    return reply.code(200).send({
+      ride: hideOtherRidersPins(ride, userId),
+      driver,
+      ...(fareSummary ? { fareSummary } : {}),
+      ...(seatCancel ?? {}),
+    });
   });
 
   app.post("/rides/:id/decision", { onRequest: requireAuth, schema: SCHEMAS.decision }, async (request, reply) => {
@@ -501,11 +513,17 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    * riderCancelReason / riderCancelNote, separate from the system
    * cancelReason, and written in the same update as the status change.
    *
-   * A shared car the driver has already added other riders to is theirs as
-   * much as this rider's. Cancelling then takes only THIS rider out (their
-   * seat is cancelled, exactly as a driver's seat cancel would) and the car
-   * carries on for the others; it used to cancel the whole ride, stranding
-   * riders who had nothing to do with the decision.
+   * A rider can always cancel THEIR OWN seat before pickup (WAITING or
+   * ARRIVED), whichever ride it lives on (resolveRiderCancelTarget):
+   * - a rider added to another driver's car sends either id — their own
+   *   request (closed as merged; followed to the car) or the car's (which
+   *   current apps follow to). It used to answer 404 / 409 to both, so they
+   *   couldn't cancel at all (2026-11-23).
+   * - on a Shared car others are in or booked into, only this rider's seat
+   *   is cancelled and the car carries on for the others; it used to cancel
+   *   the whole ride, stranding riders who had nothing to do with it.
+   * Otherwise (their own request, alone in it) the whole ride is cancelled.
+   * Someone else's ride stays a 404.
    */
   app.post(
     "/rides/:id/cancel",
@@ -521,16 +539,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     const { id } = request.params as { id: string };
     const userId = request.user!.userId;
 
-    const ride = await prisma.ride.findUnique({
-      where: { id },
-      include: { passengers: { select: { id: true, riderId: true, status: true } } },
-    });
-    if (!ride || ride.riderId !== userId) {
-      return rideNotFound(reply);
-    }
-    if (!RIDER_CANCELLABLE_STATUSES.includes(ride.status as RideStatus)) {
-      return reply.code(409).send({ error: "Ride can no longer be cancelled" });
-    }
+    const target = await resolveRiderCancelTarget(prisma, id, userId);
+    if (!target) return rideNotFound(reply);
+    const ride = target.ride;
 
     const input = parseRiderCancelInput(request.body, { hasDriver: ride.driverId !== null });
     if (!input.ok) {
@@ -542,7 +553,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       request.log[flagged ? "warn" : "info"](
         {
           event,
-          rideId: id,
+          rideId: ride.id,
           driverId: ride.driverId,
           fromStatus: ride.status,
           riderCancelReason: input.reason,
@@ -551,16 +562,18 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         flagged ? "Rider cancelled: driver asked them to cancel" : message,
       );
 
-    const ownSeat = ride.passengers.find((p) => p.riderId === userId);
+    const ownSeat = target.kind === "seat" ? target.seat : ride.passengers.find((p) => p.riderId === userId);
     const othersAboard = ride.passengers.some(
       (p) => p.riderId !== userId && isActivePassengerStatus(p.status as PassengerStatus),
     );
 
-    if (ownSeat && othersAboard) {
+    // Just this rider's seat: a car someone else booked, or their own car
+    // that others are in or booked into (or that is already on its way).
+    if (ownSeat && (target.kind === "seat" || othersAboard || ride.status === "IN_PROGRESS")) {
       let result;
       try {
         result = await applyPassengerTransition(prisma, ownSeat.id, "CANCELLED", new Date(), {
-          expectedRideId: id,
+          expectedRideId: ride.id,
           onlyFrom: ["WAITING", "ARRIVED"],
         });
       } catch (err) {
@@ -569,41 +582,55 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         }
         throw err;
       }
-      // Kept on the ride as for a whole-ride cancel: it is this rider's
-      // booking, and "the driver asked me to cancel" must reach the admin
-      // list whether or not the car carried on.
-      await prisma.ride.update({
-        where: { id },
-        data: { riderCancelReason: input.reason, riderCancelNote: input.note },
-      });
+      // Kept on the rider's OWN request (never on someone else's ride):
+      // "the driver asked me to cancel" must reach the admin list whether or
+      // not the car carried on.
+      const ownRequestId = target.kind === "seat" ? target.ownRequestId : ride.id;
+      if (result.changed && ownRequestId) {
+        await prisma.ride.update({
+          where: { id: ownRequestId },
+          data: { riderCancelReason: input.reason, riderCancelNote: input.note },
+        });
+      }
 
       const { passengers: _otherRiders, ...rideRow } = result.ride;
       reply.code(200).send({ ride: rideRow });
 
       if (result.changed) {
         emitToRider(userId, "ride:passenger_status", {
-          rideId: id,
+          rideId: ride.id,
           ridePassengerId: ownSeat.id,
           riderId: userId,
           status: "CANCELLED",
         });
         // The driver's trip screen refetches on any status event for its ride.
-        emitRideEvent(id, "ride:status", { rideId: id, status: rideRow.status as RideStatus });
-        notifyRiderCancelled(prisma, ride);
-        removeRiderFromRide(userId, id);
+        emitRideEvent(ride.id, "ride:status", { rideId: ride.id, status: rideRow.status as RideStatus });
+        // The driver hears who left (this rider, not necessarily the booker).
+        notifyRiderCancelled(prisma, { id: ride.id, riderId: userId, driverId: ride.driverId });
+        removeRiderFromRide(userId, ride.id);
+        // The last rider left a car already on its way: the trip is done.
+        if (rideRow.status === "COMPLETED" && result.rideStatusBefore !== "COMPLETED" && rideRow.driverId) {
+          finalizeRideCompletion(prisma, rideRow, rideRow.driverId, result.ride.passengers).catch((err) =>
+            request.log.error({ err, rideId: ride.id }, "rider seat cancel: completion failed"),
+          );
+        }
         // A seat freed: requests that fit the car now reach its driver at once.
         reofferToDriver(prisma, rideRow.driverId);
-        logCancel("ride_seat_cancelled_by_rider", "Rider left a shared car; it carries on for the others");
+        logCancel("ride_seat_cancelled_by_rider", "Rider left a car; it carries on for the others");
       }
       return reply;
     }
 
+    if (!RIDER_CANCELLABLE_STATUSES.includes(ride.status as RideStatus)) {
+      return reply.code(409).send({ error: "Ride can no longer be cancelled" });
+    }
+
     try {
-      const updated = await applyRideTransition(prisma, id, "CANCELLED", {
+      const updated = await applyRideTransition(prisma, ride.id, "CANCELLED", {
         cancelReason: "RIDER_CANCELLED",
         riderCancel: { reason: input.reason, note: input.note },
       });
-      emitRideEvent(id, "ride:status", { rideId: id, status: updated.status });
+      emitRideEvent(ride.id, "ride:status", { rideId: ride.id, status: updated.status });
       // A driver who had already accepted it hears at once, even with the app closed.
       notifyRiderCancelled(prisma, ride);
       // Drivers who were being offered it drop it at once.

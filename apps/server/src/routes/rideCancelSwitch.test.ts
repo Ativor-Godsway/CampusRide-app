@@ -241,11 +241,16 @@ describe("POST /rides/:id/cancel in a shared car with other riders", () => {
     });
   });
 
-  it("an added rider can't cancel the booking rider's car", async () => {
-    const { ride, kwame } = await carWithKwame();
-    const res = await cancel(ride.id, signAccessToken({ userId: kwame.id, role: "RIDER" }));
-    expect(res.statusCode).toBe(404);
-    expect((await prisma.ride.findUniqueOrThrow({ where: { id: ride.id } })).status).toBe("MATCHED");
+  it("an added rider cancels only their own seat, never the booking rider's car", async () => {
+    // It used to answer 404, so a rider added to a car couldn't cancel at all (2026-11-23).
+    const { ride, ama, kwame, kwameSeat } = await carWithKwame();
+    const res = await cancel(ride.id, signAccessToken({ userId: kwame.id, role: "RIDER" }), { reason: "CHANGED_PLANS" });
+    expect(res.statusCode).toBe(200);
+    const row = await prisma.ride.findUniqueOrThrow({ where: { id: ride.id }, include: { passengers: true } });
+    // Kwame's reason isn't written on Ama's ride.
+    expect(row).toMatchObject({ status: "MATCHED", occupancy: 1, riderCancelReason: null });
+    expect(row.passengers.find((p) => p.id === kwameSeat.id)!.status).toBe("CANCELLED");
+    expect(row.passengers.find((p) => p.riderId === ama.id)!.status).toBe("WAITING");
   });
 });
 

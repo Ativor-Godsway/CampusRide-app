@@ -596,6 +596,8 @@ export interface RideRow {
   completedAt: string | null;
   cancelledAt: string | null;
   status: string;
+  /** Still going on (searching, a driver on the way, on the trip). Absent from older servers. */
+  open?: boolean;
   type: "LONE" | "SHARED";
   source: string;
   paymentMethod: string;
@@ -718,6 +720,8 @@ export interface RideDetail {
     dropoffPin: { latitude: number; longitude: number; label: string } | null;
     routePolyline: string | null;
     mergedIntoRideId: string | null;
+    /** The whole ride can be cancelled from here (it is still going on). */
+    cancellable?: boolean;
   };
   timeline: Array<{ at: string; kind: string; text: string }>;
   offers: Array<{ driver: { id: string; name: string }; offeredAt: string; outcome: string | null; responseMs: number | null }>;
@@ -733,6 +737,19 @@ export interface RideDetail {
     joinedAt: string;
     arrivedAt: string | null;
     noShowAt: string | null;
+    /** The leftover seat of a request merged into another car (the rider rides there). */
+    movedToCar?: boolean;
+    /** This seat can be cancelled from here (anything not finished). */
+    cancellable?: boolean;
+    /** The driver cancelled this rider's pickup ("Cancel pickup"). */
+    driverCancel?: {
+      driverName: string;
+      reason: string | null;
+      reasonLabel: string | null;
+      note: string | null;
+      at: string;
+      rebookedRideId: string | null;
+    } | null;
   }>;
   ratings: Array<{ stars: number; comment: string | null; createdAt: string; rater: { id: string; name: string; role: string }; ratee: { id: string; name: string; role: string } }>;
   sos: Array<{ id: string; createdAt: string; riderId: string; smsDelivered: boolean; supportNotified: boolean; handledAt: string | null }>;
@@ -741,6 +758,18 @@ export interface RideDetail {
 }
 
 export const getRideDetail = (token: string, id: string) => get<RideDetail>(token, `/admin/rides/${encodeURIComponent(id)}`);
+
+/** Cancels a whole ride (any active status), with a reason for the audit log. */
+export const cancelRideAsAdmin = (token: string, id: string, reason: string) =>
+  post<{ status: string; cancelledSeats: number }>(token, `/admin/rides/${encodeURIComponent(id)}/cancel`, { reason });
+
+/** Cancels one rider's seat, with a reason for the audit log. */
+export const cancelSeatAsAdmin = (token: string, rideId: string, seatId: string, reason: string) =>
+  post<{ status: string; changed: boolean; alsoCancelledOnRideId?: string }>(
+    token,
+    `/admin/rides/${encodeURIComponent(rideId)}/seats/${encodeURIComponent(seatId)}/cancel`,
+    { reason },
+  );
 
 export interface ZoneSupply {
   zoneId: string;
@@ -780,6 +809,24 @@ export interface Cancellations {
   byHour: number[];
   reasons: Array<{ reason: string; label: string; count: number }>;
   rides: RideRow[];
+  /** Drivers' "Cancel pickup"s (the rider searched again). Absent from older servers. */
+  driverCancels?: {
+    count: number;
+    reasons: Array<{ reason: string; label: string; count: number }>;
+    rows: DriverCancelRow[];
+  };
+}
+
+export interface DriverCancelRow {
+  id: string;
+  at: string;
+  rideId: string;
+  rebookedRideId: string | null;
+  driver: { id: string; driverId: string | null; name: string };
+  riderName: string;
+  reason: string | null;
+  reasonLabel: string | null;
+  note: string | null;
 }
 
 export const getCancellations = (token: string, period: string, who?: string) =>
@@ -857,6 +904,8 @@ export interface DriverDetail {
     avgReplyMs: number | null;
     cancelledByDriver: number;
   };
+  /** Their "Cancel pickup"s in the period, newest first. Absent from older servers. */
+  cancellations?: Array<{ at: string; rideId: string; riderName: string; reason: string | null; reasonLabel: string | null; note: string | null }>;
   rating: number | null;
   ratings: number;
   balance: { owedPesewas: number; paidPesewas: number; waivedPesewas: number; balancePesewas: number; oldestUnpaidAt: string | null };

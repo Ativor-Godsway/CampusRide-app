@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { decodePolyline } from "@rida/shared";
-import { getRideDetail, type RideDetail as Detail } from "../api";
+import { ApiError, cancelRideAsAdmin, cancelSeatAsAdmin, getRideDetail, type RideDetail as Detail } from "../api";
 import { useToken } from "../auth";
 import { Chip } from "../components/Chip";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { useToast } from "../components/Toast";
 import { DetailDrawer } from "../components/DetailDrawer";
 import { Loaded } from "../components/States";
 import { CampusMap } from "../map/CampusMap";
@@ -44,12 +47,52 @@ function RouteMap({ d }: { d: Detail }) {
   );
 }
 
-/** One ride in full: what happened when, who was offered it, who rode and paid what, the route, ratings, SOS. */
+type Seat = Detail["seats"][number];
+type Cancelling = { kind: "ride" } | { kind: "seat"; seat: Seat };
+
+/** How a seat reads, with the leftover of a merged request said plainly. */
+function seatLabel(s: Seat): string {
+  if (s.movedToCar && (s.status === "WAITING" || s.status === "ARRIVED")) return "Moved to another car";
+  if (s.status === "CANCELLED" && s.driverCancel) return "Driver cancelled pickup";
+  return SEAT_LABELS[s.status] ?? s.status;
+}
+
+/** One ride in full: what happened when, who was offered it, who rode and paid what, the route, ratings, SOS; cancel a seat or the ride. */
 export function RideDetail({ id, onClose }: { id: string; onClose: () => void }) {
   const token = useToken();
+  const toast = useToast();
   const detail = usePolled(() => getRideDetail(token, id), `ride:${id}`);
   const r = detail.data?.ride;
   const chip = r ? rideStatusChip(r) : null;
+  const [cancelling, setCancelling] = useState<Cancelling | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const cancel = async (reason: string) => {
+    if (!cancelling) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (cancelling.kind === "ride") {
+        await cancelRideAsAdmin(token, id, reason);
+        toast("Ride cancelled. The riders and the driver have been told.");
+      } else {
+        const res = await cancelSeatAsAdmin(token, id, cancelling.seat.id, reason);
+        toast(
+          res.alsoCancelledOnRideId
+            ? `${cancelling.seat.rider.name}'s seat is cancelled here and in the car they joined.`
+            : `${cancelling.seat.rider.name}'s seat is cancelled.`,
+        );
+      }
+      setCancelling(null);
+      detail.refresh();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "That didn't work");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <DetailDrawer title={r ? `${r.pickup} → ${r.dropoff}` : "Ride"} subtitle={r ? `${rideTypeLabel(r.type)} · ${dayAndTime(r.createdAt)} · ride ${r.id.slice(-6)}` : undefined} onClose={onClose}>
       <Loaded {...detail} onRetry={detail.refresh} what="Loading the ride…">
@@ -87,6 +130,14 @@ export function RideDetail({ id, onClose }: { id: string; onClose: () => void })
               ) : null}
             </dl>
 
+            {d.ride.cancellable ? (
+              <div className="button-row">
+                <button type="button" className="danger-text-button" onClick={() => setCancelling({ kind: "ride" })}>
+                  Cancel whole ride
+                </button>
+              </div>
+            ) : null}
+
             <h3>What happened</h3>
             <ol className="timeline">
               {d.timeline.map((t, i) => (
@@ -107,6 +158,9 @@ export function RideDetail({ id, onClose }: { id: string; onClose: () => void })
                   <th scope="col" className="right">
                     Fare
                   </th>
+                  <th scope="col">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -118,8 +172,30 @@ export function RideDetail({ id, onClose }: { id: string; onClose: () => void })
                     <td>
                       {s.pickup} → {s.dropoff}
                     </td>
-                    <td>{SEAT_LABELS[s.status] ?? s.status}</td>
+                    <td>
+                      {seatLabel(s)}
+                      {s.driverCancel ? (
+                        <span className="muted small">
+                          {" "}
+                          · {s.driverCancel.driverName}: {s.driverCancel.reasonLabel ?? "no reason given"}
+                          {s.driverCancel.note ? ` ("${s.driverCancel.note}")` : ""}
+                          {s.driverCancel.rebookedRideId ? (
+                            <>
+                              {" "}
+                              · <Link to={`/rides?ride=${s.driverCancel.rebookedRideId}`}>new search</Link>
+                            </>
+                          ) : null}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="right num">{cedis(s.farePesewas)}</td>
+                    <td className="right">
+                      {s.cancellable ? (
+                        <button type="button" className="danger-text-button" onClick={() => setCancelling({ kind: "seat", seat: s })}>
+                          Cancel this rider&apos;s seat
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -190,6 +266,39 @@ export function RideDetail({ id, onClose }: { id: string; onClose: () => void })
           </div>
         )}
       </Loaded>
+      {cancelling && r ? (
+        <ConfirmDialog
+          title={cancelling.kind === "ride" ? "Cancel the whole ride?" : `Cancel ${cancelling.seat.rider.name}'s seat?`}
+          confirmLabel={cancelling.kind === "ride" ? "Cancel ride" : "Cancel seat"}
+          danger
+          reasonLabel="Why (saved in the audit log)"
+          reasonPlaceholder="e.g. Stuck after the driver's phone died; rider phoned support"
+          busy={busy}
+          error={error}
+          onCancel={() => {
+            setCancelling(null);
+            setError(null);
+          }}
+          onConfirm={(reason) => void cancel(reason)}
+        >
+          {cancelling.kind === "ride" ? (
+            <p>
+              Every rider not yet dropped off loses their seat and is told CampusRide cancelled it; the driver is told and is free for new requests. If
+              someone was already dropped off, the trip is closed as completed so their fare stands. Riders are not booked again.
+            </p>
+          ) : cancelling.seat.movedToCar ? (
+            <p>
+              This request was added to another driver&apos;s car. Its seat here is tidied up, and {cancelling.seat.rider.name}&apos;s seat in that car is
+              cancelled too. They and the driver are told. They are not booked again.
+            </p>
+          ) : (
+            <p>
+              {cancelling.seat.rider.name} is told CampusRide cancelled their seat; the driver is told and the car carries on for anyone else. If nobody is
+              left, the trip ends. They are not booked again.
+            </p>
+          )}
+        </ConfirmDialog>
+      ) : null}
     </DetailDrawer>
   );
 }

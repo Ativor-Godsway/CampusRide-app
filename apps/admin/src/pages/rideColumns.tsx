@@ -5,6 +5,21 @@ import { cedis } from "../lib/money";
 import { rideStatusChip, rideTypeLabel, shortName } from "../lib/labels";
 import { whenShort } from "../lib/time";
 
+/** Open this long and it may be stuck: worth a look (and maybe a cancel from its detail). */
+const STUCK_AFTER_MS = 45 * 60_000;
+
+/** "Open", or "Open 2 h" in amber once it has been open long enough to be stuck. */
+function OpenChip({ createdAt, now }: { createdAt: string; now?: number }) {
+  const age = (now ?? Date.now()) - Date.parse(createdAt);
+  if (age < STUCK_AFTER_MS) return <Chip tone="neutral">Open</Chip>;
+  const hours = Math.floor(age / 3_600_000);
+  return (
+    <Chip tone="amber" title="Still open after a long time: it may be stuck">
+      {hours >= 1 ? `Open ${hours} h` : `Open ${Math.round(age / 60_000)} min`}
+    </Chip>
+  );
+}
+
 /** The ride table's columns, the same on every page that lists rides. */
 /**
  * `compact`: for a detail panel, without the column the panel is about (a
@@ -52,6 +67,7 @@ export function rideColumns(opts: { now?: number; withSeats?: boolean; compact?:
         return (
           <span className="status-cell">
             <Chip tone={chip.tone}>{chip.label}</Chip>
+            {r.open ? <OpenChip createdAt={r.createdAt} now={opts.now} /> : null}
             {r.riderCancelFlagged ? <Chip tone="amber" title={r.riderCancelReasonLabel ?? undefined}>Check driver</Chip> : null}
           </span>
         );

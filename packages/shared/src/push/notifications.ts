@@ -87,6 +87,10 @@ export interface PushTextInput {
   pickupName?: string | null;
   /** DRIVER_CANCELLED: the driver marked the rider as not at the pickup. */
   noShow?: boolean;
+  /** DRIVER_CANCELLED: the driver had to cancel, and the rider's request is searching again. */
+  rebooked?: boolean;
+  /** DRIVER_CANCELLED / RIDER_CANCELLED: CampusRide (an admin) cancelled it, not the other person. */
+  byAdmin?: boolean;
 }
 
 export interface PushText {
@@ -110,6 +114,12 @@ export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
     case "TRIP_COMPLETED":
       return { title: "Trip complete", body: "Thanks for riding with CampusRide." };
     case "DRIVER_CANCELLED":
+      if (input.byAdmin) {
+        return { title: "Ride cancelled", body: "CampusRide cancelled your ride. You can request another ride." };
+      }
+      if (input.rebooked) {
+        return { title: "Your driver had to cancel", body: "We're finding you another driver now." };
+      }
       return input.noShow
         ? {
             title: "Pickup cancelled",
@@ -132,7 +142,11 @@ export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
           : "Open the app to accept.",
       };
     case "RIDER_CANCELLED":
-      return { title: "Ride cancelled", body: `${rider} cancelled the ride.` };
+      return input.byAdmin
+        ? firstName(input.riderName)
+          ? { title: "Trip changed", body: `CampusRide cancelled ${rider}'s seat on your trip.` }
+          : { title: "Trip cancelled", body: "CampusRide cancelled your trip. You're free for new requests." }
+        : { title: "Ride cancelled", body: `${rider} cancelled the ride.` };
     case "WENT_OFFLINE":
       return {
         title: "You're offline",

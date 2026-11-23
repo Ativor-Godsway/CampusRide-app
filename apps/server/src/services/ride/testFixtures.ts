@@ -153,3 +153,19 @@ export async function cleanupRide(rideId: string) {
   await prisma.ride.delete({ where: { id: rideId } });
   await prisma.user.deleteMany({ where: { id: { in: Array.from(userIds) } } });
 }
+
+/**
+ * For a test's cleanup: these rides plus the new requests a driver's "Cancel
+ * pickup" made for their riders (services/ride/cancels.ts), whose riderId
+ * would otherwise keep the test's users from being deleted. Removes the
+ * DriverCancellation rows too.
+ */
+export async function withRebookedRides(rideIds: readonly string[]): Promise<string[]> {
+  const records = await prisma.driverCancellation.findMany({
+    where: { rideId: { in: [...rideIds] } },
+    select: { rebookedRideId: true },
+  });
+  await prisma.driverCancellation.deleteMany({ where: { rideId: { in: [...rideIds] } } });
+  const rebooked = records.map((r) => r.rebookedRideId).filter((id): id is string => id !== null);
+  return [...new Set([...rideIds, ...rebooked])];
+}

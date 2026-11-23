@@ -50,6 +50,16 @@ describe("pushText", () => {
     );
   });
 
+  it("says a driver's cancel is being covered, and names CampusRide for an admin's", () => {
+    expect(pushText("DRIVER_CANCELLED", { driverName: "Kofi", rebooked: true })).toEqual({
+      title: "Your driver had to cancel",
+      body: "We're finding you another driver now.",
+    });
+    expect(pushText("DRIVER_CANCELLED", { byAdmin: true }).body).toContain("CampusRide cancelled your ride");
+    expect(pushText("RIDER_CANCELLED", { riderName: "Ama Owusu", byAdmin: true }).body).toBe("CampusRide cancelled Ama's seat on your trip.");
+    expect(pushText("RIDER_CANCELLED", { byAdmin: true }).body).toBe("CampusRide cancelled your trip. You're free for new requests.");
+  });
+
   it("names the pickup on a ride request when known", () => {
     expect(pushText("RIDE_REQUEST", { pickupName: "Night Market" }).body).toBe(
       "Pickup at Night Market. Open the app to accept.",

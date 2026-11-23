@@ -20,6 +20,7 @@ export function rideStatusChip(ride: { status: string; cancelReason?: string | n
       if (ride.cancelReason === "NO_DRIVERS_AVAILABLE") return { label: "No driver", tone: "amber" };
       if (ride.cancelReason === "DRIVER_BACKED_OUT") return { label: "Driver cancelled", tone: "red" };
       if (ride.cancelReason === "ALL_PASSENGERS_LEFT") return { label: "Riders left", tone: "red" };
+      if (ride.cancelReason === "ADMIN_CANCELLED") return { label: "Cancelled by admin", tone: "red" };
       return { label: "Rider cancelled", tone: "red" };
     default:
       return { label: ride.status, tone: "neutral" };
@@ -28,6 +29,7 @@ export function rideStatusChip(ride: { status: string; cancelReason?: string | n
 
 export const RIDE_STATUS_FILTERS: Array<{ value: string; label: string }> = [
   { value: "", label: "Any status" },
+  { value: "OPEN", label: "Still open (any of the next five)" },
   { value: "REQUESTED", label: "Looking for driver" },
   { value: "AWAITING_RIDER_DECISION", label: "No driver (rider deciding)" },
   { value: "MATCHED", label: "Driver on the way" },

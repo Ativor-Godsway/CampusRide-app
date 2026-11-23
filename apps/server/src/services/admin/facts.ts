@@ -94,6 +94,7 @@ export function cancelledBy(r: Pick<RequestFact, "status" | "cancelReason">): Ca
     case "DRIVER_BACKED_OUT":
       return "driver";
     case "NO_DRIVERS_AVAILABLE":
+    case "ADMIN_CANCELLED":
       return "system";
     case "RIDER_CANCELLED":
     case "ALL_PASSENGERS_LEFT":

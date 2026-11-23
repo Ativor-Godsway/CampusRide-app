@@ -13,6 +13,7 @@ export * from "./eta/eta";
 export * from "./api/responses";
 export * from "./media/cloudinaryAvatar";
 export * from "./rides/riderCancel";
+export * from "./rides/driverCancel";
 export * from "./rides/dispatchWindow";
 export * from "./format/currency";
 export * from "./format/dates";
