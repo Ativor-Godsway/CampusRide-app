@@ -34,7 +34,7 @@ export function notifyRider(
   riderIds: string | readonly string[],
   kind: RiderPushKind,
   rideId: string,
-  options: { driverUserId?: string | null; noShow?: boolean } = {},
+  options: { driverUserId?: string | null; noShow?: boolean; rebooked?: boolean; byAdmin?: boolean } = {},
 ): void {
   run(kind, rideId, async () => {
     const driverName = await nameOf(prisma, options.driverUserId);
@@ -42,7 +42,7 @@ export function notifyRider(
       userIds: typeof riderIds === "string" ? [riderIds] : riderIds,
       kind,
       rideId,
-      text: { driverName, noShow: options.noShow },
+      text: { driverName, noShow: options.noShow, rebooked: options.rebooked, byAdmin: options.byAdmin },
     });
   });
 }
@@ -74,10 +74,16 @@ export function notifyRideRequest(
   });
 }
 
-/** The rider cancelled a ride their driver had already accepted. */
+/**
+ * The rider cancelled a ride their driver had already accepted. `riderId` is
+ * the rider who left (for a rider added to the car, not the ride's booker).
+ * `byAdmin`: CampusRide cancelled it from the admin site — that rider's seat,
+ * or (riderId null) the whole trip.
+ */
 export function notifyRiderCancelled(
   prisma: PrismaClient,
-  ride: { id: string; riderId: string; driverId: string | null },
+  ride: { id: string; riderId: string | null; driverId: string | null },
+  options: { byAdmin?: boolean } = {},
 ): void {
   if (!ride.driverId) return;
   const driverId = ride.driverId;
@@ -87,7 +93,7 @@ export function notifyRiderCancelled(
       userIds: [driverId],
       kind: "RIDER_CANCELLED",
       rideId: ride.id,
-      text: { riderName },
+      text: { riderName, byAdmin: options.byAdmin },
     });
   });
 }

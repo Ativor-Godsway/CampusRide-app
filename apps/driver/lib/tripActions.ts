@@ -9,6 +9,7 @@ import {
   settleSeatOverlays,
   undoneStatus,
   type ClaimOutcome,
+  type DriverCancelReason,
   type PassengerStatus,
   type SeatOverlay,
   type UndoableStep,
@@ -77,7 +78,7 @@ const FALLBACK: Record<PassengerAction, string> = {
   arrived: "Couldn't mark that you're here.",
   pickup: "Couldn't mark the pickup.",
   dropoff: "Couldn't mark the drop-off.",
-  cancel: "Couldn't remove this rider.",
+  cancel: "Couldn't cancel this pickup.",
   "no-show": "Couldn't mark the no-show.",
 };
 
@@ -246,6 +247,22 @@ export function runPassengerAction(rideId: string, passengerId: string, action: 
     },
   });
   enqueueSeatCall(rideId, passengerId, (realId, timeoutMs) => CALL[action](rideId, realId, { timeoutMs }), FALLBACK[action]);
+}
+
+/**
+ * "Cancel pickup" with the driver's reason (and an optional note): the rider
+ * goes from the trip at once and the request follows, like any seat action.
+ * The server sends the rider back to searching for another driver.
+ */
+export function runCancelPickup(rideId: string, passengerId: string, reason: DriverCancelReason, note: string) {
+  forRide(rideId);
+  set({ seats: { ...state.seats, [passengerId]: { status: "CANCELLED" } } });
+  enqueueSeatCall(
+    rideId,
+    passengerId,
+    (realId, timeoutMs) => passengerCancel(rideId, realId, { timeoutMs, reason, note }),
+    FALLBACK.cancel,
+  );
 }
 
 /**

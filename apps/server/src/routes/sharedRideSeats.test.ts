@@ -228,7 +228,10 @@ describe.each(["bill", "ali"] as const)("car booked by %s", (owner) => {
     const billView = await riderView(bill, carId);
     expect(billView.mySeat.status).toBe("CANCELLED");
     expect(billView.fareSummary).toBeUndefined();
-    expect(await findActiveRideForRider(prisma, bill.id)).toBeNull();
+    // His driver had to cancel: his request is searching again, on a new ride (2026-11-23).
+    const searching = await findActiveRideForRider(prisma, bill.id);
+    expect(searching?.ride).toMatchObject({ status: "REQUESTED", driverId: null });
+    expect(searching?.ride.id).not.toBe(carId);
     expect((await riderView(ali, carId)).ride.status).toBe("IN_PROGRESS");
   });
 });

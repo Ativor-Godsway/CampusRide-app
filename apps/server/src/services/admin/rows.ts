@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { FLAGGED_RIDER_CANCEL_REASONS, RIDER_CANCEL_REASON_LABELS, maskPhone } from "@rida/shared";
 import { rideFareForAdmin } from "../ride/fares";
+import { ACTIVE_RIDE_STATUSES } from "../ride/activeRide";
 import { cancelledBy } from "./facts";
 
 /**
@@ -46,7 +47,8 @@ export function rideRow(ride: RideRowSource) {
     completedAt: ride.completedAt?.toISOString() ?? null,
     cancelledAt: ride.cancelledAt?.toISOString() ?? null,
     status: ride.status,
-    type: ride.type,
+    /** Still going on (searching, a driver on the way, on the trip): to spot stuck ones. */
+    open: ACTIVE_RIDE_STATUSES.includes(ride.status),
     source: ride.source,
     paymentMethod: ride.paymentMethod,
     /** Seats still on it (or carried, once completed). */

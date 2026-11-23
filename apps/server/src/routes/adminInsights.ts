@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import { RIDER_CANCEL_REASON_LABELS } from "@rida/shared";
+import { DRIVER_CANCEL_REASON_LABELS, RIDER_CANCEL_REASON_LABELS } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
 import { idParams, noInput, object, oneOf, text } from "../http/schemas";
@@ -44,6 +44,7 @@ const SYSTEM_CANCEL_LABELS: Record<string, string> = {
   DRIVER_BACKED_OUT: "Driver cancelled",
   NO_DRIVERS_AVAILABLE: "No driver found",
   ALL_PASSENGERS_LEFT: "Every rider left the car",
+  ADMIN_CANCELLED: "Cancelled by an admin",
 };
 
 /** A grid cell for the map heat layer: about 55 m. */
@@ -51,6 +52,49 @@ const HEAT_GRID_DEG = 0.0005;
 
 function cellOf(lat: number, lng: number): string {
   return `${Math.round(lat / HEAT_GRID_DEG)}:${Math.round(lng / HEAT_GRID_DEG)}`;
+}
+
+/**
+ * A driver's "Cancel pickup" in a period (DriverCancellation): how many, the
+ * reasons, and the latest 200 — each the driver's cancellation, though the
+ * rider's request searched again (so it isn't a cancelled request above).
+ */
+async function loadDriverCancels(prisma: PrismaClient, p: { from: Date; to: Date }) {
+  const where = { createdAt: { gte: p.from, lt: p.to } };
+  const [count, byReason, latest] = await Promise.all([
+    prisma.driverCancellation.count({ where }),
+    prisma.driverCancellation.groupBy({ by: ["reason"], where, _count: { _all: true } }),
+    prisma.driverCancellation.findMany({ where, orderBy: { createdAt: "desc" }, take: 200 }),
+  ]);
+  const names = new Map(
+    (
+      await prisma.user.findMany({
+        where: { id: { in: [...new Set(latest.flatMap((c) => [c.driverUserId, c.riderId]))] } },
+        select: { id: true, name: true, driver: { select: { id: true } } },
+      })
+    ).map((u) => [u.id, u]),
+  );
+  return {
+    count,
+    reasons: byReason
+      .map((r) => ({
+        reason: r.reason ?? "NOT_GIVEN",
+        label: r.reason ? DRIVER_CANCEL_REASON_LABELS[r.reason] : "Not given (older app)",
+        count: r._count._all,
+      }))
+      .sort((a, b) => b.count - a.count),
+    rows: latest.map((c) => ({
+      id: c.id,
+      at: c.createdAt.toISOString(),
+      rideId: c.rideId,
+      rebookedRideId: c.rebookedRideId,
+      driver: { id: c.driverUserId, driverId: names.get(c.driverUserId)?.driver?.id ?? null, name: names.get(c.driverUserId)?.name ?? "Unknown" },
+      riderName: names.get(c.riderId)?.name ?? "Unknown",
+      reason: c.reason,
+      reasonLabel: c.reason ? DRIVER_CANCEL_REASON_LABELS[c.reason] : null,
+      note: c.note,
+    })),
+  };
 }
 
 export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaClient): void {
@@ -115,6 +159,29 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
     });
     if (!ride) return reply.code(404).send({ error: "Ride not found" });
 
+    // Driver cancels on this ride (and the one this request was rebooked
+    // from), and admin cancels from the audit log: who, when, why.
+    const [driverCancels, adminCancels] = await Promise.all([
+      prisma.driverCancellation.findMany({
+        where: { OR: [{ rideId: id }, { rebookedRideId: id }] },
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.adminAuditLog.findMany({
+        where: { target: id, action: { in: ["ride.cancel", "ride.seat.cancel"] } },
+        select: { actor: true, action: true, reason: true, timestamp: true },
+        orderBy: { timestamp: "asc" },
+      }),
+    ]);
+    const people = new Map(
+      (
+        await prisma.user.findMany({
+          where: { id: { in: [...new Set([...driverCancels.flatMap((c) => [c.driverUserId, c.riderId]), ...adminCancels.map((a) => a.actor)])] } },
+          select: { id: true, name: true },
+        })
+      ).map((u) => [u.id, u.name]),
+    );
+    const nameOf = (userId: string) => people.get(userId) ?? "Someone";
+
     const row = rideRow(ride);
     const timeline: Array<{ at: string; kind: string; text: string }> = [];
     const push = (at: Date | null | undefined, kind: string, text: string) => {
@@ -138,6 +205,20 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
       push(s.arrivedAt, "arrived", `Driver arrived for ${s.rider.name}`);
       push(s.noShowAt, "no_show", `${s.rider.name} didn't show`);
     }
+    for (const c of driverCancels) {
+      const why = c.reason ? DRIVER_CANCEL_REASON_LABELS[c.reason] : "no reason given (older app)";
+      const note = c.note ? ` ("${c.note}")` : "";
+      push(
+        c.createdAt,
+        "driver_cancel",
+        c.rideId === id
+          ? `${nameOf(c.driverUserId)} cancelled ${nameOf(c.riderId)}'s pickup: ${why}${note}. ${c.rebookedRideId ? "They were moved to a new search" : "The ride searched again"}`
+          : `Booked again after ${nameOf(c.driverUserId)} cancelled ${nameOf(c.riderId)}'s pickup: ${why}${note}`,
+      );
+    }
+    for (const a of adminCancels) {
+      push(a.timestamp, "admin_cancel", `${nameOf(a.actor)} (admin) cancelled ${a.action === "ride.cancel" ? "the ride" : "a seat"}: ${a.reason ?? ""}`);
+    }
     push(ride.departedAt, "started", "Trip started");
     push(ride.completedAt, "completed", "Trip completed");
     if (ride.status === "CANCELLED") {
@@ -154,6 +235,7 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
     for (const e of ride.sosEvents) push(e.createdAt, "sos", "SOS raised");
     timeline.sort((a, b) => a.at.localeCompare(b.at));
 
+    const movedRiderId = ride.status === "CANCELLED" && ride.cancelReason === "MERGED_INTO_ANOTHER_RIDE" ? ride.rider.id : null;
     const pickup = ride.pickupLat != null && ride.pickupLng != null ? { latitude: ride.pickupLat, longitude: ride.pickupLng } : null;
     const dropoff = ride.dropoffLat != null && ride.dropoffLng != null ? { latitude: ride.dropoffLat, longitude: ride.dropoffLng } : null;
     const route = pickup && dropoff ? estimateRoute([pickup, dropoff]) : null;
@@ -163,6 +245,8 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
     return reply.send({
       ride: {
         ...row,
+        /** An admin can cancel the whole ride (POST /admin/rides/:id/cancel). */
+        cancellable: row.open,
         pickupPin: pickup ? { ...pickup, label: row.pickup, note: ride.pickupNote } : null,
         dropoffPin: dropoff ? { ...dropoff, label: row.dropoff } : null,
         routePolyline: route?.polyline ?? null,
@@ -187,6 +271,26 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
         joinedAt: s.createdAt.toISOString(),
         arrivedAt: s.arrivedAt?.toISOString() ?? null,
         noShowAt: s.noShowAt?.toISOString() ?? null,
+        /**
+         * The leftover seat of a request merged into another car: the rider
+         * really rides there (mergedIntoRideId). Cancelling it cancels that one too.
+         */
+        movedToCar: movedRiderId === s.rider.id,
+        /** An admin can cancel this seat (anything not finished). */
+        cancellable: s.status === "WAITING" || s.status === "ARRIVED" || s.status === "PICKED_UP",
+        driverCancel: (() => {
+          const c = driverCancels.filter((x) => x.ridePassengerId === s.id).pop();
+          return c
+            ? {
+                driverName: nameOf(c.driverUserId),
+                reason: c.reason,
+                reasonLabel: c.reason ? DRIVER_CANCEL_REASON_LABELS[c.reason] : null,
+                note: c.note,
+                at: c.createdAt.toISOString(),
+                rebookedRideId: c.rebookedRideId,
+              }
+            : null;
+        })(),
       })),
       ratings: ride.ratings.map((r) => ({ stars: r.stars, comment: r.comment, createdAt: r.createdAt.toISOString(), rater: r.rater, ratee: r.ratee })),
       sos: ride.sosEvents.map((e) => ({ ...e, createdAt: e.createdAt.toISOString(), handledAt: e.handledAt?.toISOString() ?? null })),
@@ -301,11 +405,14 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
         entry.count += 1;
         reasons.set(key, entry);
       }
-      const rows = await prisma.ride.findMany({
-        where: { id: { in: cancelled.map((r) => r.id).slice(-500) } },
-        select: RIDE_ROW_SELECT,
-        orderBy: { createdAt: "desc" },
-      });
+      const [rows, driverCancels] = await Promise.all([
+        prisma.ride.findMany({
+          where: { id: { in: cancelled.map((r) => r.id).slice(-500) } },
+          select: RIDE_ROW_SELECT,
+          orderBy: { createdAt: "desc" },
+        }),
+        loadDriverCancels(prisma, p),
+      ]);
       return {
         generatedAt: new Date().toISOString(),
         cancellations: cancelled.length,
@@ -317,6 +424,7 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
         byHour,
         reasons: [...reasons.values()].sort((a, b) => b.count - a.count),
         rides: rows.map(rideRow),
+        driverCancels,
       };
     });
     return reply.send(who ? { ...body, rides: body.rides.filter((r) => r.cancelledBy === who) } : body);

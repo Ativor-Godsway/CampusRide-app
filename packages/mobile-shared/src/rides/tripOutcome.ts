@@ -22,25 +22,38 @@ export function isMergedRequest(ride: {
   return ride.status === "CANCELLED" && ride.cancelReason === "MERGED_INTO_ANOTHER_RIDE" && !!ride.mergedIntoRideId;
 }
 
-export type RiderTripOutcome = "completed" | "cancelled" | "driverCancelled" | null;
+export type RiderTripOutcome = "completed" | "cancelled" | "driverCancelled" | "adminCancelled" | null;
+
+/**
+ * Their driver had to cancel and the rider's request is searching again on a
+ * new ride: the screen follows it (like a merged request) instead of ending.
+ */
+export function rebookedRideId(result: Pick<GetRideResult, "rebookedRideId" | "seatCancelledBy"> | undefined): string | null {
+  return result?.seatCancelledBy === "driver" && result.rebookedRideId ? result.rebookedRideId : null;
+}
 
 /**
  * Whether this rider's trip is over, and how — null while it is going on.
  *
- * - their seat cancelled (by the driver, or a no-show) → "driverCancelled";
+ * - their seat cancelled by CampusRide (an admin) → "adminCancelled";
+ * - their seat cancelled by the driver (a no-show) → "driverCancelled" — but
+ *   not when the driver had to cancel and their search moved to a new ride
+ *   (rebookedRideId): that isn't over;
  * - their seat dropped off, the ride completed, or a fare summary in hand
  *   (the server gives one only once their trip is complete) → "completed";
  * - the ride itself cancelled, unless it was merged into a car → "cancelled".
  */
 export function riderTripOutcome(
-  result: Pick<GetRideResult, "ride" | "fareSummary"> | undefined,
+  result: Pick<GetRideResult, "ride" | "fareSummary" | "seatCancelledBy" | "rebookedRideId"> | undefined,
   riderId: string | undefined,
 ): RiderTripOutcome {
   if (!result) return null;
   const { ride, fareSummary } = result;
   if (isMergedRequest(ride)) return null;
+  // Not over: the search moved to a new ride (the caller follows it).
+  if (rebookedRideId(result)) return null;
   const mySeat = ride.passengers.find((p) => p.riderId === riderId);
-  if (mySeat?.status === "CANCELLED") return "driverCancelled";
+  if (mySeat?.status === "CANCELLED") return result.seatCancelledBy === "admin" ? "adminCancelled" : "driverCancelled";
   if (ride.status === "COMPLETED" || mySeat?.status === "DROPPED_OFF" || fareSummary) return "completed";
   if (ride.status === "CANCELLED") return "cancelled";
   return null;

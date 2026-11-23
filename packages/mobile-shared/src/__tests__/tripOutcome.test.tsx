@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RIDE_EVENTS } from "@rida/shared";
 import type { GetRideResult } from "../rides/api";
 import { useRideTracking } from "../rides/useRideTracking";
-import { isMergedRequest, riderTripOutcome } from "../rides/tripOutcome";
+import { isMergedRequest, rebookedRideId, riderTripOutcome } from "../rides/tripOutcome";
 
 /**
  * The rider's trip screen follows only this rider's own seat (2026-11-05,
@@ -135,7 +135,36 @@ describe("riderTripOutcome", () => {
   });
 });
 
+describe("a seat cancelled by someone else (2026-11-23)", () => {
+  const outcome = (r: GetRideResult, riderId = BILL) => riderTripOutcome(r, riderId);
+
+  it("the driver had to cancel and the search moved to a new ride: not over, follow it", () => {
+    const r = { ...carWith("CANCELLED", "WAITING"), seatCancelledBy: "driver" as const, rebookedRideId: "bills-new-search" };
+    expect(outcome(r)).toBeNull();
+    expect(rebookedRideId(r)).toBe("bills-new-search");
+    // Ali's screen on the same car: nothing to follow.
+    expect(rebookedRideId({ ...carWith("WAITING", "WAITING") })).toBeNull();
+  });
+
+  it("an admin's cancel ends it with CampusRide's words; a no-show as before; older servers as before", () => {
+    expect(outcome({ ...carWith("CANCELLED", "WAITING"), seatCancelledBy: "admin", rebookedRideId: null })).toBe("adminCancelled");
+    expect(outcome({ ...carWith("CANCELLED", "WAITING"), seatCancelledBy: "driver", rebookedRideId: null })).toBe("driverCancelled");
+    expect(outcome(carWith("CANCELLED", "WAITING"))).toBe("driverCancelled");
+  });
+});
+
 describe("useRideTracking, Bill's trip screen", () => {
+  it("back to searching (the driver had to cancel): re-reads the ride for the new search's start", async () => {
+    mockServer.set("bills-ride", ride("bills-ride", { riderId: BILL, status: "MATCHED" }, [seat("s", BILL, "WAITING")]));
+    const { result } = await track("bills-ride");
+    await waitFor(() => expect(result.current.data?.ride.status).toBe("MATCHED"));
+    const started = new Date().toISOString();
+    mockServer.set("bills-ride", ride("bills-ride", { riderId: BILL, status: "REQUESTED", driverId: null, broadcastStartedAt: started }, [seat("s", BILL, "WAITING")]));
+    await send(RIDE_EVENTS.STATUS, { rideId: "bills-ride", status: "REQUESTED", driverCancelled: true });
+    await waitFor(() => expect(result.current.data?.ride.broadcastStartedAt).toBe(started));
+    expect(riderTripOutcome(result.current.data, BILL)).toBeNull();
+  });
+
   it("a bare CANCELLED event doesn't end the trip: the server's answer (merged into a car) does", async () => {
     mockServer.set("bills-request", ride("bills-request", { riderId: BILL, status: "REQUESTED", driverId: null }, [seat("s", BILL, "WAITING")]));
     const { result } = await track("bills-request");

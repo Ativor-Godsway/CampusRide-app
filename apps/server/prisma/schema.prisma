@@ -58,6 +58,20 @@ enum RideCancelReason {
   NO_DRIVERS_AVAILABLE
   ALL_PASSENGERS_LEFT
   MERGED_INTO_ANOTHER_RIDE
+  /// An admin cancelled it from the admin site; who and why are in AdminAuditLog
+  /// (action "ride.cancel").
+  ADMIN_CANCELLED
+}
+
+/// Why a DRIVER cancelled a rider's pickup. Mirrors DRIVER_CANCEL_REASONS in
+/// @rida/shared. Null on a DriverCancellation from a driver app build that
+/// predates the reasons.
+enum DriverCancelReason {
+  RIDER_NOT_RESPONDING
+  CANT_REACH_PICKUP
+  CAR_PROBLEM
+  SAFETY_CONCERN
+  OTHER
 }
 
 /// Why the RIDER cancelled, as chosen in the app's cancel sheet. Product
@@ -442,6 +456,35 @@ model Ride {
   @@index([driverId])
   @@index([pickupZoneId])
   @@index([mergedIntoRideId])
+}
+
+/// One driver cancelling one rider's pickup before it happened ("Cancel
+/// pickup", services/ride/driverCancel.ts). The rider's request went back to
+/// searching: on the same ride (rebookedRideId null — the ride went back to
+/// REQUESTED, so this row is the only record of the driver it had), or on a
+/// new ride (rebookedRideId) when the car carried other riders. Counted as
+/// the driver's cancellation in admin. "Rider didn't show" is NOT one of
+/// these (RidePassenger.noShowAt).
+///
+/// Plain columns, no foreign keys: a record of what happened, like
+/// AdminAuditLog, and never in the way of deleting or anonymising a ride.
+model DriverCancellation {
+  id              String              @id @default(cuid())
+  rideId          String
+  ridePassengerId String
+  driverUserId    String
+  riderId         String
+  reason          DriverCancelReason?
+  note            String?             @db.VarChar(200)
+  /// The new request the rider was moved to (null: the same ride searched again).
+  rebookedRideId  String?
+  createdAt       DateTime            @default(now())
+
+  @@unique([ridePassengerId, driverUserId])
+  @@index([driverUserId, createdAt])
+  @@index([createdAt])
+  @@index([rideId])
+  @@index([rebookedRideId])
 }
 
 model RidePassenger {

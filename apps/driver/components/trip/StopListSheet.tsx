@@ -38,9 +38,10 @@ const TONE: Record<PassengerStatus, StatusTone> = {
  * off. Tapping a stop calls that rider.
  *
  * Any stop can be done from here, in any order (the driver reaches Bill
- * before Ali): every open pickup has "Picked up", every drop-off whose rider
- * is on board "Dropped off", and a rider waited for long enough "Didn't
- * show". The screen asks before each one (`onMark`, `onNoShow`).
+ * before Ali): every open pickup has "Picked up" and "Cancel pickup", every
+ * drop-off whose rider is on board "Dropped off", and a rider waited for
+ * long enough "Didn't show". The screen asks before each one (`onMark`,
+ * `onNoShow`, `onCancelPickup`).
  */
 export function StopListSheet({
   visible,
@@ -51,6 +52,7 @@ export function StopListSheet({
   now,
   onMark,
   onNoShow,
+  onCancelPickup,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -62,6 +64,8 @@ export function StopListSheet({
   now: number;
   onMark: (stop: TripStop) => void;
   onNoShow: (stop: TripStop) => void;
+  /** "Cancel pickup", any time before the rider is picked up. */
+  onCancelPickup?: (stop: TripStop) => void;
 }) {
   const done = passengers.filter((p) => p.status === "DROPPED_OFF");
   return (
@@ -87,6 +91,8 @@ export function StopListSheet({
           const mark = stopMarkAction(stop);
           const noShowAt = stop.kind === "PICKUP" ? noShowAvailableAt(stop.arrivedAt) : null;
           const canNoShow = stop.passengerStatus === "ARRIVED" && noShowAt !== null && now >= noShowAt;
+          const canCancel =
+            !!onCancelPickup && stop.kind === "PICKUP" && (stop.passengerStatus === "WAITING" || stop.passengerStatus === "ARRIVED");
           return (
             <View key={stop.key}>
               <ListRow
@@ -100,7 +106,7 @@ export function StopListSheet({
                 onPress={stop.riderPhone ? () => void callPhone(stop.riderPhone, name) : undefined}
                 accessibilityLabel={`Stop ${i + 1}: ${stop.kind === "PICKUP" ? "pick up" : "drop off"} ${name} at ${stop.label}. ${word}.${stop.riderPhone ? " Double-tap to call." : ""}`}
               />
-              {mark || canNoShow ? (
+              {mark || canNoShow || canCancel ? (
                 <View style={styles.rowActions}>
                   {mark ? (
                     <Button
@@ -119,6 +125,15 @@ export function StopListSheet({
                       size="pill"
                       onPress={() => onNoShow(stop)}
                       accessibilityLabel={`${name} didn't show`}
+                    />
+                  ) : null}
+                  {canCancel ? (
+                    <Button
+                      label="Cancel pickup"
+                      variant="text"
+                      size="pill"
+                      onPress={() => onCancelPickup!(stop)}
+                      accessibilityLabel={`Cancel ${name}'s pickup`}
                     />
                   ) : null}
                 </View>

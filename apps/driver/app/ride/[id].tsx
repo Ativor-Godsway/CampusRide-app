@@ -38,6 +38,7 @@ import {
   todayEarnings,
   tripPath,
   type LatLng,
+  type DriverCancelReason,
   type TripStop,
   type TripZone,
 } from "@rida/shared";
@@ -84,6 +85,7 @@ import {
   runRejectOffer,
   overlayPassengers,
   runAddRider,
+  runCancelPickup,
   runPassengerAction,
   runUndo,
   settleWith,
@@ -91,6 +93,7 @@ import {
 } from "../../lib/tripActions";
 import { TripMap } from "../../components/trip/TripMap";
 import { StopListSheet } from "../../components/trip/StopListSheet";
+import { CancelPickupSheet } from "../../components/trip/CancelPickupSheet";
 import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
 import { AddRiderTakeover } from "../../components/trip/AddRiderTakeover";
 import { TripCompleteView, TripEndedView } from "../../components/trip/TripEndScreens";
@@ -517,6 +520,8 @@ export default function TripScreen() {
   const [stopsOpen, setStopsOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /** "Cancel pickup": the stop whose rider the sheet is asking about. */
+  const [cancelStop, setCancelStop] = useState<TripStop | null>(null);
 
 
   const now = useNow((next?.kind === "PICKUP" && next.passengerStatus === "ARRIVED") || stopsOpen);
@@ -686,11 +691,20 @@ export default function TripScreen() {
     setMenuOpen(false);
     then();
   };
-  const confirmCancelPickup = () =>
-    Alert.alert(`Remove ${nextName}?`, "They'll be told their pickup was cancelled.", [
-      { text: "Keep", style: "cancel" },
-      { text: "Remove", style: "destructive", onPress: () => actOnNext("cancel") },
-    ]);
+  /**
+   * "Cancel pickup" confirmed with a reason: the rider leaves the trip at
+   * once (the request follows). The only rider gone, the trip is over: back
+   * to Home, free for new requests straight away.
+   */
+  const cancelPickup = (stop: TripStop, reason: DriverCancelReason, note: string) => {
+    setCancelStop(null);
+    runCancelPickup(ride.id, stop.passengerId, reason, note);
+    const othersLeft = passengers.some(
+      (p) => p.id !== stop.passengerId && (p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP"),
+    );
+    if (othersLeft) showToast(`${riderName(stop)}'s pickup cancelled. We're finding them another driver.`);
+    else goHome();
+  };
   const confirmNoShowAt = (stop: TripStop) =>
     Alert.alert(`${riderName(stop)} didn't show?`, "Their pickup is cancelled and they're told why.", [
       { text: "Keep waiting", style: "cancel" },
@@ -789,15 +803,15 @@ export default function TripScreen() {
             leading={<ListRow.Icon name="list-outline" />}
             onPress={() => closeMenuThen(() => setStopsOpen(true))}
           />
-          {nextPickup?.passengerStatus === "WAITING" ? (
+          {nextPickup && (nextPickup.passengerStatus === "WAITING" || nextPickup.passengerStatus === "ARRIVED") ? (
             <ListRow
               divider
               tone="danger"
               title="Cancel pickup"
-              subtitle={`${nextName} is told their pickup was cancelled`}
+              subtitle={`${nextName} is matched with another driver`}
               leading={<ListRow.Icon name="close-circle-outline" tone="danger" />}
               showChevron={false}
-              onPress={() => closeMenuThen(confirmCancelPickup)}
+              onPress={() => closeMenuThen(() => setCancelStop(nextPickup))}
             />
           ) : null}
           {nextPickup?.passengerStatus === "ARRIVED" ? (
@@ -840,6 +854,18 @@ export default function TripScreen() {
         now={now}
         onMark={confirmMark}
         onNoShow={confirmNoShowAt}
+        onCancelPickup={(stop) => {
+          setStopsOpen(false);
+          setCancelStop(stop);
+        }}
+      />
+      <CancelPickupSheet
+        visible={cancelStop !== null}
+        riderName={cancelStop ? riderName(cancelStop) : null}
+        onClose={() => setCancelStop(null)}
+        onConfirm={(reason, note) => {
+          if (cancelStop) cancelPickup(cancelStop, reason, note);
+        }}
       />
       <AddRiderSheet
         visible={addOpen}

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { CashPaymentMethod, Prisma, PrismaClient } from "@prisma/client";
+import { DRIVER_CANCEL_REASON_LABELS } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
 import { bodyOptional, boolean, empty, id, idParams, integer, object, oneOf, text } from "../http/schemas";
@@ -238,7 +239,16 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         driverRatings(prisma, [userId]),
         driverBalances(prisma, [userId]),
         oldestUnpaid(prisma),
-        prisma.ride.count({ where: { driverId: userId, cancelReason: "DRIVER_BACKED_OUT", createdAt: { gte: p.from, lt: p.to } } }),
+        // Rides they backed out of (older records), and pickups they cancelled ("Cancel pickup").
+        Promise.all([
+          prisma.ride.count({ where: { driverId: userId, cancelReason: "DRIVER_BACKED_OUT", createdAt: { gte: p.from, lt: p.to } } }),
+          prisma.driverCancellation.findMany({
+            where: { driverUserId: userId, createdAt: { gte: p.from, lt: p.to } },
+            orderBy: { createdAt: "desc" },
+            take: 50,
+          }),
+          prisma.driverCancellation.count({ where: { driverUserId: userId, createdAt: { gte: p.from, lt: p.to } } }),
+        ]),
         prisma.ride.findMany({ where: { driverId: userId, isReviewDemo: false }, select: RIDE_ROW_SELECT, orderBy: { createdAt: "desc" }, take: 10 }),
         prisma.driverOnlineSession.findMany({
           where: { driverUserId: userId, startedAt: { lt: p.to }, OR: [{ endedAt: null }, { endedAt: { gt: p.from } }] },
@@ -251,6 +261,12 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
           WHERE "driverUserId" = ${userId} AND "recordedAt" > ${new Date(Date.now() - LOCATION_TRAIL_KEEP_DAYS * 86_400_000)}
           ORDER BY day DESC`,
       ]);
+      const [backedOut, pickupCancels, pickupCancelCount] = cancelledByDriver;
+      const cancelRiders = new Map(
+        (await prisma.user.findMany({ where: { id: { in: [...new Set(pickupCancels.map((c) => c.riderId))] } }, select: { id: true, name: true } })).map(
+          (u) => [u.id, u.name],
+        ),
+      );
       const fares = trips.reduce((s, t) => s + t.farePesewas, 0);
       const commission = trips.reduce((s, t) => s + t.commissionPesewas, 0);
       const acc = acceptance(offers);
@@ -269,8 +285,17 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
           timedOut: acc.timedOut,
           acceptanceRate: acc.rate,
           avgReplyMs: acc.avgReplyMs,
-          cancelledByDriver,
+          cancelledByDriver: backedOut + pickupCancelCount,
         },
+        /** Their "Cancel pickup"s in the period, newest first (at most 50). */
+        cancellations: pickupCancels.map((c) => ({
+          at: c.createdAt.toISOString(),
+          rideId: c.rideId,
+          riderName: cancelRiders.get(c.riderId) ?? "Unknown",
+          reason: c.reason,
+          reasonLabel: c.reason ? DRIVER_CANCEL_REASON_LABELS[c.reason] : null,
+          note: c.note,
+        })),
         rating: ratings.get(userId)?.rating ?? null,
         ratings: ratings.get(userId)?.ratings ?? 0,
         balance: {

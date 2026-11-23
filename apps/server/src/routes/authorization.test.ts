@@ -170,6 +170,8 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /admin/drivers/:id": "admin",
   "GET /admin/drivers/:id/trail": "admin",
   "POST /admin/drivers/:id/suspend": "admin",
+  "POST /admin/rides/:id/cancel": "admin",
+  "POST /admin/rides/:id/seats/:seatId/cancel": "admin",
   "POST /admin/drivers/:id/unsuspend": "admin",
   "GET /admin/cash": "admin",
   "GET /admin/cash/payments": "admin",
@@ -506,7 +508,7 @@ function cases(): OwnershipCase[] {
       body: res.body ? (res.json() as Record<string, unknown>) : {},
     };
   };
-  const { riderA, riderB, passengerC, noShowN, driver1, driver2, car, searching, deciding, done } =
+  const { riderA, riderB, noShowN, driver1, driver2, car, searching, deciding, done } =
     w;
   const seatA = car.seatIds[riderA.user.id]!;
 
@@ -580,11 +582,17 @@ function cases(): OwnershipCase[] {
       unchanged: async () => expect(await statusOf(searching.id)).toBe("REQUESTED"),
     },
     {
+      // A rider with a seat in the car may cancel THEIR seat (rideCancels.test.ts),
+      // never the car; a rider with no seat in it hears nothing at all.
       route: "POST /rides/:id/cancel",
-      name: "a passenger can't cancel the car of the rider who booked it",
-      run: () => as(passengerC, "POST", `/rides/${car.id}/cancel`, {}),
+      name: "a rider with no seat in a car can't cancel it, or anyone's seat in it",
+      run: () => as(riderB, "POST", `/rides/${car.id}/cancel`, {}),
       expectStatus: 404,
-      unchanged: async () => expect(await statusOf(car.id)).toBe("MATCHED"),
+      unchanged: async () => {
+        expect(await statusOf(car.id)).toBe("MATCHED");
+        const seats = await prisma.ridePassenger.findMany({ where: { rideId: car.id }, select: { status: true } });
+        expect(seats.every((s) => s.status === "WAITING")).toBe(true);
+      },
     },
     {
       route: "POST /rides/:id/switch",

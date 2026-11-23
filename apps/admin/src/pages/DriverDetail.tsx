@@ -222,6 +222,21 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
               </ul>
             )}
 
+            {x.cancellations?.length ? (
+              <>
+                <h3>Pickups they cancelled</h3>
+                <ul className="plain-list">
+                  {x.cancellations.map((c, i) => (
+                    <li key={i}>
+                      <Link to={withParams(path, search, { driver: null, ride: c.rideId })}>{dayAndTime(c.at)}</Link> · {c.riderName} ·{" "}
+                      {c.reasonLabel ?? "no reason given (older app)"}
+                      {c.note ? <span className="muted"> “{c.note}”</span> : null}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+
             <h3>Offers</h3>
             {x.offers.length === 0 ? (
               <p className="muted">No offers in this period.</p>

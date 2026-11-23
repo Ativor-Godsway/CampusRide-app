@@ -118,7 +118,7 @@ The request names a resource. If it isn't the caller's: **404**, same body as
 |---|---|---|---|---|
 | `GET /rides/:id` | Yes | RIDER | The booking rider or a rider with a seat on it. Other riders' pins are blanked. The driver's number is shown during the trip and for 24 h after it completes; never on a cancelled ride. | account default |
 | `POST /rides/:id/decision` | Yes | RIDER | The booking rider only. | account default |
-| `POST /rides/:id/cancel` | Yes | RIDER | The booking rider only. If the driver has added other riders to the car, only the booking rider's own seat is cancelled and the car carries on. | 12 / hour; account default |
+| `POST /rides/:id/cancel` | Yes | RIDER | The booking rider, or a rider with a seat on the ride (or whose own request was merged into it). A rider with a seat in a car someone else booked, or in their own car others are in, cancels only their own seat before pickup and the car carries on; a rider alone in their own request cancels the ride. Anyone else gets 404. | 12 / hour; account default |
 | `POST /rides/:id/switch` | Yes | RIDER | The booking rider only. | 10 / 15 min; account default |
 | `POST /rides/:id/initiate-payment` | Yes | RIDER | The booking rider or a passenger, for their own fare. Answers "cash only" while payments are off. | 15 / 15 min; account default |
 | `GET /rides/:id/payment-status` | Yes | RIDER | The booking rider or a passenger; their own payment only. | account default |
@@ -137,7 +137,7 @@ The request names a resource. If it isn't the caller's: **404**, same body as
 | `POST /rides/:id/passengers/:passengerId/arrived` | Yes | DRIVER | The car's own driver, for a seat on that car. | account default |
 | `POST /rides/:id/passengers/:passengerId/pickup` | Yes | DRIVER | As above. | account default |
 | `POST /rides/:id/passengers/:passengerId/dropoff` | Yes | DRIVER | As above. | account default |
-| `POST /rides/:id/passengers/:passengerId/cancel` | Yes | DRIVER | As above. | account default |
+| `POST /rides/:id/passengers/:passengerId/cancel` | Yes | DRIVER | As above (the assigned driver only, before pickup). "Cancel pickup" with a reason: the rider's request searches again for another driver; recorded as a `DriverCancellation`. With `{ reason: "NO_SHOW" }`: "Rider didn't show", unchanged. | account default |
 | `POST /rides/:id/passengers/:passengerId/no-show` | Yes | DRIVER | As above (older app builds). | account default |
 | `POST /rides/:id/passengers/:passengerId/undo` | Yes | DRIVER | As above; only shortly after the step, never the trip's last drop-off. | account default |
 
@@ -187,6 +187,8 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/system` | Yes | ADMIN | Read-only facts for Settings: app minimum versions, review demo mode on/off (setting names only), server commit and start time. | account default |
 | `GET /admin/audit` | Yes | ADMIN | The audit log, newest first, filtered by action, admin and text; phone numbers masked. Paginated. | account default |
 | `GET /admin/rides/:id` | Yes | ADMIN | One ride in full: timeline, offers and answers, seats and fares, exact pins and route, ratings, SOS, tracking links. | account default |
+| `POST /admin/rides/:id/cancel` | Yes | ADMIN | Cancels a whole ride in any active status, with a required reason. Riders and driver told. Audit-logged (`ride.cancel`). | account default; plus 60 changes / 15 min |
+| `POST /admin/rides/:id/seats/:seatId/cancel` | Yes | ADMIN | Cancels one rider's seat (any status but dropped off), with a required reason; on a merged request's leftover seat, the rider's seat in the car it joined too. Audit-logged (`ride.seat.cancel`). | account default; plus 60 changes / 15 min |
 | `GET /admin/supply-demand` | Yes | ADMIN | Supply & demand for a period: requests, got a driver, median time to a driver, no-driver heat grid, driver-hours online, per-zone verdict. Cached 60 s per period. | account default |
 | `GET /admin/cancellations` | Yes | ADMIN | Cancellations for a period: who, why, before/after a driver took it, by hour, the cancelled rides (phones masked). Cached 60 s per period. | account default |
 | `GET /admin/places/activity` | Yes | ADMIN | Pickups and drop-offs for a period on a ~55 m grid, and the busiest places. Cached 60 s per period. | account default |

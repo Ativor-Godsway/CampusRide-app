@@ -69,7 +69,9 @@ export function useRideTracking(rideId: string | undefined) {
     const onStatus = (payload: RideStatusPayload) => {
       if (payload.rideId !== rideId) return;
       queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current) => withRideStatus(current, payload));
-      if (payload.status === "CANCELLED" || payload.status === "COMPLETED") refetch();
+      // Back to searching (the driver had to cancel): a fresh read brings the
+      // new search's start time, for the countdown.
+      if (payload.status === "CANCELLED" || payload.status === "COMPLETED" || payload.status === "REQUESTED") refetch();
     };
 
     const onDriverAssigned = (payload: DriverAssignedPayload) => {

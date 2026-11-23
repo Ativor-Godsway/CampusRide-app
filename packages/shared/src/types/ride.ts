@@ -32,7 +32,9 @@ export type RideCancelReason =
   | "DRIVER_BACKED_OUT"
   | "NO_DRIVERS_AVAILABLE"
   | "ALL_PASSENGERS_LEFT"
-  | "MERGED_INTO_ANOTHER_RIDE";
+  | "MERGED_INTO_ANOTHER_RIDE"
+  /** An admin cancelled it from the admin site (reason in the admin audit log). */
+  | "ADMIN_CANCELLED";
 
 /**
  * Exact pins are optional on these types: absent from servers before

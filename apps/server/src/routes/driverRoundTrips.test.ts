@@ -23,6 +23,7 @@ import {
   createTestRide,
   createTestUser,
   getThreeTestZones,
+  withRebookedRides,
 } from "../services/ride/testFixtures";
 
 /**
@@ -63,7 +64,14 @@ const BUDGET = {
   "POST passenger pickup": 6,
   "POST passenger dropoff (not last)": 5,
   "POST passenger dropoff (last, completes ride)": 6,
-  "POST passenger cancel": 6,
+  // 11 since "Cancel pickup" re-books the rider (2026-11-23): the seat is
+  // cancelled AND, in the same transaction, the rider's new request is made
+  // (ride, seat, "never this driver" rejection: 4 trips with Prisma's read
+  // back) and the DriverCancellation written — so a rider can never lose a
+  // seat without getting their new search. Whether it is a retry and the
+  // rider's own merged request are read in the lock statement itself. Rare
+  // next to the other steps, and the driver app doesn't wait on it.
+  "POST passenger cancel": 11,
 } as const;
 
 type Endpoint = keyof typeof BUDGET;
@@ -91,6 +99,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  rideIds.splice(0, rideIds.length, ...(await withRebookedRides(rideIds)));
   // Rides merged into one another share riders, so remove every seat and
   // ride first, then the people.
   const rides = await prisma.ride.findMany({ where: { id: { in: rideIds } }, include: { passengers: true } });

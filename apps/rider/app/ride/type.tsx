@@ -59,6 +59,7 @@ import {
   useLaunchView,
   useRideTracking,
   isMergedRequest,
+  rebookedRideId,
   riderTripOutcome,
   useToast,
   RideRequestRefusedError,
@@ -114,6 +115,9 @@ const SHEET_HEIGHT_SLOP = 16;
 function httpStatus(error: unknown): number | undefined {
   return (error as { response?: { status?: number } } | null)?.response?.status;
 }
+
+/** Said when the driver had to cancel and the ride is searching again for another. */
+const DRIVER_HAD_TO_CANCEL = "Your driver had to cancel. We're finding you another driver.";
 
 export default function RideTypeScreen() {
   const router = useRouter();
@@ -228,8 +232,21 @@ export default function RideTypeScreen() {
     }
   }, [isMerged, ride?.mergedIntoRideId, activeRideId]);
 
+  // The driver had to cancel and this rider's search moved to a new ride
+  // (they were sharing the car with others): follow it, as for a merge, and
+  // say why the driver went.
+  const movedTo = rebookedRideId(trackingData);
+  useEffect(() => {
+    if (!movedTo || movedTo === activeRideId) return;
+    setActiveRideId(movedTo);
+    setDriverLocation(null);
+    showToast(DRIVER_HAD_TO_CANCEL);
+    void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
+  }, [movedTo, activeRideId, showToast, queryClient]);
+
   // A driver accepted: one success buzz, only on the live transition (not
-  // when reopening a ride that was already matched).
+  // when reopening a ride that was already matched). The driver had to
+  // cancel (the ride is searching again): say so, and drop their car.
   const previousStatus = useRef(ride?.status);
   useEffect(() => {
     const before = previousStatus.current;
@@ -237,7 +254,11 @@ export default function RideTypeScreen() {
     if ((before === "REQUESTED" || before === "AWAITING_RIDER_DECISION") && ride?.status === "MATCHED") {
       haptics.success();
     }
-  }, [ride?.status]);
+    if ((before === "MATCHED" || before === "ARRIVED") && ride?.status === "REQUESTED") {
+      setDriverLocation(null);
+      showToast(DRIVER_HAD_TO_CANCEL);
+    }
+  }, [ride?.status, showToast]);
 
   // The driver reached the pickup: the same buzz, again only live (null until
   // the ride has loaded, so reopening an arrived ride stays quiet).
@@ -394,7 +415,7 @@ export default function RideTypeScreen() {
   );
 
   // ── Phase ───────────────────────────────────────────────────────────────────
-  const isSearching = activeRideId !== null && (!ride || ride.status === "REQUESTED" || isMerged);
+  const isSearching = activeRideId !== null && (!ride || ride.status === "REQUESTED" || isMerged || movedTo !== null);
   const hasDriver = ride?.status === "MATCHED" || ride?.status === "ARRIVED";
   /**
    * Over: a modal sheet over the dimmed map takes the ride sheet's place.
@@ -936,6 +957,11 @@ export default function RideTypeScreen() {
         <TripCancelledSheet
           title="Driver cancelled"
           message="Your driver cancelled your pickup. Please request a ride again."
+          onDone={() => setLeaving(true)}
+        />
+      ) : tripEnded === "adminCancelled" ? (
+        <TripCancelledSheet
+          message="CampusRide cancelled your ride. You can request a new one."
           onDone={() => setLeaving(true)}
         />
       ) : tripEnded === "cancelled" ? (

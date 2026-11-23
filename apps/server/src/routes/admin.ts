@@ -34,6 +34,7 @@ import {
   phone as phoneField,
   text,
 } from "../http/schemas";
+import { ACTIVE_RIDE_STATUSES } from "../services/ride/activeRide";
 
 /**
  * Phase 5 admin surface. Closes the gap where `Driver.isApproved` was enforced
@@ -207,7 +208,8 @@ const SCHEMAS = {
   reject: { params: idParams, body: object({ reason: text(MAX.reason, { nullable: true }) }) },
   rides: {
     querystring: object({
-      status: oneOf(RIDE_STATUSES),
+      // OPEN: any status still going on (to spot stuck rides).
+      status: oneOf([...RIDE_STATUSES, "OPEN"]),
       type: oneOf(["LONE", "SHARED"]),
       zoneId: id,
       driverId: id,
@@ -394,7 +396,8 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
   });
 
   /**
-   * The Rides page: newest first, filtered by status, type, pickup zone,
+   * The Rides page: newest first, filtered by status (OPEN: every status
+   * still going on), type, pickup zone,
    * driver, rider phone, ride id and a createdAt window (from/to), a page at
    * a time. Phone numbers are masked; the rider's full number is only in
    * their detail panel. Read-only, so no audit row.
@@ -420,8 +423,12 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
       pageSize?: number;
     };
 
-    if (query.status !== undefined && !(RIDE_STATUSES as readonly string[]).includes(String(query.status))) {
-      return reply.code(400).send({ error: `status must be one of ${RIDE_STATUSES.join(", ")}` });
+    if (
+      query.status !== undefined &&
+      query.status !== "OPEN" &&
+      !(RIDE_STATUSES as readonly string[]).includes(String(query.status))
+    ) {
+      return reply.code(400).send({ error: `status must be one of ${RIDE_STATUSES.join(", ")}, OPEN` });
     }
 
     let from: Date | null;
@@ -445,7 +452,8 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
 
     // Review demo rides (App Store / Google Play reviewers) aren't real trips.
     const where: Prisma.RideWhereInput = { isReviewDemo: false };
-    if (query.status !== undefined) where.status = query.status as Prisma.RideWhereInput["status"];
+    if (query.status === "OPEN") where.status = { in: [...ACTIVE_RIDE_STATUSES] };
+    else if (query.status !== undefined) where.status = query.status as Prisma.RideWhereInput["status"];
     if (query.type) where.type = query.type;
     if (query.zoneId) where.pickupZoneId = query.zoneId;
     if (query.driverId) where.driverId = query.driverId;
