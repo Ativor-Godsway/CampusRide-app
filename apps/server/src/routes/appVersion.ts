@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { APP_CONFIG_PATH, type AppConfig, type AppMinVersions } from "@rida/shared";
+import { APP_CONFIG_PATH, type AppConfig, type AppMinVersions, type ServiceStatus } from "@rida/shared";
 import { config } from "../config";
 import { noInput } from "../http/schemas";
 
@@ -16,6 +16,8 @@ export function registerAppVersionRoutes(
   app: FastifyInstance,
   versions: AppMinVersions = config.appMinVersions,
   appConfig: AppConfig = { supportPhone: config.supportPhone },
+  /** Service hours in force now (services/service/serviceHours.ts); left out when not given. */
+  serviceStatusNow?: () => Promise<ServiceStatus>,
 ): void {
   app.get("/app/min-version", { schema: noInput }, async (_request, reply) => {
     // Always the current answer: a minimum raised on Render reaches every phone at its next check.
@@ -24,11 +26,15 @@ export function registerAppVersionRoutes(
 
   /**
    * GET /app/config — public, no login: settings the apps read from the
-   * server so they change without an app update. Today only the number
-   * "Call support" dials (SUPPORT_PHONE on Render; the apps keep a built-in
-   * one for when this can't be reached). Not secret, the same for everyone.
+   * server so they change without an app update: the number "Call support"
+   * dials (SUPPORT_PHONE on Render; the apps keep a built-in one for when
+   * this can't be reached), and `service` — whether riders can book now
+   * (service hours: open, reason, nextOpenAt, closesAt, message). Not
+   * secret, the same for everyone (review demo accounts, which always can
+   * book, learn that from GET /me/service-status).
    */
   app.get(APP_CONFIG_PATH, { schema: noInput }, async (_request, reply) => {
-    return reply.header("cache-control", "no-store").send(appConfig);
+    const body: AppConfig = serviceStatusNow ? { ...appConfig, service: await serviceStatusNow() } : appConfig;
+    return reply.header("cache-control", "no-store").send(body);
   });
 }

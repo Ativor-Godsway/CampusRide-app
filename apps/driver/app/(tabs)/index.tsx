@@ -19,6 +19,7 @@ import {
   LOCATION_PROBLEM_MESSAGE,
   SERVICE_AREA_POLYGON,
   cloudinaryAvatar,
+  driverServiceNotice,
   filterRequestsByType,
   getSharedFarePerRider,
   sortRequestsNearestFirst,
@@ -50,6 +51,7 @@ import {
   spacing,
   useAuth,
   useLaunchView,
+  useServiceStatus,
   usePushPermission,
   useToast,
   type EligibleRideItem,
@@ -123,6 +125,9 @@ export default function DriverHomeScreen() {
   const { isLoading: authLoading, user } = useAuth();
   // Before the public launch: a small reminder (drivers still go online, for early-access riders).
   const launch = useLaunchView();
+  // Service hours: "Service hours 8:00 AM – 5:00 PM", and when riders can't book. Going online still works.
+  const service = useServiceStatus();
+  const serviceNotice = driverServiceNotice(service.held, service.now);
   const { isOnline, waking, outsideServiceArea, position, locationProblem, commissionBlock, clearCommissionBlock, toggle } =
     useDriverPresence();
   const location = useDriverLocation();
@@ -420,6 +425,16 @@ export default function DriverHomeScreen() {
         {trip ? <TripRow trip={trip} onPress={() => router.push(tripHref(trip))} /> : null}
 
         {launch.kind === "countdown" ? <LaunchBanner parts={launch.parts} /> : null}
+
+        {!trip && serviceNotice ? (
+          <View style={styles.serviceNotice} accessibilityRole="text">
+            <Ionicons name="time-outline" size={16} color={colors.ink3} />
+            <Text variant="subhead" color="secondary" style={styles.serviceNoticeText}>
+              {serviceNotice.hours}
+              {serviceNotice.blocked ? ` · ${serviceNotice.blocked}` : ""}
+            </Text>
+          </View>
+        ) : null}
 
         {!trip && balance.data?.warning ? (
           <View style={styles.problem}>
@@ -721,6 +736,14 @@ function TripRow({ trip, onPress }: { trip: RideWithZones; onPress: () => void }
 }
 
 const styles = StyleSheet.create({
+  serviceNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+  },
+  serviceNoticeText: {
+    flex: 1,
+  },
   root: { flex: 1, backgroundColor: colors.mapLand },
   // ── Over the map
   topBar: {

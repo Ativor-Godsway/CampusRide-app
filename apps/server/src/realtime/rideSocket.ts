@@ -14,6 +14,8 @@ import {
   type DriverPositionUpdatePayload,
   type DriverPresenceAnswer,
   type OfferClosedPayload,
+  SERVICE_STATUS_EVENT,
+  type ServiceStatus,
 } from "@rida/shared";
 import { ExpiredAccessTokenError, verifyAccessToken } from "../services/auth/tokens";
 import { loadActiveAccount } from "../services/auth/accountStatus";
@@ -412,4 +414,13 @@ export function emitDriverBroadcast(
   if (!ioRef || driverUserIds.length === 0) return;
   const rooms = driverUserIds.map(roomForDriver);
   ioRef.to(rooms).emit(DRIVER_EVENTS.RIDE_BROADCAST, payload);
+}
+
+/**
+ * Service hours changed (services/service/serviceAnnouncer.ts): to every
+ * connected app, riders and drivers alike, so the Home banner and the driver
+ * notice update without a restart. Old app builds ignore the event.
+ */
+export function emitServiceStatus(payload: ServiceStatus): void {
+  ioRef?.emit(SERVICE_STATUS_EVENT, payload);
 }

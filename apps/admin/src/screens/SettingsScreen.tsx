@@ -24,6 +24,7 @@ import {
 import { useAuth, useToken } from "../auth";
 import { dayAndTime, shortDay } from "../lib/time";
 import { PasskeysCard } from "./PasskeysCard";
+import { ServiceHoursCard } from "./ServiceHoursCard";
 
 const MODES: { mode: LaunchMode; title: string; detail: string }[] = [
   { mode: "OFF", title: "Off", detail: "Normal: everyone can ride. No countdown anywhere." },
@@ -49,7 +50,7 @@ function toInputs(iso: string | null): { date: string; time: string } {
 }
 
 /**
- * Settings (for now: launch mode). The countdown before the public launch,
+ * Settings: service hours (ServiceHoursCard), then launch mode. The countdown before the public launch,
  * who can book during it, and the one-time "CampusRide is live!" push.
  * Every change here is written to the audit log. Times are Ghana time, GMT.
  */
@@ -175,6 +176,8 @@ export function SettingsScreen() {
   return (
     <div className="settings-stack">
       <PasskeysCard />
+
+      <ServiceHoursCard />
 
       {error ? <p className="error-text" role="alert">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}

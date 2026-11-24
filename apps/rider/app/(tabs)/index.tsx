@@ -44,9 +44,11 @@ import {
   useLaunchView,
   useNearbyCars,
   useNotificationsOffReminderOnce,
+  useServiceStatus,
   type ActiveRideSummary,
   type RideSummary,
 } from "@rida/mobile-shared";
+import { ServiceHoursBanner } from "../../components/ServiceHoursBanner";
 import { activeRideParams, useActiveRide } from "../../lib/activeRide";
 import { useActiveRideStatus } from "../../lib/activeRideStatus";
 import { chooseRideParams, usePlaces, useResolvePickup } from "../../lib/chooseRide";
@@ -93,6 +95,9 @@ export default function HomeTab() {
   const { data: places } = usePlaces();
   // Before the public launch: a countdown (gone by itself at launch time; never for early access).
   const launch = useLaunchView();
+  // Service hours: closed / no drivers online (Request is disabled on Choose a
+  // ride), or "Closes at 5:00 PM" near closing. Live over the socket.
+  const service = useServiceStatus();
   // Available cars around, live, like Bolt or Uber: only while Home is on
   // screen and the app is open, and only once we know there's no ride going
   // on (then the rider follows their own driver). Shown during the launch
@@ -204,6 +209,8 @@ export default function HomeTab() {
 
         {launch.kind === "countdown" ? (
           <LaunchCountdownCard launchAt={launch.launchAt} parts={launch.parts} />
+        ) : !activeRide ? (
+          <ServiceHoursBanner view={service.view} notifyMe={service.notifyMe} setNotifyMe={service.setNotifyMe} />
         ) : null}
 
         <Pressable

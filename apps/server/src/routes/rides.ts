@@ -62,6 +62,7 @@ import { resolveRiderCancelTarget, seatCancelledBy } from "../services/ride/canc
 import { finalizeRideCompletion } from "../services/ride/completion";
 import { nearbyCars } from "../services/ride/nearbyCars";
 import { LaunchNotOpenError } from "../services/launch/launchSettings";
+import { ServiceClosedError } from "../services/service/serviceHours";
 
 /**
  * Shape returned by `POST /rides/:id/initiate-payment` while
@@ -247,6 +248,17 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         return reply
           .code(422)
           .send({ error: err.message, code: err.code, launchAt: err.launchAt.toISOString() });
+      }
+      if (err instanceof ServiceClosedError) {
+        // 422, not 409: every app build already in riders' hands shows a
+        // 400/404/422 with `code` + `error` in the server's own words
+        // ("Couldn't request this ride" + error), but takes ANY 409 here to
+        // mean "you already have a ride in progress" and opens that sheet.
+        return reply.code(422).send({
+          error: err.message,
+          code: err.code,
+          nextOpenAt: err.nextOpenAt?.toISOString() ?? null,
+        });
       }
       if (err instanceof SameZoneError) {
         return reply.code(400).send({ error: err.message });

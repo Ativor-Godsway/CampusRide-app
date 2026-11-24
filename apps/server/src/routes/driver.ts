@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { announceServiceSoon } from "../services/service/serviceAnnouncer";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { PassengerStatus, UndoableStep } from "@rida/shared";
@@ -336,6 +337,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // Stats: hours online (services/stats/driverSessions.ts).
     if (body.isOnline) await openDriverSession(prisma, userId);
     else await closeDriverSession(prisma, userId, "OFFLINE");
+    // The first driver online (or the last one gone): riders' apps hear at once.
+    announceServiceSoon(prisma);
 
     return reply.code(200).send({ driver: updated });
   });

@@ -9,6 +9,8 @@ import type { PaymentMethod, RiderCancelReason, RideType, TripEnd } from "@rida/
 import {
   MAX_PIN_ADJUST_METERS,
   PICKUP_NOTE_MAX_LENGTH,
+  NO_DRIVERS_ONLINE_CODE,
+  SERVICE_CLOSED_CODE,
   clampToRadius,
   countdownWords,
   estimateEtaMinutes,
@@ -56,7 +58,10 @@ import {
   useAuth,
   useDriverLocation,
   useCarNotice,
+  Notice,
   useLaunchView,
+  refreshServiceStatus,
+  useServiceStatus,
   useRideTracking,
   isMergedRequest,
   rebookedRideId,
@@ -177,6 +182,14 @@ export default function RideTypeScreen() {
   const { user } = useAuth();
   // Before the public launch the Request button says when booking opens (the server refuses it anyway).
   const launch = useLaunchView();
+  // Service hours: closed, or no driver online — Request is disabled (the server refuses it anyway).
+  const service = useServiceStatus();
+  const serviceBlock =
+    service.view.kind === "closed"
+      ? { label: "CampusRide is closed", spoken: [service.view.title, service.view.detail].filter(Boolean).join(" ") }
+      : service.view.kind === "noDrivers"
+        ? { label: "No drivers online", spoken: service.view.title }
+        : null;
   const { data: trackingData } = useRideTracking(activeRideId ?? undefined);
 
   // "Picking up 1 more rider on the way · ~3 min" when the driver adds a
@@ -467,7 +480,8 @@ export default function RideTypeScreen() {
         await queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
         setConflictOpen(true);
       } else if (err instanceof RideRequestRefusedError) {
-        // Outside the area, a place that's gone, the same spot twice: the server's own words.
+        // Outside the area, a place that's gone, the same spot twice, closed: the server's own words.
+        if (err.code === SERVICE_CLOSED_CODE || err.code === NO_DRIVERS_ONLINE_CODE) refreshServiceStatus(queryClient);
         Alert.alert("Couldn't request this ride", err.message);
       } else {
         Alert.alert("Couldn't request a ride", rateLimitText(err) ?? "Please check your connection and try again.");
@@ -767,6 +781,9 @@ export default function RideTypeScreen() {
                 disabled
                 accessibilityLabel={`Booking opens in ${countdownWords(launch.parts)}`}
               />
+            ) : serviceBlock ? (
+              // Closed, or no driver online: prices and places still work, booking doesn't.
+              <Button label={serviceBlock.label} disabled accessibilityLabel={serviceBlock.spoken} />
             ) : (
               <Button
                 label={`Request ${selectedOption.title}`}
@@ -780,6 +797,12 @@ export default function RideTypeScreen() {
           <Text variant="title2" accessibilityRole="header">
             Choose a ride
           </Text>
+          {serviceBlock && launch.kind !== "countdown" ? <Notice tone="warning" icon="time-outline" message={serviceBlock.spoken} /> : null}
+          {service.view.kind === "open" && service.view.closingSoon ? (
+            <Text variant="subhead" color="secondary">
+              {service.view.closingSoon}
+            </Text>
+          ) : null}
           <View style={styles.optionList} accessibilityRole="radiogroup" accessibilityLabel="Choose a ride">
             {options.map((option) => (
               <RideOptionCard
