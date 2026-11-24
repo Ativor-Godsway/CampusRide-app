@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { liveDriverWhere } from "../zones/driverLiveness";
 import {
   DEFAULT_SERVICE_SETTINGS,
   NO_DRIVERS_ONLINE_CODE,
@@ -92,12 +93,13 @@ export async function readServiceHours(prisma: PrismaClient): Promise<StoredServ
 }
 
 /**
- * Drivers riders could be offered to now: online, approved, real (review
- * demo drivers only ever get review demo rides) and not deleted.
+ * Drivers riders could be offered to now: online and heard from in the last
+ * 10 minutes (services/zones/driverLiveness.ts), approved, real (review demo
+ * drivers only ever get review demo rides) and not deleted.
  */
-export function countOnlineDrivers(prisma: PrismaClient): Promise<number> {
+export function countOnlineDrivers(prisma: PrismaClient, now: Date = new Date()): Promise<number> {
   return prisma.driver.count({
-    where: { isOnline: true, isApproved: true, user: { isReviewDemo: false, deletedAt: null } },
+    where: { ...liveDriverWhere(now.getTime()), isApproved: true, user: { isReviewDemo: false, deletedAt: null } },
   });
 }
 
@@ -111,7 +113,7 @@ export async function isServiceOpen(prisma: PrismaClient, now = new Date()): Pro
   // First without drivers: closed hours need no count.
   const byHours = serviceStateAt({ ...settings, blockWhenNoDrivers: false }, now, 0);
   if (!byHours.open || !settings.blockWhenNoDrivers) return byHours;
-  return serviceStateAt(settings, now, await countOnlineDrivers(prisma));
+  return serviceStateAt(settings, now, await countOnlineDrivers(prisma, now));
 }
 
 /** The wire form, for GET /app/config, GET /me/service-status and the socket event. */

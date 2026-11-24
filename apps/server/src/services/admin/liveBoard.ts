@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
+import { liveDriverWhere } from "../zones/driverLiveness";
 import { freshDriverPositions } from "../zones/livePositions";
 import { driverPresenceOf } from "../zones/driverPresence";
 import { ACTIVE_DRIVER_STATUSES } from "../ride/stateMachine";
@@ -79,7 +80,8 @@ async function readBoard(prisma: PrismaClient): Promise<Board> {
       },
     }),
     prisma.driver.findMany({
-      where: { isOnline: true, user: { isReviewDemo: false, deletedAt: null } },
+      // Online and heard from in the last 10 minutes (services/zones/driverLiveness.ts).
+      where: { ...liveDriverWhere(), user: { isReviewDemo: false, deletedAt: null } },
       select: {
         id: true,
         userId: true,

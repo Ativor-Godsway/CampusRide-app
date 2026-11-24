@@ -209,30 +209,63 @@ ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run ro
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:clear-point-cache --workspace apps/server
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run routes:clear-point-cache --workspace apps/server -- --apply
 
-# 5. Zone adjacency: every zone in service next to every other (read-only check;
-#    then, only if it reports missing rows, a dry run and --apply)
+# 5. Zone neighbours: compare with the suggested ones (read-only). To apply
+#    them, use the admin site (Places → Zone neighbours → Use the suggested
+#    neighbours → Save), or a dry run and --apply here (it replaces hand edits)
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zones:check --workspace apps/server
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zones:link --workspace apps/server
 ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" npm run zones:link --workspace apps/server -- --apply
 ```
 
-### Zone adjacency
+### Zone neighbours (adjacency)
 
 Dispatch offers a ride to online drivers in the pickup zone **and the zones
-adjacent to it** (ZoneAdjacency, read in either direction; rows touching a
-retired zone don't count). `prisma/seed.ts` makes a full mesh: every zone next
-to every other, both directions — 210 rows for the 15 seeded zones. With
-Accra Mall Junction retired, 14 zones are in service and a full mesh between
-them is 182 rows (the 28 rows touching Accra Mall may still be there; they are
-harmless and counted separately).
+next to it** (ZoneAdjacency, read in either direction; rows touching a retired
+zone don't count). Until 2026-11-24 every zone was next to every other (a full
+mesh, 210 rows), so every request went to every online driver on campus.
+
+**Fallback:** when no live driver with no trip is in the pickup zone or its
+neighbours (none there, only stale or busy ones, or they declined it), the
+request goes to every live driver on campus with no trip instead, and shows in
+their "Requests near you" too. Drivers who declined it never get it again.
+
+Now they are **real neighbours**, suggested from where the zones are
+([zoneNeighbours.ts](../packages/shared/src/geo/zoneNeighbours.ts)): a zone's
+area is every spot on campus nearer its centre than any other's, and two zones
+are neighbours when those areas share at least 150 m of border, or their
+centres are within 800 m. For the 14 zones in service that is 40 pairs (80
+rows). Admins can change them (admin site, Places → Zone neighbours; every zone
+must keep one neighbour; audit-logged `zones.neighbours`). `prisma/seed.ts`
+applies the suggestion.
 
 - `zones:check` only reads, inside a READ ONLY transaction. It prints the
-  zones in service, the rows, the rows a full mesh is missing, the pairs not
-  linked either way (those are the ones dispatch actually misses) and any zone
-  with no neighbours.
-- `zones:link` lists the missing rows; with `--apply` it INSERTs them (skipping
-  any that exist) and never deletes or changes a row. A second run adds
-  nothing.
+  zones in service, the pairs linked now, the suggested pairs with their
+  distances, what differs, rows linked one way only, and any zone with no
+  neighbours.
+- `zones:link` lists what it would add and remove; with `--apply` it makes the
+  pairs exactly the suggested ones in one transaction (both directions; rows
+  with a retired zone left alone). A second run changes nothing.
+
+### Far-trip pricing
+
+Campus has two far ends, kept in `Place.farEnd` (admin site, Places → Far-trip
+pricing; each place North, South or none):
+
+- **North**: Pentagon (every block, the food court), TF Hall (James Topp Nelson
+  Yankah Hall), Bani Hostel, Evandy Hostel, and the hostels right beside them:
+  Nairobi, Kampala, Dar es Salaam and Addis Ababa Courts.
+- **South (Diaspora)**: Jean Nelson Aka, Elizabeth Frances Sey, Dr. Hilla Limann
+  and Alexander Kwapong Halls, and what is right beside them inside the
+  complex: Elizabeth Sey Pharmacy, Games Arena, Bervels, Tickels Restaurant.
+
+A Shared seat costs the far price (GH₵9 to start) **only** on a trip from one
+end to the other, either way. Every other Shared trip is the normal price
+(GH₵7): main campus to or from either end, inside one end, main campus to main
+campus. Ride alone is GH₵15 everywhere. An end of a trip counts as the place
+the rider chose, or else the nearest place within 250 m of the pin. The
+migration `20261124180000_dispatch_far_pricing` set the list above by name, so
+annexes and "Other spot near …" places of the named halls and hostels are
+included too. A new place near them is in neither end until an admin sets it.
 
 Both refuse a production host without `ALLOW_PRODUCTION_DB=1`, even with
 `NODE_ENV=production`, and print the database host only — never the URL. Code:

@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { CashPaymentMethod, Prisma, PrismaClient } from "@prisma/client";
-import { DRIVER_CANCEL_REASON_LABELS } from "@rida/shared";
+import { DRIVER_CANCEL_REASON_LABELS, isDriverLive } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
 import { bodyOptional, boolean, empty, id, idParams, integer, object, oneOf, text } from "../http/schemas";
@@ -101,6 +101,7 @@ function findDriver(prisma: PrismaClient, key: string) {
       photoUrl: true,
       isApproved: true,
       isOnline: true,
+      lastHeartbeatAt: true,
       suspendedAt: true,
       suspendedReason: true,
       createdAt: true,
@@ -165,6 +166,7 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
             photoUrl: true,
             isApproved: true,
             isOnline: true,
+            lastHeartbeatAt: true,
             suspendedAt: true,
             createdAt: true,
             user: { select: { name: true, phone: true } },
@@ -194,7 +196,8 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
           car: [d.carColor, d.carMake, d.carModel].filter(Boolean).join(" ") || null,
           photoUrl: d.photoUrl,
           isApproved: d.isApproved,
-          isOnline: d.isOnline,
+          // Online only while the app is heard from (services/zones/driverLiveness.ts).
+          isOnline: d.isOnline && isDriverLive(d.lastHeartbeatAt, now.getTime()),
           suspended: d.suspendedAt !== null,
           onTrip: onTrip.has(d.userId),
           joinedAt: d.createdAt.toISOString(),
@@ -333,7 +336,7 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         plate: driver.plate,
         photoUrl: driver.photoUrl,
         isApproved: driver.isApproved,
-        isOnline: driver.isOnline,
+        isOnline: driver.isOnline && isDriverLive(driver.lastHeartbeatAt),
         suspendedAt: driver.suspendedAt?.toISOString() ?? null,
         suspendedReason: driver.suspendedReason,
         joinedAt: driver.createdAt.toISOString(),

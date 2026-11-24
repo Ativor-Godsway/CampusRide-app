@@ -62,20 +62,13 @@ describe("recomputeLockedFares — JOIN stays at 700 (flat pricing, no ratchet)"
     expect(passengers.map((p) => p.lockedFare)).toEqual([700, 700, 700, 700]);
   });
 
-  it("Math.min guard still clamps a stale higher rate down to 700, never up", () => {
+  it("a far-trip GH₵9 seat keeps its fare when a GH₵7 rider joins (no clamp to one flat rate)", () => {
     const passengers: LockedFarePassenger[] = [
-      { id: "a", status: "WAITING", lockedFare: 700 }, // already at the flat rate
-      { id: "b", status: "WAITING", lockedFare: 1000 }, // stale pre-migration value
+      { id: "far", status: "WAITING", lockedFare: 900 }, // Bani Hostel → Balme: crosses the far area
+      { id: "near", status: "WAITING", lockedFare: 700 }, // joins on a trip that doesn't
     ];
-
-    // newRate is always 700 now — "b"'s stale 1000 gets clamped down on the
-    // next join; "a" was already correct and stays put. Confirms the
-    // ratchet self-heals any pre-existing non-flat lockedFare without ever
-    // raising one.
     const result = recomputeLockedFares(passengers, { type: "JOIN" });
-
-    expect(result.find((p) => p.id === "a")?.lockedFare).toBe(700);
-    expect(result.find((p) => p.id === "b")?.lockedFare).toBe(700);
+    expect(result.map((p) => p.lockedFare)).toEqual([900, 700]);
   });
 
   it("ignores DROPPED_OFF/CANCELLED passengers — inactive lockedFare left untouched", () => {

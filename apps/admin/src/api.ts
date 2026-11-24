@@ -1196,3 +1196,44 @@ export const getSystem = (token: string) => get<SystemInfo>(token, "/admin/syste
 
 /** The campus zones (the same list the apps get), for filters. */
 export const getZones = (token: string) => get<{ zones: Array<{ id: string; name: string }> }>(token, "/zones");
+
+// ─── Far-trip pricing, zone neighbours, refused bookings (2026-11-24) ───────
+
+export interface FarPricing {
+  settings: {
+    sharedPesewas: number;
+    sharedFarPesewas: number;
+    loneFarePesewas: number;
+    updatedAt: string | null;
+    updatedBy: { id: string; name: string } | null;
+  };
+  defaults: { sharedPesewas: number; sharedFarPesewas: number };
+  farPlaces: Array<{ id: string; name: string; isActive: boolean; zoneName: string; end: "NORTH" | "SOUTH" }>;
+}
+
+export const getFarPricing = (token: string) => get<FarPricing>(token, "/admin/far-pricing");
+export const saveFarPricing = (
+  token: string,
+  input: { sharedPesewas: number; sharedFarPesewas: number; farPlaces: Array<{ id: string; end: "NORTH" | "SOUTH" }> },
+) =>
+  request<FarPricing>("/admin/far-pricing", { method: "PUT", body: JSON.stringify(input) }, token);
+
+export interface ZoneNeighbours {
+  zones: Array<{ id: string; name: string }>;
+  pairs: Array<{ a: string; b: string }>;
+  suggested: Array<{ a: string; b: string; centreMeters: number; borderMeters: number }>;
+}
+
+export const getZoneNeighbours = (token: string) => get<ZoneNeighbours>(token, "/admin/zone-neighbours");
+export const saveZoneNeighbours = (token: string, pairs: Array<{ a: string; b: string }>) =>
+  request<ZoneNeighbours>("/admin/zone-neighbours", { method: "PUT", body: JSON.stringify({ pairs }) }, token);
+
+export interface RefusedBookings {
+  days: Array<{ day: string; total: number; byReason: Record<string, number>; requests: number; quotes: number }>;
+  byReason: Array<{ reason: string; total: number; requests: number; quotes: number }>;
+  total: number;
+  topPickupZones: Array<{ zoneId: string | null; name: string | null; total: number }>;
+  labels: Record<string, string>;
+}
+
+export const getRefusedBookings = (token: string, period: string) => get<RefusedBookings>(token, `/admin/refused-bookings?${period}`);

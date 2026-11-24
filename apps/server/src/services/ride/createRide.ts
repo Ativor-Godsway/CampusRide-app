@@ -1,12 +1,13 @@
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, RideSource, RideStatus, RideType } from "@rida/shared";
-import { MIN_TRIP_METERS, getLoneFare, getSharedFarePerRider, haversineDistanceMeters } from "@rida/shared";
+import { MIN_TRIP_METERS, haversineDistanceMeters } from "@rida/shared";
 import { resolveRideEnd, type ResolvedRideEnd, type RideEndInput } from "../places/rideEnds";
 import { broadcastRide } from "./dispatch";
 import { findActiveRideForRider } from "./activeRide";
 import { logger } from "../../lib/logger";
 import { assertCanBook } from "../launch/launchSettings";
 import { assertServiceOpen } from "../service/serviceHours";
+import { fareForNewSeat } from "./farePricing";
 
 /** Rides in any of these statuses count as "active" — a rider may have at most one at a time. */
 export { ACTIVE_RIDE_STATUSES } from "./activeRide";
@@ -81,6 +82,12 @@ export interface CreateRideInput {
   paymentMethod?: PaymentMethod;
   /** Defaults to "APP". USSD-originated rides pass "USSD" so transition hooks know to SMS instead of push. */
   source?: RideSource;
+  /**
+   * The price the app showed for this ride type (POST /rides/quote). Sent by
+   * current rider apps; must match, else FareChangedError. Absent (older
+   * apps, USSD): never more than the standard Shared price they show.
+   */
+  shownFare?: number | null;
 }
 
 /**
@@ -155,7 +162,10 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
 
   const pins = pinColumns(pickupPin, dropoffPin, input.pickupNote ?? null);
 
-  const lockedFare = type === "SHARED" ? getSharedFarePerRider(1) : getLoneFare();
+  // The price is set now and locked on the seat (far-trip pricing,
+  // services/ride/farePricing.ts): Ride alone GH₵15; Shared GH₵7, or GH₵9
+  // on a trip between the north and south ends of campus.
+  const lockedFare = await fareForNewSeat(prisma, type, pickupPin, dropoffPin, input.shownFare);
 
   const ride = await prisma.ride.create({
     data: {

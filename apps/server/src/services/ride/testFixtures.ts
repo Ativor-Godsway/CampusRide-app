@@ -38,6 +38,8 @@ export interface CreateTestDriverOptions {
   isOnline?: boolean;
   isApproved?: boolean;
   currentZoneId?: string | null;
+  /** When the app was last heard from (driverLiveness). Default: now, so an online test driver is live. */
+  lastHeartbeatAt?: Date | null;
 }
 
 /** Creates a DRIVER user plus its Driver profile row. */
@@ -55,6 +57,7 @@ export async function createTestDriver(opts: CreateTestDriverOptions = {}) {
       isApproved: opts.isApproved ?? true,
       isOnline: opts.isOnline ?? true,
       currentZoneId: opts.currentZoneId ?? null,
+      lastHeartbeatAt: opts.lastHeartbeatAt === undefined ? new Date() : opts.lastHeartbeatAt,
     },
   });
   return { user, driver };

@@ -346,7 +346,7 @@ async function main() {
     await prisma.driver.update({
       where: { userId: d.userId },
       data: onNow.has(d.userId) && d !== drivers[6]
-        ? { isOnline: true, currentZoneId: spot.zoneId, lastLat: spot.latitude, lastLng: spot.longitude, lastSeenAt: new Date(now - between(5, 50) * 1000) }
+        ? { isOnline: true, currentZoneId: spot.zoneId, lastLat: spot.latitude, lastLng: spot.longitude, lastSeenAt: new Date(now - between(5, 50) * 1000), lastHeartbeatAt: new Date(now - between(5, 50) * 1000) }
         : { isOnline: false, currentZoneId: null },
     });
   }

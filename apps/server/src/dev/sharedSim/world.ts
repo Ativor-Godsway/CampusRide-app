@@ -166,6 +166,7 @@ export class World {
         plate: `SIM-${user.id.slice(-8).toUpperCase()}`,
         isApproved: true,
         isOnline: true,
+        lastHeartbeatAt: new Date(),
         currentZoneId: pickup.id,
         lastLat: pickup.latitude,
         lastLng: pickup.longitude,

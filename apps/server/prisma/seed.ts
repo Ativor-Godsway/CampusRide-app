@@ -49,33 +49,20 @@ async function main() {
   // uses this: the dispatch/assembly eligibility tests build and assert their
   // OWN sparse edges, and a pre-seeded full mesh both collides on the unique
   // constraint and breaks "distant zone is not adjacent" assumptions. Dev/prod
-  // leave it unset (default true) and get the full demo mesh below.
+  // leave it unset (default true) and get the real neighbours below.
   if (process.env.SEED_ZONE_ADJACENCY === "false") {
     console.log("SEED_ZONE_ADJACENCY=false — skipping ZoneAdjacency seed (zones only).");
     return;
   }
 
-  // Full-mesh ZoneAdjacency (demo scope): every seeded zone adjacent to every
-  // other, BOTH directions. computeEligibleZoneSet (driver.ts) reads adjacency
-  // bidirectionally, so one direction would suffice — but both makes the mesh
-  // explicit and matches the one-way row shape the rest of the code assumes.
-  // A realistic adjacency graph is deferred post-buildathon.
-  // Idempotent: skipDuplicates relies on @@unique([zoneId, adjacentZoneId]).
-  const allZones = await prisma.zone.findMany({ select: { id: true } });
-  const edges: { zoneId: string; adjacentZoneId: string }[] = [];
-  for (const a of allZones) {
-    for (const b of allZones) {
-      if (a.id !== b.id) edges.push({ zoneId: a.id, adjacentZoneId: b.id });
-    }
-  }
-
-  const result = await prisma.zoneAdjacency.createMany({
-    data: edges,
-    skipDuplicates: true,
-  });
-  console.log(
-    `Seeded ${result.count} new ZoneAdjacency rows (${edges.length} edges for ${allZones.length} zones).`,
-  );
+  // Real zone neighbours (2026-11-24): pairs of zones whose areas share a
+  // border, or whose centres are within 800 m (@rida/shared
+  // geo/zoneNeighbours), both directions. It replaces any neighbours already
+  // there between zones in service — including the old full mesh.
+  const { replaceZoneNeighbours, suggestedZoneNeighbours } = await import("../src/services/zones/zoneNeighbours");
+  const suggested = await suggestedZoneNeighbours(prisma);
+  const { added, removed } = await replaceZoneNeighbours(prisma, suggested);
+  console.log(`Zone neighbours: ${suggested.length} pairs (${added.length} added, ${removed.length} removed).`);
 }
 
 main()

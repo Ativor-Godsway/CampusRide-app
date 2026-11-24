@@ -44,6 +44,7 @@ import {
   createRide,
   formatCedis,
   getActiveRide,
+  getFareQuote,
   radii,
   regionForCoordinates,
   shadows,
@@ -120,6 +121,9 @@ const SHEET_HEIGHT_SLOP = 16;
 function httpStatus(error: unknown): number | undefined {
   return (error as { response?: { status?: number } } | null)?.response?.status;
 }
+
+/** The server refused a request or switch because the price shown has just changed. */
+const FARE_CHANGED_CODE = "FARE_CHANGED";
 
 /** Said when the driver had to cancel and the ride is searching again for another. */
 const DRIVER_HAD_TO_CANCEL = "Your driver had to cancel. We're finding you another driver.";
@@ -284,11 +288,26 @@ export default function RideTypeScreen() {
   }, [legSeen]);
 
   // ── Fares ───────────────────────────────────────────────────────────────────
-  // Before a ride exists: the same @rida/shared pricing functions the server
-  // locks fares with (createRide / switchRideType), so the prices shown are
-  // the prices charged. Shared is flat per rider regardless of occupancy.
-  const sharedFare = useMemo(() => getSharedFarePerRider(1), []);
-  const loneFare = useMemo(() => priceLoneRide().fare, []);
+  // Before a ride exists: the SERVER's price for this trip (POST /rides/quote),
+  // the same one POST /rides locks on the seat — Shared costs more on a trip
+  // between the north and south ends of campus (far-trip pricing), so the
+  // phone never works it out. Request waits for the answer;
+  // if it can't come, today's standard prices are shown (the server still
+  // charges the right one, and the ride sheet shows the locked fare).
+  const pickupBody = useMemo(() => tripEndBody(pickupEnd), [pickupEnd]);
+  const dropoffBody = useMemo(() => tripEndBody(dropoffEnd), [dropoffEnd]);
+  const hasEnds = (pickupEnd.latitude !== 0 || pickupEnd.placeId != null) && (dropoffEnd.latitude !== 0 || dropoffEnd.placeId != null);
+  const fareQuote = useQuery({
+    queryKey: ["fareQuote", JSON.stringify(pickupBody), JSON.stringify(dropoffBody)],
+    queryFn: () => getFareQuote(pickupBody, dropoffBody),
+    enabled: hasEnds,
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const quotePending = hasEnds && fareQuote.isPending && fareQuote.fetchStatus !== "idle";
+  const sharedFare = fareQuote.data?.fares.SHARED ?? getSharedFarePerRider(1);
+  const loneFare = fareQuote.data?.fares.LONE ?? priceLoneRide().fare;
+  const farTrip = fareQuote.data?.farTrip ?? false;
   const fareFor = useCallback((type: RideType) => (type === "SHARED" ? sharedFare : loneFare), [sharedFare, loneFare]);
 
   // No pickup time here: no driver is matched yet, so there is no real ETA to
@@ -470,6 +489,9 @@ export default function RideTypeScreen() {
         ...(note.trim() ? { pickupNote: note.trim() } : {}),
         type: selectedType,
         paymentMethod: selectedPaymentMethod,
+        // The price on screen, when it came from the server: charged exactly,
+        // or refused (FARE_CHANGED) if it has just changed.
+        ...(fareQuote.data ? { shownFarePesewas: fareQuote.data.fares[selectedType] } : {}),
       });
       setAdjusting(false);
       setActiveRideId(created.id);
@@ -480,8 +502,9 @@ export default function RideTypeScreen() {
         await queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
         setConflictOpen(true);
       } else if (err instanceof RideRequestRefusedError) {
-        // Outside the area, a place that's gone, the same spot twice, closed: the server's own words.
+        // Outside the area, a place that's gone, the same spot twice, closed, a price just changed: the server's own words.
         if (err.code === SERVICE_CLOSED_CODE || err.code === NO_DRIVERS_ONLINE_CODE) refreshServiceStatus(queryClient);
+        if (err.code === FARE_CHANGED_CODE) void fareQuote.refetch();
         Alert.alert("Couldn't request this ride", err.message);
       } else {
         Alert.alert("Couldn't request a ride", rateLimitText(err) ?? "Please check your connection and try again.");
@@ -537,18 +560,22 @@ export default function RideTypeScreen() {
     if (source === "sheet") setSwitching(true);
     else setDecisionBusy("switch");
     try {
-      await switchRideType(activeRideId, toType);
+      await switchRideType(activeRideId, toType, fareQuote.data ? fareQuote.data.fares[toType] : undefined);
       haptics.success();
       setCancelOpen(false);
       await refreshRide();
       void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
     } catch (err) {
       await refreshRide();
+      const refused = (err as { response?: { data?: { code?: unknown; error?: unknown } } } | null)?.response?.data;
       if (httpStatus(err) === 409) {
         Alert.alert(
           "Couldn't switch",
           "Your ride just changed — a driver may have accepted it. Check the latest status.",
         );
+      } else if (refused?.code === FARE_CHANGED_CODE && typeof refused.error === "string") {
+        void fareQuote.refetch();
+        Alert.alert("Couldn't switch", refused.error);
       } else {
         Alert.alert("Couldn't switch", rateLimitText(err) ?? "Please check your connection and try again.");
       }
@@ -788,7 +815,8 @@ export default function RideTypeScreen() {
               <Button
                 label={`Request ${selectedOption.title}`}
                 onPress={() => void handleSubmit()}
-                loading={submitting}
+                // Until the server has priced this trip, so the price shown is the price charged.
+                loading={submitting || quotePending}
                 accessibilityHint={`${spokenCedis(selectedOption.farePesewas)}, paid in cash`}
               />
             )
@@ -801,6 +829,11 @@ export default function RideTypeScreen() {
           {service.view.kind === "open" && service.view.closingSoon ? (
             <Text variant="subhead" color="secondary">
               {service.view.closingSoon}
+            </Text>
+          ) : null}
+          {farTrip ? (
+            <Text variant="subhead" color="secondary">
+              {`Shared is ${formatCedis(sharedFare)} on this trip: it goes between the north and south ends of campus.`}
             </Text>
           ) : null}
           <View style={styles.optionList} accessibilityRole="radiogroup" accessibilityLabel="Choose a ride">

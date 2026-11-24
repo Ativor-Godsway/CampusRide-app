@@ -1,4 +1,5 @@
 import { createHmac, randomBytes } from "node:crypto";
+import { liveDriverWhere } from "../zones/driverLiveness";
 import type { PrismaClient } from "@prisma/client";
 import {
   CAR_SEATS,
@@ -49,7 +50,7 @@ const LIVE_SEAT_STATUSES = new Set(["WAITING", "ARRIVED", "PICKED_UP"]);
 async function availableDriverIds(prisma: PrismaClient, now: number): Promise<Set<string>> {
   if (availableCache && now - availableCache.at < AVAILABLE_CACHE_MS) return availableCache.ids;
   const drivers = await prisma.driver.findMany({
-    where: { isOnline: true, isApproved: true, user: { deletedAt: null, isReviewDemo: false } },
+    where: { ...liveDriverWhere(now), isApproved: true, user: { deletedAt: null, isReviewDemo: false } },
     select: { userId: true },
   });
   const ids = new Set(drivers.map((d) => d.userId));

@@ -1,5 +1,6 @@
 /**
- * zones:check — READ-ONLY report on zone adjacency (see zoneAdjacency.ts).
+ * zones:check — READ-ONLY report on zone neighbours, against the suggested
+ * ones (see zoneAdjacency.ts).
  *
  *   npm run zones:check --workspace apps/server
  *   ALLOW_PRODUCTION_DB=1 DATABASE_URL="$PROD_URL" DIRECT_URL="$PROD_URL" \

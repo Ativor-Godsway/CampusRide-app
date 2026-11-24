@@ -15,6 +15,7 @@ import { usePagePeriod } from "../lib/usePeriod";
 import { usePolled } from "../lib/usePolled";
 import { Freshness, Page, Section } from "../shell/Page";
 import { DAY_HOURS, changeLine } from "./Overview";
+import { RefusedBookingsSection } from "../screens/RefusedBookingsSection";
 
 /** The verdict as a chip: "Need 2 more drivers 4–7 pm" (red from 2, amber for 1) or "OK". */
 export function verdictChip(z: Pick<ZoneSupply, "need" | "window">): { label: string; tone: "red" | "amber" | "green" } {
@@ -154,6 +155,7 @@ export function SupplyDemandPage() {
           );
         }}
       </Loaded>
+      <RefusedBookingsSection query={query} />
     </Page>
   );
 }

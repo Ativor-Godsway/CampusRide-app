@@ -72,6 +72,7 @@ async function getOrCreateMockDriver(prisma: PrismaClient) {
           plate: "GR 1234-24",
           isApproved: true,
           isOnline: true,
+          lastHeartbeatAt: new Date(),
         },
       },
     },

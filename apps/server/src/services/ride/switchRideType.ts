@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
-import { getLoneFare, getSharedFarePerRider, type RideType } from "@rida/shared";
+import type { RideType } from "@rida/shared";
+import { fareForNewSeat, type PricedEnd } from "./farePricing";
 import { isActivePassengerStatus } from "./stateMachine";
 import { InvalidSwitchToLoneError, RideSwitchNotAllowedError } from "./errors";
 
@@ -8,9 +9,9 @@ const TX_OPTIONS = { timeout: 20000 } as const;
 /** Statuses in which no driver holds the ride yet, so its type may change. */
 export const SWITCHABLE_STATUSES = ["REQUESTED", "AWAITING_RIDER_DECISION"] as const;
 
-/** The fare a single rider is locked at for each ride type. */
-export function fareForType(type: RideType): number {
-  return type === "LONE" ? getLoneFare() : getSharedFarePerRider(1);
+/** A seat's pin as a priced end (null: a zone-only booking). */
+export function seatEnd(lat: number | null, lng: number | null, placeId: string | null): PricedEnd | null {
+  return lat !== null && lng !== null ? { latitude: lat, longitude: lng, placeId } : null;
 }
 
 /**
@@ -39,6 +40,8 @@ export async function switchRideType(
   rideId: string,
   toType: RideType,
   now: Date = new Date(),
+  /** The price the app showed for the new type (see fareForNewSeat); absent from older apps. */
+  shownFare?: number | null,
 ) {
   const fromType: RideType = toType === "LONE" ? "SHARED" : "LONE";
 
@@ -70,10 +73,16 @@ export async function switchRideType(
       throw new InvalidSwitchToLoneError(active.length);
     }
 
-    await tx.ridePassenger.update({
-      where: { id: active[0]!.id },
-      data: { lockedFare: fareForType(toType) },
-    });
+    // The new type's price for this trip, set now (far-trip pricing).
+    const seat = active[0]!;
+    const lockedFare = await fareForNewSeat(
+      prisma,
+      toType,
+      seatEnd(seat.pickupLat, seat.pickupLng, seat.pickupPlaceId),
+      seatEnd(seat.dropoffLat, seat.dropoffLng, seat.dropoffPlaceId),
+      shownFare,
+    );
+    await tx.ridePassenger.update({ where: { id: seat.id }, data: { lockedFare } });
 
     // A fresh offer of a different kind: drivers who declined the old one
     // get to see this one.

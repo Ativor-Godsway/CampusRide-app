@@ -12,14 +12,16 @@ import { dispatchDemoRide, isServedBySimDriver } from "../reviewDemo/simulation"
 import { recordOffers, recordOffersClosed } from "../stats/rideOffers";
 import { noteRequestClosed, noteRequestOffered } from "../admin/liveRequests";
 import { emitRequestsChanged } from "../../realtime/rideSocket";
-import { carsThatFitRequest, requestsForDriver, type RequestRow } from "./requestFit";
+import { carsThatFitRequest, liveFreeDrivers, requestsForDriver, type RequestRow } from "./requestFit";
 import { scheduleRequestExpiry } from "./timeouts";
 import { getZoneMap } from "../zones/zoneCache";
+import { liveDriverWhere } from "../zones/driverLiveness";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
- * online + approved drivers currently in the ride's pickup zone or a zone
- * adjacent to it. This is the candidate set only — ranking/"perfect match"
+ * online + approved drivers whose app was heard from in the last 10 minutes
+ * (services/zones/driverLiveness.ts), currently in the ride's pickup zone or
+ * a zone adjacent to it (real neighbours since 2026-11-24, not every zone). This is the candidate set only — ranking/"perfect match"
  * ordering of these candidates is Phase 2c, not handled here.
  *
  * With the ride's `id` (ride offers, 2026-10), drivers who declined it are
@@ -62,7 +64,8 @@ export async function getEligibleDrivers(
 
   return prisma.driver.findMany({
     where: {
-      isOnline: true,
+      // Online AND heard from in the last 10 minutes (services/zones/driverLiveness.ts).
+      ...liveDriverWhere(),
       isApproved: true,
       currentZoneId: { in: Array.from(zoneIds) },
       currentZone: { retiredAt: null },
@@ -78,9 +81,10 @@ function declinedNone(rideId: string) {
 
 /**
  * The drivers a request is offered to now (shared-ride dispatch rules,
- * services/ride/requestFit): online drivers nearby with no trip, and
- * drivers whose Shared car it fits — free seats and the detour check. A
- * full car, a Ride alone car and an offline driver are never in it.
+ * services/ride/requestFit): live drivers nearby with no trip — or, when
+ * there are none, every live driver on campus with no trip (the fallback) —
+ * and drivers whose Shared car it fits (free seats and the detour check). A
+ * full car, a Ride alone car and an offline or stale driver are never in it.
  */
 export async function driversOfferedTo(prisma: PrismaClient, ride: RequestRow): Promise<string[]> {
   const nearby = await getEligibleDrivers(prisma, ride);
@@ -91,7 +95,23 @@ export async function driversOfferedTo(prisma: PrismaClient, ride: RequestRow): 
       })
     : [];
   const busy = new Set(onTrip.map((r) => r.driverId));
-  const free = nearby.filter((d) => !busy.has(d.userId)).map((d) => d.userId);
+  let free = nearby.filter((d) => !busy.has(d.userId)).map((d) => d.userId);
+  // Fallback (2026-11-24): nobody live and free in the pickup zone or its
+  // neighbours (or they all declined it) — every live free driver on campus
+  // gets it, minus those who declined. Never for review demo rides.
+  if (free.length === 0 && !ride.isReviewDemo) {
+    const declined = ride.id
+      ? new Set(
+          (
+            await prisma.rideRejection.findMany({
+              where: { rideId: ride.id, OR: [{ reason: null }, { reason: { not: "TIMED_OUT" } }] },
+              select: { driverUserId: true },
+            })
+          ).map((r) => r.driverUserId),
+        )
+      : new Set<string>();
+    free = [...(await liveFreeDrivers(prisma)).keys()].filter((id) => !declined.has(id));
+  }
   return [...new Set([...free, ...(await carsThatFitRequest(prisma, ride))])];
 }
 

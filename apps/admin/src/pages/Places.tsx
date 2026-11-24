@@ -10,11 +10,14 @@ import { useRouter } from "../lib/router";
 import { usePagePeriod } from "../lib/usePeriod";
 import { usePolled } from "../lib/usePolled";
 import { PlacesScreen } from "../screens/PlacesScreen";
+import { FarPricingCard } from "../screens/FarPricingCard";
+import { ZoneNeighboursCard } from "../screens/ZoneNeighboursCard";
 import { Freshness, Page, Section } from "../shell/Page";
 
 /**
  * Places: where rides start and end (heat map and the busiest places, with
- * how often nobody got a driver there), then the place editor, unchanged.
+ * how often nobody got a driver there), far-trip pricing and zone
+ * neighbours, then the place editor.
  */
 export function PlacesPage() {
   const token = useToken();
@@ -81,6 +84,12 @@ export function PlacesPage() {
           );
         }}
       </Loaded>
+      <Section title="Far-trip pricing and zone neighbours">
+        <div className="settings-stack">
+          <FarPricingCard />
+          <ZoneNeighboursCard />
+        </div>
+      </Section>
       <Section title="Edit places">
         <PlacesScreen />
       </Section>

@@ -227,6 +227,15 @@ model Driver {
   lastLat         Float?
   lastLng         Float?
   lastSeenAt      DateTime?
+  /// The last time the driver's app was heard from at all (a position, its
+  /// presence, its live connection's heartbeat), written at most about once
+  /// a minute (services/zones/driverLiveness.ts). Online counts only within
+  /// DRIVER_STALE_AFTER_MS (10 min) of it: no offers, no "driver online" for
+  /// booking, not online in admin. Null: not heard from since 2026-11-24.
+  lastHeartbeatAt DateTime?
+  /// Set when the server set the driver offline after that silence; cleared
+  /// when they go online. The app tells them why the next time it opens.
+  autoOfflineAt   DateTime?
   /// Suspended by an admin (admin site, Drivers): can't go online until an
   /// admin lifts it. Separate from isApproved — a suspension keeps the
   /// approval and says why. `suspendedBy` is the admin's User.id (plain
@@ -296,6 +305,10 @@ model Place {
   /// Nearest zone, recomputed by the server whenever the place moves.
   zoneId    String
   isActive  Boolean       @default(true)
+  /// Which far end of campus the place is in, if any (far-trip pricing,
+  /// services/ride/farePricing.ts): a Shared trip from one end to the OTHER
+  /// pays the far price. Admin site, Places → Far-trip pricing.
+  farEnd    FarEnd?
   /// "osm:way/278303018" for seeded rows, null for places added by hand.
   source    String?       @unique
   createdAt DateTime      @default(now())
@@ -873,9 +886,10 @@ model AdminAuditLog {
 enum DriverSessionEnd {
   /// The driver went offline in the app.
   OFFLINE
-  /// The server took the driver offline after losing touch with the phone
-  /// (app last in front, no connection, nothing heard for
-  /// DRIVER_SILENCE_TIMEOUT_MIN); the session ends at the last contact.
+  /// The server set the driver offline after their app went 10 minutes
+  /// without being heard from (services/zones/driverLiveness.ts; before
+  /// 2026-11-24: 30 minutes, app last in front); the session ends at the
+  /// last contact.
   TIMEOUT
   /// An admin took the driver's approval away.
   ADMIN
@@ -1145,4 +1159,44 @@ model SosEvent {
   @@index([createdAt])
   @@index([handledAt])
   @@index([rideId])
+}
+
+/// The two far ends of campus (far-trip pricing, 2026-11-24).
+enum FarEnd {
+  /// Pentagon, TF Hall, Bani and Evandy Hostels and what is beside them.
+  NORTH
+  /// The Diaspora halls: Jean Nelson Aka, Elizabeth Frances Sey, Hilla Limann, Alexander Kwapong.
+  SOUTH
+}
+
+/// The Shared seat prices (far-trip pricing, 2026-11-24), one row (id "fares").
+/// No row: the defaults (GH₵7 normal, GH₵9 between the north and south ends). Ride alone
+/// stays PRICING.LONE_FARE. A price is locked on the seat when the ride is
+/// requested, so a change only reaches new requests.
+model FarePricingSetting {
+  id               String   @id @default("fares")
+  sharedPesewas    Int      @default(700)
+  sharedFarPesewas Int      @default(900)
+  updatedAt        DateTime @updatedAt
+  /// User.id of the admin who last changed it.
+  updatedBy        String?
+}
+
+/// A ride request the server refused (2026-11-24), kept anonymous: no rider,
+/// no phone, no exact pin — when, the two ends as a place name and zone, and
+/// why. `stage`: REQUEST (POST /rides refused) or QUOTE (Choose a ride opened
+/// while booking was blocked). See @rida/shared rides/refusedBookings.
+model RefusedBooking {
+  id            String   @id @default(cuid())
+  createdAt     DateTime @default(now())
+  reason        String   @db.VarChar(40)
+  stage         String   @db.VarChar(10)
+  rideType      String?  @db.VarChar(10)
+  /// The place each end is at or near (as drivers would see it), if any.
+  pickupLabel   String?  @db.VarChar(160)
+  pickupZoneId  String?
+  dropoffLabel  String?  @db.VarChar(160)
+  dropoffZoneId String?
+
+  @@index([createdAt])
 }

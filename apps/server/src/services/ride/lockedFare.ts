@@ -1,6 +1,4 @@
-import { getSharedFarePerRider } from "@rida/shared";
 import type { PassengerStatus } from "@rida/shared";
-import { isActivePassengerStatus } from "./stateMachine";
 
 export interface LockedFarePassenger {
   id: string;
@@ -20,32 +18,20 @@ export type LockedFareEvent =
  * Recomputes lockedFare for each passenger of a SHARED ride in response to an
  * occupancy-changing event. Pure — returns a new array, never mutates.
  *
- * Rules (downward-only ratchet):
- * - JOIN: occupancy increases (the new passenger is already included in
- *   `passengers`). Every active (WAITING/PICKED_UP) passenger's lockedFare is
- *   recomputed to getSharedFarePerRider(activeCount) — the new, lower rate.
- *   Math.min guards against ever raising a fare.
- * - CANCEL: occupancy decreases. Remaining passengers keep their existing
- *   lockedFare — fares are never raised back up.
- * - DEPARTURE: fares are frozen; no changes.
+ * Shared seats are priced per trip, not per occupancy (far-trip pricing,
+ * 2026-11-24: GH₵7, or GH₵9 for a trip between the north and south ends — locked when
+ * the rider asks, services/ride/farePricing.ts). So no event moves a fare:
+ * - JOIN: everyone keeps the fare they were quoted. (Until 2026-11-24 a join
+ *   clamped every seat to the one flat rate, which would have cut a GH₵9
+ *   seat to GH₵7 the moment someone joined.)
+ * - CANCEL: fares are never raised back up.
+ * - DEPARTURE: fares are frozen.
+ * If occupancy discounts ever come back, store each seat's own list price
+ * first: the discount has to apply to it, not replace it.
  */
 export function recomputeLockedFares(
   passengers: readonly LockedFarePassenger[],
-  event: LockedFareEvent,
+  _event: LockedFareEvent,
 ): LockedFarePassenger[] {
-  if (event.type !== "JOIN") {
-    return passengers.map((p) => ({ ...p }));
-  }
-
-  const activeCount = passengers.filter((p) =>
-    isActivePassengerStatus(p.status),
-  ).length;
-  const newRate = getSharedFarePerRider(activeCount);
-
-  return passengers.map((p) => {
-    if (!isActivePassengerStatus(p.status)) {
-      return { ...p };
-    }
-    return { ...p, lockedFare: Math.min(p.lockedFare, newRate) };
-  });
+  return passengers.map((p) => ({ ...p }));
 }

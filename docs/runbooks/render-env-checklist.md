@@ -87,7 +87,6 @@ a demo number is on `ADMIN_PHONE_ALLOWLIST`.
 | `ADMIN_PASSKEY_RP_ID`, `ADMIN_PASSKEY_ORIGINS` | `campusride-admin.onrender.com` | Change only if the admin site moves address (passkeys must then be added again) |
 | `ADMIN_OTP_FALLBACK` | off | `on` lets an admin with a passkey also sign in with a texted code: recovery only |
 | `ADMIN_ACCESS_TOKEN_MINUTES`, `ADMIN_IDLE_MINUTES`, `ADMIN_SESSION_MAX_HOURS` | 10, 60, 12 | Admin session lengths |
-| `DRIVER_SILENCE_TIMEOUT_MIN` | `30` | A driver whose app went silent while in front is taken offline after this |
 | `RIDE_AUTO_COMPLETE_HOURS` | `3` | A ride still in progress after this is completed |
 | `TRACKING_LINK_TTL_HOURS` | `24` | How long an SOS link works after the ride |
 | `ACCOUNT_DELETION_RETENTION_DAYS` | `90` | Matches the Privacy Policy; don't change without updating it |

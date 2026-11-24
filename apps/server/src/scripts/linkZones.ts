@@ -1,7 +1,8 @@
 /**
- * zones:link — adds the missing adjacency rows between zones in service, so
- * every zone is adjacent to every other (see zoneAdjacency.ts). A dry run
- * unless --apply; only ever INSERTs; safe to run twice.
+ * zones:link — sets the zone neighbours between zones in service to the
+ * suggested pairs (see zoneAdjacency.ts). A dry run unless --apply; one
+ * transaction; a second run changes nothing. Replaces hand edits made in the
+ * admin site (Places → Zone neighbours).
  *
  *   npm run zones:link --workspace apps/server               # dry run
  *   npm run zones:link --workspace apps/server -- --apply
@@ -14,21 +15,23 @@ async function main() {
   const apply = process.argv.includes("--apply");
   const { prisma, host } = await connectForScript("zones:link");
   try {
-    console.log(`\nLink zones  (database: ${host})`);
-    console.log(apply ? "  APPLYING — adds rows, never deletes or changes any\n" : "  dry run — pass --apply to add them\n");
-    const { before, added } = await linkZones(prisma, apply);
-    if (before.missing.length === 0) {
-      console.log("Nothing to add: every zone in service is already adjacent to every other.\n");
+    console.log(`\nSet zone neighbours  (database: ${host})`);
+    console.log(apply ? "  APPLYING\n" : "  dry run — pass --apply to write\n");
+    const { before, added, removed } = await linkZones(prisma, apply);
+    const name = (id: string) => before.activeZones.find((z) => z.id === id)?.name ?? id;
+    if (added.length === 0 && removed.length === 0 && before.oneWay.length === 0) {
+      console.log("Nothing to change: the neighbours are already the suggested ones.\n");
       return;
     }
-    console.log(`${apply ? "Adding" : "Would add"} ${before.missing.length} rows:`);
-    for (const m of before.missing) console.log(`  ${m.from.name}  →  ${m.to.name}`);
+    console.log(`${apply ? "Added" : "Would add"} ${added.length} pairs:`);
+    for (const p of added) console.log(`  + ${name(p.a)} – ${name(p.b)}`);
+    console.log(`${apply ? "Removed" : "Would remove"} ${removed.length} pairs:`);
+    for (const p of removed) console.log(`  − ${name(p.a)} – ${name(p.b)}`);
     if (!apply) {
-      console.log("\nNothing written. Re-run with -- --apply to add them.\n");
+      console.log("\nNothing written. Re-run with -- --apply to write it.\n");
       return;
     }
-    console.log(`\nAdded ${added} rows${added < before.missing.length ? ` (${before.missing.length - added} existed by then)` : ""}.\n`);
-    console.log("Now:");
+    console.log("\nNow:");
     for (const line of describeReport(await checkZoneAdjacency(prisma))) console.log(line);
     console.log("");
   } finally {

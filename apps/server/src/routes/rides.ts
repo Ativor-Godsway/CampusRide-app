@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
-import type { NearbyCarsResponse, PassengerStatus, PaymentMethod, RideStatus, RideType } from "@rida/shared";
+import type { FareQuote, NearbyCarsResponse, PassengerStatus, PaymentMethod, RefusedBookingReason, RideStatus, RideType } from "@rida/shared";
 import {
   FLAGGED_RIDER_CANCEL_REASONS,
   NEARBY_CARS_PATH,
@@ -14,7 +14,7 @@ import { applyPassengerTransition, applyRideTransition } from "../services/ride/
 import { isActivePassengerStatus } from "../services/ride/stateMachine";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
 import { InvalidTransitionError, RideSwitchNotAllowedError } from "../services/ride/errors";
-import { fareForType, switchRideType } from "../services/ride/switchRideType";
+import { switchRideType } from "../services/ride/switchRideType";
 import { findActiveRideForRider, riderTripComplete } from "../services/ride/activeRide";
 import { emitRideEvent, emitToRider, removeRiderFromRide } from "../realtime/rideSocket";
 import { broadcastRide, closeOffer, reofferToDriver } from "../services/ride/dispatch";
@@ -30,8 +30,11 @@ import {
   OutsideServiceAreaError,
   PlaceNotFoundError,
   parseRideEndInput,
+  resolveRideEnd,
   type RideEndInput,
 } from "../services/places/rideEnds";
+import { FareChangedError, quoteFares } from "../services/ride/farePricing";
+import { quoteAlreadyCounted, recordRefusedBooking, type RefusedBookingInput } from "../services/ride/refusedBookings";
 import { hideOtherRidersPins, pinFieldsOf } from "./ridePins";
 import { getRidePaymentSummary, initiateCollection } from "../services/payment/paymentFlow";
 import { NoAwaitingOtpPaymentError } from "../services/payment/errors";
@@ -49,6 +52,7 @@ import {
   empty,
   id,
   idParams,
+  integer,
   latitude,
   longitude,
   noInput,
@@ -61,8 +65,8 @@ import { notifyRiderCancelled } from "../services/push/notify";
 import { resolveRiderCancelTarget, seatCancelledBy } from "../services/ride/cancels";
 import { finalizeRideCompletion } from "../services/ride/completion";
 import { nearbyCars } from "../services/ride/nearbyCars";
-import { LaunchNotOpenError } from "../services/launch/launchSettings";
-import { ServiceClosedError } from "../services/service/serviceHours";
+import { LaunchNotOpenError, assertCanBook } from "../services/launch/launchSettings";
+import { ServiceClosedError, assertServiceOpen } from "../services/service/serviceHours";
 
 /**
  * Shape returned by `POST /rides/:id/initiate-payment` while
@@ -83,8 +87,24 @@ const DECISION_ACTIONS: readonly RiderDecisionAction[] = ["KEEP_WAITING", "SWITC
 /** A pickup or drop-off: a campus place, a pin, or both (the parsers check which combinations make sense). */
 const rideEnd = object({ placeId: id, latitude, longitude });
 
+/**
+ * Why createRide refused a booking, for the anonymous refused-booking record
+ * (services/ride/refusedBookings.ts); null for anything else.
+ */
+function refusalReason(err: unknown): RefusedBookingReason | null {
+  if (err instanceof LaunchNotOpenError) return "LAUNCH_NOT_OPEN";
+  if (err instanceof ServiceClosedError) return err.code;
+  if (err instanceof OutsideServiceAreaError) return "OUTSIDE_SERVICE_AREA";
+  if (err instanceof PlaceNotFoundError) return "PLACE_NOT_FOUND";
+  if (err instanceof ZoneRetiredError) return "ZONE_NOT_SERVED";
+  if (err instanceof TripTooShortError || err instanceof SameZoneError) return "TRIP_TOO_SHORT";
+  if (err instanceof ActiveRideExistsError) return "ACTIVE_RIDE_EXISTS";
+  return null;
+}
+
 /** Request schemas (http/schemas.ts): unknown fields are dropped before the handler. */
 const SCHEMAS = {
+  quote: { body: object({ pickup: rideEnd, dropoff: rideEnd }, ["pickup", "dropoff"]) },
   nearbyCars: { querystring: object({ latitude, longitude }) },
   create: {
     body: object(
@@ -97,6 +117,8 @@ const SCHEMAS = {
         pickupNote: text(MAX.freeText, { nullable: true }),
         // Not an enum on purpose: anything but MOMO falls back to CASH (cash-only launch).
         paymentMethod: text(20),
+        // The price Choose a ride showed (POST /rides/quote); older apps send none.
+        shownFarePesewas: integer(0, 100_000),
       },
       ["type"],
     ),
@@ -110,7 +132,7 @@ const SCHEMAS = {
     params: idParams,
     body: object({ reason: oneOf(RIDER_CANCEL_REASONS, { nullable: true }), note: text(MAX.freeText, { nullable: true }) }),
   },
-  switch: { params: idParams, body: object({ type: oneOf(RIDE_TYPES) }, ["type"]) },
+  switch: { params: idParams, body: object({ type: oneOf(RIDE_TYPES), shownFarePesewas: integer(0, 100_000) }, ["type"]) },
   initiatePayment: {
     params: idParams,
     // Not required here: the "payments are off, pay cash" answer must come
@@ -202,6 +224,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       pickupNote?: unknown;
       type?: unknown;
       paymentMethod?: unknown;
+      shownFarePesewas?: number;
     };
 
     // Each end is a pin/place (current apps) or a zone id (older builds).
@@ -242,8 +265,26 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         ...(dropoff ? { dropoff: dropoff as RideEndInput } : { dropoffZoneId: body.dropoffZoneId as string }),
         pickupNote: note.note,
         paymentMethod,
+        shownFare: body.shownFarePesewas ?? null,
       });
     } catch (err) {
+      // Demand that never became a ride: an anonymous record (no rider, no pin).
+      const reason = refusalReason(err);
+      if (reason) {
+        await recordRefusedBooking(prisma, {
+          reason,
+          stage: "REQUEST",
+          rideType: body.type,
+          pickup: pickup as RideEndInput | null,
+          dropoff: dropoff as RideEndInput | null,
+          pickupZoneId: pickup ? null : (body.pickupZoneId as string),
+          dropoffZoneId: dropoff ? null : (body.dropoffZoneId as string),
+        });
+      }
+      if (err instanceof FareChangedError) {
+        // 422 with code + error: shown as-is. Only apps that send the price get it.
+        return reply.code(422).send({ error: err.message, code: err.code, farePesewas: err.farePesewas });
+      }
       if (err instanceof LaunchNotOpenError) {
         return reply
           .code(422)
@@ -367,6 +408,57 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
    * Pickup/drop-off are the rider's OWN (their seat's), which differ from
    * the ride's for a rider merged into someone else's car.
    */
+  /**
+   * The price of each ride type for this trip, before booking (far-trip
+   * pricing, services/ride/farePricing.ts): Choose a ride shows it, and
+   * POST /rides locks the same price on the seat. Body: `{ pickup, dropoff }`,
+   * each `{ placeId }`, `{ latitude, longitude }` or both, exactly as for
+   * POST /rides. Answers `{ fares: { SHARED, LONE }, farTrip }` (pesewas).
+   * Refusals as POST /rides: 422 OUTSIDE_SERVICE_AREA, 404 PLACE_NOT_FOUND.
+   *
+   * When booking is blocked right now (closed, no drivers online, before
+   * launch) the app shows Request disabled and never sends POST /rides, so
+   * the refusal is recorded here instead (stage QUOTE, once per rider and
+   * trip per half hour) — the quote is still answered.
+   */
+  app.post("/rides/quote", { onRequest: requireAuth, schema: SCHEMAS.quote }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+    const body = (request.body ?? {}) as { pickup?: unknown; dropoff?: unknown };
+    const pickup = parseRideEndInput(body.pickup, "pickup");
+    const dropoff = parseRideEndInput(body.dropoff, "dropoff");
+    for (const parsed of [pickup, dropoff]) {
+      if (parsed && "error" in parsed) return reply.code(400).send({ error: parsed.error });
+    }
+    if (!pickup || !dropoff) return reply.code(400).send({ error: "pickup and dropoff are required" });
+
+    let quote: FareQuote;
+    try {
+      const [from, to] = await Promise.all([
+        resolveRideEnd(prisma, "pickup", pickup as RideEndInput),
+        resolveRideEnd(prisma, "dropoff", dropoff as RideEndInput),
+      ]);
+      quote = await quoteFares(prisma, from, to);
+    } catch (err) {
+      if (err instanceof OutsideServiceAreaError) return reply.code(422).send({ error: err.message, code: err.code, end: err.end });
+      if (err instanceof PlaceNotFoundError) return reply.code(404).send({ error: err.message, code: err.code, end: err.end });
+      throw err;
+    }
+
+    const riderId = request.user!.userId;
+    try {
+      await assertCanBook(prisma, riderId);
+      await assertServiceOpen(prisma, riderId);
+    } catch (err) {
+      const reason = refusalReason(err);
+      const record: RefusedBookingInput | null = reason
+        ? { reason, stage: "QUOTE", pickup: pickup as RideEndInput, dropoff: dropoff as RideEndInput }
+        : null;
+      if (record && !quoteAlreadyCounted(riderId, record)) await recordRefusedBooking(prisma, record);
+      else if (!record) throw err;
+    }
+    return reply.header("cache-control", "no-store").send(quote);
+  });
+
   /**
    * The cars on the rider's Home map (services/ride/nearbyCars.ts): position
    * and heading only, nearest to `?latitude=&longitude=` (the rider, or the
@@ -676,7 +768,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       if (!(await requireRider(request, reply))) return;
 
       const { id } = request.params as { id: string };
-      const body = (request.body ?? {}) as { type?: unknown };
+      const body = (request.body ?? {}) as { type?: unknown; shownFarePesewas?: number };
       if (body.type !== "LONE" && body.type !== "SHARED") {
         return reply.code(400).send({ error: "type must be LONE or SHARED" });
       }
@@ -688,7 +780,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       }
 
       try {
-        const updated = await switchRideType(prisma, id, toType);
+        const updated = await switchRideType(prisma, id, toType, new Date(), body.shownFarePesewas ?? null);
         emitRideEvent(id, "ride:status", { rideId: id, status: updated.status });
         broadcastRide(prisma, id).catch((err) => {
           logger.error("broadcastRide failed", { rideId: id, err });
@@ -700,10 +792,14 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
           { event: "ride_type_switched", rideId: id, fromType: ride.type, toType },
           "Rider switched ride type",
         );
-        return reply.code(200).send({ ride: updated, farePesewas: fareForType(toType) });
+        const seat = updated.passengers.find((p) => p.riderId === request.user!.userId && p.status !== "CANCELLED");
+        return reply.code(200).send({ ride: updated, farePesewas: seat?.lockedFare ?? null });
       } catch (err) {
         if (err instanceof RideSwitchNotAllowedError) {
           return reply.code(409).send({ error: err.message, code: "RIDE_NOT_SWITCHABLE" });
+        }
+        if (err instanceof FareChangedError) {
+          return reply.code(422).send({ error: err.message, code: err.code, farePesewas: err.farePesewas });
         }
         throw err;
       }

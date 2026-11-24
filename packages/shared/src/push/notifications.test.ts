@@ -124,7 +124,7 @@ describe("the driver taken offline for silence", () => {
     expect(appForKind("WENT_OFFLINE")).toBe("driver");
     expect(pushText("WENT_OFFLINE")).toEqual({
       title: "You're offline",
-      body: "We lost touch with your phone for a while. Go online again when you're ready.",
+      body: "You were set offline because your app lost connection. Go online again to get requests.",
     });
   });
 });
