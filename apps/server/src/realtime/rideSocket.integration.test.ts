@@ -20,7 +20,8 @@ import { createTestDriver, createTestUser, getTestZones } from "../services/ride
 import { RULES } from "../rateLimit/rules";
 import { limiter } from "../rateLimit/limiter";
 import { freshDriverPositions, resetLivePositionsForTests } from "../services/zones/livePositions";
-import { resetDriverPresenceForTests, silentDrivers } from "../services/zones/driverPresence";
+import { driverPresenceOf, resetDriverPresenceForTests } from "../services/zones/driverPresence";
+import { resetDriverLivenessForTests } from "../services/zones/driverLiveness";
 import {
   SOCKET_AUTH_ERROR,
   disconnectUser,
@@ -323,31 +324,28 @@ describe("each rider's road ETA", () => {
 });
 
 describe("a driver's presence (in touch with the phone)", () => {
-  it("is tracked from the driver's socket and app state; the answer says if they were taken offline", async () => {
+  it("connecting is a heartbeat; presence is tracked; the answer says when they were set offline", async () => {
     resetDriverPresenceForTests();
+    resetDriverLivenessForTests();
     const d = await driver();
+    await prisma.driver.update({ where: { userId: d.id }, data: { lastHeartbeatAt: null } });
     const sock = await connectAs(tokenFor(d));
     const ask = (state: unknown) =>
-      new Promise<{ takenOffline: boolean }>((resolve) => sock.emit(DRIVER_CLIENT_EVENTS.PRESENCE, { state }, resolve));
+      new Promise<{ takenOffline: boolean; takenOfflineAt?: string | null }>((resolve) => sock.emit(DRIVER_CLIENT_EVENTS.PRESENCE, { state }, resolve));
     expect(await ask("foreground")).toEqual({ takenOffline: false });
     expect(await ask("nonsense")).toEqual({ takenOffline: false });
+    expect(driverPresenceOf(d.id)).toMatchObject({ connected: true, state: "foreground" });
+    // The connection itself wrote the heartbeat (services/zones/driverLiveness.ts).
+    const row = await prisma.driver.findUniqueOrThrow({ where: { userId: d.id } });
+    expect(row.lastHeartbeatAt).not.toBeNull();
 
-    // Connected: never silent, however long.
-    const later = Date.now() + 10 * config.driverSilenceTimeoutMinutes * 60_000;
-    expect(silentDrivers(later).map((s) => s.userId)).not.toContain(d.id);
+    // Set offline for silence meanwhile: the next presence says so, and when.
+    const at = new Date("2026-11-24T10:00:00.000Z");
+    await prisma.driver.update({ where: { userId: d.id }, data: { isOnline: false, autoOfflineAt: at } });
+    expect(await ask("background")).toEqual({ takenOffline: true, takenOfflineAt: at.toISOString() });
     sock.disconnect();
     await new Promise((r) => setTimeout(r, 200));
-    expect(silentDrivers(later).map((s) => s.userId)).toContain(d.id);
-  });
-
-  it("an app that said 'background' is never silent after its socket goes", async () => {
-    resetDriverPresenceForTests();
-    const d = await driver();
-    const sock = await connectAs(tokenFor(d));
-    await new Promise((resolve) => sock.emit(DRIVER_CLIENT_EVENTS.PRESENCE, { state: "background" }, resolve));
-    sock.disconnect();
-    await new Promise((r) => setTimeout(r, 200));
-    expect(silentDrivers(Date.now() + 10 * config.driverSilenceTimeoutMinutes * 60_000)).toEqual([]);
+    expect(driverPresenceOf(d.id)).toMatchObject({ connected: false, state: "background" });
   });
 });
 

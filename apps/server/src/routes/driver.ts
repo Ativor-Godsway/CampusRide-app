@@ -33,6 +33,7 @@ import { claimIfOpen, closeOffer, reofferToDriver } from "../services/ride/dispa
 import { paidFareTotal, requestFare, type RideKind } from "../services/ride/fares";
 import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
+import { liveDriverWhere, noteDriverHeartbeat } from "../services/zones/driverLiveness";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import {
   carSeats,
@@ -332,6 +333,10 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         ...(!body.isOnline ? { currentZoneId: null } : {}),
         // Only an online driver's position is kept.
         ...(body.isOnline ? lastPositionData(position) : {}),
+        // Going online is contact (live at once, services/zones/driverLiveness.ts);
+        // either way, an earlier "set offline for silence" has been seen to.
+        ...(body.isOnline ? { lastHeartbeatAt: new Date() } : {}),
+        autoOfflineAt: null,
       },
     });
     // Stats: hours online (services/stats/driverSessions.ts).
@@ -385,6 +390,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       if (!exists) return reply.code(404).send({ error: "Driver profile not found" });
       return reply.code(409).send({ error: "You're offline. Go online to receive requests." });
     }
+    noteDriverHeartbeat(prisma, userId);
 
     return reply.code(200).send({ zoneId });
   });
@@ -860,6 +866,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           WHERE r."driverId" = ${userId} AND r.status IN ('MATCHED', 'ARRIVED', 'IN_PROGRESS')) AS busy,
         (SELECT u."isReviewDemo" FROM "User" u WHERE u.id = d."userId") AS "isReviewDemo"
       FROM "Driver" d WHERE d."userId" = ${userId}`;
+    // Asking is contact: this driver is live (services/zones/driverLiveness.ts).
+    if (driver?.isOnline) noteDriverHeartbeat(prisma, userId);
     // A review demo driver sees demo requests wherever they are (services/reviewDemo).
     if (!driver || !driver.isOnline || !driver.isApproved || (!driver.currentZoneId && !driver.isReviewDemo) || driver.busy) {
       return reply.code(200).send({ rides: [] });
@@ -898,7 +906,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const [allEligibleDrivers, ratings, places, timedOut] = await Promise.all([
       prisma.driver.findMany({
         where: {
-          isOnline: true,
+          ...liveDriverWhere(),
           isApproved: true,
           currentZoneId: { in: Array.from(allRideEligibleZones) },
         },

@@ -153,7 +153,25 @@ still owed (a driver, all time) = Σ CommissionLedger.amountPesewas     (COMMISS
 - **Cancelled by driver** = their rides cancelled with `DRIVER_BACKED_OUT`.
 - **Rating** = the average stars drivers received from riders, all time.
 - **Now**: Suspended, Needs approval, On trip (a ride of theirs is matched,
-  arrived or under way), Online, Offline.
+  arrived or under way), Online, Offline. **Online** (here, on the live map and
+  for booking) means switched on **and** the app heard from in the last 10
+  minutes (`Driver.lastHeartbeatAt`: a position, the app's presence or its live
+  connection's heartbeat). After 10 minutes of silence the server sets the
+  driver offline (never mid-trip) and their session ends `TIMEOUT` at the last
+  contact. Before 2026-11-24 a stale "online" flag counted.
+
+## Refused bookings (Supply & demand)
+
+- An anonymous record (`RefusedBooking`) of each booking the server refused:
+  when, the pickup and drop-off as the place they're at or near and their zone,
+  the ride type, and the reason (outside service hours, no drivers online,
+  before launch, outside the area, same spot twice, a place gone, a zone not
+  served, already had a ride). No rider, phone or exact pin.
+- **Tapped Request**: `POST /rides` was refused. **Saw it blocked**: the rider
+  opened Choose a ride while booking was blocked (the app greys out Request, so
+  it never sends one); counted at the price quote, once per rider and trip per
+  30 minutes.
+- Counts per Accra day and per reason; recorded from 2026-11-24.
 
 ## Cancellations
 

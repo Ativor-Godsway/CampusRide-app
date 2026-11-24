@@ -10,10 +10,12 @@ import {
 } from "react";
 import { Alert, AppState, Linking } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import * as SecureStore from "expo-secure-store";
 import {
+  DRIVER_AUTO_OFFLINE_MESSAGE,
+  DRIVER_AUTO_OFFLINE_TITLE,
   DRIVER_CLIENT_EVENTS,
   DRIVER_OUTSIDE_AREA_MESSAGE,
-  pushText,
   WHILE_USING_ONLY_MESSAGE,
   isOutsideServiceArea,
   isTransientRequestFailure,
@@ -127,6 +129,27 @@ function refusedOffCampus(err: unknown): boolean {
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/** The last "set offline" the driver was told about (its server time), kept across app starts. */
+const AUTO_OFFLINE_SEEN_KEY = "driver.autoOfflineSeen";
+let autoOfflineShownFor: string | null = null;
+
+/**
+ * "You were set offline because your app lost connection…", once per time
+ * the server did it (it answers with when). Saved so reopening the app
+ * doesn't say it again; a failed read or write just risks saying it twice.
+ */
+async function tellSetOfflineOnce(at: string): Promise<void> {
+  if (autoOfflineShownFor === at) return;
+  autoOfflineShownFor = at;
+  try {
+    if ((await SecureStore.getItemAsync(AUTO_OFFLINE_SEEN_KEY)) === at) return;
+  } catch {
+    // Can't tell: say it.
+  }
+  Alert.alert(DRIVER_AUTO_OFFLINE_TITLE, DRIVER_AUTO_OFFLINE_MESSAGE);
+  SecureStore.setItemAsync(AUTO_OFFLINE_SEEN_KEY, at).catch(() => {});
+}
+
 export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
@@ -154,12 +177,13 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
   confirmedRef.current = confirmed;
 
   // Tell the server whether the app is in front or in the background, on
-  // every (re)connect and app state change: it never takes a driver offline
-  // whose app said "background" (it may send nothing for a long while), only
-  // one whose phone it lost touch with while the app was in front
-  // (server: services/zones/driverPresence.ts). Its answer says if that
-  // happened meanwhile, and the app then shows the driver offline — unless a
-  // tap of the switch is still on its way, which wins.
+  // every (re)connect and app state change. The server sets a driver offline
+  // after 10 minutes without hearing from their app (server:
+  // services/zones/driverLiveness.ts; the app's positions and its live
+  // connection keep it heard). Its answer says if that happened meanwhile:
+  // the app shows the driver offline and, once the app is in front, says why
+  // — once per time it happened — unless a tap of the switch is still on its
+  // way, which wins.
   useEffect(() => {
     if (!isDriver) return;
     const socket = getRideSocket();
@@ -169,13 +193,16 @@ export function DriverPresenceProvider({ children }: { children: ReactNode }) {
       if (!force && state === last) return;
       last = state;
       socket.emit(DRIVER_CLIENT_EVENTS.PRESENCE, { state }, (answer?: DriverPresenceAnswer) => {
-        if (!answer?.takenOffline || !isOnlineRef.current || !confirmedRef.current) return;
-        seqRef.current += 1;
-        applyOnline(false);
-        if (AppState.currentState === "active") {
-          const { title, body } = pushText("WENT_OFFLINE");
-          Alert.alert(title, body);
+        if (!answer?.takenOffline || !confirmedRef.current) return;
+        const wasOnline = isOnlineRef.current;
+        if (wasOnline) {
+          seqRef.current += 1;
+          applyOnline(false);
         }
+        if (AppState.currentState !== "active") return;
+        if (answer.takenOfflineAt) void tellSetOfflineOnce(answer.takenOfflineAt);
+        // A server from before it said when: as before, only if the app thought it was online.
+        else if (wasOnline) Alert.alert(DRIVER_AUTO_OFFLINE_TITLE, DRIVER_AUTO_OFFLINE_MESSAGE);
       });
     };
     const onConnect = () => send(true);

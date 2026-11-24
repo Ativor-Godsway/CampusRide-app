@@ -12,6 +12,7 @@ import type {
   RideType,
   RidePinFields,
   CampusPlace,
+  FareQuote,
   Zone,
 } from "@rida/shared";
 import { NO_DRIVERS_ONLINE_CODE, SERVICE_CLOSED_CODE, asArray, readCursorPage, readList } from "@rida/shared";
@@ -84,6 +85,12 @@ export type CreateRideInput = {
   paymentMethod?: PaymentMethod;
   /** "At the main gate, blue shirt" — at most PICKUP_NOTE_MAX_LENGTH characters. */
   pickupNote?: string;
+  /**
+   * The price Choose a ride showed for this type (getFareQuote). The server
+   * charges exactly it, or refuses with FARE_CHANGED (RideRequestRefusedError)
+   * when the price has just changed.
+   */
+  shownFarePesewas?: number;
 } & ({ pickup: RideEndBody; dropoff: RideEndBody } | { pickupZoneId: string; dropoffZoneId: string });
 
 /**
@@ -245,10 +252,20 @@ export async function cancelRide(rideId: string, input: CancelRideInput = {}): P
   return res.data.ride;
 }
 
+/**
+ * What Shared and Ride alone cost for this trip, worked out by the server
+ * (far-trip pricing: Shared costs more when the trip crosses between the far
+ * area and the rest of campus). POST /rides locks the same price on the seat.
+ */
+export async function getFareQuote(pickup: RideEndBody, dropoff: RideEndBody): Promise<FareQuote> {
+  const res = await api.post<FareQuote>("/rides/quote", { pickup, dropoff });
+  return res.data;
+}
+
 export interface SwitchRideTypeResult {
   ride: Ride;
-  /** The rider's new locked fare, in pesewas. */
-  farePesewas: number;
+  /** The rider's new locked fare, in pesewas (null only if the seat is missing). */
+  farePesewas: number | null;
 }
 
 /**
@@ -256,8 +273,9 @@ export interface SwitchRideTypeResult {
  * (POST /rides/:id/switch). The server refuses with 409 once a driver has
  * claimed the ride; the rider then simply has their matched ride.
  */
-export async function switchRideType(rideId: string, type: RideType): Promise<SwitchRideTypeResult> {
-  const res = await api.post<SwitchRideTypeResult>(`/rides/${rideId}/switch`, { type });
+/** `shownFarePesewas`: the price the app showed for the new type (see CreateRideInput). */
+export async function switchRideType(rideId: string, type: RideType, shownFarePesewas?: number): Promise<SwitchRideTypeResult> {
+  const res = await api.post<SwitchRideTypeResult>(`/rides/${rideId}/switch`, { type, ...(shownFarePesewas !== undefined ? { shownFarePesewas } : {}) });
   return res.data;
 }
 

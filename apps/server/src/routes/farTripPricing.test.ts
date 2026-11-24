@@ -1,0 +1,328 @@
+/**
+ * Far-trip pricing and refused bookings (2026-11-24). Pins:
+ *   1. a Shared seat is GH₵9 when the trip CROSSES between the far area and
+ *      the rest of campus (exactly one end in it), GH₵7 when both ends are in
+ *      it or neither is; Ride alone is GH₵15 everywhere;
+ *   2. a pin with no place chosen counts by the place it's near (≤ 250 m);
+ *   3. the price is locked when the request is made: the quote, the seat, a
+ *      Shared/Ride alone switch and the driver's offer (85% share) agree; an
+ *      admin price change reaches new requests only;
+ *   3b. nobody pays more than they were shown: an app that sends no price
+ *      (older builds, which show GH₵7) pays at most GH₵7 for Shared; a stale
+ *      shown price is refused (FARE_CHANGED) and books nothing;
+ *   4. a refused booking leaves an anonymous record (no rider, no pin) —
+ *      at POST /rides, and at the quote while booking is blocked (once per
+ *      rider and trip) — and admin counts them per day and reason.
+ */
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import Fastify, { type FastifyInstance } from "fastify";
+import type { Place } from "@prisma/client";
+import { splitFare, type FareQuote } from "@rida/shared";
+import { prisma } from "../db/prisma";
+import { registerRideRoutes } from "./rides";
+import { registerDriverRoutes } from "./driver";
+import { registerAdminDispatchRoutes } from "./adminDispatch";
+import { signAccessToken } from "../services/auth/tokens";
+import { createTestDriver, createTestUser, getTestZones } from "../services/ride/testFixtures";
+import { clearFarePricingCache } from "../services/ride/farePricing";
+import { resetRefusedBookingsForTests } from "../services/ride/refusedBookings";
+import { clearServiceHoursCache, setServiceHoursGateForTests } from "../services/service/serviceHours";
+import { clearAdminCache } from "../services/admin/cache";
+
+let app: FastifyInstance;
+const userIds: string[] = [];
+const placeIds: string[] = [];
+let far: Place; // Bani Hostel (far area)
+let farToo: Place; // Jean Nelson Aka Hall (far area)
+let campus: Place; // Balme Library
+let campusToo: Place; // Akuafo Hall
+
+beforeAll(async () => {
+  app = Fastify();
+  registerRideRoutes(app, prisma);
+  registerDriverRoutes(app, prisma);
+  registerAdminDispatchRoutes(app, prisma);
+  await app.ready();
+  const { pickup } = await getTestZones();
+  const place = async (name: string, latitude: number, longitude: number, inFarArea: boolean) => {
+    const p = await prisma.place.create({ data: { name: `Far test ${name}`, latitude, longitude, zoneId: pickup.id, inFarArea } });
+    placeIds.push(p.id);
+    return p;
+  };
+  far = await place("Bani Hostel", 5.663256, -0.179997, true);
+  farToo = await place("Jean Nelson Aka Hall", 5.63534, -0.188475, true);
+  campus = await place("Balme Library", 5.652012, -0.187048, false);
+  campusToo = await place("Akuafo Hall", 5.649357, -0.186087, false);
+});
+
+beforeEach(async () => {
+  await prisma.farePricingSetting.deleteMany({});
+  await prisma.refusedBooking.deleteMany({});
+  clearFarePricingCache();
+  clearAdminCache();
+  resetRefusedBookingsForTests();
+});
+
+afterEach(async () => {
+  const ids = userIds.splice(0);
+  await prisma.ride.deleteMany({ where: { OR: [{ riderId: { in: ids } }, { driverId: { in: ids } }] } });
+  await prisma.driver.deleteMany({ where: { userId: { in: ids } } });
+  await prisma.user.deleteMany({ where: { id: { in: ids } } });
+  setServiceHoursGateForTests(false);
+  await prisma.serviceHoursSetting.deleteMany({});
+  clearServiceHoursCache();
+});
+
+afterAll(async () => {
+  await prisma.farePricingSetting.deleteMany({});
+  await prisma.refusedBooking.deleteMany({});
+  await prisma.place.deleteMany({ where: { id: { in: placeIds } } });
+  await app.close();
+});
+
+async function person(role: "RIDER" | "ADMIN" = "RIDER") {
+  const created = await createTestUser("RIDER");
+  const user = role === "ADMIN" ? await prisma.user.update({ where: { id: created.id }, data: { role } }) : created;
+  userIds.push(user.id);
+  return { user, headers: { authorization: `Bearer ${signAccessToken({ userId: user.id, role })}` } };
+}
+
+const at = (p: Place) => ({ placeId: p.id });
+
+async function quote(rider: { headers: Record<string, string> }, pickup: object, dropoff: object): Promise<FareQuote> {
+  const res = await app.inject({ method: "POST", url: "/rides/quote", headers: rider.headers, payload: { pickup, dropoff } });
+  expect(res.statusCode).toBe(200);
+  return res.json() as FareQuote;
+}
+
+/** Books as a current app does: sending the price Choose a ride showed (the quote), unless `shown` says otherwise. */
+async function book(
+  rider: { headers: Record<string, string> },
+  type: "SHARED" | "LONE",
+  pickup: object,
+  dropoff: object,
+  shown: number | "quote" | "none" = "quote",
+) {
+  const shownFarePesewas = shown === "quote" ? (await quote(rider, pickup, dropoff)).fares[type] : shown === "none" ? undefined : shown;
+  const res = await app.inject({ method: "POST", url: "/rides", headers: rider.headers, payload: { type, pickup, dropoff, shownFarePesewas } });
+  expect(res.statusCode).toBe(201);
+  const id = (res.json() as { ride: { id: string } }).ride.id;
+  return prisma.ride.findUniqueOrThrow({ where: { id }, include: { passengers: true } });
+}
+
+describe("far-trip price rules", () => {
+  it("crossing (exactly one end in the far area): Shared GH₵9, either way round", async () => {
+    const rider = await person();
+    expect(await quote(rider, at(far), at(campus))).toEqual({ fares: { SHARED: 900, LONE: 1500 }, farTrip: true });
+    expect(await quote(rider, at(campus), at(farToo))).toEqual({ fares: { SHARED: 900, LONE: 1500 }, farTrip: true });
+  });
+
+  it("not crossing: both ends in the far area, or neither — GH₵7", async () => {
+    const rider = await person();
+    expect(await quote(rider, at(far), at(farToo))).toEqual({ fares: { SHARED: 700, LONE: 1500 }, farTrip: false });
+    expect(await quote(rider, at(campus), at(campusToo))).toEqual({ fares: { SHARED: 700, LONE: 1500 }, farTrip: false });
+  });
+
+  it("Ride alone is GH₵15 everywhere, crossing or not", async () => {
+    const rider = await person();
+    for (const [a, b] of [[far, campus], [far, farToo], [campus, campusToo]] as const) {
+      expect((await quote(rider, at(a), at(b))).fares.LONE).toBe(1500);
+    }
+  });
+
+  it("a pin with no place chosen counts by the place it's near (≤ 250 m), not beyond", async () => {
+    const rider = await person();
+    const nearBani = { latitude: far.latitude + 0.001, longitude: far.longitude }; // ~110 m north
+    expect((await quote(rider, nearBani, at(campus))).fares.SHARED).toBe(900);
+    const offCluster = { latitude: 5.6585, longitude: -0.183 }; // ~600 m from Bani, nowhere near a far place
+    expect((await quote(rider, offCluster, at(campus))).fares.SHARED).toBe(700);
+  });
+});
+
+describe("the price is set when the request is made", () => {
+  it("the seat is locked at the quoted price; Ride alone at GH₵15", async () => {
+    const rider = await person();
+    const shared = await book(rider, "SHARED", at(far), at(campus));
+    expect(shared.passengers[0]!.lockedFare).toBe(900);
+    await prisma.ride.update({ where: { id: shared.id }, data: { status: "CANCELLED" } });
+    const lone = await book(rider, "LONE", at(far), at(campus));
+    expect(lone.passengers[0]!.lockedFare).toBe(1500);
+  });
+
+  it("switching Ride alone → Shared takes the far price for that trip", async () => {
+    const rider = await person();
+    const ride = await book(rider, "LONE", at(campus), at(far));
+    const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/switch`, headers: rider.headers, payload: { type: "SHARED", shownFarePesewas: 900 } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().farePesewas).toBe(900);
+    expect((await prisma.ridePassenger.findFirstOrThrow({ where: { rideId: ride.id } })).lockedFare).toBe(900);
+  });
+
+  it("an older app that shows no quote (it shows GH₵7) is never charged more: Shared ≤ GH₵7, Ride alone GH₵15", async () => {
+    const rider = await person();
+    const shared = await book(rider, "SHARED", at(far), at(campus), "none");
+    expect(shared.passengers[0]!.lockedFare).toBe(700);
+    await prisma.ride.update({ where: { id: shared.id }, data: { status: "CANCELLED" } });
+    const lone = await book(rider, "LONE", at(far), at(campus), "none");
+    expect(lone.passengers[0]!.lockedFare).toBe(1500);
+    // Switching from an older app: the same rule.
+    const res = await app.inject({ method: "POST", url: `/rides/${lone.id}/switch`, headers: rider.headers, payload: { type: "SHARED" } });
+    expect(res.json().farePesewas).toBe(700);
+  });
+
+  it("a stale shown price is refused with the new one, and nothing is booked", async () => {
+    const rider = await person();
+    const res = await app.inject({
+      method: "POST",
+      url: "/rides",
+      headers: rider.headers,
+      payload: { type: "SHARED", pickup: at(far), dropoff: at(campus), shownFarePesewas: 700 },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toMatchObject({ code: "FARE_CHANGED", farePesewas: 900, error: "The price for this trip has just changed to GH₵9. Check it and request again." });
+    expect(await prisma.ride.count({ where: { riderId: rider.user.id } })).toBe(0);
+  });
+
+  it("the driver's offer shows the locked fare and their 85% of it", async () => {
+    const rider = await person();
+    const ride = await book(rider, "SHARED", at(far), at(campus));
+    const { user } = await createTestDriver({ isOnline: true, currentZoneId: ride.pickupZoneId });
+    userIds.push(user.id);
+    const res = await app.inject({
+      method: "GET",
+      url: "/driver/rides/eligible",
+      headers: { authorization: `Bearer ${signAccessToken({ userId: user.id, role: "DRIVER" })}` },
+    });
+    const offer = (res.json() as { rides: Array<{ rideId: string; farePesewas: number; driverSharePesewas: number }> }).rides.find((r) => r.rideId === ride.id);
+    expect(offer).toMatchObject({ farePesewas: 900, driverSharePesewas: 765 });
+    expect(splitFare(900)).toEqual({ commission: 135, driverShare: 765 });
+  });
+
+  it("an admin price change reaches new requests only; a ride already requested keeps its price", async () => {
+    const admin = await person("ADMIN");
+    const rider = await person();
+    const before = await book(rider, "SHARED", at(far), at(campus));
+
+    const save = await app.inject({
+      method: "PUT",
+      url: "/admin/far-pricing",
+      headers: admin.headers,
+      payload: { sharedPesewas: 800, sharedFarPesewas: 1000, farPlaceIds: [far.id, farToo.id] },
+    });
+    expect(save.statusCode).toBe(200);
+    expect(save.json().settings).toMatchObject({ sharedPesewas: 800, sharedFarPesewas: 1000, loneFarePesewas: 1500 });
+
+    expect((await prisma.ridePassenger.findFirstOrThrow({ where: { rideId: before.id } })).lockedFare).toBe(900);
+    const other = await person();
+    expect((await quote(other, at(far), at(campus))).fares).toEqual({ SHARED: 1000, LONE: 1500 });
+    expect((await quote(other, at(campus), at(campusToo))).fares.SHARED).toBe(800);
+    const log = await prisma.adminAuditLog.findFirst({ where: { action: "fares.update", actor: admin.user.id } });
+    expect(log?.reason).toContain("far Shared 900 → 1000");
+    await prisma.adminAuditLog.deleteMany({ where: { actor: admin.user.id } });
+  });
+
+  it("admin can take a place out of the far area; bad prices are refused", async () => {
+    const admin = await person("ADMIN");
+    const put = (payload: object) => app.inject({ method: "PUT", url: "/admin/far-pricing", headers: admin.headers, payload });
+    expect((await put({ sharedPesewas: 700, sharedFarPesewas: 1600, farPlaceIds: [] })).statusCode).toBe(400);
+    expect((await put({ sharedPesewas: 700, sharedFarPesewas: 900, farPlaceIds: ["nope"] })).statusCode).toBe(400);
+    const res = await put({ sharedPesewas: 700, sharedFarPesewas: 900, farPlaceIds: [farToo.id] });
+    expect(res.json().farPlaces.map((p: { id: string }) => p.id)).toEqual([farToo.id]);
+    const rider = await person();
+    expect((await quote(rider, at(far), at(campus))).fares.SHARED).toBe(700);
+    await prisma.place.update({ where: { id: far.id }, data: { inFarArea: true } });
+    await prisma.adminAuditLog.deleteMany({ where: { actor: admin.user.id } });
+  });
+});
+
+describe("refused bookings", () => {
+  async function closeService() {
+    setServiceHoursGateForTests(true);
+    await prisma.serviceHoursSetting.create({
+      data: { id: "service", weekly: Array.from({ length: 7 }, () => null), blockWhenNoDrivers: false },
+    });
+    clearServiceHoursCache();
+  }
+
+  it("a refused POST /rides leaves an anonymous record: reason, places and zones, no rider or pin", async () => {
+    await closeService();
+    const rider = await person();
+    const res = await app.inject({ method: "POST", url: "/rides", headers: rider.headers, payload: { type: "SHARED", pickup: at(far), dropoff: at(campus) } });
+    expect(res.statusCode).toBe(422);
+    const rows = await prisma.refusedBooking.findMany();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      reason: "SERVICE_CLOSED",
+      stage: "REQUEST",
+      rideType: "SHARED",
+      pickupLabel: far.name,
+      dropoffLabel: campus.name,
+    });
+    expect(rows[0]!.pickupZoneId).not.toBeNull();
+    // Nothing that says who, nor the exact spot.
+    expect(Object.keys(rows[0]!).sort()).toEqual(
+      ["createdAt", "dropoffLabel", "dropoffZoneId", "id", "pickupLabel", "pickupZoneId", "reason", "rideType", "stage"].sort(),
+    );
+    expect(JSON.stringify(rows[0])).not.toContain(rider.user.id);
+  });
+
+  it("outside the service area is recorded with no zone for that end", async () => {
+    const rider = await person();
+    const res = await app.inject({
+      method: "POST",
+      url: "/rides",
+      headers: rider.headers,
+      payload: { type: "LONE", pickup: { latitude: 5.6, longitude: -0.25 }, dropoff: at(campus) },
+    });
+    expect(res.statusCode).toBe(422);
+    const [row] = await prisma.refusedBooking.findMany();
+    expect(row).toMatchObject({ reason: "OUTSIDE_SERVICE_AREA", stage: "REQUEST", pickupZoneId: null, pickupLabel: null, dropoffLabel: campus.name });
+  });
+
+  it("a quote while booking is blocked is still answered, and recorded once per rider and trip", async () => {
+    await closeService();
+    const rider = await person();
+    expect((await quote(rider, at(far), at(campus))).fares.SHARED).toBe(900);
+    await quote(rider, at(far), at(campus));
+    await quote(rider, at(far), at(campus));
+    const other = await person();
+    await quote(other, at(far), at(campus));
+    const rows = await prisma.refusedBooking.findMany();
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.stage === "QUOTE" && r.reason === "SERVICE_CLOSED")).toBe(true);
+  });
+
+  it("an open service records nothing", async () => {
+    const rider = await person();
+    await quote(rider, at(far), at(campus));
+    await book(rider, "SHARED", at(far), at(campus));
+    expect(await prisma.refusedBooking.count()).toBe(0);
+  });
+
+  it("admin sees a count per day and per reason", async () => {
+    const admin = await person("ADMIN");
+    const now = new Date();
+    const zone = (await getTestZones()).pickup;
+    await prisma.refusedBooking.createMany({
+      data: [
+        { reason: "SERVICE_CLOSED", stage: "REQUEST", createdAt: now, pickupZoneId: zone.id },
+        { reason: "SERVICE_CLOSED", stage: "QUOTE", createdAt: now, pickupZoneId: zone.id },
+        { reason: "NO_DRIVERS_ONLINE", stage: "QUOTE", createdAt: now },
+      ],
+    });
+    const from = new Date(now.getTime() - 86_400_000).toISOString();
+    const to = new Date(now.getTime() + 60_000).toISOString();
+    const res = await app.inject({ method: "GET", url: `/admin/refused-bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, headers: admin.headers });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.total).toBe(3);
+    expect(body.byReason).toEqual([
+      { reason: "SERVICE_CLOSED", total: 2, requests: 1, quotes: 1 },
+      { reason: "NO_DRIVERS_ONLINE", total: 1, requests: 0, quotes: 1 },
+    ]);
+    const today = body.days.find((d: { total: number }) => d.total > 0);
+    expect(today).toMatchObject({ total: 3, byReason: { SERVICE_CLOSED: 2, NO_DRIVERS_ONLINE: 1 }, requests: 1, quotes: 2 });
+    expect(body.topPickupZones[0]).toMatchObject({ zoneId: zone.id, name: zone.name, total: 2 });
+    expect(body.labels.SERVICE_CLOSED).toBe("Outside service hours");
+  });
+});

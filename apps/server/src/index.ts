@@ -25,7 +25,7 @@ import {
 import { registerAllRoutes } from "./routes";
 import { checkPushReceipts } from "./services/push/pushService";
 import { maybeSendLaunchPush } from "./services/push/broadcast";
-import { SERVICE_TICK_MS, serviceTick } from "./services/service/serviceAnnouncer";
+import { SERVICE_TICK_MS, announceServiceSoon, serviceTick } from "./services/service/serviceAnnouncer";
 import { sweepLivePositions } from "./services/zones/livePositions";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
@@ -43,7 +43,8 @@ import { loadTestOtpCode } from "./services/auth/loadTestOtp";
 import { purgeDeletedAccounts } from "./services/auth/deleteAccount";
 import { purgeOldOtpCodes } from "./services/auth/otpCleanup";
 import { FLUSH_MS, flushLocationTrail, purgeOldLocationPoints } from "./services/stats/locationTrail";
-import { sweepDriverPresence, takeSilentDriversOffline } from "./services/zones/driverPresence";
+import { sweepDriverPresence } from "./services/zones/driverPresence";
+import { SWEEP_GRACE_AFTER_START_MS, takeStaleDriversOffline } from "./services/zones/driverLiveness";
 import { startReviewDemo } from "./services/reviewDemo/simulation";
 import { reviewDemoConfig } from "./services/reviewDemo/config";
 
@@ -301,12 +302,21 @@ async function bootstrap() {
   // trail written in one batch a minute (with drivers' sessions marked as
   // seen), and trail points past 90 days deleted.
   const trailFlush = setInterval(() => void flushLocationTrail(prisma), FLUSH_MS);
-  // Online drivers whose phone the server lost touch with (app last in
-  // front, no connection, nothing heard for DRIVER_SILENCE_TIMEOUT_MIN) are
-  // taken offline and told by push; never in the background or mid-trip.
+  // Online drivers whose app hasn't been heard from for 10 minutes are set
+  // offline and told by push (services/zones/driverLiveness.ts); never
+  // mid-trip. Not in the first minutes after a start: live apps reconnect
+  // (and are heard) within seconds of a deploy.
+  const staleSweepFrom = Date.now() + SWEEP_GRACE_AFTER_START_MS;
   const sessionTimeouts = setInterval(() => {
     sweepDriverPresence();
-    takeSilentDriversOffline(prisma).catch((err) => app.log.error({ err }, "Taking silent drivers offline failed"));
+    if (Date.now() < staleSweepFrom) return;
+    takeStaleDriversOffline(prisma).then(
+      (taken) => {
+        // Fewer drivers online may close booking ("no drivers online").
+        if (taken.length > 0) announceServiceSoon(prisma);
+      },
+      (err) => app.log.error({ err }, "Setting silent drivers offline failed"),
+    );
   }, 60_000);
   const purgeTrail = () =>
     purgeOldLocationPoints(prisma).then(

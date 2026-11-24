@@ -107,7 +107,8 @@ always the one in the token.
 | `GET /rides/mine` | Yes | RIDER | Own bookings only. | account default |
 | `GET /rides/active` | Yes | RIDER | Own current ride (as booker or passenger), own stops only. | account default |
 | `GET /rides/nearby-cars` | Yes | RIDER | Up to 20 available cars on campus for the Home map: a key that changes every 5 minutes, a position moved 10-25 m, and a heading. No driver id, name, plate or number. Empty while the rider has a ride going on. Positions come from drivers' sockets, kept in memory only. | 1 / 5 s (instead of the account default) |
-| `POST /rides` | Yes | RIDER | Books for the caller only; one active ride at a time. Rider, driver, status and fares can't be set by the app. | 12 / hour (and one active ride at a time); account default |
+| `POST /rides` | Yes | RIDER | Books for the caller only; one active ride at a time. Rider, driver, status and fares can't be set by the app (the server sets the fare: far-trip pricing). A refusal writes an anonymous record (reason, place names and zones; no rider, phone or pin). | 12 / hour (and one active ride at a time); account default |
+| `POST /rides/quote` | Yes | RIDER | The price of Shared and Ride alone for a pickup and drop-off, before booking (worked out on the server). While booking is blocked (closed, no drivers, before launch) it also writes an anonymous refused-booking record, once per rider and trip per 30 min (a hash in memory only says which). | account default |
 | `POST /uploads/driver-photo/signature` | Yes | DRIVER | Signs an upload that can only land at this driver's own image id. | 10 / hour; account default |
 | `POST /uploads/driver-photo/failure` | Yes | DRIVER | Logs the driver's own upload error. | account default |
 
@@ -212,6 +213,11 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `POST /admin/drivers/:id/waive` | Yes | ADMIN | Waives some or all of one driver's balance (never more than owed) with a required reason. Audit-logged (`cash.waive`). | account default; plus 60 changes / 15 min |
 | `GET /admin/commission-settings` | Yes | ADMIN | The commission rules: debt limit, warning level, enforcement, Paystack fee and cap; whether a Paystack key is set (never the key). | account default |
 | `PUT /admin/commission-settings` | Yes | ADMIN | Saves the commission rules (bounds checked). Audit-logged (`commission.settings`, before → after). | account default; plus 60 changes / 15 min |
+| `GET /admin/far-pricing` | Yes | ADMIN | The two Shared prices (normal, far) and the places in the far area. | account default |
+| `PUT /admin/far-pricing` | Yes | ADMIN | Saves both Shared prices (GH₵1–100, far ≤ Ride alone) and exactly this far area. New requests only. Audit-logged (`fares.update`). | account default; plus 60 changes / 15 min |
+| `GET /admin/zone-neighbours` | Yes | ADMIN | Zones in service, the neighbour pairs dispatch uses, and the suggested pairs (from where the zones are). | account default |
+| `PUT /admin/zone-neighbours` | Yes | ADMIN | Makes the neighbour pairs exactly these (every zone keeps at least one). Audit-logged (`zones.neighbours`). | account default; plus 60 changes / 15 min |
+| `GET /admin/refused-bookings` | Yes | ADMIN | Refused bookings in a period, per day and per reason, and the most refused pickup zones. Anonymous records only. Cached 60 s per period. | account default |
 | `GET /admin/riders` | Yes | ADMIN | Rider totals for a period, sign-ups per day, and a page of riders (phones masked; search by phone or name). | account default |
 | `GET /admin/riders/:id` | Yes | ADMIN | One rider in full, incl. their phone number: rides, ratings given, SOS. | account default |
 | `GET /admin/safety` | Yes | ADMIN | Open SOS (any date) and the period's handled ones, SOS from before records, 1–2 star ratings. Cached 60 s per period. | account default |

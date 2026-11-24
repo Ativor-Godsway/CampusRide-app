@@ -180,32 +180,32 @@ also touches the driver app.
 
 ### Changing a price
 
-Prices live in one place, `PRICING` in
+Since 2026-11-24 the **Shared prices are admin settings** (admin site, Places →
+Far-trip pricing: the normal Shared seat, the far-trip Shared seat, and the
+places in the far area). Saving there changes new requests at once; no deploy,
+no app update. Ride alone (`PRICING.LONE_FARE`) and the 85/15 split
+(`PRICING.COMMISSION_PCT`) are still code in
 [packages/shared/src/pricing/pricing.ts](../../packages/shared/src/pricing/pricing.ts).
-The server and both apps read from it, so a price change ships as a server deploy
-plus an over-the-air update of both apps. It changes nothing native.
 
-What already exists is safe: each rider's fare is stored on their seat when they
-request (`lockedFare`). Offers, the trip, the cash commission and the driver's
-history all read those stored fares
-([apps/server/src/services/ride/fares.ts](../../apps/server/src/services/ride/fares.ts)),
-so a ride requested before the change keeps its price. That includes a waiting
-request a driver later adds to their car.
+The server works out every price
+([apps/server/src/services/ride/farePricing.ts](../../apps/server/src/services/ride/farePricing.ts));
+the rider app shows its quote (`POST /rides/quote`) and never works it out
+itself. What already exists is safe: each rider's fare is stored on their seat
+when they request (`lockedFare`), and offers, the trip, the cash commission and
+the driver's history read those stored fares
+([apps/server/src/services/ride/fares.ts](../../apps/server/src/services/ride/fares.ts)).
 
-What isn't covered yet is the moment of the switch. Merging deploys the server
-straight away (Render deploys `main`), and the app update can only be published
-after the merge, and reaches each phone two launches later. So for a while a
-phone still shows the old price on Choose a ride while the server charges the
-new one. Before launch (October 2026, testers only) that was accepted: merge,
-then publish `rider` and `driver` straight after.
+**No rider is charged more than they were shown.** A current rider app sends the
+price it showed (`shownFarePesewas`) with a request or a switch of ride type;
+the server charges exactly that, or refuses with `FARE_CHANGED` (422, the new
+price in words) when it has just changed, and the app asks for a new quote. A
+request with no shown price — rider builds from before 2026-11-24, which work
+GH₵7 out on the phone, and USSD — pays at most GH₵7 for Shared. Once (almost)
+every phone has the update, that fallback could go; it is
+`LEGACY_SHOWN_SHARED_FARE` in farePricing.ts.
 
-> **For any price change after launch, build "honor the shown price" first.**
-> The app sends the price it showed with each request (and with a switch of ride
-> type). The server charges exactly that price, or refuses a stale one so the
-> app refreshes. A request from an older app that sends no price keeps the old
-> fare until a cutoff date (changeable on Render), then pays the new one. With
-> that in place, no rider is ever charged more than they were shown, whatever the
-> release order.
+Changing Ride alone or the commission split still means a server deploy plus an
+over-the-air update of both apps (older apps show their own Ride alone price).
 
 ---
 

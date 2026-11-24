@@ -316,6 +316,7 @@ async function seedTrips(prisma: PrismaClient): Promise<{ trips: Trip[]; zones: 
         photoUrl: "https://example.com/driver.jpg",
         isApproved: true,
         isOnline: true,
+        lastHeartbeatAt: new Date(),
         currentZoneId: pickup.id,
       },
     });

@@ -26,6 +26,7 @@ import { registerNotificationRoutes } from "./notifications";
 import { registerAdminPasskeyRoutes } from "./adminPasskeys";
 import { registerAdminDashboardRoutes } from "./adminDashboard";
 import { registerAdminInsightRoutes } from "./adminInsights";
+import { registerAdminDispatchRoutes } from "./adminDispatch";
 import { registerAdminPeopleRoutes } from "./adminPeople";
 import { registerAdminRideCancelRoutes } from "./adminRideCancel";
 import { registerDriverBalanceRoutes } from "./driverBalance";
@@ -98,6 +99,7 @@ export function registerAllRoutes(
   // The admin dashboard v2 (apps/admin): docs/admin-metrics.md.
   registerAdminDashboardRoutes(app, prisma);
   registerAdminInsightRoutes(app, prisma);
+  registerAdminDispatchRoutes(app, prisma);
   registerAdminPeopleRoutes(app, prisma);
   registerAdminRideCancelRoutes(app, prisma);
 }

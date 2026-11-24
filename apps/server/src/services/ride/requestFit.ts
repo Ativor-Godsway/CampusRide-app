@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient, Ride, RidePassenger } from "@prisma/client";
+import { liveDriverWhere } from "../zones/driverLiveness";
 import {
   DISPATCH_WINDOW_MS,
   PRICING,
@@ -226,7 +227,7 @@ export async function carsThatFitRequest(prisma: PrismaClient, request: RequestR
       type: "SHARED",
       isReviewDemo: request.isReviewDemo,
       driver: {
-        driver: { isOnline: true, isApproved: true },
+        driver: { ...liveDriverWhere(now.getTime()), isApproved: true },
         rideRejections: { none: { rideId: request.id, OR: [{ reason: null }, { reason: { not: "TIMED_OUT" } }] } },
       },
     },

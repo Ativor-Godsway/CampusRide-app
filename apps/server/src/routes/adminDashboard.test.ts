@@ -390,7 +390,8 @@ describe("Live map", () => {
   it("comes from memory: positions, waiting requests with offer counts", async () => {
     resetLivePositionsForTests();
     resetLiveRequestsForTests();
-    await prisma.driver.update({ where: { id: d1DriverId }, data: { isOnline: true } });
+    // Online and heard from just now: only a live driver shows online (services/zones/driverLiveness.ts).
+    await prisma.driver.update({ where: { id: d1DriverId }, data: { isOnline: true, lastHeartbeatAt: new Date() } });
     recordDriverPosition(d1.id, { latitude: 5.6505, longitude: -0.1865 });
     noteRequestOffered(
       { rideId: "live-ride", riderId: r2.id, riderName: "Yaw Boateng", type: "LONE", requestedAt: Date.now() - 60_000, pickup: { latitude: 5.65, longitude: -0.19, label: "Night Market" }, pickupZoneId: "z", pickupLabel: "Night Market", dropoffLabel: "Akuafo Hall" },

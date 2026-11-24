@@ -122,7 +122,7 @@ adjacency edges and a pre-seeded full mesh both collides on the unique constrain
 and breaks "distant zone is not adjacent" assumptions.
 
 ```bash
-npm run db:seed:dev  --workspace apps/server    # zones + 210-row ZoneAdjacency (meshed)
+npm run db:seed:dev  --workspace apps/server    # zones + real zone neighbours (replaces any old full mesh)
 npm run db:seed:test --workspace apps/server    # zones only (SEED_ZONE_ADJACENCY=false)
 ```
 

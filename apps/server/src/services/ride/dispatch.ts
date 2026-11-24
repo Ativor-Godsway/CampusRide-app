@@ -15,11 +15,13 @@ import { emitRequestsChanged } from "../../realtime/rideSocket";
 import { carsThatFitRequest, requestsForDriver, type RequestRow } from "./requestFit";
 import { scheduleRequestExpiry } from "./timeouts";
 import { getZoneMap } from "../zones/zoneCache";
+import { liveDriverWhere } from "../zones/driverLiveness";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
- * online + approved drivers currently in the ride's pickup zone or a zone
- * adjacent to it. This is the candidate set only — ranking/"perfect match"
+ * online + approved drivers whose app was heard from in the last 10 minutes
+ * (services/zones/driverLiveness.ts), currently in the ride's pickup zone or
+ * a zone adjacent to it (real neighbours since 2026-11-24, not every zone). This is the candidate set only — ranking/"perfect match"
  * ordering of these candidates is Phase 2c, not handled here.
  *
  * With the ride's `id` (ride offers, 2026-10), drivers who declined it are
@@ -62,7 +64,8 @@ export async function getEligibleDrivers(
 
   return prisma.driver.findMany({
     where: {
-      isOnline: true,
+      // Online AND heard from in the last 10 minutes (services/zones/driverLiveness.ts).
+      ...liveDriverWhere(),
       isApproved: true,
       currentZoneId: { in: Array.from(zoneIds) },
       currentZone: { retiredAt: null },

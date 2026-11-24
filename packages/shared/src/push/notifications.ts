@@ -9,6 +9,7 @@
  * screen.
  */
 import { firstName } from "../rides/tripStops";
+import { DRIVER_AUTO_OFFLINE_MESSAGE, DRIVER_AUTO_OFFLINE_TITLE } from "../driver/liveness";
 
 /** What happened. Rider kinds go to the rider app, driver kinds to the driver app. */
 export const RIDER_PUSH_KINDS = [
@@ -149,8 +150,8 @@ export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
         : { title: "Ride cancelled", body: `${rider} cancelled the ride.` };
     case "WENT_OFFLINE":
       return {
-        title: "You're offline",
-        body: "We lost touch with your phone for a while. Go online again when you're ready.",
+        title: DRIVER_AUTO_OFFLINE_TITLE,
+        body: DRIVER_AUTO_OFFLINE_MESSAGE,
       };
   }
 }
