@@ -4,7 +4,14 @@
  * more moving parts than the whole screen count justifies.
  */
 
-import { rateLimitMessage, type BroadcastAudience, type BroadcastKind } from "@rida/shared";
+import {
+  rateLimitMessage,
+  type BroadcastAudience,
+  type BroadcastKind,
+  type DayHours,
+  type ServiceOverrideMode,
+  type ServiceStatus,
+} from "@rida/shared";
 import {
   startAuthentication,
   startRegistration,
@@ -454,6 +461,42 @@ export function giveEarlyAccessToAllRiders(
 
 export function setLaunchPush(token: string, enabled: boolean): Promise<{ launchPush: LaunchPushState }> {
   return request("/admin/launch/push", { method: "PUT", body: JSON.stringify({ enabled }) }, token);
+}
+
+// ── Service hours ───────────────────────────────────────────────────────────
+
+export interface ServiceHoursSettings {
+  setting: {
+    /** 7 days, index 0 = Sunday; null = closed all day. */
+    weekly: (DayHours | null)[];
+    override: { mode: ServiceOverrideMode; until: string | null } | null;
+    closedMessage: string | null;
+    blockWhenNoDrivers: boolean;
+    updatedAt: string | null;
+    updatedBy: { id: string; name: string } | null;
+  };
+  status: ServiceStatus;
+  /** "Open – closes at 5:00 PM", "Closed (manual) until tomorrow at 8:00 AM", … */
+  stateLine: string;
+  driversOnline: number;
+  /** Riders waiting for "We're open!". */
+  waiting: number;
+}
+
+export function getServiceHours(token: string): Promise<ServiceHoursSettings> {
+  return request("/admin/service-hours", {}, token);
+}
+
+export function saveServiceHours(
+  token: string,
+  body: { weekly: (DayHours | null)[]; closedMessage: string | null; blockWhenNoDrivers: boolean },
+): Promise<{ status: ServiceStatus }> {
+  return request("/admin/service-hours", { method: "PUT", body: JSON.stringify(body) }, token);
+}
+
+/** "OPEN" (Open now), "CLOSED" (Close now), or null (back to the schedule). */
+export function setServiceOverride(token: string, mode: ServiceOverrideMode | null): Promise<{ status: ServiceStatus }> {
+  return request("/admin/service-hours/override", { method: "PUT", body: JSON.stringify({ mode }) }, token);
 }
 
 // ── Notifications ───────────────────────────────────────────────────────────

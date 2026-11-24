@@ -5,6 +5,7 @@ import { normalizePhone } from "../../lib/phone";
 import { createRide, ActiveRideExistsError, ZoneNotFoundError, SameZoneError, ACTIVE_RIDE_STATUSES } from "../ride/createRide";
 import { findOrCreateRiderByPhone, InvalidPhoneError } from "./findOrCreateRiderByPhone";
 import { LaunchNotOpenError } from "../launch/launchSettings";
+import { ServiceClosedError } from "../service/serviceHours";
 import {
   ZONE_GROUP_ORDER,
   ZONE_GROUP_LABELS,
@@ -246,7 +247,7 @@ async function finalizeRideRequest(
     if (err instanceof ActiveRideExistsError) {
       return endWith("You already have an active ride. Dial back and choose Check Status.", sessionId);
     }
-    if (err instanceof LaunchNotOpenError) {
+    if (err instanceof LaunchNotOpenError || err instanceof ServiceClosedError) {
       return endWith(err.message, sessionId);
     }
     if (err instanceof SameZoneError || err instanceof ZoneNotFoundError) {

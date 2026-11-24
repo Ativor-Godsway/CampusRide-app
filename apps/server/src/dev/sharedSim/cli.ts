@@ -17,6 +17,10 @@ import "./simGuard";
 import { prisma } from "../../db/prisma";
 import { SCENARIOS } from "./scenarios";
 import { World } from "./world";
+import { setServiceHoursGateForTests } from "../../services/service/serviceHours";
+
+// The simulator books at any hour with simulated drivers: service hours don't apply.
+setServiceHoursGateForTests(false);
 
 async function main(): Promise<void> {
   // The server's own JSON log lines (lib/logger) aren't the timeline: kept

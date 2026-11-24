@@ -171,6 +171,7 @@ export async function deleteAccount(
       data: { endedAt: now, endReason: "ACCOUNT_CLOSED" },
     });
     await tx.pushToken.deleteMany({ where: { userId } });
+    await tx.serviceOpenWaiter.deleteMany({ where: { userId } });
     await tx.trackingLink.deleteMany({ where: { riderId: userId } });
     await tx.otpCode.deleteMany({ where: { phone: user.phone } });
 

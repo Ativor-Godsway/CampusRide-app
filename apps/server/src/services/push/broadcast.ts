@@ -2,6 +2,7 @@ import { Prisma, type BroadcastKind, type PrismaClient } from "@prisma/client";
 import {
   BROADCAST_AUDIENCE_LABELS,
   LAUNCH_PUSH_TEXT,
+  SERVICE_OPEN_PUSH_TEXT,
   checkBroadcastText,
   effectiveLaunchMode,
   type BroadcastAudience,
@@ -78,6 +79,7 @@ function installsFor(kind: BroadcastKind, recipient: Recipient | null): Prisma.P
   switch (kind) {
     case "RIDERS":
     case "LAUNCH":
+    case "OPENING":
       return RIDER_INSTALLS;
     case "DRIVERS":
       return DRIVER_INSTALLS;
@@ -455,6 +457,49 @@ export async function maybeSendLaunchPush(prisma: PrismaClient, now = new Date()
     return true;
   } catch (err) {
     logger.error("launch push: check failed", { err });
+    return false;
+  }
+}
+
+/**
+ * "We're open!" to the riders who tapped "Notify me when you open" (service
+ * hours, services/service/serviceAnnouncer.ts), who were just taken off the
+ * list: one push each, recorded in the Notifications history and the audit
+ * log like the launch push. No cap: the list is emptied by this send, so it
+ * can't repeat. Open rider accounts only (never review demo). Never throws.
+ */
+export async function sendOpeningPush(prisma: PrismaClient, userIds: readonly string[]): Promise<boolean> {
+  try {
+    if (userIds.length === 0 || !isPushEnabled()) return false;
+    const where: Prisma.PushTokenWhereInput = { AND: [installsFor("OPENING", null), { userId: { in: [...userIds] } }] };
+    const devices = await prisma.pushToken.count({ where });
+    const id = await prisma.$transaction(async (tx) => {
+      const row = await tx.broadcast.create({
+        data: {
+          actor: SYSTEM_ACTOR,
+          kind: "OPENING",
+          title: SERVICE_OPEN_PUSH_TEXT.title,
+          body: SERVICE_OPEN_PUSH_TEXT.body,
+          devices,
+          ...(devices === 0 ? { status: "SENT" as const, finishedAt: new Date() } : {}),
+        },
+        select: { id: true },
+      });
+      await tx.adminAuditLog.create({
+        data: {
+          actor: SYSTEM_ACTOR,
+          action: "notification.opening",
+          target: row.id,
+          reason: `${userIds.length} rider(s) asked; ${auditReason("OPENING", null, devices, SERVICE_OPEN_PUSH_TEXT)}`,
+        },
+      });
+      return row.id;
+    });
+    logger.info("opening push: sending", { broadcastId: id, riders: userIds.length, devices });
+    if (devices > 0) deliverInBackground(prisma, id, where, SERVICE_OPEN_PUSH_TEXT);
+    return true;
+  } catch (err) {
+    logger.error("opening push: failed", { err });
     return false;
   }
 }

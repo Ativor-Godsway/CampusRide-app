@@ -16,3 +16,4 @@ export * from "./about";
 export * from "./appUpdate";
 export * from "./errors/AppErrorScreen";
 export * from "./launch";
+export * from "./service";

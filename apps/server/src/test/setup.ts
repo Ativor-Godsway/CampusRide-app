@@ -6,6 +6,7 @@ import { beforeAll } from "vitest";
 import { prisma } from "../db/prisma";
 import { config } from "../config";
 import { assertDatabaseAllowedForEnv } from "../db/dbHostGuard";
+import { setServiceHoursGateForTests } from "../services/service/serviceHours";
 
 /**
  * SAFETY GATE. The suite creates and deletes rows, so it must never run
@@ -20,6 +21,13 @@ import { assertDatabaseAllowedForEnv } from "../db/dbHostGuard";
  * check that lives only here protects only the paths that remember to load it.
  */
 assertDatabaseAllowedForEnv(config.databaseUrl, config.nodeEnv, "test setup");
+
+/**
+ * Service hours would refuse bookings by the time of day and when no driver
+ * is online, so every test that books a ride would depend on the clock. The
+ * gate is off for the suite; serviceHours.test.ts turns it on for its own tests.
+ */
+setServiceHoursGateForTests(false);
 
 /**
  * Each test file gets a fresh Prisma Client / DB connection. Neon's pooled

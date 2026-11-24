@@ -1,4 +1,5 @@
 import { normalizeGhanaPhone } from "../phone/ghanaPhone";
+import type { ServiceStatus } from "../service/serviceHours";
 
 /**
  * "Call support" in the rider and driver apps' Account tab. The number comes
@@ -15,6 +16,8 @@ export const APP_CONFIG_PATH = "/app/config";
 export interface AppConfig {
   /** Canonical "+233…" number the apps' "Call support" dials. */
   supportPhone: string;
+  /** Service hours in force now: whether riders can book (missing from older servers). */
+  service?: ServiceStatus;
 }
 
 /**

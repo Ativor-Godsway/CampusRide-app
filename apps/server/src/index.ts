@@ -25,6 +25,7 @@ import {
 import { registerAllRoutes } from "./routes";
 import { checkPushReceipts } from "./services/push/pushService";
 import { maybeSendLaunchPush } from "./services/push/broadcast";
+import { SERVICE_TICK_MS, serviceTick } from "./services/service/serviceAnnouncer";
 import { sweepLivePositions } from "./services/zones/livePositions";
 import { checkCloudinaryAtStartup } from "./services/uploads/cloudinaryConfig";
 import { initRideSocket } from "./realtime/rideSocket";
@@ -276,6 +277,12 @@ async function bootstrap() {
   void maybeSendLaunchPush(prisma);
   const launchPushCheck = setInterval(() => void maybeSendLaunchPush(prisma), LAUNCH_PUSH_CHECK_INTERVAL_MS);
 
+  // Service hours: tells every connected app when riders can or can't book
+  // (opening/closing time, the last driver going offline), and sends "We're
+  // open!" to riders who asked, at the opening (services/service/serviceAnnouncer.ts).
+  void serviceTick(prisma);
+  const serviceHoursTick = setInterval(() => void serviceTick(prisma), SERVICE_TICK_MS);
+
   // Old login codes: once now, then every few hours.
   const purgeOtpCodes = () =>
     purgeOldOtpCodes(prisma).then(
@@ -316,6 +323,7 @@ async function bootstrap() {
     receiptSweep,
     accountPurge,
     launchPushCheck,
+    serviceHoursTick,
     livePositionSweep,
     otpPurge,
     trailFlush,

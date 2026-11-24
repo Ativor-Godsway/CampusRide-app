@@ -20,6 +20,8 @@ import { registerPushRoutes } from "./push";
 import { registerHealthRoutes } from "./health";
 import { registerAppVersionRoutes } from "./appVersion";
 import { registerLaunchRoutes } from "./launch";
+import { registerServiceHoursRoutes } from "./serviceHours";
+import { serviceStatus } from "../services/service/serviceHours";
 import { registerNotificationRoutes } from "./notifications";
 import { registerAdminPasskeyRoutes } from "./adminPasskeys";
 import { registerAdminDashboardRoutes } from "./adminDashboard";
@@ -62,9 +64,12 @@ export function registerAllRoutes(
   // /health (Render) and /health/ready (UptimeRobot): unlimited, see health.ts.
   registerHealthRoutes(app, prisma);
   // Public: whether this app version must update first (the "Time to update" screen).
-  registerAppVersionRoutes(app);
+  // GET /app/config also says whether riders can book now (service hours).
+  registerAppVersionRoutes(app, undefined, undefined, () => serviceStatus(prisma));
   // Public launch countdown status, its signed-in form, and the admin Settings.
   registerLaunchRoutes(app, prisma);
+  // Service hours: the signed-in status, "Notify me when you open", and the admin Settings.
+  registerServiceHoursRoutes(app, prisma);
 
   registerAuthRoutes(app, prisma, deps.otpService);
   registerDemoOtpRoutes(app, prisma, deps.otpService);

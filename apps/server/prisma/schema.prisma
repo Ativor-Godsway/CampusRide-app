@@ -178,6 +178,7 @@ model User {
   cashPayments           DriverCashPayment[]
   paystackPayments       DriverPaystackPayment[]
   sosEvents              SosEvent[]
+  serviceOpenWaiter      ServiceOpenWaiter?
 
   /// Sign-ups per day (admin Riders page).
   @@index([createdAt])
@@ -745,6 +746,43 @@ model LaunchSetting {
   launchPushEnabled Boolean    @default(false)
 }
 
+enum ServiceOverrideMode {
+  OPEN
+  CLOSED
+}
+
+/// Service hours (services/service/serviceHours.ts; the rules are in
+/// @rida/shared service/serviceHours.ts): when riders can book. One row,
+/// id "service"; no row = the defaults (every day 08:00–17:00, requests
+/// blocked when no driver is online). Times are Africa/Accra (= UTC).
+model ServiceHoursSetting {
+  id                 String               @id @default("service")
+  /// 7 entries, index 0 = Sunday: { open: "08:00", close: "17:00" } or null (closed all day).
+  weekly             Json
+  /// "Open now" / "Close now" in Settings; null = follow the schedule.
+  overrideMode       ServiceOverrideMode?
+  /// When the override ends and the schedule takes over (the next scheduled
+  /// opening for CLOSED, closing for OPEN); null = no change ahead, it lasts
+  /// until an admin changes it. Never rewritten when it passes: every read
+  /// compares it with the clock.
+  overrideUntil      DateTime?
+  /// Shown to riders whenever CampusRide is closed ("Closed for the holiday").
+  closedMessage      String?              @db.VarChar(120)
+  blockWhenNoDrivers Boolean              @default(true)
+  updatedAt          DateTime             @updatedAt
+  /// User.id of the admin who last changed it. Plain column, like AdminAuditLog.actor.
+  updatedBy          String?
+}
+
+/// A rider who tapped "Notify me when you open". At the next opening each
+/// gets one "We're open!" push and the list is emptied (claimed row by row,
+/// so two servers never send twice). One row per rider.
+model ServiceOpenWaiter {
+  userId    String   @id
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
 enum BroadcastKind {
   RIDERS
   DRIVERS
@@ -754,6 +792,8 @@ enum BroadcastKind {
   TEST
   /// The one-time launch push.
   LAUNCH
+  /// "We're open!" to riders who tapped "Notify me when you open" (service hours).
+  OPENING
 }
 
 enum BroadcastStatus {

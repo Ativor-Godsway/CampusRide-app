@@ -13,8 +13,11 @@ export const BROADCAST_BODY_MAX = 150;
 export const BROADCAST_AUDIENCES = ["RIDERS", "DRIVERS", "EVERYONE", "PHONE"] as const;
 export type BroadcastAudience = (typeof BROADCAST_AUDIENCES)[number];
 
-/** How a send is recorded in the history: the four above, an admin's test, or the launch push. */
-export type BroadcastKind = BroadcastAudience | "TEST" | "LAUNCH";
+/**
+ * How a send is recorded in the history: the four above, an admin's test,
+ * the launch push, or "We're open!" to riders who asked to be told (service hours).
+ */
+export type BroadcastKind = BroadcastAudience | "TEST" | "LAUNCH" | "OPENING";
 
 export const BROADCAST_AUDIENCE_LABELS: Record<BroadcastKind, string> = {
   RIDERS: "All riders",
@@ -23,6 +26,7 @@ export const BROADCAST_AUDIENCE_LABELS: Record<BroadcastKind, string> = {
   PHONE: "One phone number",
   TEST: "Test to me",
   LAUNCH: "Launch push (riders)",
+  OPENING: "We're open (riders who asked)",
 };
 
 /** The `data.kind` of an admin notification: the apps open, nothing more (no ride to show). */

@@ -14,7 +14,7 @@ import type {
   CampusPlace,
   Zone,
 } from "@rida/shared";
-import { asArray, readCursorPage, readList } from "@rida/shared";
+import { NO_DRIVERS_ONLINE_CODE, SERVICE_CLOSED_CODE, asArray, readCursorPage, readList } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
 /**
@@ -125,6 +125,14 @@ export async function createRide(input: CreateRideInput): Promise<Ride> {
     return res.data.ride;
   } catch (err) {
     const response = (err as { response?: { status?: number; data?: unknown } }).response;
+    const refused = (response?.data ?? {}) as { code?: unknown; error?: unknown };
+    // Service hours (the server sends 422; a 409 with these codes is read the same way).
+    if (
+      (refused.code === SERVICE_CLOSED_CODE || refused.code === NO_DRIVERS_ONLINE_CODE) &&
+      typeof refused.error === "string"
+    ) {
+      throw new RideRequestRefusedError(refused.error, refused.code, null);
+    }
     if (response?.status === 409) {
       const data = (response.data ?? {}) as { activeRideId?: unknown; ride?: { id?: unknown } };
       const id = typeof data.activeRideId === "string" ? data.activeRideId : data.ride?.id;

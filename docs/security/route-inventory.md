@@ -44,7 +44,7 @@ Last reviewed: 2026-10-16 (pre-launch hardening, Stages 1–5).
 | `GET /health` | No | — | Returns `{status, app}` only. Render's liveness check; never touches the database. | none (Render polls it) |
 | `GET /health/ready` | No | — | Also checks the database (`SELECT 1`, at most 3 s): `{status, app, database}`, 503 when it can't be reached. No error details. For UptimeRobot. | none (UptimeRobot polls it) |
 | `GET /app/min-version` | No | — | Per app and platform, the lowest store version still allowed and the store link, from the `MIN_VERSION_*` / `STORE_URL_*` Render variables (docs/runbooks/releasing.md). Not secret, the same for everyone; reads nothing from the database. | IP backstop |
-| `GET /app/config` | No | — | The number the apps' "Call support" dials, from the `SUPPORT_PHONE` Render variable (default +233548608146). Not secret, the same for everyone; reads nothing from the database. | IP backstop |
+| `GET /app/config` | No | — | The number the apps' "Call support" dials, from the `SUPPORT_PHONE` Render variable (default +233548608146), and `service`: whether riders can book now (service hours — open, reason, next opening, closing time, closed message). Not secret, the same for everyone; one cached database read (10 s) and, in open hours, a count of online drivers. | IP backstop |
 | `GET /launch-status` | No | — | Launch mode in force (`OFF`, `COUNTDOWN`, `LIVE`), the launch time during a countdown, and the server's clock. Not secret, the same for everyone; one cached database read (10 s). | IP backstop |
 | `POST /auth/request-otp` | No | — | Sends a code to the phone given. | per number: 1 per 60 s, 5 / 15 min, 10 / 24 h (an admin's number: 3 / 15 min, 6 / 24 h); per IP: 200 codes / 15 min; IP backstop |
 | `POST /auth/verify-otp` | No | — | Returns a 5-minute verification token for that phone only. 5 wrong tries burns the code. | per number: 10 / 15 min (an admin's: 5); IP backstop |
@@ -83,6 +83,9 @@ always the one in the token.
 | Route | Login | Roles | Ownership rule | Rate limit |
 |---|---|---|---|---|
 | `GET /me` | Yes | any | Own account only. | account default |
+| `GET /me/service-status` | Yes | any | Service hours in force now (as `service` in `GET /app/config`), plus `exempt` (review demo and admin accounts book whatever the hours) and `notifyMe` (this account asked to be told at the next opening). Own account only. | account default |
+| `POST /me/service-notify` | Yes | RIDER | "Notify me when you open": puts the caller's own account on the list for one "We're open!" push at the next opening. Refused (409) while riders can book. | account default |
+| `DELETE /me/service-notify` | Yes | any | Takes the caller's own account off that list. | account default |
 | `GET /me/launch-status` | Yes | any | As `GET /launch-status`, plus `canRide`: whether this account may book now (review demo, admin and early-access accounts can during the countdown). Own account only. | account default |
 | `PATCH /me` | Yes | any | Own name and emergency contact only. Any other field sent (role, phone, ids) is ignored. | 20 / hour; account default |
 | `POST /me/terms` | Yes | any | Own account only: records "I'm 18 or older and I agree to the Terms and Privacy Policy" (time and terms version) for an account from before sign-up asked. | 20 / hour; account default |
@@ -171,6 +174,9 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/early-access` | Yes | ADMIN | One phone number's account and whether it has early access. | account default |
 | `POST /admin/early-access` | Yes | ADMIN | Gives or takes away one rider's early access (rider accounts only). Audit-logged (`early_access.grant` / `early_access.revoke`). | account default |
 | `POST /admin/early-access/all-riders` | Yes | ADMIN | Gives early access to every open rider account that exists now (not review demo accounts). Audit-logged once with the count (`early_access.grant_all`). | account default |
+| `GET /admin/service-hours` | Yes | ADMIN | Service hours as stored (weekly schedule, override, closed message, no-drivers switch), the state in force, drivers online and how many riders asked to be notified. | account default |
+| `PUT /admin/service-hours` | Yes | ADMIN | Saves the weekly schedule, closed message and "block when no drivers are online". Audit-logged (`service_hours.update`, before and after). | account default |
+| `PUT /admin/service-hours/override` | Yes | ADMIN | Open now / Close now (until the next scheduled change) or back to the schedule. Audit-logged (`service_hours.override`). | account default |
 | `PUT /admin/launch/push` | Yes | ADMIN | Switches the one-time launch push ("CampusRide is live!") on or off. Refused once CampusRide is already Live or the push has gone out. Audit-logged (`launch.push.enable` / `launch.push.disable`). | account default |
 | `GET /admin/notifications` | Yes | ADMIN | The notification send history (text, audience, counts; one number only masked) and this hour's use of the caps. | account default |
 | `GET /admin/notifications/audience` | Yes | ADMIN | How many app installs a send would reach now; for one number, whose account it is (name, role, masked number). | account default |

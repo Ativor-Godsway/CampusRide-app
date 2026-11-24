@@ -6,6 +6,7 @@ import { broadcastRide } from "./dispatch";
 import { findActiveRideForRider } from "./activeRide";
 import { logger } from "../../lib/logger";
 import { assertCanBook } from "../launch/launchSettings";
+import { assertServiceOpen } from "../service/serviceHours";
 
 /** Rides in any of these statuses count as "active" — a rider may have at most one at a time. */
 export { ACTIVE_RIDE_STATUSES } from "./activeRide";
@@ -107,6 +108,11 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
   // Launch mode: during the countdown only exempt riders book, and everyone
   // else hears when CampusRide opens before anything else (LaunchNotOpenError).
   await assertCanBook(prisma, riderId);
+  // Service hours: outside them (or with no driver online, when that switch
+  // is on) new requests are refused with when CampusRide is back
+  // (ServiceClosedError). Review demo accounts and admins always book.
+  // Requests already searching and trips going on are never touched.
+  await assertServiceOpen(prisma, riderId);
 
   // Pins first: they can be refused (outside the area, unknown place) before
   // anything else is read.
