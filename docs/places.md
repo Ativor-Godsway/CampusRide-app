@@ -224,6 +224,11 @@ next to it** (ZoneAdjacency, read in either direction; rows touching a retired
 zone don't count). Until 2026-11-24 every zone was next to every other (a full
 mesh, 210 rows), so every request went to every online driver on campus.
 
+**Fallback:** when no live driver with no trip is in the pickup zone or its
+neighbours (none there, only stale or busy ones, or they declined it), the
+request goes to every live driver on campus with no trip instead, and shows in
+their "Requests near you" too. Drivers who declined it never get it again.
+
 Now they are **real neighbours**, suggested from where the zones are
 ([zoneNeighbours.ts](../packages/shared/src/geo/zoneNeighbours.ts)): a zone's
 area is every spot on campus nearer its centre than any other's, and two zones
@@ -243,15 +248,24 @@ applies the suggestion.
 
 ### Far-trip pricing
 
-`Place.inFarArea` marks the far area (admin site, Places → Far-trip pricing).
-A Shared trip with exactly one end there costs the far price (GH₵9 to start),
-otherwise the normal Shared price (GH₵7); Ride alone is GH₵15 everywhere. An
-end counts as the place the rider chose, or else the nearest place within
-250 m of the pin. The migration `20261124180000_dispatch_far_pricing` marked
-every place whose name contains Jean Nelson Aka, Elizabeth (Frances) Sey Hall,
-Hilla Limann, Kwapong, Bani Hostel or Evandy (so their annexes and "Other spot
-near …" places too). A new place near them isn't in the far area until an admin
-adds it.
+Campus has two far ends, kept in `Place.farEnd` (admin site, Places → Far-trip
+pricing; each place North, South or none):
+
+- **North**: Pentagon (every block, the food court), TF Hall (James Topp Nelson
+  Yankah Hall), Bani Hostel, Evandy Hostel, and the hostels right beside them:
+  Nairobi, Kampala, Dar es Salaam and Addis Ababa Courts.
+- **South (Diaspora)**: Jean Nelson Aka, Elizabeth Frances Sey, Dr. Hilla Limann
+  and Alexander Kwapong Halls, and what is right beside them inside the
+  complex: Elizabeth Sey Pharmacy, Games Arena, Bervels, Tickels Restaurant.
+
+A Shared seat costs the far price (GH₵9 to start) **only** on a trip from one
+end to the other, either way. Every other Shared trip is the normal price
+(GH₵7): main campus to or from either end, inside one end, main campus to main
+campus. Ride alone is GH₵15 everywhere. An end of a trip counts as the place
+the rider chose, or else the nearest place within 250 m of the pin. The
+migration `20261124180000_dispatch_far_pricing` set the list above by name, so
+annexes and "Other spot near …" places of the named halls and hostels are
+included too. A new place near them is in neither end until an admin sets it.
 
 Both refuse a production host without `ALLOW_PRODUCTION_DB=1`, even with
 `NODE_ENV=production`, and print the database host only — never the URL. Code:

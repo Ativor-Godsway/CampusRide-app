@@ -254,8 +254,8 @@ export async function cancelRide(rideId: string, input: CancelRideInput = {}): P
 
 /**
  * What Shared and Ride alone cost for this trip, worked out by the server
- * (far-trip pricing: Shared costs more when the trip crosses between the far
- * area and the rest of campus). POST /rides locks the same price on the seat.
+ * (far-trip pricing: Shared costs more on a trip between the north and south
+ * ends of campus). POST /rides locks the same price on the seat.
  */
 export async function getFareQuote(pickup: RideEndBody, dropoff: RideEndBody): Promise<FareQuote> {
   const res = await api.post<FareQuote>("/rides/quote", { pickup, dropoff });

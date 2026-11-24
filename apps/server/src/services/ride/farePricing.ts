@@ -3,9 +3,10 @@ import {
   DEFAULT_SHARED_FARE_PRICES,
   NEAR_PLACE_METERS,
   PRICING,
-  crossesFarArea,
+  isFarTrip,
   nearestPlace,
   seatPriceFor,
+  type FarEnd,
   type FareQuote,
   type LatLng,
   type RideType,
@@ -15,9 +16,10 @@ import { clearPlaceCache, getActivePlaces } from "../places/placeCache";
 
 /**
  * Far-trip pricing (2026-11-24, rules in @rida/shared pricing/farTrips): a
- * Shared seat costs the far price when exactly one end of the trip is in the
- * far area (Place.inFarArea), the normal price otherwise; Ride alone is
- * always PRICING.LONE_FARE. Both Shared prices are admin settings.
+ * Shared seat costs the far price only when the trip goes from one far end of
+ * campus to the other (Place.farEnd NORTH ↔ SOUTH), the normal price
+ * otherwise; Ride alone is always PRICING.LONE_FARE. Both Shared prices, and
+ * each place's end, are admin settings.
  *
  * Applied once, when the ride is requested (createRide, and a switch to
  * Shared): the price is locked on the rider's seat (RidePassenger.lockedFare),
@@ -28,7 +30,7 @@ import { clearPlaceCache, getActivePlaces } from "../places/placeCache";
  * Which place an end is at: the place the rider chose (while the pin stays
  * near it), else the nearest active place within NEAR_PLACE_METERS — the
  * place its label names ("Near Bani Hostel"). A pin with no place that near,
- * and a zone-only booking from an old app or USSD, isn't in the far area.
+ * and a zone-only booking from an old app or USSD, is in neither end.
  */
 
 const SETTING_ID = "fares";
@@ -71,9 +73,10 @@ export function placeForEnd(end: PricedEnd, places: readonly Place[]): Place | n
   return near && near.meters <= NEAR_PLACE_METERS ? near.place : null;
 }
 
-export function endInFarArea(end: PricedEnd | null, places: readonly Place[]): boolean {
-  if (!end) return false;
-  return placeForEnd(end, places)?.inFarArea ?? false;
+/** The far end a trip end is in (NORTH / SOUTH), or null for the rest of campus. */
+export function farEndOf(end: PricedEnd | null, places: readonly Place[]): FarEnd | null {
+  if (!end) return null;
+  return placeForEnd(end, places)?.farEnd ?? null;
 }
 
 /** The price of each ride type for this trip now (null end: a zone-only booking). */
@@ -83,16 +86,16 @@ export async function quoteFares(
   dropoff: PricedEnd | null,
 ): Promise<FareQuote> {
   const [prices, places] = await Promise.all([getFarePricing(prisma), getActivePlaces(prisma)]);
-  const ends = { pickupInFarArea: endInFarArea(pickup, places), dropoffInFarArea: endInFarArea(dropoff, places) };
+  const ends = { pickupFarEnd: farEndOf(pickup, places), dropoffFarEnd: farEndOf(dropoff, places) };
   return {
     fares: { SHARED: seatPriceFor("SHARED", ends, prices), LONE: PRICING.LONE_FARE },
-    farTrip: crossesFarArea(ends),
+    farTrip: isFarTrip(ends),
   };
 }
 
 /**
  * The price the app showed changed before the request arrived (an admin
- * changed a price, or the far area, a moment ago). Nothing is booked; the
+ * changed a price, or a far end, a moment ago). Nothing is booked; the
  * app shows `message` and asks for a new quote.
  */
 export class FareChangedError extends Error {
@@ -131,33 +134,38 @@ export async function fareForNewSeat(
 }
 
 /**
- * Saves the prices and the far area (exactly `farPlaceIds`) together, with
- * one audit row saying what changed.
+ * Saves the prices and the far ends (exactly these places, each NORTH or
+ * SOUTH; every other place in neither) together, with one audit row saying
+ * what changed.
  */
 export async function saveFarePricing(
   prisma: PrismaClient,
-  input: SharedFarePrices & { farPlaceIds: string[] },
+  input: SharedFarePrices & { farPlaces: Array<{ placeId: string; end: FarEnd }> },
   adminId: string,
 ): Promise<void> {
+  const ids = input.farPlaces.map((p) => p.placeId);
   const [before, beforePlaces, named] = await Promise.all([
     getFarePricing(prisma),
-    prisma.place.findMany({ where: { inFarArea: true }, select: { id: true, name: true } }),
-    prisma.place.findMany({ where: { id: { in: input.farPlaceIds } }, select: { id: true, name: true } }),
+    prisma.place.findMany({ where: { farEnd: { not: null } }, select: { id: true, name: true, farEnd: true } }),
+    prisma.place.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }),
   ]);
-  const wanted = new Set(named.map((p) => p.id));
-  const added = named.filter((p) => !beforePlaces.some((b) => b.id === p.id)).map((p) => p.name);
-  const removed = beforePlaces.filter((p) => !wanted.has(p.id)).map((p) => p.name);
+  const wanted = new Map(input.farPlaces.map((p) => [p.placeId, p.end]));
+  const nameOf = new Map([...beforePlaces, ...named].map((p) => [p.id, p.name]));
+  const was = new Map(beforePlaces.map((p) => [p.id, p.farEnd]));
+  const moved = [...wanted].filter(([id, end]) => was.get(id) !== end).map(([id, end]) => `${nameOf.get(id)} → ${end.toLowerCase()}`);
+  const removed = beforePlaces.filter((p) => !wanted.has(p.id)).map((p) => `${p.name} → none`);
   const changes = [
     before.sharedPesewas !== input.sharedPesewas ? `Shared ${before.sharedPesewas} → ${input.sharedPesewas}` : null,
     before.sharedFarPesewas !== input.sharedFarPesewas ? `far Shared ${before.sharedFarPesewas} → ${input.sharedFarPesewas}` : null,
-    added.length ? `far area + ${added.join(", ")}` : null,
-    removed.length ? `far area − ${removed.join(", ")}` : null,
+    moved.length || removed.length ? `far ends: ${[...moved, ...removed].join(", ")}` : null,
   ].filter(Boolean);
   const data = { sharedPesewas: input.sharedPesewas, sharedFarPesewas: input.sharedFarPesewas, updatedBy: adminId };
+  const ofEnd = (end: FarEnd) => [...wanted].filter(([, e]) => e === end).map(([id]) => id);
   await prisma.$transaction([
     prisma.farePricingSetting.upsert({ where: { id: SETTING_ID }, create: { id: SETTING_ID, ...data }, update: data }),
-    prisma.place.updateMany({ where: { inFarArea: true, id: { notIn: [...wanted] } }, data: { inFarArea: false } }),
-    prisma.place.updateMany({ where: { id: { in: [...wanted] } }, data: { inFarArea: true } }),
+    prisma.place.updateMany({ where: { farEnd: { not: null }, id: { notIn: ids } }, data: { farEnd: null } }),
+    prisma.place.updateMany({ where: { id: { in: ofEnd("NORTH") } }, data: { farEnd: "NORTH" } }),
+    prisma.place.updateMany({ where: { id: { in: ofEnd("SOUTH") } }, data: { farEnd: "SOUTH" } }),
     prisma.adminAuditLog.create({
       data: {
         actor: adminId,

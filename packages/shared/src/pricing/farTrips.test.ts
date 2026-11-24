@@ -1,38 +1,51 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_SHARED_FARE_PRICES, crossesFarArea, seatPriceFor, sharedFarePricesProblem } from "./farTrips";
+import { DEFAULT_SHARED_FARE_PRICES, isFarTrip, seatPriceFor, sharedFarePricesProblem, type FarEnd } from "./farTrips";
 import { splitFare } from "./pricing";
 
 const prices = DEFAULT_SHARED_FARE_PRICES;
-const ends = (pickupInFarArea: boolean, dropoffInFarArea: boolean) => ({ pickupInFarArea, dropoffInFarArea });
+const trip = (pickupFarEnd: FarEnd | null, dropoffFarEnd: FarEnd | null) => ({ pickupFarEnd, dropoffFarEnd });
+const shared = (a: FarEnd | null, b: FarEnd | null) => seatPriceFor("SHARED", trip(a, b), prices);
 
-describe("far-trip pricing", () => {
+describe("far-trip pricing (two far ends)", () => {
   it("starts at GH₵7 normal and GH₵9 far", () => {
     expect(prices).toEqual({ sharedPesewas: 700, sharedFarPesewas: 900 });
   });
 
-  it("a Shared trip crossing between the far area and the rest of campus is GH₵9, either way round", () => {
-    expect(crossesFarArea(ends(true, false))).toBe(true);
-    expect(crossesFarArea(ends(false, true))).toBe(true);
-    expect(seatPriceFor("SHARED", ends(true, false), prices)).toBe(900);
-    expect(seatPriceFor("SHARED", ends(false, true), prices)).toBe(900);
+  it("North ↔ South is GH₵9, both directions", () => {
+    expect(shared("NORTH", "SOUTH")).toBe(900);
+    expect(shared("SOUTH", "NORTH")).toBe(900);
+    expect(isFarTrip(trip("NORTH", "SOUTH"))).toBe(true);
+    expect(isFarTrip(trip("SOUTH", "NORTH"))).toBe(true);
   });
 
-  it("both ends in the far area, or neither, stays GH₵7", () => {
-    expect(seatPriceFor("SHARED", ends(true, true), prices)).toBe(700);
-    expect(seatPriceFor("SHARED", ends(false, false), prices)).toBe(700);
+  it("main campus ↔ North is GH₵7, both directions", () => {
+    expect(shared(null, "NORTH")).toBe(700);
+    expect(shared("NORTH", null)).toBe(700);
+  });
+
+  it("main campus ↔ South is GH₵7, both directions", () => {
+    expect(shared(null, "SOUTH")).toBe(700);
+    expect(shared("SOUTH", null)).toBe(700);
+  });
+
+  it("inside North, inside South and main campus ↔ main campus are GH₵7", () => {
+    expect(shared("NORTH", "NORTH")).toBe(700);
+    expect(shared("SOUTH", "SOUTH")).toBe(700);
+    expect(shared(null, null)).toBe(700);
   });
 
   it("Ride alone is GH₵15 everywhere", () => {
-    for (const [a, b] of [[true, false], [false, true], [true, true], [false, false]] as const) {
-      expect(seatPriceFor("LONE", ends(a, b), prices)).toBe(1500);
-      expect(seatPriceFor("LONE", ends(a, b), { sharedPesewas: 100, sharedFarPesewas: 200 })).toBe(1500);
+    const ends: Array<FarEnd | null> = ["NORTH", "SOUTH", null];
+    for (const a of ends) for (const b of ends) {
+      expect(seatPriceFor("LONE", trip(a, b), prices)).toBe(1500);
+      expect(seatPriceFor("LONE", trip(a, b), { sharedPesewas: 100, sharedFarPesewas: 200 })).toBe(1500);
     }
   });
 
   it("uses the admin's prices", () => {
     const custom = { sharedPesewas: 800, sharedFarPesewas: 1000 };
-    expect(seatPriceFor("SHARED", ends(true, false), custom)).toBe(1000);
-    expect(seatPriceFor("SHARED", ends(false, false), custom)).toBe(800);
+    expect(seatPriceFor("SHARED", trip("NORTH", "SOUTH"), custom)).toBe(1000);
+    expect(seatPriceFor("SHARED", trip("NORTH", null), custom)).toBe(800);
   });
 
   it("the driver keeps 85% of the far price and CampusRide 15%", () => {

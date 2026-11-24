@@ -6,17 +6,31 @@
 ALTER TABLE "Driver" ADD COLUMN "lastHeartbeatAt" TIMESTAMP(3);
 ALTER TABLE "Driver" ADD COLUMN "autoOfflineAt" TIMESTAMP(3);
 
--- 2. The far area, starting with the six places and every annex or
---    "Other spot near" variant of them (matched by name).
-ALTER TABLE "Place" ADD COLUMN "inFarArea" BOOLEAN NOT NULL DEFAULT false;
-UPDATE "Place" SET "inFarArea" = true
+-- 2. The two far ends of campus. A Shared trip from one to the other pays
+--    the far price. Each place: NORTH, SOUTH or none (admin-editable).
+CREATE TYPE "FarEnd" AS ENUM ('NORTH', 'SOUTH');
+ALTER TABLE "Place" ADD COLUMN "farEnd" "FarEnd";
+
+-- North: Pentagon (every block, its food court), TF Hall, Bani and Evandy
+-- Hostels — with their annexes and "Other spot near …" places (matched by
+-- name) — and the hostels right beside them.
+UPDATE "Place" SET "farEnd" = 'NORTH'
+WHERE "name" ILIKE '%Pentagon%'
+   OR "name" ILIKE '%Topp Nelson Yankah%'
+   OR "name" ILIKE '%TF Hall%'
+   OR "name" ILIKE '%Bani Hostel%'
+   OR "name" ILIKE '%Evandy%'
+   OR "name" IN ('Nairobi Courts', 'Kampala Courts', 'Dar es Salaam Courts', 'Addis Ababa Courts');
+
+-- South (Diaspora): the four halls — with their annexes and "Other spot near
+-- …" places — and the places right beside them inside the complex.
+UPDATE "Place" SET "farEnd" = 'SOUTH'
 WHERE "name" ILIKE '%Jean Nelson Aka%'
    OR "name" ILIKE '%Elizabeth Frances Sey%'
    OR "name" ILIKE '%Elizabeth Sey Hall%'
    OR "name" ILIKE '%Hilla Limann%'
    OR "name" ILIKE '%Kwapong%'
-   OR "name" ILIKE '%Bani Hostel%'
-   OR "name" ILIKE '%Evandy%';
+   OR "name" IN ('Elizabeth Sey Pharmacy', 'Games Arena', 'Bervels', 'Tickels Restaurant');
 
 -- 3. The Shared seat prices (no row = GH₵7 / GH₵9 defaults).
 CREATE TABLE "FarePricingSetting" (

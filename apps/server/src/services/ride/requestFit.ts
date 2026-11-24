@@ -265,9 +265,70 @@ export function computeEligibleZoneSet(
 }
 
 /**
+ * Every live driver with no trip who could take a new request anywhere on
+ * campus: online and heard from in the last 10 minutes, approved, real (not
+ * review demo), in a zone in service. Their zone, by user id.
+ */
+export async function liveFreeDrivers(prisma: PrismaClient, now: Date = new Date()): Promise<Map<string, string>> {
+  const drivers = await prisma.driver.findMany({
+    where: {
+      ...liveDriverWhere(now.getTime()),
+      isApproved: true,
+      currentZoneId: { not: null },
+      currentZone: { retiredAt: null },
+      user: { isReviewDemo: false, deletedAt: null },
+    },
+    select: { userId: true, currentZoneId: true },
+  });
+  if (drivers.length === 0) return new Map();
+  const busy = new Set(
+    (
+      await prisma.ride.findMany({
+        where: { driverId: { in: drivers.map((d) => d.userId) }, status: { in: [...ACTIVE_DRIVER_STATUSES] } },
+        select: { driverId: true },
+      })
+    ).map((r) => r.driverId),
+  );
+  return new Map(drivers.filter((d) => !busy.has(d.userId)).map((d) => [d.userId, d.currentZoneId!]));
+}
+
+/**
+ * Dispatch fallback (2026-11-24): the requests among `requests` that no live
+ * free driver in their pickup zone or its neighbours can take (none there,
+ * or every one there declined it). Those are offered to every live driver
+ * on campus instead (dispatch.driversOfferedTo), so this driver's list shows
+ * them too, wherever they are.
+ */
+export async function strandedRequests<T extends { id: string; pickupZoneId: string }>(
+  prisma: PrismaClient,
+  requests: readonly T[],
+  now: Date = new Date(),
+): Promise<T[]> {
+  if (requests.length === 0) return [];
+  const [free, adjacency, declines] = await Promise.all([
+    liveFreeDrivers(prisma, now),
+    getZoneAdjacency(prisma),
+    prisma.rideRejection.findMany({
+      where: { rideId: { in: requests.map((r) => r.id) }, OR: [{ reason: null }, { reason: { not: "TIMED_OUT" } }] },
+      select: { rideId: true, driverUserId: true },
+    }),
+  ]);
+  const declined = new Set(declines.map((d) => `${d.rideId}:${d.driverUserId}`));
+  return requests.filter((r) => {
+    const near = computeEligibleZoneSet(r.pickupZoneId, adjacency);
+    for (const [userId, zoneId] of free) {
+      if (near.has(zoneId) && !declined.has(`${r.id}:${userId}`)) return false;
+    }
+    return true;
+  });
+}
+
+/**
  * The open requests a driver with no trip is offered: picked up in their
  * zone or one next to it (a review demo driver: every demo request), Ride
- * alone and Shared alike, newest first.
+ * alone and Shared alike, newest first — plus, anywhere on campus, any
+ * request that no live driver near its pickup can take (the dispatch
+ * fallback, strandedRequests).
  */
 export async function requestsForFreeDriver(
   prisma: PrismaClient,
@@ -278,20 +339,25 @@ export async function requestsForFreeDriver(
   const zones = driver.currentZoneId
     ? computeEligibleZoneSet(driver.currentZoneId, await getZoneAdjacency(prisma))
     : new Set<string>();
-  return prisma.ride.findMany({
-    where: {
-      ...openRequestWhere(now),
-      ...notDeclinedBy(driver.userId),
-      occupancy: { lte: CAR_CAPACITY },
-      // Demo requests for demo drivers only, real ones for real drivers only.
-      isReviewDemo: driver.isReviewDemo,
-      ...(driver.isReviewDemo ? {} : { pickupZoneId: { in: [...zones] } }),
-    },
-    // First name only, so the trip can say "Pick up Ama" from the moment
-    // the driver accepts; the seat for the fare the rider was quoted.
-    include: REQUEST_INCLUDE,
-    orderBy: { createdAt: "desc" },
-  });
+  const where = {
+    ...openRequestWhere(now),
+    ...notDeclinedBy(driver.userId),
+    occupancy: { lte: CAR_CAPACITY },
+    // Demo requests for demo drivers only, real ones for real drivers only.
+    isReviewDemo: driver.isReviewDemo,
+  };
+  // First name only, so the trip can say "Pick up Ama" from the moment
+  // the driver accepts; the seat for the fare the rider was quoted.
+  if (driver.isReviewDemo) {
+    return prisma.ride.findMany({ where, include: REQUEST_INCLUDE, orderBy: { createdAt: "desc" } });
+  }
+  // One read for every open request (a handful at a time); the ones picked up
+  // elsewhere cost more reads only when there are any.
+  const open = await prisma.ride.findMany({ where, include: REQUEST_INCLUDE, orderBy: { createdAt: "desc" } });
+  const elsewhere = open.filter((r) => !zones.has(r.pickupZoneId));
+  if (elsewhere.length === 0) return open;
+  const stranded = new Set((await strandedRequests(prisma, elsewhere, now)).map((r) => r.id));
+  return open.filter((r) => zones.has(r.pickupZoneId) || stranded.has(r.id));
 }
 
 /**

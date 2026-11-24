@@ -1208,11 +1208,14 @@ export interface FarPricing {
     updatedBy: { id: string; name: string } | null;
   };
   defaults: { sharedPesewas: number; sharedFarPesewas: number };
-  farPlaces: Array<{ id: string; name: string; isActive: boolean; zoneName: string }>;
+  farPlaces: Array<{ id: string; name: string; isActive: boolean; zoneName: string; end: "NORTH" | "SOUTH" }>;
 }
 
 export const getFarPricing = (token: string) => get<FarPricing>(token, "/admin/far-pricing");
-export const saveFarPricing = (token: string, input: { sharedPesewas: number; sharedFarPesewas: number; farPlaceIds: string[] }) =>
+export const saveFarPricing = (
+  token: string,
+  input: { sharedPesewas: number; sharedFarPesewas: number; farPlaces: Array<{ id: string; end: "NORTH" | "SOUTH" }> },
+) =>
   request<FarPricing>("/admin/far-pricing", { method: "PUT", body: JSON.stringify(input) }, token);
 
 export interface ZoneNeighbours {

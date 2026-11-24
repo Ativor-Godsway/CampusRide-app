@@ -289,9 +289,9 @@ export default function RideTypeScreen() {
 
   // ── Fares ───────────────────────────────────────────────────────────────────
   // Before a ride exists: the SERVER's price for this trip (POST /rides/quote),
-  // the same one POST /rides locks on the seat — Shared costs more when the
-  // trip crosses between the far area and the rest of campus (far-trip
-  // pricing), so the phone never works it out. Request waits for the answer;
+  // the same one POST /rides locks on the seat — Shared costs more on a trip
+  // between the north and south ends of campus (far-trip pricing), so the
+  // phone never works it out. Request waits for the answer;
   // if it can't come, today's standard prices are shown (the server still
   // charges the right one, and the ride sheet shows the locked fare).
   const pickupBody = useMemo(() => tripEndBody(pickupEnd), [pickupEnd]);
@@ -833,7 +833,7 @@ export default function RideTypeScreen() {
           ) : null}
           {farTrip ? (
             <Text variant="subhead" color="secondary">
-              {`Shared is ${formatCedis(sharedFare)} on this trip: it goes to or from the far side of campus.`}
+              {`Shared is ${formatCedis(sharedFare)} on this trip: it goes between the north and south ends of campus.`}
             </Text>
           ) : null}
           <View style={styles.optionList} accessibilityRole="radiogroup" accessibilityLabel="Choose a ride">

@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import { DEFAULT_SHARED_FARE_PRICES, PRICING, REFUSED_BOOKING_REASON_LABELS, sharedFarePricesProblem } from "@rida/shared";
+import { DEFAULT_SHARED_FARE_PRICES, FAR_ENDS, PRICING, REFUSED_BOOKING_REASON_LABELS, sharedFarePricesProblem, type FarEnd } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
-import { id, integer, noInput, object, text } from "../http/schemas";
+import { id, integer, noInput, object, oneOf, text } from "../http/schemas";
 import { RULES } from "../rateLimit/rules";
 import { cached, clearAdminCache } from "../services/admin/cache";
 import { accraDay, daysIn, periodKey } from "../services/admin/period";
@@ -19,7 +19,7 @@ import { periodOr400 } from "./adminDashboard";
 
 /**
  * Admin site, dispatch and pricing (2026-11-24):
- * - far-trip pricing: the two Shared prices and the far area (Places page);
+ * - far-trip pricing: the two Shared prices and the places in each far end (Places page);
  * - zone neighbours: which zones dispatch treats as next door (Places page);
  * - refused bookings: anonymous counts per day and reason (Supply & demand).
  * Every change is audit-logged.
@@ -36,9 +36,9 @@ const SCHEMAS = {
       {
         sharedPesewas: integer(1, 100_000),
         sharedFarPesewas: integer(1, 100_000),
-        farPlaceIds: { type: "array", maxItems: MAX_FAR_PLACES, items: id },
+        farPlaces: { type: "array", maxItems: MAX_FAR_PLACES, items: object({ id, end: oneOf(FAR_ENDS) }, ["id", "end"]) },
       },
-      ["sharedPesewas", "sharedFarPesewas", "farPlaceIds"],
+      ["sharedPesewas", "sharedFarPesewas", "farPlaces"],
     ),
   },
   zoneNeighbours: noInput,
@@ -55,8 +55,8 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
     const [pricing, places] = await Promise.all([
       getFarePricing(prisma),
       prisma.place.findMany({
-        where: { inFarArea: true },
-        select: { id: true, name: true, isActive: true, zone: { select: { name: true } } },
+        where: { farEnd: { not: null } },
+        select: { id: true, name: true, isActive: true, farEnd: true, zone: { select: { name: true } } },
         orderBy: { name: "asc" },
       }),
     ]);
@@ -72,26 +72,31 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
         updatedBy: admin,
       },
       defaults: DEFAULT_SHARED_FARE_PRICES,
-      farPlaces: places.map((p) => ({ id: p.id, name: p.name, isActive: p.isActive, zoneName: p.zone.name })),
+      farPlaces: places.map((p) => ({ id: p.id, name: p.name, isActive: p.isActive, zoneName: p.zone.name, end: p.farEnd! })),
     };
   }
 
-  /** The Shared prices (normal, far) and the places in the far area. */
+  /** The Shared prices (normal, far) and the places in each far end (NORTH / SOUTH). */
   app.get("/admin/far-pricing", { ...gate, schema: SCHEMAS.farPricing }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     return reply.send(await farPricingBody());
   });
 
-  /** Saves both prices and exactly this far area. New requests use them at once; requested rides keep theirs. */
+  /** Saves both prices and exactly these far-end places. New requests use them at once; requested rides keep theirs. */
   app.put("/admin/far-pricing", { ...gate, schema: SCHEMAS.saveFarPricing, config: write }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
-    const body = request.body as { sharedPesewas: number; sharedFarPesewas: number; farPlaceIds: string[] };
+    const body = request.body as { sharedPesewas: number; sharedFarPesewas: number; farPlaces: Array<{ id: string; end: FarEnd }> };
     const problem = sharedFarePricesProblem(body);
     if (problem) return reply.code(400).send({ error: problem });
-    const ids = [...new Set(body.farPlaceIds)];
-    const known = await prisma.place.count({ where: { id: { in: ids } } });
-    if (known !== ids.length) return reply.code(400).send({ error: "One of those places doesn't exist any more. Reload and try again." });
-    await saveFarePricing(prisma, { sharedPesewas: body.sharedPesewas, sharedFarPesewas: body.sharedFarPesewas, farPlaceIds: ids }, request.user!.userId);
+    const byId = new Map(body.farPlaces.map((p) => [p.id, p.end]));
+    if (byId.size !== body.farPlaces.length) return reply.code(400).send({ error: "A place can be in one far end only." });
+    const known = await prisma.place.count({ where: { id: { in: [...byId.keys()] } } });
+    if (known !== byId.size) return reply.code(400).send({ error: "One of those places doesn't exist any more. Reload and try again." });
+    await saveFarePricing(
+      prisma,
+      { sharedPesewas: body.sharedPesewas, sharedFarPesewas: body.sharedFarPesewas, farPlaces: [...byId].map(([placeId, end]) => ({ placeId, end })) },
+      request.user!.userId,
+    );
     clearAdminCache();
     return reply.send(await farPricingBody());
   });

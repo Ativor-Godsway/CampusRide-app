@@ -182,7 +182,7 @@ also touches the driver app.
 
 Since 2026-11-24 the **Shared prices are admin settings** (admin site, Places →
 Far-trip pricing: the normal Shared seat, the far-trip Shared seat, and the
-places in the far area). Saving there changes new requests at once; no deploy,
+places in the north and south far ends). Saving there changes new requests at once; no deploy,
 no app update. Ride alone (`PRICING.LONE_FARE`) and the 85/15 split
 (`PRICING.COMMISSION_PCT`) are still code in
 [packages/shared/src/pricing/pricing.ts](../../packages/shared/src/pricing/pricing.ts).

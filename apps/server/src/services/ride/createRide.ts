@@ -164,7 +164,7 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
 
   // The price is set now and locked on the seat (far-trip pricing,
   // services/ride/farePricing.ts): Ride alone GH₵15; Shared GH₵7, or GH₵9
-  // when the trip crosses between the far area and the rest of campus.
+  // on a trip between the north and south ends of campus.
   const lockedFare = await fareForNewSeat(prisma, type, pickupPin, dropoffPin, input.shownFare);
 
   const ride = await prisma.ride.create({

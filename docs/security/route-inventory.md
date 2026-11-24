@@ -213,8 +213,8 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `POST /admin/drivers/:id/waive` | Yes | ADMIN | Waives some or all of one driver's balance (never more than owed) with a required reason. Audit-logged (`cash.waive`). | account default; plus 60 changes / 15 min |
 | `GET /admin/commission-settings` | Yes | ADMIN | The commission rules: debt limit, warning level, enforcement, Paystack fee and cap; whether a Paystack key is set (never the key). | account default |
 | `PUT /admin/commission-settings` | Yes | ADMIN | Saves the commission rules (bounds checked). Audit-logged (`commission.settings`, before → after). | account default; plus 60 changes / 15 min |
-| `GET /admin/far-pricing` | Yes | ADMIN | The two Shared prices (normal, far) and the places in the far area. | account default |
-| `PUT /admin/far-pricing` | Yes | ADMIN | Saves both Shared prices (GH₵1–100, far ≤ Ride alone) and exactly this far area. New requests only. Audit-logged (`fares.update`). | account default; plus 60 changes / 15 min |
+| `GET /admin/far-pricing` | Yes | ADMIN | The two Shared prices (normal, far) and the places in each far end (North, South). | account default |
+| `PUT /admin/far-pricing` | Yes | ADMIN | Saves both Shared prices (GH₵1–100, far ≤ Ride alone) and exactly these far-end places (each North or South). New requests only. Audit-logged (`fares.update`). | account default; plus 60 changes / 15 min |
 | `GET /admin/zone-neighbours` | Yes | ADMIN | Zones in service, the neighbour pairs dispatch uses, and the suggested pairs (from where the zones are). | account default |
 | `PUT /admin/zone-neighbours` | Yes | ADMIN | Makes the neighbour pairs exactly these (every zone keeps at least one). Audit-logged (`zones.neighbours`). | account default; plus 60 changes / 15 min |
 | `GET /admin/refused-bookings` | Yes | ADMIN | Refused bookings in a period, per day and per reason, and the most refused pickup zones. Anonymous records only. Cached 60 s per period. | account default |

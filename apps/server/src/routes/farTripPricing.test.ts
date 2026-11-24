@@ -1,12 +1,13 @@
 /**
  * Far-trip pricing and refused bookings (2026-11-24). Pins:
- *   1. a Shared seat is GH₵9 when the trip CROSSES between the far area and
- *      the rest of campus (exactly one end in it), GH₵7 when both ends are in
- *      it or neither is; Ride alone is GH₵15 everywhere;
+ *   1. two far ends: a Shared seat is GH₵9 ONLY from the north end to the
+ *      south end or back; main campus ↔ either end, inside one end and main
+ *      campus ↔ main campus are GH₵7; Ride alone is GH₵15 everywhere;
  *   2. a pin with no place chosen counts by the place it's near (≤ 250 m);
  *   3. the price is locked when the request is made: the quote, the seat, a
  *      Shared/Ride alone switch and the driver's offer (85% share) agree; an
- *      admin price change reaches new requests only;
+ *      admin price change reaches new requests only; admin sets each place
+ *      North, South or none;
  *   3b. nobody pays more than they were shown: an app that sends no price
  *      (older builds, which show GH₵7) pays at most GH₵7 for Shared; a stale
  *      shown price is refused (FARE_CHANGED) and books nothing;
@@ -16,7 +17,7 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
-import type { Place } from "@prisma/client";
+import type { FarEnd, Place } from "@prisma/client";
 import { splitFare, type FareQuote } from "@rida/shared";
 import { prisma } from "../db/prisma";
 import { registerRideRoutes } from "./rides";
@@ -32,10 +33,12 @@ import { clearAdminCache } from "../services/admin/cache";
 let app: FastifyInstance;
 const userIds: string[] = [];
 const placeIds: string[] = [];
-let far: Place; // Bani Hostel (far area)
-let farToo: Place; // Jean Nelson Aka Hall (far area)
-let campus: Place; // Balme Library
-let campusToo: Place; // Akuafo Hall
+let north: Place; // Bani Hostel (north end)
+let northToo: Place; // Pentagon Block A (north end)
+let south: Place; // Jean Nelson Aka Hall (south end)
+let southToo: Place; // Elizabeth Sey Pharmacy (south end, beside Sey Hall)
+let campus: Place; // Balme Library (main campus)
+let campusToo: Place; // Akuafo Hall (main campus)
 
 beforeAll(async () => {
   app = Fastify();
@@ -44,15 +47,17 @@ beforeAll(async () => {
   registerAdminDispatchRoutes(app, prisma);
   await app.ready();
   const { pickup } = await getTestZones();
-  const place = async (name: string, latitude: number, longitude: number, inFarArea: boolean) => {
-    const p = await prisma.place.create({ data: { name: `Far test ${name}`, latitude, longitude, zoneId: pickup.id, inFarArea } });
+  const place = async (name: string, latitude: number, longitude: number, farEnd: FarEnd | null) => {
+    const p = await prisma.place.create({ data: { name: `Far test ${name}`, latitude, longitude, zoneId: pickup.id, farEnd } });
     placeIds.push(p.id);
     return p;
   };
-  far = await place("Bani Hostel", 5.663256, -0.179997, true);
-  farToo = await place("Jean Nelson Aka Hall", 5.63534, -0.188475, true);
-  campus = await place("Balme Library", 5.652012, -0.187048, false);
-  campusToo = await place("Akuafo Hall", 5.649357, -0.186087, false);
+  north = await place("Bani Hostel", 5.663256, -0.179997, "NORTH");
+  northToo = await place("Pentagon Block A", 5.657652, -0.182018, "NORTH");
+  south = await place("Jean Nelson Aka Hall", 5.63534, -0.188475, "SOUTH");
+  southToo = await place("Elizabeth Sey Pharmacy", 5.635414, -0.187468, "SOUTH");
+  campus = await place("Balme Library", 5.652012, -0.187048, null);
+  campusToo = await place("Akuafo Hall", 5.649357, -0.186087, null);
 });
 
 beforeEach(async () => {
@@ -110,48 +115,65 @@ async function book(
   return prisma.ride.findUniqueOrThrow({ where: { id }, include: { passengers: true } });
 }
 
-describe("far-trip price rules", () => {
-  it("crossing (exactly one end in the far area): Shared GH₵9, either way round", async () => {
+const FAR = { fares: { SHARED: 900, LONE: 1500 }, farTrip: true };
+const NORMAL = { fares: { SHARED: 700, LONE: 1500 }, farTrip: false };
+
+describe("far-trip price rules (two far ends)", () => {
+  it("North ↔ South is GH₵9, both directions", async () => {
     const rider = await person();
-    expect(await quote(rider, at(far), at(campus))).toEqual({ fares: { SHARED: 900, LONE: 1500 }, farTrip: true });
-    expect(await quote(rider, at(campus), at(farToo))).toEqual({ fares: { SHARED: 900, LONE: 1500 }, farTrip: true });
+    expect(await quote(rider, at(north), at(south))).toEqual(FAR);
+    expect(await quote(rider, at(south), at(north))).toEqual(FAR);
+    expect(await quote(rider, at(northToo), at(southToo))).toEqual(FAR);
   });
 
-  it("not crossing: both ends in the far area, or neither — GH₵7", async () => {
+  it("main campus ↔ North is GH₵7, both directions", async () => {
     const rider = await person();
-    expect(await quote(rider, at(far), at(farToo))).toEqual({ fares: { SHARED: 700, LONE: 1500 }, farTrip: false });
-    expect(await quote(rider, at(campus), at(campusToo))).toEqual({ fares: { SHARED: 700, LONE: 1500 }, farTrip: false });
+    expect(await quote(rider, at(campus), at(north))).toEqual(NORMAL);
+    expect(await quote(rider, at(northToo), at(campus))).toEqual(NORMAL);
   });
 
-  it("Ride alone is GH₵15 everywhere, crossing or not", async () => {
+  it("main campus ↔ South is GH₵7, both directions", async () => {
     const rider = await person();
-    for (const [a, b] of [[far, campus], [far, farToo], [campus, campusToo]] as const) {
+    expect(await quote(rider, at(campus), at(south))).toEqual(NORMAL);
+    expect(await quote(rider, at(southToo), at(campusToo))).toEqual(NORMAL);
+  });
+
+  it("inside North, inside South, and main campus ↔ main campus are GH₵7", async () => {
+    const rider = await person();
+    expect(await quote(rider, at(north), at(northToo))).toEqual(NORMAL);
+    expect(await quote(rider, at(south), at(southToo))).toEqual(NORMAL);
+    expect(await quote(rider, at(campus), at(campusToo))).toEqual(NORMAL);
+  });
+
+  it("Ride alone is GH₵15 everywhere", async () => {
+    const rider = await person();
+    for (const [a, b] of [[north, south], [south, north], [campus, north], [south, campus], [north, northToo], [campus, campusToo]] as const) {
       expect((await quote(rider, at(a), at(b))).fares.LONE).toBe(1500);
     }
   });
 
   it("a pin with no place chosen counts by the place it's near (≤ 250 m), not beyond", async () => {
     const rider = await person();
-    const nearBani = { latitude: far.latitude + 0.001, longitude: far.longitude }; // ~110 m north
-    expect((await quote(rider, nearBani, at(campus))).fares.SHARED).toBe(900);
-    const offCluster = { latitude: 5.6585, longitude: -0.183 }; // ~600 m from Bani, nowhere near a far place
-    expect((await quote(rider, offCluster, at(campus))).fares.SHARED).toBe(700);
+    const nearBani = { latitude: north.latitude + 0.001, longitude: north.longitude }; // ~110 m north
+    expect((await quote(rider, nearBani, at(south))).fares.SHARED).toBe(900);
+    const offCluster = { latitude: 5.6610, longitude: -0.1855 }; // > 250 m from every test place
+    expect((await quote(rider, offCluster, at(south))).fares.SHARED).toBe(700);
   });
 });
 
 describe("the price is set when the request is made", () => {
   it("the seat is locked at the quoted price; Ride alone at GH₵15", async () => {
     const rider = await person();
-    const shared = await book(rider, "SHARED", at(far), at(campus));
+    const shared = await book(rider, "SHARED", at(north), at(south));
     expect(shared.passengers[0]!.lockedFare).toBe(900);
     await prisma.ride.update({ where: { id: shared.id }, data: { status: "CANCELLED" } });
-    const lone = await book(rider, "LONE", at(far), at(campus));
+    const lone = await book(rider, "LONE", at(north), at(south));
     expect(lone.passengers[0]!.lockedFare).toBe(1500);
   });
 
   it("switching Ride alone → Shared takes the far price for that trip", async () => {
     const rider = await person();
-    const ride = await book(rider, "LONE", at(campus), at(far));
+    const ride = await book(rider, "LONE", at(south), at(north));
     const res = await app.inject({ method: "POST", url: `/rides/${ride.id}/switch`, headers: rider.headers, payload: { type: "SHARED", shownFarePesewas: 900 } });
     expect(res.statusCode).toBe(200);
     expect(res.json().farePesewas).toBe(900);
@@ -160,10 +182,10 @@ describe("the price is set when the request is made", () => {
 
   it("an older app that shows no quote (it shows GH₵7) is never charged more: Shared ≤ GH₵7, Ride alone GH₵15", async () => {
     const rider = await person();
-    const shared = await book(rider, "SHARED", at(far), at(campus), "none");
+    const shared = await book(rider, "SHARED", at(north), at(south), "none");
     expect(shared.passengers[0]!.lockedFare).toBe(700);
     await prisma.ride.update({ where: { id: shared.id }, data: { status: "CANCELLED" } });
-    const lone = await book(rider, "LONE", at(far), at(campus), "none");
+    const lone = await book(rider, "LONE", at(north), at(south), "none");
     expect(lone.passengers[0]!.lockedFare).toBe(1500);
     // Switching from an older app: the same rule.
     const res = await app.inject({ method: "POST", url: `/rides/${lone.id}/switch`, headers: rider.headers, payload: { type: "SHARED" } });
@@ -176,7 +198,7 @@ describe("the price is set when the request is made", () => {
       method: "POST",
       url: "/rides",
       headers: rider.headers,
-      payload: { type: "SHARED", pickup: at(far), dropoff: at(campus), shownFarePesewas: 700 },
+      payload: { type: "SHARED", pickup: at(north), dropoff: at(south), shownFarePesewas: 700 },
     });
     expect(res.statusCode).toBe(422);
     expect(res.json()).toMatchObject({ code: "FARE_CHANGED", farePesewas: 900, error: "The price for this trip has just changed to GH₵9. Check it and request again." });
@@ -185,7 +207,7 @@ describe("the price is set when the request is made", () => {
 
   it("the driver's offer shows the locked fare and their 85% of it", async () => {
     const rider = await person();
-    const ride = await book(rider, "SHARED", at(far), at(campus));
+    const ride = await book(rider, "SHARED", at(north), at(south));
     const { user } = await createTestDriver({ isOnline: true, currentZoneId: ride.pickupZoneId });
     userIds.push(user.id);
     const res = await app.inject({
@@ -201,36 +223,49 @@ describe("the price is set when the request is made", () => {
   it("an admin price change reaches new requests only; a ride already requested keeps its price", async () => {
     const admin = await person("ADMIN");
     const rider = await person();
-    const before = await book(rider, "SHARED", at(far), at(campus));
+    const before = await book(rider, "SHARED", at(north), at(south));
+    const ends = [north, northToo].map((p) => ({ id: p.id, end: "NORTH" })).concat([south, southToo].map((p) => ({ id: p.id, end: "SOUTH" })));
 
     const save = await app.inject({
       method: "PUT",
       url: "/admin/far-pricing",
       headers: admin.headers,
-      payload: { sharedPesewas: 800, sharedFarPesewas: 1000, farPlaceIds: [far.id, farToo.id] },
+      payload: { sharedPesewas: 800, sharedFarPesewas: 1000, farPlaces: ends },
     });
     expect(save.statusCode).toBe(200);
     expect(save.json().settings).toMatchObject({ sharedPesewas: 800, sharedFarPesewas: 1000, loneFarePesewas: 1500 });
 
     expect((await prisma.ridePassenger.findFirstOrThrow({ where: { rideId: before.id } })).lockedFare).toBe(900);
     const other = await person();
-    expect((await quote(other, at(far), at(campus))).fares).toEqual({ SHARED: 1000, LONE: 1500 });
-    expect((await quote(other, at(campus), at(campusToo))).fares.SHARED).toBe(800);
+    expect((await quote(other, at(north), at(south))).fares).toEqual({ SHARED: 1000, LONE: 1500 });
+    expect((await quote(other, at(campus), at(north))).fares.SHARED).toBe(800);
     const log = await prisma.adminAuditLog.findFirst({ where: { action: "fares.update", actor: admin.user.id } });
     expect(log?.reason).toContain("far Shared 900 → 1000");
     await prisma.adminAuditLog.deleteMany({ where: { actor: admin.user.id } });
   });
 
-  it("admin can take a place out of the far area; bad prices are refused", async () => {
+  it("admin sets each place North, South or none; bad input is refused", async () => {
     const admin = await person("ADMIN");
     const put = (payload: object) => app.inject({ method: "PUT", url: "/admin/far-pricing", headers: admin.headers, payload });
-    expect((await put({ sharedPesewas: 700, sharedFarPesewas: 1600, farPlaceIds: [] })).statusCode).toBe(400);
-    expect((await put({ sharedPesewas: 700, sharedFarPesewas: 900, farPlaceIds: ["nope"] })).statusCode).toBe(400);
-    const res = await put({ sharedPesewas: 700, sharedFarPesewas: 900, farPlaceIds: [farToo.id] });
-    expect(res.json().farPlaces.map((p: { id: string }) => p.id)).toEqual([farToo.id]);
+    expect((await put({ sharedPesewas: 700, sharedFarPesewas: 1600, farPlaces: [] })).statusCode).toBe(400);
+    expect((await put({ sharedPesewas: 700, sharedFarPesewas: 900, farPlaces: [{ id: "nope", end: "NORTH" }] })).statusCode).toBe(400);
+    expect((await put({ sharedPesewas: 700, sharedFarPesewas: 900, farPlaces: [{ id: north.id, end: "EAST" }] })).statusCode).toBe(400);
+    expect(
+      (await put({ sharedPesewas: 700, sharedFarPesewas: 900, farPlaces: [{ id: north.id, end: "NORTH" }, { id: north.id, end: "SOUTH" }] })).statusCode,
+    ).toBe(400);
+
+    // Bani moved to the south end, Jean Nelson Aka to none: Bani → Pharmacy is now inside one end.
+    const res = await put({ sharedPesewas: 700, sharedFarPesewas: 900, farPlaces: [{ id: north.id, end: "SOUTH" }, { id: southToo.id, end: "SOUTH" }, { id: northToo.id, end: "NORTH" }] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().farPlaces.map((p: { id: string; end: string }) => [p.id, p.end]).sort()).toEqual(
+      [[north.id, "SOUTH"], [southToo.id, "SOUTH"], [northToo.id, "NORTH"]].sort(),
+    );
     const rider = await person();
-    expect((await quote(rider, at(far), at(campus))).fares.SHARED).toBe(700);
-    await prisma.place.update({ where: { id: far.id }, data: { inFarArea: true } });
+    expect((await quote(rider, at(north), at(southToo))).fares.SHARED).toBe(700);
+    expect((await quote(rider, at(north), at(northToo))).fares.SHARED).toBe(900);
+    expect((await quote(rider, at(south), at(northToo))).fares.SHARED).toBe(700);
+    await prisma.place.update({ where: { id: north.id }, data: { farEnd: "NORTH" } });
+    await prisma.place.update({ where: { id: south.id }, data: { farEnd: "SOUTH" } });
     await prisma.adminAuditLog.deleteMany({ where: { actor: admin.user.id } });
   });
 });
@@ -247,7 +282,7 @@ describe("refused bookings", () => {
   it("a refused POST /rides leaves an anonymous record: reason, places and zones, no rider or pin", async () => {
     await closeService();
     const rider = await person();
-    const res = await app.inject({ method: "POST", url: "/rides", headers: rider.headers, payload: { type: "SHARED", pickup: at(far), dropoff: at(campus) } });
+    const res = await app.inject({ method: "POST", url: "/rides", headers: rider.headers, payload: { type: "SHARED", pickup: at(north), dropoff: at(campus) } });
     expect(res.statusCode).toBe(422);
     const rows = await prisma.refusedBooking.findMany();
     expect(rows).toHaveLength(1);
@@ -255,7 +290,7 @@ describe("refused bookings", () => {
       reason: "SERVICE_CLOSED",
       stage: "REQUEST",
       rideType: "SHARED",
-      pickupLabel: far.name,
+      pickupLabel: north.name,
       dropoffLabel: campus.name,
     });
     expect(rows[0]!.pickupZoneId).not.toBeNull();
@@ -282,11 +317,11 @@ describe("refused bookings", () => {
   it("a quote while booking is blocked is still answered, and recorded once per rider and trip", async () => {
     await closeService();
     const rider = await person();
-    expect((await quote(rider, at(far), at(campus))).fares.SHARED).toBe(900);
-    await quote(rider, at(far), at(campus));
-    await quote(rider, at(far), at(campus));
+    expect((await quote(rider, at(north), at(south))).fares.SHARED).toBe(900);
+    await quote(rider, at(north), at(south));
+    await quote(rider, at(north), at(south));
     const other = await person();
-    await quote(other, at(far), at(campus));
+    await quote(other, at(north), at(south));
     const rows = await prisma.refusedBooking.findMany();
     expect(rows).toHaveLength(2);
     expect(rows.every((r) => r.stage === "QUOTE" && r.reason === "SERVICE_CLOSED")).toBe(true);
@@ -294,8 +329,8 @@ describe("refused bookings", () => {
 
   it("an open service records nothing", async () => {
     const rider = await person();
-    await quote(rider, at(far), at(campus));
-    await book(rider, "SHARED", at(far), at(campus));
+    await quote(rider, at(north), at(campus));
+    await book(rider, "SHARED", at(north), at(campus));
     expect(await prisma.refusedBooking.count()).toBe(0);
   });
 

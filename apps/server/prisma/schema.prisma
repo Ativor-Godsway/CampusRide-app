@@ -305,10 +305,10 @@ model Place {
   /// Nearest zone, recomputed by the server whenever the place moves.
   zoneId    String
   isActive  Boolean       @default(true)
-  /// In the far area (far-trip pricing, services/ride/farePricing.ts): a
-  /// Shared trip with exactly one end here pays the far price. Admin site,
-  /// Places → Far-trip pricing.
-  inFarArea Boolean       @default(false)
+  /// Which far end of campus the place is in, if any (far-trip pricing,
+  /// services/ride/farePricing.ts): a Shared trip from one end to the OTHER
+  /// pays the far price. Admin site, Places → Far-trip pricing.
+  farEnd    FarEnd?
   /// "osm:way/278303018" for seeded rows, null for places added by hand.
   source    String?       @unique
   createdAt DateTime      @default(now())
@@ -1161,8 +1161,16 @@ model SosEvent {
   @@index([rideId])
 }
 
+/// The two far ends of campus (far-trip pricing, 2026-11-24).
+enum FarEnd {
+  /// Pentagon, TF Hall, Bani and Evandy Hostels and what is beside them.
+  NORTH
+  /// The Diaspora halls: Jean Nelson Aka, Elizabeth Frances Sey, Hilla Limann, Alexander Kwapong.
+  SOUTH
+}
+
 /// The Shared seat prices (far-trip pricing, 2026-11-24), one row (id "fares").
-/// No row: the defaults (GH₵7 normal, GH₵9 crossing the far area). Ride alone
+/// No row: the defaults (GH₵7 normal, GH₵9 between the north and south ends). Ride alone
 /// stays PRICING.LONE_FARE. A price is locked on the seat when the ride is
 /// requested, so a change only reaches new requests.
 model FarePricingSetting {

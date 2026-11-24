@@ -19,7 +19,7 @@ export type LockedFareEvent =
  * occupancy-changing event. Pure — returns a new array, never mutates.
  *
  * Shared seats are priced per trip, not per occupancy (far-trip pricing,
- * 2026-11-24: GH₵7, or GH₵9 for a trip crossing the far area — locked when
+ * 2026-11-24: GH₵7, or GH₵9 for a trip between the north and south ends — locked when
  * the rider asks, services/ride/farePricing.ts). So no event moves a fare:
  * - JOIN: everyone keeps the fare they were quoted. (Until 2026-11-24 a join
  *   clamped every seat to the one flat rate, which would have cut a GH₵9

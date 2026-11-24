@@ -3,7 +3,7 @@ import type { Zone } from "@prisma/client";
 import { zonePairKey } from "@rida/shared";
 import { prisma } from "../db/prisma";
 import { getEligibleDrivers } from "../services/ride/dispatch";
-import { cleanupDriver, createTestDriver } from "../services/ride/testFixtures";
+import { cleanupDriver, createTestDriver, createTestUser } from "../services/ride/testFixtures";
 import { replaceZoneNeighbours, suggestedZoneNeighbours, ZoneNeighbourError } from "../services/zones/zoneNeighbours";
 import { checkZoneAdjacency, describeReport, linkZones, type NamedPair } from "./zoneAdjacency";
 
@@ -144,12 +144,13 @@ describe("replaceZoneNeighbours (admin site)", () => {
   });
 
   it("audit-logs what an admin changed", async () => {
-    const admin = await prisma.user.findFirst({ select: { id: true } });
+    const admin = await createTestUser("RIDER");
     const suggested = (await suggestedZoneNeighbours(prisma)).map((p) => ({ a: p.a, b: p.b }));
     await replaceZoneNeighbours(prisma, suggested);
     await replaceZoneNeighbours(prisma, [...suggested, { a: mine.a.id, b: mine.far.id }], { adminId: admin!.id });
     const log = await prisma.adminAuditLog.findFirst({ where: { action: "zones.neighbours" }, orderBy: { timestamp: "desc" } });
     expect(log?.reason).toContain(`${mine.a.name} – ${mine.far.name}`);
     await prisma.adminAuditLog.deleteMany({ where: { id: log!.id } });
+    await prisma.user.delete({ where: { id: admin.id } });
   });
 });
