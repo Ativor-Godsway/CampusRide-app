@@ -69,3 +69,4 @@ export * from "./geo/zoneNeighbours";
 export * from "./pricing/farTrips";
 export * from "./driver/liveness";
 export * from "./rides/refusedBookings";
+export * from "./driver/requestBoard";

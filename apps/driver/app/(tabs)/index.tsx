@@ -290,7 +290,7 @@ export default function DriverHomeScreen() {
       acceptingRef.current = true;
       setAccepting({ rideId: request.rideId, fromOffer });
       setAcceptError(null);
-      const outcome = await acceptRequest(request);
+      const outcome = await acceptRequest(request, fromOffer ? "POPUP" : "LIST");
       acceptingRef.current = false;
       setAccepting(null);
       if (outcome.kind === "accepted") {
@@ -349,7 +349,7 @@ export default function DriverHomeScreen() {
   const add = (item: HomeRequest) => {
     const suggestion = fill.data?.suggestions.find((s) => s.requestRideId === item.rideId);
     if (!sharedTrip || !suggestion) return;
-    runAddRider(sharedTrip.id, suggestion, suggestion.farePesewas ?? sharedFare, position);
+    runAddRider(sharedTrip.id, suggestion, suggestion.farePesewas ?? sharedFare, position, "LIST");
   };
   const goOnline = () => {
     haptics.impactMedium();

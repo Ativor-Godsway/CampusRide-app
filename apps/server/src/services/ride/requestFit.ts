@@ -1,7 +1,7 @@
 import type { Prisma, PrismaClient, Ride, RidePassenger } from "@prisma/client";
 import { liveDriverWhere } from "../zones/driverLiveness";
+import { searchWindowMs } from "./searchWindow";
 import {
-  DISPATCH_WINDOW_MS,
   PRICING,
   indexRoutes,
   previewAddRider,
@@ -81,7 +81,7 @@ export function openRequestWhere(now: Date): Prisma.RideWhereInput {
   return {
     status: "REQUESTED",
     driverId: null,
-    broadcastStartedAt: { gte: new Date(now.getTime() - DISPATCH_WINDOW_MS) },
+    broadcastStartedAt: { gte: new Date(now.getTime() - searchWindowMs()) },
   };
 }
 
@@ -219,7 +219,7 @@ export async function carsThatFitRequest(prisma: PrismaClient, request: RequestR
   if (request.type !== "SHARED") return [];
   if (request.status !== "REQUESTED" || request.driverId !== null) return [];
   const started = request.broadcastStartedAt?.getTime() ?? 0;
-  if (now.getTime() - started > DISPATCH_WINDOW_MS) return [];
+  if (now.getTime() - started > searchWindowMs()) return [];
 
   const cars = await prisma.ride.findMany({
     where: {

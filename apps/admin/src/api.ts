@@ -1237,3 +1237,15 @@ export interface RefusedBookings {
 }
 
 export const getRefusedBookings = (token: string, period: string) => get<RefusedBookings>(token, `/admin/refused-bookings?${period}`);
+
+// ─── Ride requests: the search window (2026-11-25) ──────────────────────────
+
+export interface DispatchSettings {
+  settings: { searchWindowSeconds: number; updatedAt: string | null; updatedBy: { id: string; name: string } | null };
+  defaults: { searchWindowSeconds: number };
+  bounds: { min: number; max: number };
+}
+
+export const getDispatchSettings = (token: string) => get<DispatchSettings>(token, "/admin/dispatch-settings");
+export const saveDispatchSettings = (token: string, searchWindowSeconds: number) =>
+  request<DispatchSettings>("/admin/dispatch-settings", { method: "PUT", body: JSON.stringify({ searchWindowSeconds }) }, token);

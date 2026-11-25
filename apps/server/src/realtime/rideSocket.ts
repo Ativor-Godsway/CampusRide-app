@@ -419,6 +419,12 @@ export function emitRequestsChanged(driverUserId: string): void {
   ioRef?.to(roomForDriver(driverUserId)).emit(DRIVER_EVENTS.REQUESTS_CHANGED, {});
 }
 
+/** A request appeared on the board (or changed): these drivers' boards refetch. */
+export function emitBoardChanged(driverUserIds: string[]): void {
+  if (!ioRef || driverUserIds.length === 0) return;
+  ioRef.to(driverUserIds.map(roomForDriver)).emit(DRIVER_EVENTS.BOARD_CHANGED, {});
+}
+
 export function emitDriverBroadcast(
   driverUserIds: string[],
   payload: RideBroadcastPayload,

@@ -26,6 +26,7 @@ import {
   passengerUndo,
   rejectRide,
   serverReason,
+  type AcceptSource,
   type EligibleRideItem,
   type FillSuggestion,
   type PassengerInCar,
@@ -341,6 +342,8 @@ export function runAddRider(
   farePesewas?: number,
   /** Where the driver is, for the server's detour check on a moving car. */
   position?: { latitude: number; longitude: number } | null,
+  /** Where they took it from (saved for analysis). */
+  source: AcceptSource = "LIST",
 ) {
   forRide(rideId);
   set({ adds: { ...state.adds, [suggestion.requestRideId]: { suggestion, farePesewas } } });
@@ -348,7 +351,7 @@ export function runAddRider(
   enqueue(async () => {
     try {
       const result = await sendUntilAnswered(
-        (timeoutMs) => addPassenger(rideId, suggestion.requestRideId, { timeoutMs, position }),
+        (timeoutMs) => addPassenger(rideId, suggestion.requestRideId, { timeoutMs, position, source }),
         "Couldn't add this rider.",
         (on) => {
           if (on !== retrying) setRetrying(on);
@@ -388,9 +391,9 @@ const CLAIM_TIMEOUT_MS = 15_000;
  * the trip screen opens with it at once; the store then fetches the trip
  * itself to learn the rider's seat id and hands it to the app (`onRide`).
  */
-export async function acceptRequest(request: EligibleRideItem): Promise<ClaimOutcome> {
+export async function acceptRequest(request: EligibleRideItem, source: AcceptSource = "LIST"): Promise<ClaimOutcome> {
   try {
-    await driverClaimRide(request.rideId, { timeoutMs: CLAIM_TIMEOUT_MS });
+    await driverClaimRide(request.rideId, { timeoutMs: CLAIM_TIMEOUT_MS, source });
   } catch (err) {
     const data = (err as { response?: { data?: { code?: unknown; reason?: unknown; error?: unknown } } })
       .response?.data;

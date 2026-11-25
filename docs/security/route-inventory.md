@@ -104,6 +104,7 @@ always the one in the token.
 | `GET /driver/balance/payments/:reference` | Yes | DRIVER | One of own commission payments; while it's unfinished, asks Paystack's verify endpoint about own unfinished payments (each at most every 10 s), expires ones over 30 minutes old, and stops one overtaken by a waiver or another payment. Another driver's reference is "not found". | account default |
 | `POST /driver/balance/payments/:reference/otp` | Yes | DRIVER | The code a network asked for, for own payment. Another driver's reference is "not found". | account default; plus 5 / 15 min |
 | `GET /driver/rides/eligible` | Yes | DRIVER | Requests offered to this driver (online, approved, nearby zone, not declined). First names and place names, never pins. | account default |
+| `GET /driver/requests/board` | Yes | DRIVER | The request board: every open request on campus still searching (not ones this driver declined), with whether this driver can take each now. First names and place names, never pins. Empty when offline or while CampusRide is closed. | account default |
 | `GET /rides/mine` | Yes | RIDER | Own bookings only. | account default |
 | `GET /rides/active` | Yes | RIDER | Own current ride (as booker or passenger), own stops only. | account default |
 | `GET /rides/nearby-cars` | Yes | RIDER | Up to 20 available cars on campus for the Home map: a key that changes every 5 minutes, a position moved 10-25 m, and a heading. No driver id, name, plate or number. Empty while the rider has a ride going on. Positions come from drivers' sockets, kept in memory only. | 1 / 5 s (instead of the account default) |
@@ -218,6 +219,8 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/zone-neighbours` | Yes | ADMIN | Zones in service, the neighbour pairs dispatch uses, and the suggested pairs (from where the zones are). | account default |
 | `PUT /admin/zone-neighbours` | Yes | ADMIN | Makes the neighbour pairs exactly these (every zone keeps at least one). Audit-logged (`zones.neighbours`). | account default; plus 60 changes / 15 min |
 | `GET /admin/refused-bookings` | Yes | ADMIN | Refused bookings in a period, per day and per reason, and the most refused pickup zones. Anonymous records only. Cached 60 s per period. | account default |
+| `GET /admin/dispatch-settings` | Yes | ADMIN | How long a request searches for a driver (seconds), the default and the bounds. | account default |
+| `PUT /admin/dispatch-settings` | Yes | ADMIN | Saves the search window (1–30 minutes). Audit-logged (`dispatch.search_window`). | account default; plus 60 changes / 15 min |
 | `GET /admin/riders` | Yes | ADMIN | Rider totals for a period, sign-ups per day, and a page of riders (phones masked; search by phone or name). | account default |
 | `GET /admin/riders/:id` | Yes | ADMIN | One rider in full, incl. their phone number: rides, ratings given, SOS. | account default |
 | `GET /admin/safety` | Yes | ADMIN | Open SOS (any date) and the period's handled ones, SOS from before records, 1–2 star ratings. Cached 60 s per period. | account default |

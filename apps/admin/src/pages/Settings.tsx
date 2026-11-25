@@ -9,6 +9,7 @@ import { dayAndTime, ago } from "../lib/time";
 import { AdminLoginsScreen } from "../screens/AdminLoginsScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 import { CommissionRulesCard } from "../screens/CommissionRulesCard";
+import { RideRequestsCard } from "../screens/RideRequestsCard";
 import { Page, Section } from "../shell/Page";
 
 function AuditLog() {
@@ -129,12 +130,13 @@ function SystemFacts() {
   );
 }
 
-/** Settings: launch mode and early access, the launch push, passkeys, the driver commission rules, admin sign-ins, the audit log, and read-only facts. */
+/** Settings: launch mode and early access, the launch push, passkeys, how long requests search, the driver commission rules, admin sign-ins, the audit log, and read-only facts. */
 export function SettingsPage() {
   return (
     <Page title="Settings" subtitle="Launch, access, commission, sign-ins and the audit log">
       <SettingsScreen />
       <div className="settings-stack">
+        <RideRequestsCard />
         <CommissionRulesCard />
       </div>
       <Section title="Admin sign-ins" className="anchor" >

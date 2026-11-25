@@ -145,6 +145,11 @@ export class ServiceClosedError extends Error {
  * dev-only shared-ride simulator. Refused in production.
  */
 let gateOn = true;
+/** Whether service hours are applied at all (always, except in tests that switch it off). */
+export function serviceHoursGateOn(): boolean {
+  return gateOn;
+}
+
 export function setServiceHoursGateForTests(on: boolean): void {
   if (config.nodeEnv === "production") throw new Error("The service hours gate can't be switched off in production");
   gateOn = on;

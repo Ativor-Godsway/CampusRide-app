@@ -13,7 +13,7 @@ import { driverSetupRoute } from "../../lib/driverGate";
 import { ActiveTripBanner } from "../../components/ActiveTripBanner";
 import { useDriverActiveTrip } from "../../lib/activeTrip";
 
-/** Bottom tab shell — Home / Earnings / Account. Re-checks auth, role, onboarding and approval so a signed-out, mismatched-role, not-yet-onboarded or not-yet-approved user can't land here directly. */
+/** Bottom tab shell — Home / Requests / Earnings / Account. Re-checks auth, role, onboarding and approval so a signed-out, mismatched-role, not-yet-onboarded or not-yet-approved user can't land here directly. */
 export default function TabsLayout() {
   const { isLoading, isAuthenticated, user, signOut } = useAuth();
   const router = useRouter();
@@ -77,6 +77,16 @@ export default function TabsLayout() {
           title: "Home",
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons name={focused ? "home" : "home-outline"} size={size} color={color} />
+          ),
+        }}
+      />
+      {/* The request board (2026-11-25): every request on campus still waiting. */}
+      <Tabs.Screen
+        name="requests"
+        options={{
+          title: "Requests",
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? "list" : "list-outline"} size={size} color={color} />
           ),
         }}
       />

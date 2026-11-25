@@ -104,6 +104,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /rides/nearby-cars": "signed-in",
   "POST /rides": "self",
   "POST /rides/quote": "self",
+  "GET /driver/requests/board": "self",
   "POST /uploads/driver-photo/signature": "self",
   "POST /uploads/driver-photo/failure": "self",
 
@@ -194,6 +195,8 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /admin/zone-neighbours": "admin",
   "PUT /admin/zone-neighbours": "admin",
   "GET /admin/refused-bookings": "admin",
+  "GET /admin/dispatch-settings": "admin",
+  "PUT /admin/dispatch-settings": "admin",
   "GET /admin/riders": "admin",
   "GET /admin/riders/:id": "admin",
   "GET /admin/safety": "admin",

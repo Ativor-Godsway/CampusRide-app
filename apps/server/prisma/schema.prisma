@@ -422,6 +422,10 @@ model Ride {
   /// Set when this ride is absorbed into another car via addRiderToCar
   /// (Phase 2d): the request ride is closed (CANCELLED,
   /// MERGED_INTO_ANOTHER_RIDE) and points at the anchor ride it joined.
+  /// How a driver took this request (2026-11-25, for analysis): "POPUP"
+  /// (the offer pop-up), "LIST" (Requests near you / the trip's add list),
+  /// "BOARD" (the request board tab). Null: an older app, or not taken.
+  acceptedVia        String?            @db.VarChar(10)
   mergedIntoRideId   String?
   /// Exact pickup/drop-off pins (2026-10 "exact pins"). All nullable: a ride
   /// from an app build that predates them has none, and everything falls
@@ -1199,4 +1203,15 @@ model RefusedBooking {
   dropoffZoneId String?
 
   @@index([createdAt])
+}
+
+/// Ride request settings (2026-11-25), one row (id "dispatch"). No row: the
+/// defaults. services/ride/searchWindow.ts.
+model DispatchSetting {
+  id                  String   @id @default("dispatch")
+  /// How long a request searches before "no driver found" (default 7 min).
+  searchWindowSeconds Int      @default(420)
+  updatedAt           DateTime @updatedAt
+  /// User.id of the admin who last changed it.
+  updatedBy           String?
 }

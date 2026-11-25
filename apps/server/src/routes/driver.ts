@@ -7,7 +7,6 @@ import {
   DRIVER_CANCEL_NOTE_MAX,
   DRIVER_CANCEL_REASONS,
   parseDriverCancelInput,
-  DISPATCH_WINDOW_MS,
   DRIVER_OUTSIDE_AREA_MESSAGE,
   PRICING,
   designateBestFit,
@@ -31,17 +30,22 @@ import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
 import { claimIfOpen, closeOffer, reofferToDriver } from "../services/ride/dispatch";
 import { paidFareTotal, requestFare, type RideKind } from "../services/ride/fares";
-import { departRide, addRiderToCar, FILLABLE_STATUSES } from "../services/ride/assembly";
+import { ACCEPTED_VIA, departRide, addRiderToCar, FILLABLE_STATUSES, type AcceptedVia } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { liveDriverWhere, noteDriverHeartbeat } from "../services/zones/driverLiveness";
+import { searchWindowMs } from "../services/ride/searchWindow";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import {
   carSeats,
   computeEligibleZoneSet,
+  driverCar,
+  notDeclinedBy,
+  openRequestWhere,
   requestsForFreeDriver,
   requestsThatFitCar,
   seatFit,
 } from "../services/ride/requestFit";
+import { isServiceOpen, serviceHoursGateOn } from "../services/service/serviceHours";
 import { applyRideTransition, applyPassengerTransition, undoPassengerStep } from "../services/ride/rideService";
 import { finalizeRideCompletion } from "../services/ride/completion";
 import { announceClaim, announcePassengerChange, announcePassengerUndo } from "../services/ride/driverActionEvents";
@@ -112,14 +116,17 @@ const SCHEMAS = {
     }),
   },
   noBodyAction: { params: idParams, body: empty },
+  // Optional: where the driver took it from (Ride.acceptedVia); older apps send nothing.
+  claim: { params: idParams, body: object({ source: oneOf(ACCEPTED_VIA) }) },
   reject: { params: idParams, body: object({ reason: oneOf(["DECLINED", "TIMED_OUT"]) }) },
   eligible: { querystring: object({ lat: latitude, lng: longitude }) },
+  board: { querystring: object({ lat: latitude, lng: longitude }) },
   fillSuggestions: { params: idParams, querystring: empty },
   addPreview: {
     params: idParams,
     querystring: object({ requestRideId: id, lat: latitude, lng: longitude }, ["requestRideId"]),
   },
-  addPassenger: { params: idParams, body: object({ requestRideId: id, lat: latitude, lng: longitude }, ["requestRideId"]) },
+  addPassenger: { params: idParams, body: object({ requestRideId: id, lat: latitude, lng: longitude, source: oneOf(ACCEPTED_VIA) }, ["requestRideId"]) },
   passengerAction: {
     params: object({ id, passengerId: id }, ["id", "passengerId"]),
     // reason/note: "Cancel pickup" (DRIVER_CANCEL_REASONS) or NO_SHOW.
@@ -217,6 +224,24 @@ function passengerForApp(
  * pickup falls back to the straight-line estimate when there's no road
  * route (the driver far from any campus road); the trip then shows none.
  */
+/** Why the board says a driver can't take a request now (null refusal: the car's detour check). */
+function boardNote(refusal: ReturnType<typeof seatFit>): string {
+  switch (refusal) {
+    case "LONE_CAR":
+      return "Your trip is Ride alone";
+    case "NEEDS_EMPTY_CAR":
+      return "Ride alone: needs an empty car";
+    case "CAR_FULL":
+      return "Your car is full";
+    case "NOT_ENOUGH_SEATS":
+      return "Not enough free seats";
+    case "CAR_CLOSED":
+      return "Your trip can't take more riders now";
+    default:
+      return "Too far off your route";
+  }
+}
+
 async function offerDistances(
   prisma: PrismaClient,
   ride: { pickupZoneId: string; dropoffZoneId: string } & Partial<RidePinFields>,
@@ -645,12 +670,13 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    */
   app.post(
     "/rides/:id/claim",
-    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.noBodyAction, config: { limits: { user: [RULES.driverAccept] } } },
+    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.claim, config: { limits: { user: [RULES.driverAccept] } } },
     async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
 
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
+    const source = ((request.body ?? {}) as { source?: AcceptedVia }).source ?? null;
 
     const [standing] = await prisma.$queryRaw<
       Array<{ isApproved: boolean; isOnline: boolean; activeRideId: string | null }>
@@ -676,7 +702,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       });
     }
 
-    const ride = await claimIfOpen(prisma, rideId, userId);
+    const ride = await claimIfOpen(prisma, rideId, userId, source);
     if (!ride) {
       // Say which: the pop-up closes with "Already taken",
       // not a vague "unavailable". One extra read, on the losing path only.
@@ -967,7 +993,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         // Ride offers: numbers and names only — no coordinates, no note.
         riderRating: stars != null ? Math.round(stars * 10) / 10 : null,
         ...trip,
-        expiresAt: new Date((ride.broadcastStartedAt ?? ride.createdAt).getTime() + DISPATCH_WINDOW_MS).toISOString(),
+        expiresAt: new Date((ride.broadcastStartedAt ?? ride.createdAt).getTime() + searchWindowMs()).toISOString(),
         offerSeconds: config.driverOfferSeconds,
         /** Its pop-up already ran out on this driver: listed, never popped up again. */
         offerTimedOut: poppedUp.has(ride.id),
@@ -975,6 +1001,101 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     }));
 
     return reply.code(200).send({ rides: result });
+  });
+
+  /**
+   * The request board (2026-11-25): EVERY open request on campus still
+   * waiting for a driver (its search window not over), wherever its pickup —
+   * an extra to the pop-ups, which are unchanged. For a driver online and
+   * approved (asking is contact, so they're live); empty while CampusRide is
+   * closed (service hours). Never one this driver declined.
+   *
+   * Each request is the same shape as GET /driver/rides/eligible's (so the
+   * app accepts it the same way), plus:
+   * - `boardCanTake`: whether this driver can take it now — with no trip, any
+   *   request; on a Shared trip, one that fits the car (seats and the detour
+   *   check the add makes: requestsThatFitCar);
+   * - `boardNote`: why not, in words, when they can't.
+   * Nearest pickup first. `car`: the driver's trip, if any (type, free seats).
+   * Accepting: POST /rides/:id/claim or /rides/:id/add-passenger with
+   * `source: "BOARD"`.
+   */
+  app.get("/driver/requests/board", { onRequest: requireAuth, schema: SCHEMAS.board }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+    const userId = request.user!.userId;
+    const now = new Date();
+    const query = (request.query ?? {}) as { lat?: number; lng?: number };
+    const driverPoint = query.lat !== undefined && query.lng !== undefined ? { latitude: query.lat, longitude: query.lng } : null;
+
+    const [driver, car] = await Promise.all([
+      prisma.driver.findUnique({
+        where: { userId },
+        select: { isOnline: true, isApproved: true, currentZoneId: true, lastLat: true, lastLng: true, user: { select: { isReviewDemo: true } } },
+      }),
+      driverCar(prisma, userId),
+    ]);
+    if (!driver || !driver.isApproved || !driver.isOnline) {
+      return reply.code(200).send({ open: true, online: false, car: null, rides: [] });
+    }
+    noteDriverHeartbeat(prisma, userId);
+    const carSummary = car
+      ? { rideId: car.id, type: car.type, status: car.status, freeSeats: car.type === "SHARED" ? carSeats(car.passengers).free : 0 }
+      : null;
+    const service = serviceHoursGateOn() ? await isServiceOpen(prisma, now) : null;
+    if (service && !service.open && service.reason !== "NO_DRIVERS") {
+      return reply.code(200).send({ open: false, online: true, car: carSummary, rides: [] });
+    }
+
+    const rows = await prisma.ride.findMany({
+      where: {
+        ...openRequestWhere(now),
+        ...notDeclinedBy(userId),
+        isReviewDemo: driver.user.isReviewDemo,
+        ...(car ? { id: { not: car.id }, riderId: { notIn: car.passengers.map((p) => p.riderId) } } : {}),
+      },
+      include: { rider: { select: { name: true } }, passengers: { select: { riderId: true, status: true, lockedFare: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    if (rows.length === 0) return reply.code(200).send({ open: true, online: true, car: carSummary, rides: [] });
+
+    const fitting = car
+      ? new Set((await requestsThatFitCar(prisma, car, { userId, isOnline: true, lastLat: driver.lastLat, lastLng: driver.lastLng }, now)).map((r) => r.id))
+      : null;
+    const [zoneMap, places] = await Promise.all([getZoneMap(prisma), getActivePlaces(prisma)]);
+    const from = driverPoint ?? (driver.currentZoneId ? (zoneMap.get(driver.currentZoneId) ?? null) : null);
+
+    const rides = await Promise.all(
+      rows.map(async (ride) => {
+        const farePesewas = requestFare(ride.type, ride.passengers, ride.riderId);
+        const pickupZoneName = zoneMap.get(ride.pickupZoneId)?.name ?? "";
+        const dropoffZoneName = zoneMap.get(ride.dropoffZoneId)?.name ?? "";
+        const refusal = car ? seatFit(ride, car) : seatFit(ride, null);
+        const canTake = fitting ? fitting.has(ride.id) : refusal === null;
+        return {
+          rideId: ride.id,
+          riderFirstName: firstName(ride.rider.name),
+          pickupZoneName,
+          pickupZoneId: ride.pickupZoneId,
+          dropoffZoneName,
+          dropoffZoneId: ride.dropoffZoneId,
+          ...requestPlaceNames(ride, pickupZoneName, dropoffZoneName),
+          type: ride.type as "LONE" | "SHARED",
+          seats: ride.occupancy,
+          farePesewas,
+          driverSharePesewas: splitFare(farePesewas).driverShare,
+          createdAt: ride.createdAt.toISOString(),
+          searchingSince: (ride.broadcastStartedAt ?? ride.createdAt).toISOString(),
+          bestFit: false,
+          ...(await offerDistances(prisma, ride, from, zoneMap, places)),
+          expiresAt: new Date((ride.broadcastStartedAt ?? ride.createdAt).getTime() + searchWindowMs()).toISOString(),
+          offerSeconds: config.driverOfferSeconds,
+          boardCanTake: canTake,
+          boardNote: canTake ? null : boardNote(refusal),
+        };
+      }),
+    );
+    rides.sort((a, b) => (a.pickupDistanceMeters ?? Infinity) - (b.pickupDistanceMeters ?? Infinity) || b.createdAt.localeCompare(a.createdAt));
+    return reply.code(200).send({ open: true, online: true, car: carSummary, rides });
   });
 
   /**
@@ -1190,7 +1311,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       addedMinutes: preview.addedMinutes,
       /** How much later the most-delayed rider already in the car is dropped off. */
       maxOnboardDelayMinutes: Math.ceil(preview.maxOnboardDelaySeconds / 60),
-      expiresAt: new Date(startedAt + DISPATCH_WINDOW_MS).toISOString(),
+      expiresAt: new Date(startedAt + searchWindowMs()).toISOString(),
       /** How long the trip screen's pop-up counts down: the same setting as Home's (DRIVER_OFFER_SECONDS). */
       offerSeconds: config.driverOfferSeconds,
       pickupIndex: preview.pickupIndex,
@@ -1223,7 +1344,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     const { id: rideId } = request.params as { id: string };
     const userId = request.user!.userId;
-    const body = (request.body ?? {}) as { requestRideId?: unknown; lat?: unknown; lng?: unknown };
+    const body = (request.body ?? {}) as { requestRideId?: unknown; lat?: unknown; lng?: unknown; source?: AcceptedVia };
 
     if (typeof body.requestRideId !== "string" || body.requestRideId.length === 0) {
       return reply.code(400).send({ error: "requestRideId (string) is required" });
@@ -1250,6 +1371,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       let requestPickupZoneId: string | null = null;
       let requestRiderId: string | null = null;
       const car = await addRiderToCar(prisma, userId, rideId, requestRideId, {
+        acceptedVia: body.source ?? null,
         checkCar: ({ passengers, candidate }) => {
           requestPickupZoneId = candidate.pickupZoneId;
           requestRiderId = candidate.riderId;
