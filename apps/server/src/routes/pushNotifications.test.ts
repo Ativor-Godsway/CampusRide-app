@@ -264,7 +264,8 @@ describe("rider notifications from driver actions", () => {
 
 describe("other events", () => {
   it("no driver found: when the search window runs out", async () => {
-    const start = new Date(Date.now() - 5 * 60_000);
+    // Past the 7-minute window (searchWindow.ts).
+    const start = new Date(Date.now() - 8 * 60_000);
     const { ride, rider } = await createTestRide({
       type: "SHARED",
       status: "REQUESTED",

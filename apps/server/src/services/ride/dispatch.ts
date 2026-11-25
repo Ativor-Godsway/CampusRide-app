@@ -1,5 +1,6 @@
 import type { PrismaClient, Ride } from "@prisma/client";
-import { DISPATCH_WINDOW_MS, splitFare } from "@rida/shared";
+import { splitFare } from "@rida/shared";
+import { searchWindowMs } from "./searchWindow";
 import { requestFare } from "./fares";
 import { emitDriverBroadcast, emitOfferClosed } from "../../realtime/rideSocket";
 import { logger } from "../../lib/logger";
@@ -11,9 +12,10 @@ import { notifyRideRequest } from "../push/notify";
 import { dispatchDemoRide, isServedBySimDriver } from "../reviewDemo/simulation";
 import { recordOffers, recordOffersClosed } from "../stats/rideOffers";
 import { noteRequestClosed, noteRequestOffered } from "../admin/liveRequests";
-import { emitRequestsChanged } from "../../realtime/rideSocket";
+import { emitBoardChanged, emitRequestsChanged } from "../../realtime/rideSocket";
 import { carsThatFitRequest, liveFreeDrivers, requestsForDriver, type RequestRow } from "./requestFit";
 import { scheduleRequestExpiry } from "./timeouts";
+import type { AcceptedVia } from "./assembly";
 import { getZoneMap } from "../zones/zoneCache";
 import { liveDriverWhere } from "../zones/driverLiveness";
 
@@ -187,6 +189,12 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
     );
   }
 
+  // The request board (every online driver's, wherever they are) refetches.
+  void prisma.driver
+    .findMany({ where: { ...liveDriverWhere(), isApproved: true, user: { isReviewDemo: ride.isReviewDemo ?? false } }, select: { userId: true } })
+    .then((drivers) => emitBoardChanged(drivers.map((d) => d.userId)))
+    .catch((err) => logger.warn("board refresh failed", { rideId: ride.id, err }));
+
   if (eligible.length > 0) {
     const payload = broadcastPayload(ride, ride.pickupZone.name, ride.dropoffZone.name);
     emitDriverBroadcast(
@@ -215,7 +223,7 @@ function broadcastPayload(ride: RequestRow, pickupZoneName: string, dropoffZoneN
     type: ride.type,
     farePesewas,
     driverSharePesewas: driverShare,
-    expiresAt: (ride.broadcastStartedAt?.getTime() ?? Date.now()) + DISPATCH_WINDOW_MS,
+    expiresAt: (ride.broadcastStartedAt?.getTime() ?? Date.now()) + searchWindowMs(),
   };
 }
 
@@ -293,11 +301,18 @@ export async function claimRide(prisma: PrismaClient, rideId: string, driverId: 
  * (it used to be an update and then a second query to read the row back).
  * Null when the ride was not open: already claimed, cancelled or timed out.
  */
-export async function claimIfOpen(prisma: PrismaClient, rideId: string, driverId: string): Promise<Ride | null> {
+export async function claimIfOpen(
+  prisma: PrismaClient,
+  rideId: string,
+  driverId: string,
+  /** Where the driver took it from (Ride.acceptedVia), kept in the same statement. */
+  acceptedVia: AcceptedVia | null = null,
+): Promise<Ride | null> {
   // A review demo ride can only be taken by a demo driver, and a real ride
   // only by a real one (services/reviewDemo): checked in the same statement.
   const rows = await prisma.$queryRaw<Ride[]>`
-    UPDATE "Ride" SET "driverId" = ${driverId}, status = 'MATCHED', "matchedAt" = COALESCE("matchedAt", now())
+    UPDATE "Ride" SET "driverId" = ${driverId}, status = 'MATCHED', "matchedAt" = COALESCE("matchedAt", now()),
+      "acceptedVia" = ${acceptedVia}
     WHERE id = ${rideId} AND status = 'REQUESTED' AND "driverId" IS NULL
       AND "isReviewDemo" = (SELECT u."isReviewDemo" FROM "User" u WHERE u.id = ${driverId})
     RETURNING *`;

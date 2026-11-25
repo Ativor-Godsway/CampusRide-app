@@ -42,7 +42,13 @@ export interface AddRiderOptions {
    * rolls back, including the absorbed request.
    */
   checkCar?: (car: { anchor: Ride; passengers: readonly RidePassenger[]; candidate: AddCandidate }) => void;
+  /** Where the driver took it from (Ride.acceptedVia: POPUP, LIST, BOARD), kept on the request. */
+  acceptedVia?: AcceptedVia | null;
 }
+
+/** How a driver took a request (Ride.acceptedVia), for analysis. */
+export const ACCEPTED_VIA = ["POPUP", "LIST", "BOARD"] as const;
+export type AcceptedVia = (typeof ACCEPTED_VIA)[number];
 
 /**
  * "Fill the car": a driver pulls a still-pending SHARED request into their
@@ -113,7 +119,8 @@ export async function addRiderToCar(
             UPDATE "Ride"
             SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId},
               -- Stats: the rider got a car (this one's), and the request closed, now.
-              "matchedAt" = COALESCE("matchedAt", now()), "cancelledAt" = now()
+              "matchedAt" = COALESCE("matchedAt", now()), "cancelledAt" = now(),
+              "acceptedVia" = ${options.acceptedVia ?? null}
             WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
               AND "isReviewDemo" = ${anchor.isReviewDemo}
             RETURNING *

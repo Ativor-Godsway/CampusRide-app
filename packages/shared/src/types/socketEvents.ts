@@ -162,6 +162,12 @@ export const DRIVER_EVENTS = {
    * rider added, the trip ended): refetch the requests lists now. No payload.
    */
   REQUESTS_CHANGED: "driver:requests_changed",
+  /**
+   * The request board (2026-11-25): a request appeared, or changed type,
+   * somewhere on campus — refetch the board. Sent to every online driver;
+   * removals come as OFFER_CLOSED. No payload. Older apps ignore it.
+   */
+  BOARD_CHANGED: "driver:board_changed",
 } as const;
 
 /** Sent to the drivers a request was offered to when it stops being available. */
@@ -189,7 +195,7 @@ export interface RideBroadcastPayload {
   farePesewas: number;
   /** Driver's 85% share in integer pesewas. */
   driverSharePesewas: number;
-  /** Unix ms timestamp when the 2-minute broadcast window (DISPATCH_WINDOW_MS) expires. */
+  /** Unix ms timestamp when the request's search window (admin setting, 7 min by default) ends. */
   expiresAt: number;
 }
 

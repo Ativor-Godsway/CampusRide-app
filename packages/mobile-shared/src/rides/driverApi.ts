@@ -176,10 +176,13 @@ export async function getDriverActiveRide(): Promise<RideWithZones | null> {
 }
 
 /** Atomically claim a REQUESTED ride. Throws with status 409 if already claimed. */
-export async function driverClaimRide(rideId: string, options?: { timeoutMs?: number }): Promise<Ride> {
+/** Where the driver took a request from (saved for analysis; servers before 2026-11-25 ignore it). */
+export type AcceptSource = "POPUP" | "LIST" | "BOARD";
+
+export async function driverClaimRide(rideId: string, options?: { timeoutMs?: number; source?: AcceptSource }): Promise<Ride> {
   const res = await api.post<{ ride: Ride }>(
     `/rides/${rideId}/claim`,
-    undefined,
+    options?.source ? { source: options.source } : undefined,
     options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return res.data.ride;
@@ -264,6 +267,36 @@ export async function getEligibleRides(position?: { latitude: number; longitude:
     params: position ? { lat: position.latitude.toFixed(5), lng: position.longitude.toFixed(5) } : undefined,
   });
   return readList<EligibleRideItem>(res.data, "rides");
+}
+
+// ─── The request board (2026-11-25) ─────────────────────────────────────────
+
+/** A request on the board: an eligible request, plus whether this driver can take it now. */
+export interface BoardRideItem extends EligibleRideItem {
+  /** When the rider's search started (ISO): "waiting 3 min". */
+  searchingSince: string;
+  /** Takeable now: with no trip, any; on a Shared trip, one that fits the car. */
+  boardCanTake: boolean;
+  /** Why not, in words ("Your car is full"), or null. */
+  boardNote: string | null;
+}
+
+export interface RequestBoard {
+  /** False while CampusRide is closed (service hours): nothing listed. */
+  open: boolean;
+  /** False when the server has this driver offline. */
+  online: boolean;
+  /** The driver's trip, if any. */
+  car: { rideId: string; type: RideType; status: string; freeSeats: number } | null;
+  rides: BoardRideItem[];
+}
+
+/** Every open request on campus, nearest first (GET /driver/requests/board). */
+export async function getRequestBoard(position?: { latitude: number; longitude: number } | null): Promise<RequestBoard> {
+  const res = await api.get<RequestBoard>("/driver/requests/board", {
+    params: position ? { lat: position.latitude.toFixed(5), lng: position.longitude.toFixed(5) } : undefined,
+  });
+  return { open: res.data.open ?? true, online: res.data.online ?? true, car: res.data.car ?? null, rides: readList<BoardRideItem>(res.data, "rides") };
 }
 
 // ─── Completed-ride history (read-only, derived earnings) ────────────────────
@@ -431,12 +464,14 @@ export async function addPassenger(
     timeoutMs?: number;
     /** The driver's position, for the server's detour check on a moving car. */
     position?: { latitude: number; longitude: number } | null;
+    source?: AcceptSource;
   },
 ): Promise<AddPassengerResult> {
   const res = await api.post<AddPassengerResult>(
     `/rides/${rideId}/add-passenger`,
     {
       requestRideId,
+      ...(options?.source ? { source: options.source } : {}),
       ...(options?.position ? { lat: options.position.latitude, lng: options.position.longitude } : {}),
     },
     options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,

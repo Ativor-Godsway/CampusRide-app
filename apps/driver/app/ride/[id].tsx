@@ -504,10 +504,11 @@ export default function TripScreen() {
     if (!ride || !previewing || !previewData || committing) return;
     setCommitting(true);
     setOfferClock((c) => (c ? { ...c, heldAt: Date.now() } : c));
-    const { suggestion } = previewing;
+    const { suggestion, manual } = previewing;
     const fare = previewData.farePesewas;
     commitTimer.current = setTimeout(() => {
-      runAddRider(ride.id, suggestion, fare, positionRef.current);
+      // The trip screen's add pop-up ("POPUP"), or a rider picked from its list ("LIST").
+      runAddRider(ride.id, suggestion, fare, positionRef.current, manual ? "LIST" : "POPUP");
       skippedRef.current.add(suggestion.requestRideId);
       setPreviewing(null);
       setCommitting(false);

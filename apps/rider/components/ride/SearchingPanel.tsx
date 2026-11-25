@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { DISPATCH_WINDOW_MS, dispatchSecondsLeft, type RideType } from "@rida/shared";
+import { searchElapsedSeconds, stopwatch, type RideType } from "@rida/shared";
 import {
   Button,
   Card,
   Illustration,
-  ProgressBar,
   RouteStops,
   Text,
   colors,
@@ -16,12 +15,16 @@ import {
 /** One calm tip for the wait: the check that matters most at pickup. */
 export const SAFETY_TIP = "Check the car's plate matches before you get in.";
 
+/** After this long, the heading says the search is still going. */
+const STILL_LOOKING_AFTER_S = 30;
+
 /**
- * "Finding your driver": a compact sheet over the map, where the pickup
- * pulses. Everything shown is real state: the thin line along the top of the
- * card is the 2-minute dispatch window running down from the server's
- * broadcastStartedAt ("up to 2 minutes" is that window: the server ends the
- * search the moment it runs out).
+ * "Finding your driver", then "Still looking for a driver…": a compact
+ * sheet over the map, where the pickup pulses, with how long the search has
+ * been going (a stopwatch from the server's broadcastStartedAt) and Cancel.
+ * The server keeps searching for its whole window (7 minutes by default, an
+ * admin setting), then the ride shows the "no driver found" panel
+ * (NoDriversPanel) — so no countdown is shown here.
  */
 export function SearchingPanel({
   pickupZoneName,
@@ -49,28 +52,36 @@ export function SearchingPanel({
     return () => clearInterval(timer);
   }, []);
 
-  const secondsLeft = dispatchSecondsLeft(broadcastStartedAt, now);
+  const elapsed = searchElapsedSeconds(broadcastStartedAt, now);
+  const still = elapsed !== null && elapsed >= STILL_LOOKING_AFTER_S;
 
   return (
     <View style={styles.section}>
       <View style={styles.heading} accessibilityLiveRegion="polite">
         <Text variant="title2" accessibilityRole="header">
-          Finding your driver
+          {still ? "Still looking for a driver…" : "Finding your driver"}
         </Text>
         <Text variant="subhead" color="secondary">
-          Asking drivers near {pickupPlaceName ?? "you"} · up to 2 minutes
+          Asking drivers near {pickupPlaceName ?? "you"}
         </Text>
       </View>
 
       <Card variant="filled" style={styles.card}>
-        <View importantForAccessibility="no-hide-descendants">
-          <ProgressBar
-            progress={secondsLeft === null ? 1 : (secondsLeft * 1000) / DISPATCH_WINDOW_MS}
-            height={3}
-            color={colors.green500}
-            trackColor={colors.surface3}
-          />
-        </View>
+        {elapsed !== null ? (
+          <View
+            style={styles.elapsed}
+            accessible
+            accessibilityLabel={`Searching for ${Math.floor(elapsed / 60)} minutes ${elapsed % 60} seconds`}
+          >
+            <Ionicons name="time-outline" size={16} color={colors.ink3} />
+            <Text variant="subhead" color="secondary">
+              Searching
+            </Text>
+            <Text variant="bodyStrong" tabular>
+              {stopwatch(elapsed)}
+            </Text>
+          </View>
+        ) : null}
         <RouteStops
           connectorHeight={12}
           origin={
@@ -119,5 +130,6 @@ const styles = StyleSheet.create({
   rideRow: { flexDirection: "row", alignItems: "center", gap: spacing[3] },
   rideText: { flex: 1, gap: 2 },
   tip: { flexDirection: "row", alignItems: "center", gap: spacing[2] },
+  elapsed: { flexDirection: "row", alignItems: "center", gap: spacing[2] },
   tipText: { flex: 1 },
 });

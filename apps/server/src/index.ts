@@ -16,6 +16,7 @@ import {
   toFastifyTrustProxy,
 } from "./lib/security";
 import { processTimeouts } from "./services/ride/timeouts";
+import { refreshSearchWindow } from "./services/ride/searchWindow";
 import {
   assertOtpServiceAllowedInProduction,
   otpService,
@@ -232,6 +233,8 @@ async function bootstrap() {
   // time ran out while the server was down (a deploy, a crash) are settled
   // at once. Nothing about a ride's timing lives in memory, so this is all a
   // restart needs (docs/architecture/in-memory-state.md).
+  // The search window (admin setting, 7 min by default) before the first sweep uses it.
+  await refreshSearchWindow(prisma);
   await processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
     app.log.error({ err }, "Startup timeout sweep failed");
   });
@@ -309,6 +312,7 @@ async function bootstrap() {
   const staleSweepFrom = Date.now() + SWEEP_GRACE_AFTER_START_MS;
   const sessionTimeouts = setInterval(() => {
     sweepDriverPresence();
+    void refreshSearchWindow(prisma);
     if (Date.now() < staleSweepFrom) return;
     takeStaleDriversOffline(prisma).then(
       (taken) => {

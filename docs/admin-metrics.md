@@ -160,6 +160,16 @@ still owed (a driver, all time) = Σ CommissionLedger.amountPesewas     (COMMISS
   driver offline (never mid-trip) and their session ends `TIMEOUT` at the last
   contact. Before 2026-11-24 a stale "online" flag counted.
 
+## How requests were taken (2026-11-25)
+
+- `Ride.acceptedVia` on each request a driver took: **POPUP** (the offer
+  pop-up, on Home or the trip screen), **LIST** (Home's "Requests near you", or
+  the trip screen's add list), **BOARD** (the Requests tab). Null: an app from
+  before 2026-11-25, or a request nobody took. Not shown in admin yet; for
+  analysis.
+- Requests search for the admin-set window (Settings → Ride requests, 7 minutes
+  by default; 2 minutes before 2026-11-25) before "no driver found".
+
 ## Refused bookings (Supply & demand)
 
 - An anonymous record (`RefusedBooking`) of each booking the server refused:

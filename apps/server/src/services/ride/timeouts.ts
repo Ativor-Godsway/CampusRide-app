@@ -1,5 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
-import { DISPATCH_WINDOW_MS, RIDE_EVENTS, type RideSource } from "@rida/shared";
+import { RIDE_EVENTS, type RideSource } from "@rida/shared";
+import { searchWindowMs } from "./searchWindow";
 import { applyRideTransition } from "./rideService";
 import { emitRideEvent } from "../../realtime/rideSocket";
 import { notifyUssdRider } from "../sms/notifyUssdRiders";
@@ -9,8 +10,6 @@ import { config } from "../../config";
 import { logger as appLogger } from "../../lib/logger";
 import { completeStaleRide, isStaleInProgress, staleCutoff } from "./staleRides";
 
-/** Shared with the rider app's countdown, so the two can never disagree. */
-const BROADCAST_TIMEOUT_MS = DISPATCH_WINDOW_MS;
 const DECISION_GRACE_MS = 90_000;
 
 const NO_DRIVER_NUDGE = "No driver yet. Dial *919*4007# and choose Check Status.";
@@ -24,14 +23,14 @@ interface RideTimeoutFields {
 }
 
 /**
- * True if a REQUESTED ride has been broadcast for >= DISPATCH_WINDOW_MS (2 min) with no claim and
+ * True if a REQUESTED ride has been searching for the whole search window (searchWindowMs, 7 min by default) with no claim and
  * should move to AWAITING_RIDER_DECISION. Pure — driven by an injected `now`
  * so it's testable without wall-clock delays.
  */
 export function shouldTimeout(ride: RideTimeoutFields, now: Date): boolean {
   if (ride.status !== "REQUESTED") return false;
   const start = ride.broadcastStartedAt ?? ride.createdAt;
-  return now.getTime() - start.getTime() >= BROADCAST_TIMEOUT_MS;
+  return now.getTime() - start.getTime() >= searchWindowMs();
 }
 
 /**
@@ -63,7 +62,7 @@ const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 export function scheduleRequestExpiry(prisma: PrismaClient, rideId: string, broadcastStartedAt: Date): void {
   const previous = expiryTimers.get(rideId);
   if (previous) clearTimeout(previous);
-  const delay = Math.max(0, broadcastStartedAt.getTime() + BROADCAST_TIMEOUT_MS - Date.now()) + 250;
+  const delay = Math.max(0, broadcastStartedAt.getTime() + searchWindowMs() - Date.now()) + 250;
   const timer = setTimeout(() => {
     expiryTimers.delete(rideId);
     processTimeouts(prisma, new Date(), { rideIds: [rideId], logger: timerLogger }).catch(() => {});
@@ -80,7 +79,7 @@ interface TimeoutLogger {
 /**
  * Finds rides needing a timeout-driven transition as of `now` and applies
  * them:
- * - REQUESTED rides broadcast >= 2 min with no claim -> AWAITING_RIDER_DECISION
+ * - REQUESTED rides searching for the whole search window with no claim -> AWAITING_RIDER_DECISION
  * - AWAITING_RIDER_DECISION rides idle >= 90s -> CANCELLED (NO_DRIVERS_AVAILABLE)
  * - IN_PROGRESS rides under way >= RIDE_AUTO_COMPLETE_HOURS (3) -> COMPLETED
  *   (a driver who never tapped "complete": ./staleRides.ts)

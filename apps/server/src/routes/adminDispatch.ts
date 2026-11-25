@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
-import { DEFAULT_SHARED_FARE_PRICES, FAR_ENDS, PRICING, REFUSED_BOOKING_REASON_LABELS, sharedFarePricesProblem, type FarEnd } from "@rida/shared";
+import { DEFAULT_SEARCH_WINDOW_SECONDS, SEARCH_WINDOW_BOUNDS_SECONDS, searchWindowProblem, DEFAULT_SHARED_FARE_PRICES, FAR_ENDS, PRICING, REFUSED_BOOKING_REASON_LABELS, sharedFarePricesProblem, type FarEnd } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
 import { id, integer, noInput, object, oneOf, text } from "../http/schemas";
@@ -9,6 +9,7 @@ import { cached, clearAdminCache } from "../services/admin/cache";
 import { accraDay, daysIn, periodKey } from "../services/admin/period";
 import { getFarePricing, saveFarePricing } from "../services/ride/farePricing";
 import { refusedBookingCounts } from "../services/ride/refusedBookings";
+import { readSearchWindow, saveSearchWindow } from "../services/ride/searchWindow";
 import {
   ZoneNeighbourError,
   currentZoneNeighbours,
@@ -44,6 +45,8 @@ const SCHEMAS = {
   zoneNeighbours: noInput,
   saveZoneNeighbours: { body: object({ pairs: { type: "array", maxItems: MAX_PAIRS, items: pair } }, ["pairs"]) },
   refused: { querystring: object({ from: text(40), to: text(40) }, ["from", "to"]) },
+  dispatchSettings: noInput,
+  saveDispatchSettings: { body: object({ searchWindowSeconds: integer(1, 100_000) }, ["searchWindowSeconds"]) },
 };
 
 export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: PrismaClient): void {
@@ -131,6 +134,32 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
       throw err;
     }
     return reply.send(await neighboursBody());
+  });
+
+  async function dispatchSettingsBody() {
+    const setting = await readSearchWindow(prisma);
+    const admin = setting.updatedBy ? await prisma.user.findUnique({ where: { id: setting.updatedBy }, select: { id: true, name: true } }) : null;
+    return {
+      settings: { searchWindowSeconds: setting.searchWindowSeconds, updatedAt: setting.updatedAt?.toISOString() ?? null, updatedBy: admin },
+      defaults: { searchWindowSeconds: DEFAULT_SEARCH_WINDOW_SECONDS },
+      bounds: SEARCH_WINDOW_BOUNDS_SECONDS,
+    };
+  }
+
+  /** How long a request searches for a driver before "no driver found" (2026-11-25; 7 min by default). */
+  app.get("/admin/dispatch-settings", { ...gate, schema: SCHEMAS.dispatchSettings }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    return reply.send(await dispatchSettingsBody());
+  });
+
+  /** Saves it: requests already searching follow the new length too. Audit-logged. */
+  app.put("/admin/dispatch-settings", { ...gate, schema: SCHEMAS.saveDispatchSettings, config: write }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const { searchWindowSeconds } = request.body as { searchWindowSeconds: number };
+    const problem = searchWindowProblem(searchWindowSeconds);
+    if (problem) return reply.code(400).send({ error: problem });
+    await saveSearchWindow(prisma, searchWindowSeconds, request.user!.userId);
+    return reply.send(await dispatchSettingsBody());
   });
 
   /** Refused bookings in the period: per Accra day and per reason (anonymous; services/ride/refusedBookings.ts). */
