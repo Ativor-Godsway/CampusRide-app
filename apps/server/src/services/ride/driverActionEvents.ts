@@ -77,6 +77,7 @@ export async function announcePassengerChange(
         occupancy: ride.occupancy,
         paymentMethod: ride.paymentMethod,
         source: ride.source,
+        isReviewDemo: ride.isReviewDemo,
       },
       driverUserId,
       ride.passengers,

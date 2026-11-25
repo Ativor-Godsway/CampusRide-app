@@ -32,6 +32,8 @@ export async function finalizeRideCompletion(
     occupancy: number;
     paymentMethod: string;
     source: RideSource;
+    /** Review demo / production test ride: no commission is owed on it. */
+    isReviewDemo: boolean;
   },
   driverUserId: string,
   /** The ride's passengers, when the caller already has them (saves reading them again). */
@@ -52,7 +54,9 @@ export async function finalizeRideCompletion(
         })
       : undefined);
 
-  if (paymentMethod === "CASH" && passengers) {
+  // A review demo or production test ride (fake riders) earns nobody
+  // anything: no commission row, so no driver ever owes on it.
+  if (paymentMethod === "CASH" && passengers && !ride.isReviewDemo) {
     // The fares the carried riders were quoted and paid (services/ride/fares),
     // never today's price list: a trip booked before a price change owes
     // commission on what was actually collected. Shared: the riders dropped
