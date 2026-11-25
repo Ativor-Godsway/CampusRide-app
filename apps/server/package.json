@@ -29,6 +29,8 @@
     "simulate:shared": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sharedSim/cli.ts",
     "simulate:requests": "ts-node --transpile-only -r tsconfig-paths/register src/dev/requestSim/cli.ts",
     "simulate:requests:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/requestSim/cleanupCli.ts",
+    "prodtest:requests": "ts-node --transpile-only -r tsconfig-paths/register src/dev/prodTest/requestsCli.ts",
+    "prodtest:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/prodTest/cleanupCli.ts",
     "sim:approve-driver": "ts-node --transpile-only -r tsconfig-paths/register src/dev/sim/approveDriverCli.ts",
     "loadtest": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/loadtest.ts",
     "sentry:test": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/sentryTest.ts",
