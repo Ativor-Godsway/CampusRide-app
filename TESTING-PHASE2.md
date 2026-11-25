@@ -14,9 +14,77 @@ Production is not touched, and nothing is merged.
 - The fake riders use numbers that can't exist (+233099…) and names ending in
   "(test)". The cleanup step removes only those.
 
-You need **three Terminal windows**: the server, the driver app, and the fake riders.
+You need **three Terminal windows**: the server, Metro (the driver app's
+JavaScript), and the fake riders. The app runs on your iPhone as a **development
+build** of CampusRide Driver (Expo Go can't run it: the project is SDK 57, and
+Expo Go on the phone is SDK 58).
 
 ---
+
+## Step 0: Install the development build on your iPhone (once)
+
+Do this once. Later sessions start at Step 1.
+
+**0a. Developer Mode** (iOS 16 and later must have it for this kind of build). On
+the iPhone, open **Settings → Privacy & Security → Developer Mode**, switch it
+**on** and restart when asked. After the restart, tap **Turn On** and enter your
+passcode. If you don't see Developer Mode, do 0b first: it appears once a
+development profile is installed.
+
+**0b. Register the iPhone.** In Terminal on the Mac, go to the driver app:
+
+```bash
+cd ~/Desktop/CampusRideApp/apps/driver
+```
+
+Start the registration:
+
+```bash
+npx -y eas-cli@24 device:create
+```
+
+Answer the questions:
+
+1. "Would you like to use the campusride-gh account?": **Yes**.
+2. "Do you want to log in to your Apple account?": **Yes**. Enter your Apple ID,
+   password and the 2-step code (they go to Apple only).
+3. Choose your Apple Team if asked.
+4. "How would you like to register your devices?": **Website** (it shows a link
+   and a QR code).
+
+On the iPhone:
+
+1. Point the **Camera** at the QR code on the Mac, or open the link in **Safari**.
+2. Tap **Register**. Safari says the site wants to download a configuration
+   profile: tap **Allow**, then **Close**.
+3. Open **Settings**. Tap **Profile Downloaded** near the top (or go to
+   **General → VPN & Device Management**).
+4. Tap **Install**, enter your passcode, then tap **Install** twice more.
+5. Safari opens again and says the device is registered. Back in Terminal, it
+   shows your iPhone (give it a name such as "Ativor iPhone 14 Pro" if asked).
+
+**0c. Build it in the cloud.** Still in `apps/driver`, start the iOS development build:
+
+```bash
+npx -y eas-cli@24 build --platform ios --profile development
+```
+
+Answer the questions:
+
+1. Log in to your Apple account again if asked: **Yes**.
+2. If asked to create or update the ad hoc provisioning profile: **Yes**.
+3. If asked which devices to include: select your iPhone (space), then Enter.
+
+It uploads the project and prints **Build details: https://expo.dev/accounts/campusride-gh/projects/campusride-driver/builds/…**.
+That's the build page. The build takes about 15–25 minutes in the cloud. You can
+close Terminal; it keeps going.
+
+**0d. Install it.** When the build page says **Finished**, tap **Install** on it
+from the iPhone's Safari, or scan its QR code with the Camera. Then tap **Install**.
+The app appears on the Home Screen as **CampusRide Driver** (the development
+build replaces the App Store app if it's installed). Open it once: if iOS says
+"Untrusted Developer", go to **Settings → General → VPN & Device Management**,
+tap the developer and **Trust**.
 
 ## Step 1: Get the branch (Terminal 1)
 
@@ -32,10 +100,17 @@ Fetch the latest branches:
 git fetch
 ```
 
-Switch to the Phase 2 branch. This doesn't merge anything:
+Switch to the test branch. It's the request board plus the development build
+setup, and it is never merged:
 
 ```bash
-git checkout driver-request-board
+git checkout driver-dev-build
+```
+
+Install its packages (it adds `expo-dev-client`):
+
+```bash
+npm install
 ```
 
 Rebuild the database client for this branch:
@@ -51,7 +126,21 @@ applied, so this should say there's nothing to do:
 npm run db:migrate:phase2 --workspace apps/server
 ```
 
-## Step 2: Start the server against the test copy (Terminal 1)
+## Step 2: Put the iPhone and the Mac on one network
+
+Use the iPhone's **Personal Hotspot**. Its devices can always reach each other,
+while many shared and campus Wi-Fi networks block devices from talking to each
+other. That's why you saw two addresses before: 172.20.10.x is the hotspot,
+10.107.x.x was the other Wi-Fi.
+
+1. On the iPhone: **Settings → Personal Hotspot**, turn on **Allow Others to
+   Join**.
+2. On the Mac: click the Wi-Fi icon in the menu bar and choose your iPhone.
+
+Do this before starting the server. If the server is already running, stop it
+(Ctrl+C) and start it again after the Mac joins the hotspot.
+
+## Step 3: Start the server against the test copy (Terminal 1)
 
 ```bash
 npm run dev:phase2 --workspace apps/server
@@ -60,53 +149,63 @@ npm run dev:phase2 --workspace apps/server
 Wait for a line saying `phase2:guard OK — phase2-test branch`, then
 `Server listening at http://…:3000`. Leave this window open: login codes appear here.
 
-## Step 3: Find your Mac's Wi-Fi address (Terminal 2)
+## Step 4: Check the iPhone can reach the server (Terminal 2)
 
-Skip this step if you're using the iPhone simulator on the Mac.
-
-Go to the project:
+In **Terminal 2**, go to the project:
 
 ```bash
 cd ~/Desktop/CampusRideApp
 ```
 
-Print the address:
+Print the Mac's address on the hotspot. It should start with `172.20.10.`:
 
 ```bash
 ipconfig getifaddr en0
 ```
 
-It prints something like `10.107.10.227`. On your phone (same Wi-Fi), open
-`http://10.107.10.227:3000/health` in the browser, using your own number. You should
-see `{"status":"ok","app":"CampusRide"}`. If the Mac asks whether to allow incoming
-connections for `node`, click **Allow**.
+Check that the server answers there from the Mac:
 
-## Step 4: Point the driver app at the Mac (Terminal 2)
+```bash
+curl http://$(ipconfig getifaddr en0):3000/health
+```
 
-**On your phone:** write the Mac's address into the driver app's local settings:
+It should print `{"status":"ok","app":"CampusRide"}`.
+
+**Now check from the iPhone.** In **Safari**, open `http://172.20.10.4:3000/health`,
+using the address the Mac printed. You should see the same
+`{"status":"ok","app":"CampusRide"}`. If Safari can't open it, the phone can't
+reach the Mac. Check the Mac is on the iPhone's hotspot (not another Wi-Fi), then
+run the last two commands again.
+
+## Step 5: Start Metro for the development build (Terminal 2)
+
+Tell the driver app which server to use: the Mac's hotspot address.
 
 ```bash
 echo "EXPO_PUBLIC_API_URL=http://$(ipconfig getifaddr en0):3000" > apps/driver/.env.development.local
 ```
 
-**Or on the iPhone simulator:** use this instead:
+Start Metro on the **same** address, so Metro and the server can't disagree, with
+a fresh bundle so the app picks up the server address:
 
 ```bash
-echo "EXPO_PUBLIC_API_URL=http://localhost:3000" > apps/driver/.env.development.local
+REACT_NATIVE_PACKAGER_HOSTNAME=$(ipconfig getifaddr en0) npm run dev:driver -- --dev-client --clear
 ```
 
-Start the driver app with a fresh bundle, so it picks up the address:
+It shows a QR code and `Metro waiting on exp+campusride-driver://…` with the same
+`172.20.10.x` address.
 
-```bash
-npm run dev:driver -- --clear
-```
+On the iPhone, open **CampusRide Driver** (the development build). Either:
 
-Open the CampusRide Driver **development build** on your phone, or press `i` in this
-window for the iPhone simulator. This window should print
-`[CampusRide] API server: http://…:3000`. If it says `api.campusride.app`, stop
-it (Ctrl+C) and run the last two commands again.
+- scan Metro's QR code with the **Camera** and tap the banner, or
+- in the app's start screen, tap the server listed under **Development servers**
+  (`http://172.20.10.x:8081`), or tap **Enter URL manually** and type it.
 
-## Step 5: Sign in as a driver
+The first load takes a minute. Terminal 2 then prints
+`[CampusRide] API server: http://172.20.10.x:3000`. If it says `api.campusride.app`,
+stop Metro (Ctrl+C) and run the last two commands again.
+
+## Step 6: Sign in as a driver
 
 Your own driver account is in the copy, so use it.
 
@@ -122,7 +221,7 @@ Your own driver account is in the copy, so use it.
 If the copy says you owe commission and can't go online, use another approved driver
 account you control, or tell me.
 
-## Step 6: Fill the board with fake riders (Terminal 3)
+## Step 7: Fill the board with fake riders (Terminal 3)
 
 Go to the project:
 
@@ -142,10 +241,10 @@ Each request prints a line as it's made, for example
 `✓ Ama (test)  Shared  GH₵7  Pentagon Block A → James Quartey Building`.
 North ↔ South trips (Pentagon, TF or Bani ↔ Jean Nelson) show **GH₵9**.
 
-To run another batch, clean up first (Step 8). Each fake rider can only have
+To run another batch, clean up first (Step 9). Each fake rider can only have
 one open request at a time.
 
-## Step 7: Test the board (in the app)
+## Step 8: Test the board (in the app)
 
 1. **Pop-ups unchanged:** a request near you still pops up on Home for about
    20 seconds.
@@ -172,7 +271,7 @@ one open request at a time.
 8. **7 minutes:** leave one request alone. It stays on the board for 7 minutes,
    then disappears (the rider is told no driver was found).
 
-## Step 8: Clean up (Terminal 3)
+## Step 9: Clean up (Terminal 3)
 
 Remove every fake rider and their rides from the test copy:
 
@@ -189,6 +288,10 @@ rm apps/driver/.env.development.local
 ```
 
 ## Afterwards
+
+The development build replaced the App Store **CampusRide Driver** on your iPhone
+(they're the same app). To drive for real again, delete the development build and
+install CampusRide Driver from the App Store.
 
 The phase2-test branch keeps costing a little Neon compute while it exists. When
 you're done testing, delete it in the Neon console (project `withered-voice-05688596`,
