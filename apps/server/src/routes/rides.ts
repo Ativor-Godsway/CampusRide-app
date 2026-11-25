@@ -272,6 +272,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       const reason = refusalReason(err);
       if (reason) {
         await recordRefusedBooking(prisma, {
+          riderId,
           reason,
           stage: "REQUEST",
           rideType: body.type,
@@ -451,7 +452,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     } catch (err) {
       const reason = refusalReason(err);
       const record: RefusedBookingInput | null = reason
-        ? { reason, stage: "QUOTE", pickup: pickup as RideEndInput, dropoff: dropoff as RideEndInput }
+        ? { riderId, reason, stage: "QUOTE", pickup: pickup as RideEndInput, dropoff: dropoff as RideEndInput }
         : null;
       if (record && !quoteAlreadyCounted(riderId, record)) await recordRefusedBooking(prisma, record);
       else if (!record) throw err;

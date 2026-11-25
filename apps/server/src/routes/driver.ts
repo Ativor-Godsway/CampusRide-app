@@ -1041,7 +1041,9 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const carSummary = car
       ? { rideId: car.id, type: car.type, status: car.status, freeSeats: car.type === "SHARED" ? carSeats(car.passengers).free : 0 }
       : null;
-    const service = serviceHoursGateOn() ? await isServiceOpen(prisma, now) : null;
+    // Review demo drivers (and a production test driver) see demo requests
+    // whatever the hours, like demo riders book whatever the hours.
+    const service = serviceHoursGateOn() && !driver.user.isReviewDemo ? await isServiceOpen(prisma, now) : null;
     if (service && !service.open && service.reason !== "NO_DRIVERS") {
       return reply.code(200).send({ open: false, online: true, car: carSummary, rides: [] });
     }

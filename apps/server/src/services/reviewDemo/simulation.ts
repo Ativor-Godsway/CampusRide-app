@@ -247,17 +247,25 @@ export function dispatchDemoRide(prisma: PrismaClient, rideId: string): void {
   running.set(rideId, run);
 }
 
-/** True for a demo ride the simulated driver serves (the demo rider's), false for the simulated rider's own requests. */
+/**
+ * True for a demo ride the simulated driver serves: the App Store / Google
+ * Play review rider's (REVIEW_DEMO_RIDER_PHONE). Every other demo ride is
+ * offered to online demo drivers like any request — the simulated rider's
+ * requests for the review driver, and (2026-11-25) production test rides
+ * made by `npm run prodtest:requests` for the one driver it flags.
+ */
 export async function isServedBySimDriver(
   prisma: PrismaClient,
   ride: { riderId: string; isReviewDemo: boolean },
 ): Promise<boolean> {
   if (!ride.isReviewDemo) return false;
+  const demoRider = reviewDemoConfig().riderPhone;
+  if (!demoRider) return false;
   const rider = await prisma.user.findUnique({
     where: { id: ride.riderId },
     select: { phone: true },
   });
-  return rider?.phone !== SIM_RIDER_PHONE;
+  return rider?.phone === demoRider && rider.phone !== SIM_RIDER_PHONE;
 }
 
 // ─── Requests for the demo driver ─────────────────────────────────────────

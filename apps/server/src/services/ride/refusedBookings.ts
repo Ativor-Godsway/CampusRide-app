@@ -32,6 +32,8 @@ const MAX_REMEMBERED = 10_000;
 const seenQuotes = new Map<string, number>();
 
 export interface RefusedBookingInput {
+  /** Set by the route: a review demo or test rider's refusal is never recorded. */
+  riderId?: string;
   reason: RefusedBookingReason;
   stage: RefusedBookingStage;
   rideType?: RideType | null;
@@ -70,6 +72,11 @@ async function describeEnd(prisma: PrismaClient, end: RideEndInput | null | unde
 /** Records one refusal. Never throws: a refused booking is answered whatever happens here. */
 export async function recordRefusedBooking(prisma: PrismaClient, input: RefusedBookingInput, now: Date = new Date()): Promise<void> {
   try {
+    // Review demo and production test riders aren't demand: never counted.
+    if (input.riderId) {
+      const rider = await prisma.user.findUnique({ where: { id: input.riderId }, select: { isReviewDemo: true } });
+      if (rider?.isReviewDemo) return;
+    }
     const [pickup, dropoff] = await Promise.all([
       describeEnd(prisma, input.pickup, input.pickupZoneId),
       describeEnd(prisma, input.dropoff, input.dropoffZoneId),
