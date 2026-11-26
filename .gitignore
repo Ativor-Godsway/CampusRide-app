@@ -40,3 +40,6 @@ google-services*.json
 # copies kept on this Mac only, never committed.
 Claude outputs/
 docs/mockups/admin/files/
+
+# Staging setup snapshot (STAGING.md): local only.
+apps/server/.staging/

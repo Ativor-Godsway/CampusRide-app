@@ -51,7 +51,14 @@
     "lint": "eslint src prisma",
     "lint:fix": "eslint src prisma --fix",
     "typecheck": "prisma generate && tsc -p tsconfig.json --noEmit",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "staging:secrets": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/staging/secrets.ts",
+    "staging:seed": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/staging/seedSetup.ts",
+    "staging:accounts": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/staging/accounts.ts",
+    "staging:db:migrate": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/staging/migrate.ts",
+    "staging:db:rebuild": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/staging/rebuild.ts",
+    "staging:fake-requests": "ts-node --transpile-only -r tsconfig-paths/register src/dev/requestSim/cli.ts --staging",
+    "staging:fake-requests:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/requestSim/cleanupCli.ts --staging"
   },
   "dependencies": {
     "@fastify/ajv-compiler": "^4.0.6",

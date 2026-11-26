@@ -2,7 +2,12 @@
 # eas-update.sh — publish an over-the-air (EAS Update) release of one app.
 #
 # Usage:
-#   bash scripts/eas-update.sh <rider|driver> <development|preview|production> "<what changed>"
+#   bash scripts/eas-update.sh <rider|driver> <development|preview|production|staging> "<what changed>"
+#
+# staging: the CampusRide Staging apps (STAGING.md), from ANY branch. It
+# bundles the staging variant (APP_VARIANT=staging: the staging server) and
+# publishes to the EAS branch "staging", which the "preview" channel — the
+# one the staging builds listen on — points at. Production stays main-only.
 #
 # Step-by-step guide: docs/runbooks/releasing.md.
 #
@@ -31,9 +36,17 @@ channel="${2:-}"
 message="${3:-}"
 
 if [[ "$app" != "rider" && "$app" != "driver" ]] ||
-  [[ "$channel" != "development" && "$channel" != "preview" && "$channel" != "production" ]] ||
+  [[ "$channel" != "development" && "$channel" != "preview" && "$channel" != "production" && "$channel" != "staging" ]] ||
   [[ -z "$message" ]]; then
-  echo "Usage: bash scripts/eas-update.sh <rider|driver> <development|preview|production> \"<what changed>\"" >&2
+  echo "Usage: bash scripts/eas-update.sh <rider|driver> <development|preview|production|staging> \"<what changed>\"" >&2
+  exit 1
+fi
+
+# The "preview" channel now belongs to the staging apps (STAGING.md):
+# publishing the production variant there would put production-variant code
+# on the staging phones. Use "staging".
+if [[ "$channel" == "preview" ]]; then
+  echo "Error: the preview channel is the staging apps' (STAGING.md). Publish with: bash scripts/eas-update.sh $app staging \"…\"" >&2
   exit 1
 fi
 
@@ -60,17 +73,30 @@ fi
 
 cd "apps/$app"
 
-# google-services.json is part of the app's fingerprint (its contents, not
-# just its name). Without this Mac's copy — byte-identical to the one in the
-# GOOGLE_SERVICES_JSON EAS variable — the update would be labelled for a
-# build that doesn't exist and reach nobody.
-if [[ ! -f google-services.json ]]; then
-  echo "Error: apps/$app/google-services.json is missing. See docs/runbooks/push-notifications.md, step 1." >&2
-  exit 1
+if [[ "$channel" == "staging" ]]; then
+  # The staging variant: its own ids, icon and server (app.config.js). Its
+  # Firebase file, if any, is ./google-services.staging.json — byte-identical
+  # to the GOOGLE_SERVICES_JSON_STAGING EAS variable the staging builds used,
+  # or absent on both (then the staging apps have no Android push).
+  export APP_VARIANT=staging
+  api_url="$(npx expo config --type public --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const c=JSON.parse(s);if(c.extra.APP_VARIANT!=="staging")process.exit(1);process.stdout.write(c.extra.SERVER_URL)})')" || {
+    echo "Error: couldn't resolve the staging variant of apps/$app/app.config.js." >&2
+    exit 1
+  }
+  export EXPO_PUBLIC_API_URL="$api_url"
+else
+  # google-services.json is part of the app's fingerprint (its contents, not
+  # just its name). Without this Mac's copy — byte-identical to the one in the
+  # GOOGLE_SERVICES_JSON EAS variable — the update would be labelled for a
+  # build that doesn't exist and reach nobody.
+  if [[ ! -f google-services.json ]]; then
+    echo "Error: apps/$app/google-services.json is missing. See docs/runbooks/push-notifications.md, step 1." >&2
+    exit 1
+  fi
+  unset APP_VARIANT
+  api_url="$(node -p 'require("./eas.json").build.production.env.EXPO_PUBLIC_API_URL')"
+  export EXPO_PUBLIC_API_URL="$api_url"
 fi
-
-api_url="$(node -p 'require("./eas.json").build.production.env.EXPO_PUBLIC_API_URL')"
-export EXPO_PUBLIC_API_URL="$api_url"
 
 # Optional: the update's source maps to Sentry, so errors from it show real
 # file names and lines (DEPLOY.md, "Monitoring"). Only when SENTRY_AUTH_TOKEN
@@ -79,6 +105,8 @@ export EXPO_PUBLIC_API_URL="$api_url"
 # publish: the next one's export replaces dist/.
 upload_source_maps() {
   [[ -n "${SENTRY_AUTH_TOKEN:-}" ]] || return 0
+  # Staging code never goes into production's Sentry projects.
+  [[ "$channel" != "staging" ]] || return 0
   if [[ -z "${SENTRY_ORG:-}" ]]; then
     echo "Skipping the Sentry source map upload: set SENTRY_ORG (your Sentry organization's slug) too." >&2
     return 0
@@ -89,8 +117,13 @@ upload_source_maps() {
 }
 
 for platform in ios android; do
-  echo "Publishing $app ($platform) to channel '$channel' (server: $EXPO_PUBLIC_API_URL)…"
-  if ! $EAS update --channel "$channel" --environment production --platform "$platform" --message "$message"; then
+  echo "Publishing $app ($platform) to $channel (server: $EXPO_PUBLIC_API_URL)…"
+  if [[ "$channel" == "staging" ]]; then
+    target=(--branch staging)
+  else
+    target=(--channel "$channel")
+  fi
+  if ! $EAS update "${target[@]}" --environment production --platform "$platform" --message "$message"; then
     if [[ "$platform" == "android" ]]; then
       echo "Error: the iOS update was published, but Android failed. Fix the problem and run this again (iOS is simply published once more)." >&2
     fi

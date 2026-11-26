@@ -31,11 +31,21 @@ export interface ServerUrlInputs {
   configUrl: string | undefined;
   /** React Native's __DEV__: true under `expo start`, false in a release build. */
   isDev: boolean;
+  /** expo.extra.APP_VARIANT: "staging" for the CampusRide Staging apps (STAGING.md), else absent. */
+  variant?: string;
 }
 
 export const DEFAULT_DEV_SERVER_URL = "http://localhost:3000";
 
-export function resolveServerUrl({ envUrl, configUrl, isDev }: ServerUrlInputs): string {
+export function resolveServerUrl({ envUrl, configUrl, isDev, variant }: ServerUrlInputs): string {
+  // The staging app talks to the staging server and nothing else — never
+  // production, whatever EXPO_PUBLIC_API_URL was when it was bundled (its
+  // EAS build profile inherits production's).
+  if (variant === "staging") {
+    const staging = configUrl?.trim();
+    if (!staging) throw new Error("The staging app has no staging server URL (expo.extra.SERVER_URL).");
+    return staging;
+  }
   const env = envUrl?.trim() || undefined;
   if (env && (isDev || !isLocalDevServerUrl(env))) return env;
   // A release build never points at a laptop: fall through to the deployed server.

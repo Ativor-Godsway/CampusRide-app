@@ -42,6 +42,7 @@ import { alerts, noteDatabaseError } from "./lib/alerts";
 import { MoolreOtpService } from "./services/otp/MoolreOtpService";
 import { createBalanceCheck } from "./services/sms/moolreBalance";
 import { loadTestOtpCode } from "./services/auth/loadTestOtp";
+import { isStagingServer } from "./lib/stagingMode";
 import { purgeDeletedAccounts } from "./services/auth/deleteAccount";
 import { purgeOldOtpCodes } from "./services/auth/otpCleanup";
 import { FLUSH_MS, flushLocationTrail, purgeOldLocationPoints } from "./services/stats/locationTrail";
@@ -241,6 +242,12 @@ async function bootstrap() {
   await processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
     app.log.error({ err }, "Startup timeout sweep failed");
   });
+  if (isStagingServer()) {
+    app.log.warn(
+      { event: "staging_server" },
+      "STAGING server (CAMPUSRIDE_ENV=staging): staging database only, no SMS, test numbers +233 99 … sign in with the fixed STAGING_TEST_OTP (STAGING.md)",
+    );
+  }
   if (loadTestOtpCode()) {
     app.log.warn(
       { event: "load_test_otp" },

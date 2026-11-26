@@ -1,4 +1,5 @@
 import { config } from "../config";
+import { isStagingServer, stagingProblems } from "../lib/stagingMode";
 import { DummyPaymentService } from "./payment/DummyPaymentService";
 import { MoolrePaymentService } from "./payment/MoolrePaymentService";
 import { DummyRouteService } from "./route/DummyRouteService";
@@ -90,7 +91,11 @@ export class InsecureOtpProviderError extends Error {
 export function assertOtpServiceAllowedInProduction(
   service: OtpService,
   nodeEnv: string,
+  env: Record<string, string | undefined> = process.env,
 ): void {
+  // The staging server texts nothing by design: its test numbers sign in with
+  // a fixed code (lib/stagingMode.ts), and only on the staging database.
+  if (isStagingServer(env) && stagingProblems(env).length === 0) return;
   if (nodeEnv === "production" && service instanceof DummyOtpService) {
     throw new InsecureOtpProviderError(
       "Refusing to start: OTP_PROVIDER resolved to DummyOtpService while NODE_ENV=production, " +
