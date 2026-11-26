@@ -168,7 +168,10 @@ describe("stop helpers", () => {
   it("unlocks 'rider didn't show' three minutes after arrival", () => {
     expect(noShowAvailableAt("2026-10-01T10:00:00.000Z")).toBe(Date.parse("2026-10-01T10:00:00.000Z") + NO_SHOW_AFTER_MS);
     expect(noShowAvailableAt(null)).toBeNull();
-    expect(NO_SHOW_AFTER_MS).toBe(180_000);
+    expect(NO_SHOW_AFTER_MS).toBe(300_000);
+    // The server's own time for the seat wins; null = not until a wait timer starts.
+    expect(noShowAvailableAt("2026-10-01T10:00:00.000Z", "2026-10-01T10:07:00.000Z")).toBe(Date.parse("2026-10-01T10:07:00.000Z"));
+    expect(noShowAvailableAt("2026-10-01T10:00:00.000Z", null)).toBeNull();
   });
 
   it("formats the wait and first names", () => {

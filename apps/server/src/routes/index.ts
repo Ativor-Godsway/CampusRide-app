@@ -10,6 +10,7 @@ import { registerZoneRoutes } from "./zones";
 import { registerRideRoutes } from "./rides";
 import { registerRatingRoutes } from "./ratings";
 import { registerDriverRoutes } from "./driver";
+import { installWaitFeeAppMarker } from "../services/ride/waitFee";
 import { registerAdminRoutes } from "./admin";
 import { registerAdminAccountDeletionRoutes } from "./adminAccountDeletion";
 import { registerUssdRoutes } from "./ussd";
@@ -61,6 +62,9 @@ export function registerAllRoutes(
   useRequestValidation(app);
   installErrorHandling(app);
   installRateLimits(app);
+  // A signed-in rider whose app shows the wait timer counts as warned about
+  // the wait fee (services/ride/waitFee.ts).
+  installWaitFeeAppMarker(app, prisma);
 
   // /health (Render) and /health/ready (UptimeRobot): unlimited, see health.ts.
   registerHealthRoutes(app, prisma);

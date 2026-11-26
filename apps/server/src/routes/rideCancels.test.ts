@@ -320,7 +320,7 @@ describe("driver's Cancel pickup", () => {
   it("\"Rider didn't show\" is unchanged: booking ends, no driver cancellation", async () => {
     const { ama, rideId, d, seatId } = await loneRide();
     await d.as("POST", `/rides/${rideId}/passengers/${seatId}/arrived`);
-    await prisma.ridePassenger.update({ where: { id: seatId }, data: { arrivedAt: new Date(Date.now() - 4 * 60_000) } });
+    await prisma.ridePassenger.update({ where: { id: seatId }, data: { arrivedAt: new Date(Date.now() - 6 * 60_000), noShowOpensAt: new Date(Date.now() - 60_000) } });
     expect((await d.as("POST", `/rides/${rideId}/passengers/${seatId}/cancel`, { reason: "NO_SHOW" })).statusCode).toBe(200);
     expect(await seatStatus(seatId)).toBe("CANCELLED");
     expect((await rideOf(rideId)).status).toBe("CANCELLED");

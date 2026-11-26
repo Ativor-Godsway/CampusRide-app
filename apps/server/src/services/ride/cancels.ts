@@ -4,6 +4,7 @@ import { InvalidTransitionError, NotRideOwnerError, PassengerNotFoundError } fro
 import { currentSeatFare } from "./fares";
 import { isActivePassengerStatus } from "./stateMachine";
 import { ACTIVE_RIDE_STATUSES } from "./activeRide";
+import { CLEARED_WAIT } from "./waitFee";
 
 /**
  * The three ways a pickup or a ride is cancelled by someone other than the
@@ -197,7 +198,7 @@ export async function driverCancelPickup(prisma: PrismaClient, input: DriverCanc
       await tx.rideRejection.create({ data: { rideId: ride.id, driverUserId: input.driverUserId, reason: "DECLINED" } });
       const passenger = await tx.ridePassenger.update({
         where: { id: seat.id },
-        data: { status: "WAITING", arrivedAt: null },
+        data: { status: "WAITING", arrivedAt: null, ...CLEARED_WAIT },
       });
       await tx.driverCancellation.create({ data: { ...record, rideId: ride.id, rebookedRideId: null } });
       return {

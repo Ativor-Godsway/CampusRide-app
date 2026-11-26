@@ -180,14 +180,18 @@ export class UndoRefusedError extends Error {
   }
 }
 
-/** "Rider didn't show" tapped before the rider has had their 3 minutes. */
+/**
+ * "Rider didn't show" tapped before the rider has had their wait (the
+ * no-show setting, 5 min by default, from the wait timer's start); null
+ * `availableAt`: no wait timer was started (the driver wasn't near the pickup).
+ */
 export class NoShowTooEarlyError extends Error {
   readonly availableAt: Date | null;
   constructor(availableAt: Date | null) {
     super(
       availableAt
         ? `You can mark a no-show from ${availableAt.toISOString()}`
-        : "You can only mark a no-show after arriving at the pickup",
+        : "You can only mark a no-show once the wait timer has started at the pickup",
     );
     this.name = "NoShowTooEarlyError";
     this.availableAt = availableAt;

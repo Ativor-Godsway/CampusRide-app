@@ -25,6 +25,11 @@ let latest: ArrivalSample | null = null;
 let lastSentAt: number | null = null;
 let lastSentFor: string | null = null;
 
+/** The latest fix if it is at most `maxAgeMs` old (the wait timer's GPS check sends it with "arrived"). */
+export function latestFix(maxAgeMs: number, now: number = Date.now()): { latitude: number; longitude: number } | null {
+  return latest && now - latest.at <= maxAgeMs ? { latitude: latest.latitude, longitude: latest.longitude } : null;
+}
+
 /** What is being shared: the trip under way (if any), and whether the driver is online. */
 export function setPositionSharing(next: { rideId: string | null; online: boolean }): void {
   rideId = next.rideId;

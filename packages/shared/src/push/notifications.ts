@@ -10,6 +10,7 @@
  */
 import { firstName } from "../rides/tripStops";
 import { DRIVER_AUTO_OFFLINE_MESSAGE, DRIVER_AUTO_OFFLINE_TITLE } from "../driver/liveness";
+import { arrivedWithWaitText } from "../rides/waitFee";
 
 /** What happened. Rider kinds go to the rider app, driver kinds to the driver app. */
 export const RIDER_PUSH_KINDS = [
@@ -92,6 +93,8 @@ export interface PushTextInput {
   rebooked?: boolean;
   /** DRIVER_CANCELLED / RIDER_CANCELLED: CampusRide (an admin) cancelled it, not the other person. */
   byAdmin?: boolean;
+  /** DRIVER_ARRIVED: the rider's free wait started (rides/waitFee.ts) — the push states it and the fee. */
+  freeWait?: { seconds: number; feePesewas: number };
 }
 
 export interface PushText {
@@ -109,6 +112,9 @@ export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
     case "DRIVER_ARRIVING":
       return { title: "Driver almost there", body: `${driver} is almost at your pickup.` };
     case "DRIVER_ARRIVED":
+      if (input.freeWait) {
+        return { title: "Your driver is here", body: arrivedWithWaitText(input.freeWait.seconds, input.freeWait.feePesewas) };
+      }
       return { title: "Your driver is here", body: `${driver} is at your pickup.` };
     case "TRIP_STARTED":
       return { title: "Trip started", body: "You're on your way. Enjoy the ride." };

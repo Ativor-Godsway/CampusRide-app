@@ -137,27 +137,31 @@ export interface SendPushInput {
   kind: PushKind;
   rideId: string;
   text?: PushTextInput;
+  /** Repeat suppression key; default `${kind}:${rideId}`. */
+  dedupeKey?: string;
 }
 
 /**
  * Sends one notification to each of these people's phones (the app the kind
- * belongs to only). Never throws; resolves once Expo has answered.
+ * belongs to only). Never throws; resolves once Expo has answered, with how
+ * many phones it accepted the notification for (0 when none was sent).
  */
-export async function sendPush(prisma: PrismaClient, input: SendPushInput): Promise<void> {
+export async function sendPush(prisma: PrismaClient, input: SendPushInput): Promise<number> {
   try {
-    if (!transport || input.userIds.length === 0) return;
+    if (!transport || input.userIds.length === 0) return 0;
     const now = Date.now();
+    const key = input.dedupeKey ?? `${input.kind}:${input.rideId}`;
     const allowed = [...new Set(input.userIds)].filter((userId) =>
-      limiter.allow(userId, `${input.kind}:${input.rideId}`, DEDUPE_MS[input.kind], now),
+      limiter.allow(userId, key, DEDUPE_MS[input.kind], now),
     );
-    if (allowed.length === 0) return;
+    if (allowed.length === 0) return 0;
 
     const app = appForKind(input.kind);
     const tokens = await prisma.pushToken.findMany({
       where: { userId: { in: allowed }, app },
       select: { id: true, token: true },
     });
-    if (tokens.length === 0) return;
+    if (tokens.length === 0) return 0;
 
     const { title, body } = pushText(input.kind, input.text);
     const data: PushData = { kind: input.kind, rideId: input.rideId };
@@ -175,12 +179,14 @@ export async function sendPush(prisma: PrismaClient, input: SendPushInput): Prom
     const tickets = await transport.send(messages);
     await handleTickets(prisma, tokens, tickets, now);
     logger.info("push sent", { kind: input.kind, rideId: input.rideId, devices: tokens.length });
+    return tickets.filter((t) => t.status === "ok").length;
   } catch (err) {
     logger.error("push: send failed", { err, kind: input.kind, rideId: input.rideId });
     alerts.pushFailures.record({
       stage: "send",
       error: err instanceof Error ? err.message : String(err),
     });
+    return 0;
   }
 }
 

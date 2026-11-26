@@ -151,6 +151,10 @@ model User {
   /// @rida/shared, the pages' "Last updated" date). Null until confirmed;
   /// POST /auth/signup refuses to create an account without it.
   ageConfirmedAt        DateTime?
+  /// First time this rider's app sent a request showing it has the wait
+  /// timer (header x-campusride-features: wait-fee). Counts as "warned"
+  /// about the wait fee even when the arrival push doesn't arrive.
+  waitFeeAppAt          DateTime?
   termsAcceptedAt       DateTime?
   termsVersion          String?
   /// Early access (launch mode): when an admin let this rider book during
@@ -522,6 +526,26 @@ model RidePassenger {
   arrivedAt      DateTime?
   /// Set when the driver cancelled this seat because the rider didn't show.
   noShowAt       DateTime?
+  /// The pickup wait (2026-11-25, services/ride/waitFee.ts). Started by the
+  /// driver's "arrived" only when their GPS is within 100 m of this pickup
+  /// (and their app knows the wait fee); null otherwise: no timer, no fee.
+  waitStartedAt  DateTime?
+  /// End of the free wait (waitStartedAt + the free-wait setting then).
+  freeWaitEndsAt DateTime?
+  /// The wait fee (pesewas, the setting then) if the rider isn't picked up
+  /// by freeWaitEndsAt. Owed only if the rider was warned in time
+  /// (riderWarnedAt <= freeWaitEndsAt).
+  waitFeeAmount  Int?
+  /// When the rider was warned about the free wait: the arrival push was
+  /// accepted, or their app already shows the wait timer. Null: no fee.
+  riderWarnedAt  DateTime?
+  /// The wait fee actually charged, stamped at pickup. It is INCLUDED in
+  /// lockedFare (and so fareCharged); this column records the part that was
+  /// the fee (admin: wait fees per day).
+  waitFee        Int?
+  /// When "rider didn't show" opens (wait start + the no-show setting); for
+  /// an arrival without a timer from an older driver app, arrival + it.
+  noShowOpensAt  DateTime?
   /// When the driver marked this rider picked up / dropped off. "Undo" is
   /// taken only shortly after (UNDO_ACCEPTED_FOR_MS); cleared by an undo.
   pickedUpAt     DateTime?
@@ -1207,6 +1231,18 @@ model RefusedBooking {
 
 /// Ride request settings (2026-11-25), one row (id "dispatch"). No row: the
 /// defaults. services/ride/searchWindow.ts.
+/// The pickup wait fee (2026-11-25, admin Settings). One row, id "wait";
+/// no row = the defaults (2:30 free, GH₵2, no-show after 5 min).
+model WaitFeeSetting {
+  id              String   @id @default("wait")
+  freeWaitSeconds Int      @default(150)
+  feePesewas      Int      @default(200)
+  noShowMinutes   Int      @default(5)
+  updatedAt       DateTime @updatedAt
+  /// User.id of the admin who last changed it.
+  updatedBy       String?
+}
+
 model DispatchSetting {
   id                  String   @id @default("dispatch")
   /// How long a request searches before "no driver found" (default 7 min).

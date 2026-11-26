@@ -1,4 +1,5 @@
 import axios from "axios";
+import { CLIENT_FEATURES_HEADER, WAIT_FEE_FEATURE } from "@rida/shared";
 import { getServerUrl } from "../config/serverUrl";
 import { getAccessToken, setAccessToken } from "./tokenStore";
 import { clearStoredRefreshToken, getStoredRefreshToken, setStoredRefreshToken } from "./storage";
@@ -31,8 +32,38 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
+  // What this JavaScript can show (an OTA update adds features without a new
+  // store version): "wait-fee" — the pickup wait timer and fee (@rida/shared
+  // rides/waitFee.ts). The server only charges a fee a rider was warned about.
+  config.headers[CLIENT_FEATURES_HEADER] = WAIT_FEE_FEATURE;
   return config;
 });
+
+/**
+ * How far the server's clock is ahead of this phone's (ms), from the Date
+ * header of the latest answer (1 s resolution). Countdowns the server times
+ * (the pickup wait) use serverNow(), so a phone set a few minutes wrong
+ * still shows 2:30.
+ */
+let serverClockOffsetMs = 0;
+
+/** Now, by the server's clock as far as this phone knows it. */
+export function serverNow(): number {
+  return Date.now() + serverClockOffsetMs;
+}
+
+/** Tests only. */
+export function setServerClockOffsetForTests(ms: number): void {
+  serverClockOffsetMs = ms;
+}
+
+function noteServerDate(headers: unknown): void {
+  const raw = (headers as Record<string, unknown> | undefined)?.date;
+  const at = typeof raw === "string" ? Date.parse(raw) : NaN;
+  if (!Number.isFinite(at)) return;
+  // The header is whole seconds: half a second in the middle of that second.
+  serverClockOffsetMs = at + 500 - Date.now();
+}
 
 /**
  * Called when the server has definitively rejected this session: the refresh
@@ -128,7 +159,10 @@ export async function refreshSessionOrSignOut(): Promise<string> {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    noteServerDate(response.headers);
+    return response;
+  },
   async (error) => {
     const originalRequest = error.config as (typeof error.config) & { _retry?: boolean };
 

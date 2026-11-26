@@ -7,9 +7,14 @@
 import { haversineDistanceMeters } from "../geo/distance";
 import type { RouteStop } from "../geo/tripRoute";
 import type { PassengerStatus } from "../types/ride";
+import type { SeatWait } from "./waitFee";
 
-/** How long a rider has to come out once the driver is at the pickup before "Rider didn't show" unlocks. */
-export const NO_SHOW_AFTER_MS = 3 * 60_000;
+/**
+ * How long a rider has to come out once the driver is at the pickup before
+ * "Rider didn't show" unlocks, for a server that doesn't send the seat's own
+ * time (noShowOpensAt; the admin setting, 5 min by default — rides/waitFee.ts).
+ */
+export const NO_SHOW_AFTER_MS = 5 * 60_000;
 
 /** Within this many metres of a stop's zone centre, the driver is "at" it (auto-arrival). */
 export const AT_STOP_RADIUS_METERS = 60;
@@ -34,6 +39,10 @@ export interface TripPassenger {
   status: PassengerStatus;
   /** ISO time the driver reached this rider's pickup. */
   arrivedAt?: string | null;
+  /** The pickup wait while ARRIVED (rides/waitFee.ts); absent from older servers. */
+  wait?: SeatWait | null;
+  /** ISO time "Rider didn't show" opens; null: not yet. Absent from older servers. */
+  noShowOpensAt?: string | null;
   /** Exact pins and their labels; absent or null for a ride booked without them. */
   pickupLat?: number | null;
   pickupLng?: number | null;
@@ -69,10 +78,14 @@ export interface TripStop {
   exact: boolean;
   /** The rider's note for the driver, on their pickup stop only. */
   note: string | null;
-  /** What this rider pays (shown large at their drop-off). */
+  /** What this rider pays (shown large at their drop-off), without a wait fee not charged yet: see fareWithWait. */
   farePesewas: number | null;
   passengerStatus: PassengerStatus;
   arrivedAt: string | null;
+  /** The pickup wait (rides/waitFee.ts), or null. */
+  wait: SeatWait | null;
+  /** ISO time "Rider didn't show" opens: null not yet, undefined from an older server. */
+  noShowOpensAt?: string | null;
 }
 
 export interface TripPlan {
@@ -196,6 +209,8 @@ export function planTripStops(input: {
       farePesewas: p.lockedFare,
       passengerStatus: p.status,
       arrivedAt: p.arrivedAt ?? null,
+      wait: p.wait ?? null,
+      ...(p.noShowOpensAt !== undefined ? { noShowOpensAt: p.noShowOpensAt } : {}),
     };
     const pickupZone = zoneOf(p.pickupZoneId);
     const dropoffZone = zoneOf(p.dropoffZoneId);
@@ -296,8 +311,20 @@ export function isAtStop(
   return position !== null && haversineDistanceMeters(position, zone) <= radiusMeters;
 }
 
-/** When "Rider didn't show" unlocks, or null if the driver hasn't arrived. */
-export function noShowAvailableAt(arrivedAt: string | null | undefined): number | null {
+/**
+ * When "Rider didn't show" unlocks, or null if it can't yet. The server's
+ * time for the seat (`noShowOpensAt`: the no-show setting after the wait
+ * timer started; null until a timer starts) when it sent one; else
+ * NO_SHOW_AFTER_MS after arriving (an older server).
+ */
+export function noShowAvailableAt(
+  arrivedAt: string | null | undefined,
+  noShowOpensAt?: string | null,
+): number | null {
+  if (noShowOpensAt !== undefined) {
+    const t = noShowOpensAt ? Date.parse(noShowOpensAt) : NaN;
+    return Number.isFinite(t) ? t : null;
+  }
   if (!arrivedAt) return null;
   const t = Date.parse(arrivedAt);
   return Number.isFinite(t) ? t + NO_SHOW_AFTER_MS : null;

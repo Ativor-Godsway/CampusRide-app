@@ -29,6 +29,7 @@ import {
   tripEndBody,
   tripEndFromParams,
   tripEndParams,
+  fareWithWait,
 } from "@rida/shared";
 import {
   ActiveRideExistsError,
@@ -80,6 +81,7 @@ import {
   IconButton,
   RideOptionCard,
   illustrations,
+  serverNow,
 } from "@rida/mobile-shared";
 import { CancelRideContent, type SwitchOffer } from "../../components/ride/CancelRideContent";
 import {
@@ -338,7 +340,8 @@ export default function RideTypeScreen() {
   // truth (it may have been switched, or be a resumed ride booked before a
   // price change: it keeps the price it was booked at).
   const rideType: RideType = ride?.type ?? selectedType;
-  const priceLabel = formatCedis(myPassenger?.lockedFare ?? fareFor(rideType));
+  // With a wait fee once one is due (charged ones are already in lockedFare).
+  const priceLabel = formatCedis(fareWithWait(myPassenger?.lockedFare ?? null, myPassenger?.wait, serverNow()) ?? fareFor(rideType));
 
   // ── Map coords & region ─────────────────────────────────────────────────────
   const pickupCoord = useMemo(
@@ -967,6 +970,11 @@ export default function RideTypeScreen() {
                       dropoffName={dropoffEnd.label}
                       etaMinutes={etaToDropoff}
                       stopsBefore={stopsBefore}
+                      waitFee={
+                        myPassenger?.waitFeePesewas && myPassenger.lockedFare !== null
+                          ? { farePesewas: myPassenger.lockedFare, feePesewas: myPassenger.waitFeePesewas }
+                          : null
+                      }
                       onShare={shareThisTrip}
                       onSafety={() => setSafetyOpen(true)}
                     />
@@ -976,6 +984,8 @@ export default function RideTypeScreen() {
                     <DriverArrivedContent
                       driver={driver}
                       pickup={pickupWhere}
+                      wait={myPassenger?.wait}
+                      farePesewas={myPassenger?.lockedFare ?? null}
                       onShare={shareThisTrip}
                       onSafety={() => setSafetyOpen(true)}
                       onCancel={() => setCancelOpen(true)}

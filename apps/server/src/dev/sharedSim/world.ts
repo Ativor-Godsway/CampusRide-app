@@ -125,7 +125,12 @@ export class World {
       UPDATE "Ride" SET "broadcastStartedAt" = "broadcastStartedAt" - (${ms} * interval '1 millisecond')
       WHERE id = ANY(${ids}) AND "broadcastStartedAt" IS NOT NULL AND status IN ('REQUESTED', 'AWAITING_RIDER_DECISION')`;
     await this.prisma.$executeRaw`
-      UPDATE "RidePassenger" SET "arrivedAt" = "arrivedAt" - (${ms} * interval '1 millisecond')
+      UPDATE "RidePassenger" SET
+        "arrivedAt" = "arrivedAt" - (${ms} * interval '1 millisecond'),
+        "waitStartedAt" = "waitStartedAt" - (${ms} * interval '1 millisecond'),
+        "freeWaitEndsAt" = "freeWaitEndsAt" - (${ms} * interval '1 millisecond'),
+        "noShowOpensAt" = "noShowOpensAt" - (${ms} * interval '1 millisecond'),
+        "riderWarnedAt" = "riderWarnedAt" - (${ms} * interval '1 millisecond')
       WHERE "rideId" = ANY(${ids}) AND "arrivedAt" IS NOT NULL`;
     await processTimeouts(this.prisma, new Date(), { rideIds: ids, logger: { info: () => {}, warn: () => {} } });
   }

@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
-import { clockTime, cloudinaryAvatar, initialsOf } from "@rida/shared";
+import { clockTime, cloudinaryAvatar, fareWithWait, formatCedis, initialsOf, waitClock, waitView, type SeatWait } from "@rida/shared";
 import {
   Button,
   IconButton,
@@ -11,6 +11,7 @@ import {
   callPhone,
   colors,
   radii,
+  serverNow,
   shadows,
   spacing,
   textPhone,
@@ -234,15 +235,68 @@ export function DriverOnTheWayContent({
 }
 
 /** The driver is at the pickup: who to look for, and where. */
+/** Server time, once a second while `on` (the free-wait countdown). */
+function useServerClock(on: boolean): number {
+  const [now, setNow] = useState(serverNow);
+  useEffect(() => {
+    if (!on) return;
+    setNow(serverNow());
+    const t = setInterval(() => setNow(serverNow()), 1_000);
+    return () => clearInterval(t);
+  }, [on]);
+  return now;
+}
+
+/**
+ * The rider's free wait at the pickup (@rida/shared rides/waitFee.ts):
+ * "Free wait 2:29 · then GH 2 extra", then "Wait fee added: GH 2. Your fare
+ * is now GH 9." Nothing when no timer is running or no fee can apply.
+ */
+function FreeWait({ wait, farePesewas }: { wait: SeatWait | null | undefined; farePesewas: number | null }) {
+  const now = useServerClock(!!wait?.timerStarted);
+  const view = waitView(wait, now);
+  if (!view || view.phase === "NOT_STARTED" || view.feePesewas === null) return null;
+  const fee = formatCedis(view.feePesewas);
+  if (view.phase === "FREE") {
+    return (
+      <View
+        style={styles.waitBox}
+        accessible
+        accessibilityLabel={`Free wait, ${waitClock(view.freeLeftMs)} left. Then ${fee} extra.`}
+      >
+        <Text variant="title2" tabular>
+          Free wait {waitClock(view.freeLeftMs)}
+        </Text>
+        <Text variant="subhead" color="secondary">
+          Then {fee} extra{farePesewas !== null ? `. Your fare: ${formatCedis(farePesewas)}` : ""}
+        </Text>
+      </View>
+    );
+  }
+  const total = fareWithWait(farePesewas, wait, now);
+  return (
+    <View style={[styles.waitBox, styles.waitBoxFee]} accessibilityLiveRegion="polite">
+      <Text variant="body" style={styles.waitFeeText}>
+        Wait fee added: {fee}.{total !== null ? ` Your fare is now ${formatCedis(total)}.` : ""}
+      </Text>
+    </View>
+  );
+}
+
 export function DriverArrivedContent({
   driver,
   pickup,
+  wait,
+  farePesewas,
   onShare,
   onSafety,
   onCancel,
 }: Shared & {
   /** Where the pickup is (pickupPlace); null when there's no place name for it. */
   pickup: { name: string; at: boolean } | null;
+  /** This rider's pickup wait (their seat's), and their fare before any wait fee. */
+  wait?: SeatWait | null;
+  farePesewas?: number | null;
   onCancel: () => void;
 }) {
   return (
@@ -262,6 +316,7 @@ export function DriverArrivedContent({
               : `Meet near ${pickup.name}`}
         </Text>
       </View>
+      <FreeWait wait={wait} farePesewas={farePesewas ?? null} />
       <View style={styles.divider} />
       <DriverRow driver={driver} />
       <TripActions driver={driver} onShare={onShare} onSafety={onSafety} reachDriver />
@@ -276,6 +331,7 @@ export function InRideContent({
   dropoffName,
   etaMinutes,
   stopsBefore,
+  waitFee,
   onShare,
   onSafety,
 }: Shared & {
@@ -284,6 +340,8 @@ export function InRideContent({
   etaMinutes: number | null;
   /** Shared rides: stops the car makes before this rider's drop-off. */
   stopsBefore: number | null;
+  /** This rider's fare and the wait fee in it, when one was charged at pickup. */
+  waitFee?: { farePesewas: number; feePesewas: number } | null;
 }) {
   return (
     <View style={styles.section}>
@@ -303,6 +361,11 @@ export function InRideContent({
             label={`${stopsBefore} more stop${stopsBefore === 1 ? "" : "s"} before yours`}
             style={styles.stopsChip}
           />
+        ) : null}
+        {waitFee ? (
+          <Text variant="subhead" color="secondary">
+            Your fare: {formatCedis(waitFee.farePesewas)} (includes {formatCedis(waitFee.feePesewas)} wait fee)
+          </Text>
         ) : null}
       </View>
       <View style={styles.divider} />
@@ -324,6 +387,9 @@ const styles = StyleSheet.create({
   arrives: { flexShrink: 1, textAlign: "right" },
   divider: { height: StyleSheet.hairlineWidth, backgroundColor: colors.line },
   stopsChip: { alignSelf: "flex-start", marginTop: spacing[2] },
+  waitBox: { gap: spacing[1], padding: spacing[3], borderRadius: radii.md, backgroundColor: colors.surface2 },
+  waitBoxFee: { backgroundColor: colors.amber50 },
+  waitFeeText: { fontWeight: "700", color: colors.amber700 },
   // ── Driver row
   driverRow: { flexDirection: "row", alignItems: "center", gap: spacing[3] },
   // Room under the avatar for the half of the badge that hangs below it.

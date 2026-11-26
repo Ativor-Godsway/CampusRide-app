@@ -10,7 +10,6 @@ import {
   offerDeadline,
   chooseTripSource,
   summaryGivesWay,
-  NO_SHOW_AFTER_MS,
   classifyActionFailure,
   decodePolyline,
   trimPathToPosition,
@@ -37,6 +36,9 @@ import {
   splitFare,
   todayEarnings,
   tripPath,
+  fareWithWait,
+  waitClock,
+  waitView,
   type LatLng,
   type DriverCancelReason,
   type TripStop,
@@ -74,6 +76,7 @@ import {
   type PassengerInCar,
   type RideWithZones,
   AppErrorScreen,
+  serverNow,
 } from "@rida/mobile-shared";
 import { driverActiveRideQueryKey, useDriverActiveTrip } from "../../lib/activeTrip";
 import { useDriverLocation, useLocationDemand } from "../../lib/location";
@@ -316,7 +319,8 @@ export default function TripScreen() {
     if (!hadStopsRef.current || done) return;
     const carried = passengers.filter((p) => p.status === "DROPPED_OFF");
     if (carried.length === 0) return;
-    const total = carried.reduce((sum, p) => sum + (p.lockedFare ?? 0), 0);
+    // Wait fees included (charged at pickup into lockedFare; fareWithWait covers one the server hasn't confirmed yet).
+    const total = carried.reduce((sum, p) => sum + (fareWithWait(p.lockedFare, p.wait, serverNow()) ?? 0), 0);
     const { driverShare, commission } = splitFare(total);
     const only = carried.length === 1 ? carried[0]! : null;
     setDone({
@@ -671,9 +675,11 @@ export default function TripScreen() {
   }
 
   // ─── On the trip ─────────────────────────────────────────────────────────
+  // With any wait fee now due (fareWithWait: charged ones are already in lockedFare).
+  const clock = serverNow();
   const tripFare = passengers
     .filter((p) => p.status !== "CANCELLED")
-    .reduce((sum, p) => sum + (p.lockedFare ?? 0), 0);
+    .reduce((sum, p) => sum + (fareWithWait(p.lockedFare, p.wait, clock) ?? 0), 0);
   const price = tripFare > 0 ? ` · ${formatCedis(tripFare)}` : "";
   const pill =
     ride.type === "SHARED"
@@ -683,8 +689,8 @@ export default function TripScreen() {
   // The next pickup's own actions, for the ⋯ menu.
   const nextPickup = next?.kind === "PICKUP" ? next : null;
   const nextName = next ? riderName(next) : "";
-  const noShowAt = noShowAvailableAt(nextPickup?.arrivedAt);
-  const canNoShow = noShowAt !== null && now >= noShowAt;
+  const noShowAt = noShowAvailableAt(nextPickup?.arrivedAt, nextPickup?.noShowOpensAt);
+  const canNoShow = noShowAt !== null && serverNow() >= noShowAt;
   const actOnNext = (action: Parameters<typeof runPassengerAction>[2]) => {
     if (next) runPassengerAction(ride.id, next.passengerId, action);
   };
@@ -768,6 +774,7 @@ export default function TripScreen() {
             onMark={markStop}
             onTellHere={tellHere}
             onNoShow={confirmNoShow}
+            onStartTimer={() => actOnNext("arrived")}
             onStops={() => setStopsOpen(true)}
           />
         ) : (
@@ -820,7 +827,13 @@ export default function TripScreen() {
               divider
               tone="danger"
               title="Rider didn't show"
-              subtitle={canNoShow ? `Cancel ${nextName}'s pickup` : `After ${formatWait(NO_SHOW_AFTER_MS)} of waiting`}
+              subtitle={
+                canNoShow
+                  ? `Cancel ${nextName}'s pickup`
+                  : noShowAt === null
+                    ? "Start the wait timer at the pickup first"
+                    : `In ${waitClock(noShowAt - serverNow())}`
+              }
               leading={<ListRow.Icon name="person-remove-outline" tone="danger" />}
               showChevron={false}
               disabled={!canNoShow}
@@ -913,6 +926,18 @@ export default function TripScreen() {
 
 // ─── Next stop ───────────────────────────────────────────────────────────────
 
+/** The pickup wait's chip: "Free wait 2:29", or how long the driver has waited (amber once a wait fee is added). */
+function WaitChip({ label, spoken, warn = false }: { label: string; spoken: string; warn?: boolean }) {
+  return (
+    <View style={[styles.waitChip, warn ? styles.waitChipWarn : null]} accessible accessibilityLabel={spoken}>
+      <Ionicons name="time-outline" size={16} color={colors.ink2} />
+      <Text variant="subhead" style={styles.waitText} tabular>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
 /**
  * The sheet (docs/mockups/11-driver-trip.png): what's next and where, the
  * rider's note, round Navigate · Call · Message · Stops, and ONE slide at the
@@ -933,6 +958,7 @@ function NextStopCard({
   onMark,
   onTellHere,
   onNoShow,
+  onStartTimer,
   onStops,
 }: {
   ride: RideWithZones;
@@ -944,12 +970,14 @@ function NextStopCard({
   distanceMeters: number | null;
   atStop: boolean;
   now: number;
-  /** "Rider didn't show" is open (NO_SHOW_AFTER_MS after arriving). */
+  /** "Rider didn't show" is open (the seat's noShowOpensAt: 5 min into the wait by default). */
   canNoShow: boolean;
   /** The slide finished: picked up / dropped off (with "Undo"). */
   onMark: (stop: TripStop) => void;
   onTellHere: () => void;
   onNoShow: () => void;
+  /** "Arrived" again from nearer: starts a wait timer that didn't start. */
+  onStartTimer: () => void;
   onStops: () => void;
 }) {
   const name = riderName(stop);
@@ -957,7 +985,11 @@ function NextStopCard({
   const arrived = pickup && stop.passengerStatus === "ARRIVED";
   const arrivedAt = stop.arrivedAt ? Date.parse(stop.arrivedAt) : null;
   const cash = ride.paymentMethod === "CASH";
-  const fare = stop.farePesewas !== null ? formatCedis(stop.farePesewas) : null;
+  // The pickup wait, by the server's clock (2:30 free, then the wait fee: @rida/shared rides/waitFee.ts).
+  const clock = serverNow();
+  const wait = arrived ? waitView(stop.wait, clock) : null;
+  const farePesewas = fareWithWait(stop.farePesewas, stop.wait, clock);
+  const fare = farePesewas !== null ? formatCedis(farePesewas) : null;
 
   const where = [
     stop.label,
@@ -1043,14 +1075,48 @@ function NextStopCard({
         />
       ) : null}
 
-      {arrived && arrivedAt !== null ? (
-        <View style={styles.waitRow}>
-          <View style={styles.waitChip} accessible accessibilityLabel={`Waiting for ${formatWait(now - arrivedAt)}`}>
-            <Ionicons name="time-outline" size={16} color={colors.ink2} />
-            <Text variant="subhead" style={styles.waitText} tabular>
-              Waiting · {formatWait(now - arrivedAt)}
-            </Text>
+      {wait?.phase === "NOT_STARTED" ? (
+        <View style={styles.waitNotice}>
+          <Notice tone="warning" icon="locate-outline" message="Get closer to the pickup to start the wait timer." />
+          <Button label="Start wait timer" variant="secondary" size="md" onPress={onStartTimer} />
+        </View>
+      ) : null}
+
+      {wait && wait.phase !== "NOT_STARTED" ? (
+        <View style={styles.waitBlock}>
+          <View style={styles.waitRow}>
+            <WaitChip
+              label={
+                wait.phase === "FREE"
+                  ? `Free wait ${waitClock(wait.freeLeftMs)}`
+                  : `Waiting · ${formatWait(wait.waitedMs ?? 0)}`
+              }
+              spoken={
+                wait.phase === "FREE"
+                  ? `Free wait, ${waitClock(wait.freeLeftMs)} left`
+                  : `Waiting for ${formatWait(wait.waitedMs ?? 0)}`
+              }
+              warn={wait.phase === "OVER" && wait.feePesewas !== null}
+            />
+            {canNoShow ? <Button label="Rider didn't show" variant="danger" size="pill" onPress={onNoShow} /> : null}
           </View>
+          {wait.phase === "FREE" && wait.feePesewas !== null ? (
+            <Text variant="subhead" color="secondary">
+              Then +{formatCedis(wait.feePesewas)} wait fee
+            </Text>
+          ) : null}
+          {wait.phase === "OVER" && wait.feePesewas !== null ? (
+            <Text variant="subhead" style={styles.waitText} accessibilityLiveRegion="polite">
+              {`Wait fee added (+${formatCedis(wait.feePesewas)}).${cash && fare ? ` Collect ${fare}.` : ""}`}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* An older server: no wait data, just how long the driver has waited. */}
+      {arrived && !wait && arrivedAt !== null ? (
+        <View style={styles.waitRow}>
+          <WaitChip label={`Waiting · ${formatWait(now - arrivedAt)}`} spoken={`Waiting for ${formatWait(now - arrivedAt)}`} />
           {canNoShow ? <Button label="Rider didn't show" variant="danger" size="pill" onPress={onNoShow} /> : null}
         </View>
       ) : null}
@@ -1187,6 +1253,8 @@ const styles = StyleSheet.create({
   actions: { flexDirection: "row" },
   action: { flex: 1, alignItems: "center" },
   waitRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing[2] },
+  waitBlock: { gap: spacing[1] },
+  waitNotice: { gap: spacing[2] },
   waitChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -1196,6 +1264,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.sm,
     backgroundColor: colors.surface2,
   },
+  waitChipWarn: { backgroundColor: colors.amber50 },
   waitText: { color: colors.ink, fontWeight: "700" },
   collect: { flexDirection: "row", alignItems: "baseline", justifyContent: "center", gap: spacing[2] },
 });

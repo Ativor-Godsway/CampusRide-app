@@ -17,6 +17,7 @@ import {
 } from "./lib/security";
 import { processTimeouts } from "./services/ride/timeouts";
 import { refreshSearchWindow } from "./services/ride/searchWindow";
+import { refreshWaitFeeSettings } from "./services/ride/waitFee";
 import {
   assertOtpServiceAllowedInProduction,
   otpService,
@@ -235,6 +236,8 @@ async function bootstrap() {
   // restart needs (docs/architecture/in-memory-state.md).
   // The search window (admin setting, 7 min by default) before the first sweep uses it.
   await refreshSearchWindow(prisma);
+  // The wait fee settings (admin, 2:30 free / GH 2 / no-show 5 min by default).
+  await refreshWaitFeeSettings(prisma);
   await processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
     app.log.error({ err }, "Startup timeout sweep failed");
   });
@@ -313,6 +316,7 @@ async function bootstrap() {
   const sessionTimeouts = setInterval(() => {
     sweepDriverPresence();
     void refreshSearchWindow(prisma);
+    void refreshWaitFeeSettings(prisma);
     if (Date.now() < staleSweepFrom) return;
     takeStaleDriversOffline(prisma).then(
       (taken) => {

@@ -90,10 +90,23 @@ export const riderRideListSelect = {
   dropoffZone: { select: zoneSelect },
 } satisfies Prisma.RideSelect;
 
+/**
+ * The pickup wait columns (services/ride/waitFee.ts). Read for GET /rides/:id
+ * only to work out the rider's own `wait` and `waitFeePesewas`
+ * (riderSeatsView) — never sent as they are.
+ */
+export const seatWaitSelect = {
+  waitStartedAt: true,
+  freeWaitEndsAt: true,
+  waitFeeAmount: true,
+  riderWarnedAt: true,
+  waitFee: true,
+} satisfies Prisma.RidePassengerSelect;
+
 /** GET /rides/:id — as above, plus the passenger manifest. */
 export const riderRideDetailSelect = {
   ...riderRideListSelect,
-  passengers: { select: ridePassengerSelect },
+  passengers: { select: { ...ridePassengerSelect, ...seatWaitSelect } },
 } satisfies Prisma.RideSelect;
 
 /**

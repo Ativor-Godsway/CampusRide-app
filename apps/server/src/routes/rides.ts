@@ -35,7 +35,7 @@ import {
 } from "../services/places/rideEnds";
 import { FareChangedError, quoteFares } from "../services/ride/farePricing";
 import { quoteAlreadyCounted, recordRefusedBooking, type RefusedBookingInput } from "../services/ride/refusedBookings";
-import { hideOtherRidersPins, pinFieldsOf } from "./ridePins";
+import { hideOtherRidersPins, pinFieldsOf, riderSeatsView } from "./ridePins";
 import { getRidePaymentSummary, initiateCollection } from "../services/payment/paymentFlow";
 import { NoAwaitingOtpPaymentError } from "../services/payment/errors";
 import type { MoolreChannel } from "../services/payment/constants";
@@ -561,8 +561,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     const cancelledSeat = ride.passengers.find((p) => p.riderId === userId && p.status === "CANCELLED");
     const seatCancel = cancelledSeat ? await seatCancelledBy(prisma, ride.id, cancelledSeat.id) : null;
 
+    const shown = hideOtherRidersPins(ride, userId);
     return reply.code(200).send({
-      ride: hideOtherRidersPins(ride, userId),
+      ride: { ...shown, passengers: riderSeatsView(shown.passengers, userId) },
       driver,
       ...(fareSummary ? { fareSummary } : {}),
       ...(seatCancel ?? {}),
