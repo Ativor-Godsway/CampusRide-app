@@ -162,16 +162,18 @@ cd ../..
 
 For each app, build iOS and Android with the `preview` profile. On the first iOS build, EAS asks to create the new bundle ID, a provisioning profile that includes your iPhone, and a push key. Answer yes and log in to Apple.
 
+Always put `APP_VARIANT=staging` in front of the build command, exactly as below. EAS reads the app config twice: once on this Mac, to pick the bundle ID, signing credentials and build number, and again on the build server. The server knows it's a `preview` build, but the Mac doesn't: without `APP_VARIANT=staging` the Mac picks the production app (`com.campusride.rider`, "CampusRide") while the server builds the staging one, so the build uses the wrong credentials and adds 1 to the production build number. If the output says `Bundle identifier registered com.campusride.rider` or `com.campusride.driver` without `.staging`, press Ctrl+C.
+
 ```sh
 cd apps/rider
 ```
 
 ```sh
-npx eas-cli@24 build --profile preview --platform ios
+APP_VARIANT=staging npx eas-cli@24 build --profile preview --platform ios
 ```
 
 ```sh
-npx eas-cli@24 build --profile preview --platform android
+APP_VARIANT=staging npx eas-cli@24 build --profile preview --platform android
 ```
 
 ```sh
@@ -179,11 +181,11 @@ cd ../driver
 ```
 
 ```sh
-npx eas-cli@24 build --profile preview --platform ios
+APP_VARIANT=staging npx eas-cli@24 build --profile preview --platform ios
 ```
 
 ```sh
-npx eas-cli@24 build --profile preview --platform android
+APP_VARIANT=staging npx eas-cli@24 build --profile preview --platform android
 ```
 
 ```sh

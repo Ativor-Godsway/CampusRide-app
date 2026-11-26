@@ -149,8 +149,8 @@ After the PR is merged and the server has redeployed:
 
 ```bash
 git switch main && git pull
-cd apps/rider  && npx -y eas-cli@24 build --profile preview --platform android
-cd ../driver   && npx -y eas-cli@24 build --profile preview --platform android
+cd apps/rider  && APP_VARIANT=staging npx -y eas-cli@24 build --profile preview --platform android
+cd ../driver   && APP_VARIANT=staging npx -y eas-cli@24 build --profile preview --platform android
 ```
 
 Each build ends with a link and a QR code. Open them on the test phone(s) to

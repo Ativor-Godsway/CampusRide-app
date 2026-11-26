@@ -224,8 +224,10 @@ need to touch build numbers. EAS counts those up by itself on every build.
 
 ```bash
 cd apps/rider
-npx -y eas-cli@24 build --profile preview --platform all
+APP_VARIANT=staging npx -y eas-cli@24 build --profile preview --platform all
 ```
+
+A preview build is the CampusRide Staging app, which talks to the staging server (STAGING.md). Keep `APP_VARIANT=staging` in front, or EAS signs it as the production app.
 
 When it finishes (about 15–30 minutes), EAS shows a link and a QR code. Open it on
 a test phone to install. iPhones must be registered first:

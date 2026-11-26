@@ -87,7 +87,7 @@ Build commands, run from the app's directory (`apps/rider` or `apps/driver`):
 
 ```bash
 npx eas-cli@latest build --profile production --platform all
-npx eas-cli@latest build --profile preview --platform android   # test build
+APP_VARIANT=staging npx eas-cli@latest build --profile preview --platform android   # staging test app (STAGING.md)
 ```
 
 Shipping a release — over-the-air update or new store build, rollback, and
