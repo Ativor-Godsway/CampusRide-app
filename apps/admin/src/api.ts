@@ -1199,24 +1199,40 @@ export const getZones = (token: string) => get<{ zones: Array<{ id: string; name
 
 // ─── Far-trip pricing, zone neighbours, refused bookings (2026-11-24) ───────
 
+/** Every price an admin sets (2026-11-26): Shared by seats in one booking, far per seat, Ride alone. */
+export interface FarePriceSettings {
+  sharedPesewas: number;
+  shared2Pesewas: number;
+  shared3Pesewas: number;
+  farPerSeatPesewas: number;
+  lonePesewas: number;
+}
+
 export interface FarPricing {
-  settings: {
-    sharedPesewas: number;
+  settings: FarePriceSettings & {
+    /** Older names, still sent: a far 1-seat booking, and Ride alone. */
     sharedFarPesewas: number;
     loneFarePesewas: number;
     updatedAt: string | null;
     updatedBy: { id: string; name: string } | null;
   };
-  defaults: { sharedPesewas: number; sharedFarPesewas: number };
+  defaults: FarePriceSettings;
   farPlaces: Array<{ id: string; name: string; isActive: boolean; zoneName: string; end: "NORTH" | "SOUTH" }>;
 }
 
 export const getFarPricing = (token: string) => get<FarPricing>(token, "/admin/far-pricing");
+/** Saves the prices and exactly these far-end places together. */
 export const saveFarPricing = (
   token: string,
-  input: { sharedPesewas: number; sharedFarPesewas: number; farPlaces: Array<{ id: string; end: "NORTH" | "SOUTH" }> },
+  input: FarePriceSettings & { farPlaces: Array<{ id: string; end: "NORTH" | "SOUTH" }> },
 ) =>
   request<FarPricing>("/admin/far-pricing", { method: "PUT", body: JSON.stringify(input) }, token);
+
+/** The prices as they are saved now (what a save of the far places sends back unchanged). */
+export function priceSettingsOf(f: FarPricing): FarePriceSettings {
+  const { sharedPesewas, shared2Pesewas, shared3Pesewas, farPerSeatPesewas, lonePesewas } = f.settings;
+  return { sharedPesewas, shared2Pesewas, shared3Pesewas, farPerSeatPesewas, lonePesewas };
+}
 
 export interface ZoneNeighbours {
   zones: Array<{ id: string; name: string }>;

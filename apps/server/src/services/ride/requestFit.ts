@@ -3,6 +3,7 @@ import { liveDriverWhere } from "../zones/driverLiveness";
 import { searchWindowMs } from "./searchWindow";
 import {
   PRICING,
+  bookingSeats,
   indexRoutes,
   previewAddRider,
   type PassengerStatus,
@@ -23,8 +24,9 @@ import { ACTIVE_DRIVER_STATUSES } from "./stateMachine";
  * rules, 2026-11). One set of rules for the Home list, the pop-up
  * broadcast, the mid-trip list and the accept itself:
  *
- * - free seats = the car's capacity − riders on board − riders assigned
- *   and still waiting for their pickup;
+ * - free seats = the car's capacity (4 seats) − seats of the bookings on
+ *   board − seats of the bookings still waiting for their pickup (a booking
+ *   for 2 takes 2, rides/seats.ts);
  * - a driver with no trip is offered any request (their car is empty, so a
  *   Ride alone fits too);
  * - a Shared car is offered Shared requests that fit its free seats AND
@@ -49,9 +51,15 @@ export interface CarSeats {
   free: number;
 }
 
-export function carSeats(passengers: readonly { status: string }[], capacity: number = CAR_CAPACITY): CarSeats {
-  const onBoard = passengers.filter((p) => p.status === "PICKED_UP").length;
-  const waiting = passengers.filter((p) => p.status === "WAITING" || p.status === "ARRIVED").length;
+export function carSeats(
+  passengers: readonly { status: string; seats?: number | null }[],
+  capacity: number = CAR_CAPACITY,
+): CarSeats {
+  // SEATS, not bookings (2026-11-26): a booking for 2 takes 2.
+  const count = (keep: (status: string) => boolean) =>
+    passengers.reduce((n, p) => (keep(p.status) ? n + bookingSeats(p) : n), 0);
+  const onBoard = count((status) => status === "PICKED_UP");
+  const waiting = count((status) => status === "WAITING" || status === "ARRIVED");
   return { capacity, onBoard, waiting, free: Math.max(0, capacity - onBoard - waiting) };
 }
 
@@ -60,8 +68,8 @@ export type SeatFitRefusal = "CAR_CLOSED" | "LONE_CAR" | "NEEDS_EMPTY_CAR" | "CA
 
 /**
  * The seat half of the rules. `car` is the driver's current trip, or null
- * when they have none. `request.occupancy` is the seats asked for (1 from
- * every app and USSD today).
+ * when they have none. `request.occupancy` is the seats asked for (the
+ * booking's seats; 1 from older apps and USSD).
  */
 export function seatFit(
   request: { type: string; occupancy: number },

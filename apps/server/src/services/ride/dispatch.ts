@@ -256,6 +256,8 @@ function broadcastPayload(ride: RequestRow, pickupZoneName: string, dropoffZoneN
     dropoffZoneName,
     ...requestPlaceNames(ride, pickupZoneName, dropoffZoneName),
     type: ride.type,
+    // Seats this booking takes (Shared) or people in it (Ride alone): one fare for all.
+    seats: ride.occupancy,
     farePesewas,
     driverSharePesewas: driverShare,
     expiresAt: (ride.broadcastStartedAt?.getTime() ?? Date.now()) + searchWindowMs(),

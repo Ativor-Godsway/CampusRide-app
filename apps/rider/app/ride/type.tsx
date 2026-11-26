@@ -31,6 +31,11 @@ import {
   tripEndParams,
   fareWithWait,
   cancelSearchLine,
+  MAX_LONE_PEOPLE,
+  MAX_SHARED_BOOKING_SEATS,
+  bookingSeats,
+  peopleWord,
+  seatsWord,
 } from "@rida/shared";
 import {
   ActiveRideExistsError,
@@ -84,6 +89,8 @@ import {
   illustrations,
   serverNow,
   useRideSearchStatus,
+  Stepper,
+  useTweenNumber,
 } from "@rida/mobile-shared";
 import { CancelRideContent, type SwitchOffer } from "../../components/ride/CancelRideContent";
 import {
@@ -100,6 +107,7 @@ import { activeRideParams, useActiveRide } from "../../lib/activeRide";
 import { haptics } from "../../lib/haptics";
 import { usePlaces, useZones } from "../../lib/chooseRide";
 import { shareTrip } from "../../lib/shareTrip";
+import { bookingPriceLabel, requestLabel } from "../../lib/rideChoice";
 
 /** The floating route pill: its height, and its gap below the status bar. */
 const PILL_HEIGHT = 44;
@@ -108,13 +116,16 @@ const PILL_HEIGHT = 44;
 interface RideOption {
   type: RideType;
   title: string;
-  /** One short, TRUE line: "up to 4 riders" / "just you". */
+  /** One short, TRUE line. */
   subtitle: string;
+  /** For the seats or people chosen on its card (the server's quote). */
   farePesewas: number;
-  /** Formatted with formatCedis, e.g. "GH₵7". */
-  priceLabel: string;
-  badge?: string;
 }
+
+/** Seats one Shared booking may take, and people one Ride alone booking may bring. */
+const SHARED_SEATS = { min: 1, max: MAX_SHARED_BOOKING_SEATS } as const;
+const LONE_PEOPLE = { min: 1, max: MAX_LONE_PEOPLE } as const;
+
 const PILL_TOP_GAP = spacing.sm;
 /** A first guess at the options sheet's height, until it reports its real one. */
 const OPTIONS_SHEET_ESTIMATE = 360;
@@ -168,6 +179,11 @@ export default function RideTypeScreen() {
 
   // ── Options phase ───────────────────────────────────────────────────────────
   const [selectedType, setSelectedType] = useState<RideType>("SHARED");
+  /** Seats in a Shared booking (the rider and friends), people in a Ride alone one. */
+  const [sharedSeats, setSharedSeats] = useState(1);
+  const [lonePeople, setLonePeople] = useState(1);
+  /** "4 people? Ride alone fits you all": after + at 3 Shared seats. */
+  const [loneHint, setLoneHint] = useState(false);
   const [selectedPaymentMethod] = useState<PaymentMethod>("CASH");
   const [submitting, setSubmitting] = useState(false);
 
@@ -309,41 +325,54 @@ export default function RideTypeScreen() {
     retry: 1,
   });
   const quotePending = hasEnds && fareQuote.isPending && fareQuote.fetchStatus !== "idle";
-  const sharedFare = fareQuote.data?.fares.SHARED ?? getSharedFarePerRider(1);
-  const loneFare = fareQuote.data?.fares.LONE ?? priceLoneRide().fare;
-  const farTrip = fareQuote.data?.farTrip ?? false;
-  const fareFor = useCallback((type: RideType) => (type === "SHARED" ? sharedFare : loneFare), [sharedFare, loneFare]);
+  const quote = fareQuote.data;
+  // Seats on a booking (2026-11-26): only when the server prices them. An
+  // older server, or no quote yet: 1 seat, no steppers.
+  const seatsSupported = !!quote?.sharedBySeats;
+  const loneFare = quote?.fares.LONE ?? priceLoneRide().fare;
+  const farTrip = quote?.farTrip ?? false;
+  /** A booking's price for these seats (Shared) or people (Ride alone): the server's quote. */
+  const fareFor = useCallback(
+    (type: RideType, seats: number = 1): number => {
+      if (type === "LONE") return loneFare;
+      const bySeats = quote?.sharedBySeats?.[seats - 1];
+      if (bySeats !== undefined) return bySeats;
+      return seats === 1 ? (quote?.fares.SHARED ?? getSharedFarePerRider(1)) : Number.NaN;
+    },
+    [quote, loneFare],
+  );
+  const sharedFare = fareFor("SHARED", sharedSeats);
+  /** Seats (Shared) or people (Ride alone) in the booking being chosen. */
+  const chosenSeats = selectedType === "SHARED" ? sharedSeats : lonePeople;
 
   // No pickup time here: no driver is matched yet, so there is no real ETA to
   // show, and we never make one up.
   const options: RideOption[] = useMemo(
     () => [
-      {
-        type: "SHARED",
-        title: "Shared",
-        subtitle: "up to 4 riders",
-        farePesewas: sharedFare,
-        priceLabel: formatCedis(sharedFare),
-        badge: "Best value",
-      },
-      {
-        type: "LONE",
-        title: "Ride alone",
-        subtitle: "just you",
-        farePesewas: loneFare,
-        priceLabel: formatCedis(loneFare),
-      },
+      { type: "SHARED", title: "Shared", subtitle: "Share with students going your way", farePesewas: sharedFare },
+      { type: "LONE", title: "Ride alone", subtitle: "The whole car, up to 4 people", farePesewas: loneFare },
     ],
     [sharedFare, loneFare],
   );
   const selectedOption = options.find((o) => o.type === selectedType) ?? options[0]!;
+  // The button's total glides with the stepper, as the card's price does;
+  // new prices from the server (the quote) simply appear.
+  const quoteKey = quote ? JSON.stringify([quote.fares, quote.sharedBySeats ?? null]) : "none";
+  const buttonPesewas = useTweenNumber(selectedOption.farePesewas, undefined, `${quoteKey}:${selectedType}`);
 
   // Once a ride exists, the SERVER's type and this rider's locked fare are the
   // truth (it may have been switched, or be a resumed ride booked before a
   // price change: it keeps the price it was booked at).
   const rideType: RideType = ride?.type ?? selectedType;
-  // With a wait fee once one is due (charged ones are already in lockedFare).
-  const priceLabel = formatCedis(fareWithWait(myPassenger?.lockedFare ?? null, myPassenger?.wait, serverNow()) ?? fareFor(rideType));
+  // This booking's seats (people for Ride alone): the server's, once it exists.
+  const mySeats = myPassenger ? bookingSeats(myPassenger) : chosenSeats;
+  // With a wait fee once one is due (charged ones are already in lockedFare),
+  // and the seats: "2 seats · GH₵14".
+  const priceLabel = bookingPriceLabel(
+    rideType,
+    mySeats,
+    formatCedis(fareWithWait(myPassenger?.lockedFare ?? null, myPassenger?.wait, serverNow()) ?? fareFor(rideType, mySeats)),
+  );
 
   // ── Map coords & region ─────────────────────────────────────────────────────
   const pickupCoord = useMemo(
@@ -475,18 +504,23 @@ export default function RideTypeScreen() {
 
   // Still unclaimed and holding only this rider: the server will accept a
   // type switch (POST /rides/:id/switch — same rule, checked again there).
+  // Ride alone for 4 can't become Shared (3 seats at most), and a switch
+  // keeps the booking's seats, so it needs the server's price for them.
+  const switchTarget: RideType = rideType === "SHARED" ? "LONE" : "SHARED";
+  const switchFare = fareFor(switchTarget, mySeats);
   const canSwitch =
     !!ride &&
     !isMerged &&
     (ride.status === "REQUESTED" || ride.status === "AWAITING_RIDER_DECISION") &&
-    ride.occupancy === 1;
-  const switchTarget: RideType = rideType === "SHARED" ? "LONE" : "SHARED";
+    ride.passengers.filter((p) => p.status !== "CANCELLED").length === 1 &&
+    (switchTarget === "LONE" || mySeats <= MAX_SHARED_BOOKING_SEATS) &&
+    Number.isFinite(switchFare);
   const switchOffer: SwitchOffer | null = canSwitch
     ? {
         toType: switchTarget,
         label: switchTarget === "LONE" ? "Switch to Ride alone" : "Switch to Shared",
-        priceLabel: formatCedis(fareFor(switchTarget)),
-        priceSpoken: spokenCedis(fareFor(switchTarget)),
+        priceLabel: formatCedis(switchFare),
+        priceSpoken: spokenCedis(switchFare),
       }
     : null;
 
@@ -499,10 +533,12 @@ export default function RideTypeScreen() {
         dropoff: tripEndBody(dropoffEnd),
         ...(note.trim() ? { pickupNote: note.trim() } : {}),
         type: selectedType,
+        // Seats only to a server that prices them (older ones book 1 seat).
+        ...(seatsSupported ? { seats: chosenSeats } : {}),
         paymentMethod: selectedPaymentMethod,
         // The price on screen, when it came from the server: charged exactly,
         // or refused (FARE_CHANGED) if it has just changed.
-        ...(fareQuote.data ? { shownFarePesewas: fareQuote.data.fares[selectedType] } : {}),
+        ...(quote ? { shownFarePesewas: fareFor(selectedType, chosenSeats) } : {}),
       });
       setAdjusting(false);
       setActiveRideId(created.id);
@@ -571,7 +607,8 @@ export default function RideTypeScreen() {
     if (source === "sheet") setSwitching(true);
     else setDecisionBusy("switch");
     try {
-      await switchRideType(activeRideId, toType, fareQuote.data ? fareQuote.data.fares[toType] : undefined);
+      // The price for this booking's seats in the new type (what the offer showed).
+      await switchRideType(activeRideId, toType, quote ? fareFor(toType, mySeats) : undefined);
       haptics.success();
       setCancelOpen(false);
       await refreshRide();
@@ -826,11 +863,13 @@ export default function RideTypeScreen() {
               <Button label={serviceBlock.label} disabled accessibilityLabel={serviceBlock.spoken} />
             ) : (
               <Button
-                label={`Request ${selectedOption.title}`}
+                // The real total, gliding with the stepper: "Request shared · GH₵14".
+                label={requestLabel(selectedType, formatCedis(buttonPesewas))}
                 onPress={() => void handleSubmit()}
                 // Until the server has priced this trip, so the price shown is the price charged.
                 loading={submitting || quotePending}
-                accessibilityHint={`${spokenCedis(selectedOption.farePesewas)}, paid in cash`}
+                accessibilityLabel={requestLabel(selectedType, formatCedis(selectedOption.farePesewas))}
+                accessibilityHint={`${bookingPriceLabel(selectedType, chosenSeats, spokenCedis(selectedOption.farePesewas))}, paid in cash`}
               />
             )
           }
@@ -846,7 +885,7 @@ export default function RideTypeScreen() {
           ) : null}
           {farTrip ? (
             <Text variant="subhead" color="secondary">
-              {`Shared is ${formatCedis(sharedFare)} on this trip: it goes between the north and south ends of campus.`}
+              This trip goes between the north and south ends of campus, so Shared costs a little more.
             </Text>
           ) : null}
           <View style={styles.optionList} accessibilityRole="radiogroup" accessibilityLabel="Choose a ride">
@@ -855,13 +894,76 @@ export default function RideTypeScreen() {
                 key={option.type}
                 image={option.type === "SHARED" ? illustrations.carShared : illustrations.carStandard}
                 title={option.title}
-                badge={option.badge}
                 subtitle={option.subtitle}
-                price={option.priceLabel}
+                price={formatCedis(option.farePesewas)}
+                // The price glides when the stepper changes it.
+                pricePesewas={option.farePesewas}
+                priceKey={quoteKey}
                 selected={selectedType === option.type}
                 // The card plays the selection haptic itself.
-                onPress={() => setSelectedType(option.type)}
-              />
+                onPress={() => {
+                  setSelectedType(option.type);
+                  setLoneHint(false);
+                }}
+              >
+                {!seatsSupported ? null : option.type === "SHARED" ? (
+                  <View style={styles.seatsBlock}>
+                    <View style={styles.seatsRow}>
+                      <Text variant="subhead" color="secondary" style={styles.seatsQuestion}>
+                        Bringing a friend?
+                      </Text>
+                      <Stepper
+                        value={sharedSeats}
+                        min={SHARED_SEATS.min}
+                        max={SHARED_SEATS.max}
+                        format={seatsWord}
+                        accessibilityLabel="Seats in this Shared booking"
+                        testID="shared-seats"
+                        onChange={(n) => {
+                          setSharedSeats(n);
+                          setSelectedType("SHARED");
+                          setLoneHint(false);
+                        }}
+                        onIncrementAtMax={() => setLoneHint(true)}
+                      />
+                    </View>
+                    {loneHint ? (
+                      <FadeIn>
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityHint="Switches to Ride alone for 4 people"
+                          onPress={() => {
+                            setSelectedType("LONE");
+                            setLonePeople(LONE_PEOPLE.max);
+                            setLoneHint(false);
+                          }}
+                          style={({ pressed }) => [styles.loneHint, pressed && styles.loneHintPressed]}
+                        >
+                          <Ionicons name="people-outline" size={16} color={colors.green700} />
+                          <Text variant="subhead" style={styles.loneHintText}>
+                            {`4 people? Ride alone fits you all for ${formatCedis(loneFare)}.`}
+                          </Text>
+                        </Pressable>
+                      </FadeIn>
+                    ) : null}
+                  </View>
+                ) : selectedType === "LONE" ? (
+                  <View style={styles.seatsRow}>
+                    <Text variant="subhead" color="secondary" style={styles.seatsQuestion}>
+                      How many people?
+                    </Text>
+                    <Stepper
+                      value={lonePeople}
+                      min={LONE_PEOPLE.min}
+                      max={LONE_PEOPLE.max}
+                      format={peopleWord}
+                      accessibilityLabel="People in this Ride alone booking"
+                      testID="lone-people"
+                      onChange={setLonePeople}
+                    />
+                  </View>
+                ) : null}
+              </RideOptionCard>
             ))}
           </View>
 
@@ -954,13 +1056,8 @@ export default function RideTypeScreen() {
               {ride?.status === "AWAITING_RIDER_DECISION" && (
                 <FadeIn key="no-drivers">
                   <NoDriversPanel
-                    switchOffer={
-                      canSwitch
-                        ? switchTarget === "LONE"
-                          ? `Switch to Ride alone · ${formatCedis(loneFare)}`
-                          : `Switch to Shared · ${formatCedis(sharedFare)}`
-                        : null
-                    }
+                    // "Switch to Ride alone · GH₵15": this booking's seats priced in the other type.
+                    switchOffer={switchOffer ? `${switchOffer.label} · ${switchOffer.priceLabel}` : null}
                     busy={decisionBusy}
                     onSearchAgain={() => void handleSearchAgain()}
                     onSwitch={() => void handleSwitch(switchTarget, "no_drivers")}
@@ -1041,6 +1138,7 @@ export default function RideTypeScreen() {
           driver={driver}
           dropoffName={dropoffEnd.label}
           completedAt={ride.completedAt}
+          seats={mySeats}
           onDone={() => setLeaving(true)}
         />
       ) : tripEnded === "driverCancelled" ? (
@@ -1234,6 +1332,21 @@ const styles = StyleSheet.create({
   // ── Options
   optionsSheet: { gap: spacing.md },
   optionList: { gap: spacing.xs },
+  // The steppers inside the ride cards: quiet, one row.
+  seatsBlock: { gap: spacing[2] },
+  seatsRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing[2] },
+  seatsQuestion: { flexShrink: 1 },
+  loneHint: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing[2],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: radii.md,
+    backgroundColor: colors.surface,
+  },
+  loneHintPressed: { backgroundColor: colors.surface2 },
+  loneHintText: { flex: 1, color: colors.green700 },
   optionChips: { flexDirection: "row", flexWrap: "wrap", gap: spacing[2] },
   pickupExtras: { gap: spacing[2] },
   // ── Route pill

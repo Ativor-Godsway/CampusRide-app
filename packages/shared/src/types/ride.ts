@@ -76,9 +76,14 @@ export interface RidePassenger extends Partial<RidePinFields> {
   pickupZoneId: string;
   dropoffZoneId: string;
   fareCharged: number | null;
-  /** This rider's fare, including a wait fee charged at pickup. */
+  /** This booking's fare (all its seats), including a wait fee charged at pickup. */
   lockedFare: number | null;
   status: PassengerStatus;
+  /**
+   * Seats this booking takes (Shared: 1–3) or people in it (Ride alone:
+   * 1–4), rides/seats.ts. Absent from older servers: 1.
+   */
+  seats?: number;
   /**
    * The rider's own seat only (GET /rides/:id): their pickup wait while the
    * driver is there (rides/waitFee.ts), and a wait fee charged (already in

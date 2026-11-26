@@ -1,5 +1,5 @@
 import { StyleSheet, View } from "react-native";
-import { requestedAgo } from "@rida/shared";
+import { requestedAgo, seatsWord } from "@rida/shared";
 import {
   BottomSheet,
   ListRow,
@@ -63,7 +63,7 @@ export function AddRiderSheet({
                 key={s.requestRideId}
                 divider={i > 0}
                 title={`${from} → ${to}`}
-                subtitle={`${s.riderFirstName ? `${s.riderFirstName} · ` : ""}${requestedAgo(s.createdAt)}`}
+                subtitle={`${s.riderFirstName ? `${s.riderFirstName} · ` : ""}${(s.seats ?? 1) > 1 ? `${seatsWord(s.seats ?? 1)} · ` : ""}${requestedAgo(s.createdAt)}`}
                 leading={<ListRow.Icon name="person-add-outline" />}
                 trailing={
                   s.compatible ? (

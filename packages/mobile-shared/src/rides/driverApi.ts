@@ -390,9 +390,14 @@ export interface PassengerInCar extends Partial<RidePinFields> {
   /** Zone ids, for placing the rider's stops on the map. Optional: older servers don't send them. */
   pickupZoneId?: string;
   dropoffZoneId?: string;
-  /** The passenger's fare in pesewas, including a wait fee charged at pickup. */
+  /** The booking's fare in pesewas (all its seats), including a wait fee charged at pickup. */
   lockedFare: number | null;
   status: PassengerStatus;
+  /**
+   * Seats this booking takes (Shared 1–3) or people in it (Ride alone 1–4),
+   * @rida/shared rides/seats.ts. Absent from older servers: 1.
+   */
+  seats?: number;
   /** ISO time the driver reached this rider's pickup (wait timer, "rider didn't show"). */
   arrivedAt?: string | null;
   /** The pickup wait while ARRIVED (@rida/shared rides/waitFee.ts); absent from older servers. */

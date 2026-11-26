@@ -115,8 +115,9 @@ async function book(
   return prisma.ride.findUniqueOrThrow({ where: { id }, include: { passengers: true } });
 }
 
-const FAR = { fares: { SHARED: 900, LONE: 1500 }, farTrip: true };
-const NORMAL = { fares: { SHARED: 700, LONE: 1500 }, farTrip: false };
+// Shared for 1, 2 and 3 seats too (2026-11-26): the far surcharge is per seat.
+const FAR = { fares: { SHARED: 900, LONE: 1500 }, sharedBySeats: [900, 1800, 2400], farTrip: true };
+const NORMAL = { fares: { SHARED: 700, LONE: 1500 }, sharedBySeats: [700, 1400, 1800], farTrip: false };
 
 describe("far-trip price rules (two far ends)", () => {
   it("North ↔ South is GH₵9, both directions", async () => {
@@ -240,7 +241,35 @@ describe("the price is set when the request is made", () => {
     expect((await quote(other, at(north), at(south))).fares).toEqual({ SHARED: 1000, LONE: 1500 });
     expect((await quote(other, at(campus), at(north))).fares.SHARED).toBe(800);
     const log = await prisma.adminAuditLog.findFirst({ where: { action: "fares.update", actor: admin.user.id } });
-    expect(log?.reason).toContain("far Shared 900 → 1000");
+    // An admin page from before seat prices: far 1000 on a 800 seat = GH₵2 a seat, as before.
+    expect(log?.reason).toContain("Shared 1 seat 700 → 800");
+    expect(save.json().settings).toMatchObject({ farPerSeatPesewas: 200, shared2Pesewas: 1400, shared3Pesewas: 1800, lonePesewas: 1500 });
+    await prisma.adminAuditLog.deleteMany({ where: { actor: admin.user.id } });
+  });
+
+  it("Settings → Prices: the seat table, far per seat and Ride alone; new requests only; bad tables refused", async () => {
+    const admin = await person("ADMIN");
+    const rider = await person();
+    const before = await book(rider, "LONE", at(north), at(south));
+    const put = (payload: object) => app.inject({ method: "PUT", url: "/admin/far-pricing", headers: admin.headers, payload });
+    const ends = [{ id: north.id, end: "NORTH" }, { id: south.id, end: "SOUTH" }];
+    const table = { sharedPesewas: 800, shared2Pesewas: 1500, shared3Pesewas: 2000, farPerSeatPesewas: 300, lonePesewas: 1700 };
+
+    const saved = await put({ ...table, farPlaces: ends });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json().settings).toMatchObject({ ...table, sharedFarPesewas: 1100, loneFarePesewas: 1700 });
+    const q = await quote(await person(), at(north), at(south));
+    expect(q).toEqual({ fares: { SHARED: 1100, LONE: 1700 }, sharedBySeats: [1100, 2100, 2900], farTrip: true });
+    expect((await quote(rider, at(campus), at(north))).sharedBySeats).toEqual([800, 1500, 2000]);
+    // A ride already requested keeps its price.
+    expect((await prisma.ridePassenger.findFirstOrThrow({ where: { rideId: before.id } })).lockedFare).toBe(1500);
+    const log = await prisma.adminAuditLog.findFirst({ where: { action: "fares.update", actor: admin.user.id } });
+    expect(log?.reason).toContain("Shared 2 seats 1400 → 1500");
+    expect(log?.reason).toContain("Ride alone 1500 → 1700");
+
+    expect((await put({ ...table, shared2Pesewas: 700, farPlaces: ends })).json().error).toMatch(/can't cost less/);
+    expect((await put({ ...table, farPerSeatPesewas: 5000, farPlaces: ends })).statusCode).toBe(400);
+    expect((await put({ ...table, lonePesewas: 0, farPlaces: ends })).statusCode).toBe(400);
     await prisma.adminAuditLog.deleteMany({ where: { actor: admin.user.id } });
   });
 

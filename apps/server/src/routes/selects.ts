@@ -80,6 +80,7 @@ export const ridePassengerSelect = {
   fareCharged: true,
   lockedFare: true,
   status: true,
+  seats: true,
   ...pinSelect,
 } satisfies Prisma.RidePassengerSelect;
 

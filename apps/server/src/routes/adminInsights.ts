@@ -130,6 +130,7 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
             status: true,
             lockedFare: true,
             fareCharged: true,
+            seats: true,
             createdAt: true,
             arrivedAt: true,
             noShowAt: true,

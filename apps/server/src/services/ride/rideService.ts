@@ -2,7 +2,7 @@ import type { PrismaClient, Prisma, Ride, RidePassenger } from "@prisma/client";
 import {
   PRICING,
   UNDO_ACCEPTED_FOR_MS,
-  getSharedFarePerRider,
+  seatsTaken,
   validateSharedOccupancy,
   waitFeeDue,
   type WaitFeeSettings,
@@ -341,7 +341,8 @@ export async function applyPassengerTransition(
 
     if (toStatus === "CANCELLED") {
       const remaining = others.filter((p) => isActivePassengerStatus(p.status)).length;
-      rideData.occupancy = remaining;
+      // Seats left in the car (a booking for 2 takes 2).
+      rideData.occupancy = seatsTaken(others);
       if (remaining === 0) {
         if (status === "IN_PROGRESS") hop("COMPLETED");
         else hop("CANCELLED", { cancelReason: "ALL_PASSENGERS_LEFT" });
@@ -486,8 +487,8 @@ export async function undoPassengerStep(
       if (rated) throw new UndoRefusedError("UNDO_TOO_LATE", "This rider has already rated the trip.");
       if (rebooked) throw new UndoRefusedError("UNDO_TOO_LATE", "This rider has already booked another ride.");
       // The freed seat went to a new rider: putting this one back would seat five.
-      const seated = passengers.filter((p) => isActivePassengerStatus(p.status)).length;
-      if (seated >= PRICING.MAX_SHARED_OCCUPANCY) {
+      const seated = seatsTaken(passengers);
+      if (seated + passenger.seats > PRICING.MAX_SHARED_OCCUPANCY) {
         throw new UndoRefusedError("CAR_FULL", "That seat has gone to another rider, so this drop-off can't be undone.");
       }
       data = { status: "PICKED_UP", droppedOffAt: null, fareCharged: null };
@@ -539,6 +540,8 @@ export interface JoinSharedRideInput extends Partial<RidePinFields> {
    * list changed since (and it may be the far-trip price).
    */
   quotedFare?: number | null;
+  /** Seats the booking takes (default 1): they all count against the car's 4. */
+  seats?: number;
 }
 
 /**
@@ -593,10 +596,12 @@ export async function joinLoadedSharedRideTx(
   const activePassengers = passengers.filter((p) =>
     isActivePassengerStatus(p.status),
   );
-  const newOccupancy = activePassengers.length + 1;
+  // Seats, not bookings (a booking for 2 takes 2): never past the car's 4.
+  const seats = input.seats ?? 1;
+  const newOccupancy = seatsTaken(activePassengers) + seats;
   validateSharedOccupancy(newOccupancy);
 
-  const newRate = getSharedFarePerRider(newOccupancy);
+  const newRate = currentSeatFare("SHARED");
 
   const passengersForRecompute: LockedFarePassenger[] = [
     ...activePassengers.map((p) => ({
@@ -640,6 +645,7 @@ export async function joinLoadedSharedRideTx(
       dropoffZoneId: input.dropoffZoneId,
       status: "WAITING",
       lockedFare: newPassengerLockedFare,
+      seats,
       pickupLat: input.pickupLat ?? null,
       pickupLng: input.pickupLng ?? null,
       pickupLabel: input.pickupLabel ?? null,

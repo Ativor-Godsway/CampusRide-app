@@ -57,10 +57,11 @@ async function availableDriverIds(prisma: PrismaClient, now: number): Promise<Se
   if (ids.size > 0) {
     const trips = await prisma.ride.findMany({
       where: { driverId: { in: [...ids] }, status: { in: [...ACTIVE_DRIVER_STATUSES] } },
-      select: { driverId: true, type: true, passengers: { select: { status: true } } },
+      select: { driverId: true, type: true, passengers: { select: { status: true, seats: true } } },
     });
     for (const trip of trips) {
-      const seats = trip.passengers.filter((p) => LIVE_SEAT_STATUSES.has(p.status)).length;
+      // Seats, not bookings: a booking for 2 takes 2 (@rida/shared rides/seats).
+      const seats = trip.passengers.reduce((n, p) => (LIVE_SEAT_STATUSES.has(p.status) ? n + p.seats : n), 0);
       if (trip.driverId && (trip.type !== "SHARED" || seats >= CAR_SEATS)) ids.delete(trip.driverId);
     }
   }

@@ -27,6 +27,7 @@ import {
   todayEarnings,
   type LatLng,
   type RequestTypeFilter,
+  seatsTaken,
 } from "@rida/shared";
 import {
   BottomSheet,
@@ -199,11 +200,8 @@ export default function DriverHomeScreen() {
     (trip.status === "MATCHED" || trip.status === "ARRIVED" || trip.status === "IN_PROGRESS")
       ? trip
       : null;
-  const seated = sharedTrip
-    ? overlayPassengers(sharedTrip.id, sharedTrip.passengers).filter(
-        (p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP",
-      ).length
-    : 0;
+  // Seats, not bookings: a booking for 2 takes 2 (@rida/shared rides/seats).
+  const seated = sharedTrip ? seatsTaken(overlayPassengers(sharedTrip.id, sharedTrip.passengers)) : 0;
   const freeSeats = Math.max(0, CAR_SEATS - seated);
   const fill = useQuery({
     queryKey: ["fillSuggestions", sharedTrip?.id],

@@ -10,6 +10,7 @@ import {
   stopMarkAction,
   type PassengerStatus,
   type TripStop,
+  seatsWord,
 } from "@rida/shared";
 import {
   BottomSheet,
@@ -113,7 +114,7 @@ export function StopListSheet({
             <View key={stop.key}>
               <ListRow
                 divider={i > 0}
-                title={`${stop.kind === "PICKUP" ? "Pick up" : "Drop off"} ${name}`}
+                title={`${stop.kind === "PICKUP" ? "Pick up" : "Drop off"} ${name}${stop.seats > 1 ? ` · ${seatsWord(stop.seats)}` : ""}`}
                 subtitle={`${stop.label}${eta}${waitNote}`}
                 leading={<StopMarker kind={stop.kind} number={i + 1} />}
                 trailing={

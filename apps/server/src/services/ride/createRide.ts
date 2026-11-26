@@ -1,18 +1,27 @@
 import type { PrismaClient } from "@prisma/client";
 import type { PaymentMethod, RideSource, RideStatus, RideType } from "@rida/shared";
-import { MIN_TRIP_METERS, haversineDistanceMeters } from "@rida/shared";
+import { MIN_TRIP_METERS, haversineDistanceMeters, isValidBookingSeats } from "@rida/shared";
 import { resolveRideEnd, type ResolvedRideEnd, type RideEndInput } from "../places/rideEnds";
 import { broadcastRide } from "./dispatch";
 import { findActiveRideForRider } from "./activeRide";
 import { logger } from "../../lib/logger";
 import { assertCanBook } from "../launch/launchSettings";
 import { assertServiceOpen } from "../service/serviceHours";
-import { fareForNewSeat } from "./farePricing";
+import { fareForNewBooking } from "./farePricing";
 
 /** Rides in any of these statuses count as "active" — a rider may have at most one at a time. */
 export { ACTIVE_RIDE_STATUSES } from "./activeRide";
 
 /** Thrown by createRide when pickupZoneId and dropoffZoneId are the same. */
+/** A seat count the booking's type can't have (Shared 1–3, Ride alone 1–4). */
+export class InvalidBookingSeatsError extends Error {
+  readonly code = "INVALID_SEATS";
+  constructor(type: RideType) {
+    super(type === "SHARED" ? "A Shared booking is for 1 to 3 seats." : "Ride alone is for 1 to 4 people.");
+    this.name = "InvalidBookingSeatsError";
+  }
+}
+
 export class SameZoneError extends Error {
   constructor() {
     super("pickupZoneId and dropoffZoneId must differ");
@@ -76,7 +85,14 @@ export interface CreateRideInput {
   dropoff?: RideEndInput;
   /** Already trimmed and length-checked (parsePickupNote). */
   pickupNote?: string | null;
-  /** Defaults to 1 — the occupancy at creation time (a fresh ride always starts with its requester as the sole passenger). */
+  /**
+   * Seats this booking takes (Shared 1–3: the rider and friends) or people
+   * in it (Ride alone 1–4), @rida/shared rides/seats.ts. Defaults to 1:
+   * older apps and USSD never send it. Kept on the request (occupancy) and
+   * on the booking's seat row (RidePassenger.seats).
+   */
+  seats?: number;
+  /** @deprecated The old name for `seats`. */
   occupancy?: number;
   /** Defaults to "MOMO", matching the pre-extraction route default. */
   paymentMethod?: PaymentMethod;
@@ -108,7 +124,8 @@ export interface CreateRideInput {
  */
 export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
   const { riderId, type } = input;
-  const occupancy = input.occupancy ?? 1;
+  const occupancy = input.seats ?? input.occupancy ?? 1;
+  if (!isValidBookingSeats(type, occupancy)) throw new InvalidBookingSeatsError(type);
   const paymentMethod: PaymentMethod = input.paymentMethod ?? "MOMO";
   const source: RideSource = input.source ?? "APP";
 
@@ -162,10 +179,10 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
 
   const pins = pinColumns(pickupPin, dropoffPin, input.pickupNote ?? null);
 
-  // The price is set now and locked on the seat (far-trip pricing,
-  // services/ride/farePricing.ts): Ride alone GH₵15; Shared GH₵7, or GH₵9
-  // on a trip between the north and south ends of campus.
-  const lockedFare = await fareForNewSeat(prisma, type, pickupPin, dropoffPin, input.shownFare);
+  // The price is set now and locked on the booking (services/ride/farePricing.ts):
+  // Ride alone GH₵15 whoever comes; Shared GH₵7 / 14 / 18 for 1 / 2 / 3 seats,
+  // plus GH₵2 a seat between the north and south ends of campus.
+  const lockedFare = await fareForNewBooking(prisma, type, occupancy, pickupPin, dropoffPin, input.shownFare);
 
   const ride = await prisma.ride.create({
     data: {
@@ -187,6 +204,7 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
           dropoffZoneId,
           status: "WAITING",
           lockedFare,
+          seats: occupancy,
           ...pins,
         },
       },

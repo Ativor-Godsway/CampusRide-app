@@ -4,6 +4,8 @@ import { Ionicons } from "@expo/vector-icons";
 import {
   clockTime,
   priceLoneRide,
+  peopleWord,
+  seatsWord,
   type RideCompletedFareSummary,
   type RideType,
 } from "@rida/shared";
@@ -74,10 +76,13 @@ export function TripCompleteSheet({
   driver,
   dropoffName,
   completedAt,
+  seats = 1,
   onDone,
 }: {
   rideId: string;
   rideType: RideType;
+  /** Seats in this rider's booking (people for Ride alone): "2 seats · Pay Kofi in cash". */
+  seats?: number;
   /** From GET /rides/:id once COMPLETED; undefined for a moment before. */
   fareSummary: RideCompletedFareSummary | undefined;
   driver: RideDriverInfo | null | undefined;
@@ -144,7 +149,9 @@ export function TripCompleteSheet({
             <View style={styles.cash}>
               <Ionicons name="cash-outline" size={20} color={colors.ink2} />
               <Text variant="body" color="secondary" style={styles.cashText}>
-                {driverName ? `Pay ${driverName} in cash` : "Pay your driver in cash"}
+                {`${seats > 1 ? `${rideType === "LONE" ? peopleWord(seats) : seatsWord(seats)} · ` : ""}${
+                  driverName ? `Pay ${driverName} in cash` : "Pay your driver in cash"
+                }`}
               </Text>
             </View>
           </View>

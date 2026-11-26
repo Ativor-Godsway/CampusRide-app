@@ -72,3 +72,4 @@ export * from "./rides/refusedBookings";
 export * from "./driver/requestBoard";
 export * from "./rides/waitFee";
 export * from "./rides/searchStatus";
+export * from "./rides/seats";

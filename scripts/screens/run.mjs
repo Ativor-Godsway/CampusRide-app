@@ -158,10 +158,12 @@ async function build(app) {
 const WIDTH = device.width;
 const HEIGHT = device.height;
 
-/** The element with this accessibility label, or else this visible text. */
+/** The element with this accessibility label, test id, or else this visible text. */
 async function find(tab, label) {
   const byLabel = await tab.$(`[aria-label=${JSON.stringify(label)}]`);
   if (byLabel) return byLabel;
+  const byTestId = await tab.$(`[data-testid=${JSON.stringify(label)}]`);
+  if (byTestId) return byTestId;
   return tab.waitForSelector(`::-p-text(${label})`, { timeout: 5_000 });
 }
 

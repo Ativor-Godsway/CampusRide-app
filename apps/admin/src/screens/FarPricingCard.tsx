@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ApiError, failureText, getFarPricing, getPlaces, saveFarPricing, type AdminPlace, type FarPricing } from "../api";
+import { ApiError, failureText, getFarPricing, getPlaces, priceSettingsOf, saveFarPricing, type AdminPlace, type FarPricing } from "../api";
 import { useToken } from "../auth";
-import { cedis, cedisInput, parseCedis } from "../lib/money";
+import { cedis } from "../lib/money";
 import { dayAndTime } from "../lib/time";
 
 type FarPlace = FarPricing["farPlaces"][number];
@@ -9,17 +9,14 @@ type End = FarPlace["end"];
 const END_LABEL: Record<End, string> = { NORTH: "North end", SOUTH: "South end (Diaspora)" };
 
 /**
- * Far-trip pricing (server: services/ride/farePricing.ts). Campus has two
- * far ends, North and South. A Shared seat costs the far price only on a
- * trip from one end to the other; every other Shared trip pays the normal
- * price. Ride alone is the same everywhere. A price is set when a ride is
- * requested: saving here changes new requests only.
+ * Far-trip places (server: services/ride/farePricing.ts). Campus has two far
+ * ends, North and South. A Shared booking pays the far surcharge (per seat,
+ * set with the other prices in Settings → Prices) only on a trip from one
+ * end to the other. Saving here changes new requests only.
  */
 export function FarPricingCard() {
   const token = useToken();
   const [loaded, setLoaded] = useState<FarPricing | null>(null);
-  const [normal, setNormal] = useState("");
-  const [far, setFar] = useState("");
   const [places, setPlaces] = useState<FarPlace[]>([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<AdminPlace[]>([]);
@@ -29,13 +26,11 @@ export function FarPricingCard() {
 
   const show = (f: FarPricing) => {
     setLoaded(f);
-    setNormal(cedisInput(f.settings.sharedPesewas));
-    setFar(cedisInput(f.settings.sharedFarPesewas));
     setPlaces(f.farPlaces);
   };
 
   useEffect(() => {
-    getFarPricing(token).then(show, (err) => setError(failureText("Loading far-trip pricing", err)));
+    getFarPricing(token).then(show, (err) => setError(failureText("Loading far-trip places", err)));
   }, [token]);
 
   useEffect(() => {
@@ -53,16 +48,10 @@ export function FarPricingCard() {
     return () => clearTimeout(t);
   }, [query, token]);
 
-  const normalPesewas = parseCedis(normal);
-  const farPesewas = parseCedis(far);
-  const lone = loaded?.settings.loneFarePesewas ?? 1500;
-  const valid = normalPesewas !== null && farPesewas !== null && normalPesewas >= 100 && farPesewas >= 100 && farPesewas <= lone;
   const chosen = useMemo(() => new Set(places.map((p) => p.id)), [places]);
   const changed =
     loaded !== null &&
-    (normalPesewas !== loaded.settings.sharedPesewas ||
-      farPesewas !== loaded.settings.sharedFarPesewas ||
-      places.length !== loaded.farPlaces.length ||
+    (places.length !== loaded.farPlaces.length ||
       places.some((p) => !loaded.farPlaces.some((q) => q.id === p.id && q.end === p.end)));
   const setEnd = (id: string, end: End | "") =>
     setPlaces((all) => (end ? all.map((p) => (p.id === id ? { ...p, end } : p)) : all.filter((p) => p.id !== id)));
@@ -73,15 +62,16 @@ export function FarPricingCard() {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    if (!valid || !loaded) return;
+    if (!loaded) return;
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      show(await saveFarPricing(token, { sharedPesewas: normalPesewas, sharedFarPesewas: farPesewas, farPlaces: places.map((p) => ({ id: p.id, end: p.end })) }));
+      // The prices go back exactly as they are (they're set in Settings → Prices).
+      show(await saveFarPricing(token, { ...priceSettingsOf(loaded), farPlaces: places.map((p) => ({ id: p.id, end: p.end })) }));
       setNotice("Saved. New ride requests use it at once; rides already requested keep the price they were booked at.");
     } catch (err) {
-      setError(err instanceof ApiError ? failureText("Saving far-trip pricing", err) : "Saving far-trip pricing failed");
+      setError(err instanceof ApiError ? failureText("Saving far-trip places", err) : "Saving far-trip places failed");
     } finally {
       setBusy(false);
     }
@@ -89,11 +79,12 @@ export function FarPricingCard() {
 
   return (
     <div className="inset">
-      <h3>Far-trip pricing</h3>
+      <h3>Far-trip places</h3>
       <p className="muted">
-        Campus has two far ends. A Shared seat costs the far price only when the trip goes from the north end to the south end, or back. Every other
-        Shared trip pays the normal price: main campus to or from either end, inside one end, and main campus to main campus. Ride alone is {cedis(lone)}{" "}
-        everywhere. A pin counts as the place it&apos;s at or near (within 250 m). The driver keeps 85% of whatever the rider pays.
+        Campus has two far ends. A Shared booking pays the far surcharge
+        {loaded ? ` (${cedis(loaded.settings.farPerSeatPesewas)} a seat)` : ""} only when the trip goes from the north end to the south end, or back.
+        Every other Shared trip pays the normal price. Ride alone is the same price everywhere. A pin counts as the place it&apos;s at or near (within
+        250 m). Prices are set in Settings → Prices.
       </p>
       {error ? <p className="error-text" role="alert">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}
@@ -101,18 +92,6 @@ export function FarPricingCard() {
         <p className="muted">Loading…</p>
       ) : (
         <form className="settings-form" onSubmit={(e) => void save(e)}>
-          <div className="filters">
-            <label className="field">
-              <span>Shared seat (GH₵)</span>
-              <input inputMode="decimal" value={normal} onChange={(e) => setNormal(e.target.value)} required />
-            </label>
-            <label className="field">
-              <span>Shared seat, far trip (GH₵)</span>
-              <input inputMode="decimal" value={far} onChange={(e) => setFar(e.target.value)} required />
-            </label>
-          </div>
-          {!valid ? <p className="error-text">Each price must be at least GH₵1, and a far seat can&apos;t cost more than Ride alone ({cedis(lone)}).</p> : null}
-
           {(["NORTH", "SOUTH"] as const).map((e) => {
             const mine = places.filter((p) => p.end === e);
             return (
@@ -167,14 +146,10 @@ export function FarPricingCard() {
               Last changed {dayAndTime(loaded.settings.updatedAt)}
               {loaded.settings.updatedBy ? ` by ${loaded.settings.updatedBy.name}` : ""}.
             </p>
-          ) : (
-            <p className="muted small">
-              Prices not changed yet: the defaults ({cedis(loaded.defaults.sharedPesewas)} and {cedis(loaded.defaults.sharedFarPesewas)}).
-            </p>
-          )}
+          ) : null}
           <p>
-            <button type="submit" className="tonal-button" disabled={busy || !valid || !changed}>
-              {busy ? "Saving…" : "Save far-trip pricing"}
+            <button type="submit" className="tonal-button" disabled={busy || !changed}>
+              {busy ? "Saving…" : "Save far-trip places"}
             </button>
           </p>
         </form>

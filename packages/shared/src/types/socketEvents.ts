@@ -195,6 +195,11 @@ export interface RideBroadcastPayload {
   pickupPlaceName?: string;
   dropoffPlaceName?: string;
   type: RideType;
+  /**
+   * Seats the booking takes (Shared 1–3) or people in it (Ride alone 1–4),
+   * rides/seats.ts. Absent from older servers: 1.
+   */
+  seats?: number;
   /** Total locked fare for the ride in integer pesewas. */
   farePesewas: number;
   /** Driver's 85% share in integer pesewas. */

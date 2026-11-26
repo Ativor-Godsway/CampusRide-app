@@ -25,7 +25,7 @@ export const RIDE_ROW_SELECT = {
   pickupLabel: true,
   dropoffLabel: true,
   // The fare is read from the seats (Ride.fareTotal is never written).
-  passengers: { select: { status: true, lockedFare: true, fareCharged: true } },
+  passengers: { select: { status: true, lockedFare: true, fareCharged: true, seats: true } },
   rider: { select: { id: true, name: true, phone: true } },
   driver: { select: { id: true, name: true, driver: { select: { id: true, plate: true } } } },
   pickupZone: { select: { id: true, name: true } },
@@ -52,7 +52,7 @@ export function rideRow(ride: RideRowSource) {
     source: ride.source,
     paymentMethod: ride.paymentMethod,
     /** Seats still on it (or carried, once completed). */
-    seats: ride.passengers.filter((p) => p.status !== "CANCELLED").length || ride.occupancy,
+    seats: ride.passengers.filter((p) => p.status !== "CANCELLED").reduce((n, p) => n + p.seats, 0) || ride.occupancy,
     /** Pesewas, from the seats' stored fares; null for a cancelled ride. */
     fareTotal: fare.pesewas,
     fareFinal: fare.final,

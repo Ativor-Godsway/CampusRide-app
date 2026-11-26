@@ -46,6 +46,8 @@ const signedIn: Routes = {
   "PUT /me/push-token": { ok: true },
   "POST /routes/legs": (body) =>
     roadRoute((body as { points: { latitude: number; longitude: number }[] }).points),
+  // The server's prices for this trip: Shared by seats (2026-11-26), Ride alone.
+  "POST /rides/quote": { fares: { SHARED: 700, LONE: 1500 }, sharedBySeats: [700, 1400, 1800], farTrip: false },
 };
 
 // Standing at Akuafo Hall, going to Balme Library.
@@ -328,16 +330,35 @@ const scenes: Scene[] = [
     params: { ...routeParams, from: "plan" },
     position: here,
   },
+  ...(
+    [
+      ["choose-a-ride-2-seats", [{ press: "shared-seats-plus" }, { wait: 600 }]],
+      ["choose-a-ride-3-seats-hint", [{ press: "shared-seats-plus" }, { press: "shared-seats-plus" }, { press: "shared-seats-plus" }, { wait: 600 }]],
+      ["choose-a-ride-alone", [{ press: "Ride alone" }, { wait: 600 }]],
+      ["choose-a-ride-alone-3", [{ press: "Ride alone" }, { press: "lone-people-plus" }, { press: "lone-people-plus" }, { wait: 600 }]],
+    ] as const
+  ).map(
+    ([name, steps]): Scene => ({
+      name,
+      note: "map: grey box",
+      user: rider,
+      routes: signedIn,
+      chain: [RootLayout, ChooseRide],
+      pathname: "/ride/type",
+      params: { ...routeParams, from: "plan" },
+      position: here,
+      steps: [...steps],
+    }),
+  ),
   {
-    name: "choose-a-ride-alone",
-    note: "map: grey box",
+    name: "choose-a-ride-far",
+    note: "map: grey box; a North ↔ South trip",
     user: rider,
-    routes: signedIn,
+    routes: { ...signedIn, "POST /rides/quote": { fares: { SHARED: 900, LONE: 1500 }, sharedBySeats: [900, 1800, 2400], farTrip: true } },
     chain: [RootLayout, ChooseRide],
     pathname: "/ride/type",
     params: { ...routeParams, from: "plan" },
     position: here,
-    steps: [{ press: "Ride alone" }],
   },
   {
     name: "choose-a-ride-note",

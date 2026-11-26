@@ -13,6 +13,7 @@ import {
   planBoardTake,
   settleBoardFilter,
   spokenCedis,
+  bookingLabel,
 } from "@rida/shared";
 import {
   Button,
@@ -40,9 +41,9 @@ function waiting(since: string, now: number): string {
   return !Number.isFinite(mins) || mins < 1 ? "Waiting <1 min" : `Waiting ${mins} min`;
 }
 
+/** "Shared · 2 seats", "Ride alone · 3 people" (@rida/shared rides/seats). */
 function kind(item: BoardRideItem): string {
-  const seats = item.seats ?? 1;
-  return item.type === "LONE" ? "Ride alone" : `Shared · ${seats} seat${seats === 1 ? "" : "s"}`;
+  return bookingLabel(item.type, item.seats ?? 1);
 }
 
 /**

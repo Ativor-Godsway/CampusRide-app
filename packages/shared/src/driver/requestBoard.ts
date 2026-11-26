@@ -1,3 +1,4 @@
+import { notEnoughSeatsText, seatsWord } from "../rides/seats";
 /**
  * The driver app's request board (2026-11-25): every open request on campus,
  * filtered by pickup then drop-off, and several taken at once ("Add to my
@@ -105,7 +106,8 @@ const seatsOf = (r: Pick<BoardRequest, "seats">) => r.seats ?? 1;
  *   request, which must be taken on its own), the rest added to that car;
  * - a Shared trip: all added, Shared only, within the free seats;
  * - a Ride alone trip: nothing.
- * At most PRICING.MAX_SHARED_OCCUPANCY (4) riders in a car.
+ * At most PRICING.MAX_SHARED_OCCUPANCY (4) SEATS in a car: a booking for 2
+ * takes 2 (rides/seats.ts).
  */
 export function planBoardTake(selected: readonly BoardRequest[], car: BoardCar | null): BoardPlan {
   if (selected.length === 0) return { ok: false, message: "Choose at least one request." };
@@ -114,16 +116,16 @@ export function planBoardTake(selected: readonly BoardRequest[], car: BoardCar |
   if (car) {
     if (car.type !== "SHARED") return { ok: false, message: "Your trip is Ride alone: no one else can join it." };
     if (lone.length > 0) return { ok: false, message: "Ride alone requests need an empty car." };
-    if (seats > car.freeSeats) {
-      return { ok: false, message: car.freeSeats === 0 ? "Your car is full." : `Only ${car.freeSeats} free seat${car.freeSeats === 1 ? "" : "s"} in your car.` };
-    }
+    if (seats > car.freeSeats) return { ok: false, message: notEnoughSeatsText(seats, car.freeSeats) };
     return { ok: true, claim: null, add: selected.map((r) => r.rideId), seats };
   }
   if (lone.length > 0) {
     if (selected.length > 1) return { ok: false, message: "A Ride alone request can't share the car: take it on its own." };
     return { ok: true, claim: lone[0]!.rideId, add: [], seats };
   }
-  if (seats > PRICING.MAX_SHARED_OCCUPANCY) return { ok: false, message: `A car takes at most ${PRICING.MAX_SHARED_OCCUPANCY} riders.` };
+  if (seats > PRICING.MAX_SHARED_OCCUPANCY) {
+    return { ok: false, message: `Needs ${seatsWord(seats)}: a car has ${PRICING.MAX_SHARED_OCCUPANCY}.` };
+  }
   const [first, ...rest] = [...selected].sort((a, b) => (a.pickupDistanceMeters ?? Infinity) - (b.pickupDistanceMeters ?? Infinity));
   return { ok: true, claim: first!.rideId, add: rest.map((r) => r.rideId), seats };
 }

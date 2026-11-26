@@ -520,6 +520,9 @@ model RidePassenger {
   /// Price-locked fare in pesewas, set at join-time and ratcheted downward
   /// only as occupancy increases; frozen permanently once the ride departs
   lockedFare     Int?
+  /// Seats this booking takes (Shared 1-3: the rider and friends) or people
+  /// in it (Ride alone 1-4), @rida/shared rides/seats.ts. One fare for all.
+  seats          Int             @default(1)
   status         PassengerStatus @default(WAITING)
   /// When the driver reached this rider's pickup (WAITING -> ARRIVED). Starts
   /// the rider's wait timer; "rider didn't show" unlocks 3 minutes after it.
@@ -1202,12 +1205,21 @@ enum FarEnd {
 /// stays PRICING.LONE_FARE. A price is locked on the seat when the ride is
 /// requested, so a change only reaches new requests.
 model FarePricingSetting {
-  id               String   @id @default("fares")
-  sharedPesewas    Int      @default(700)
-  sharedFarPesewas Int      @default(900)
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default("fares")
+  /// A 1-seat Shared booking.
+  sharedPesewas     Int      @default(700)
+  /// Kept in step (1 seat + the far surcharge) for older code; prices read farPerSeatPesewas.
+  sharedFarPesewas  Int      @default(900)
+  /// A 2-seat and a 3-seat Shared booking (2026-11-26).
+  shared2Pesewas    Int      @default(1400)
+  shared3Pesewas    Int      @default(1800)
+  /// Added per seat on a North <-> South trip.
+  farPerSeatPesewas Int      @default(200)
+  /// Ride alone (the whole car, 1-4 people).
+  lonePesewas       Int      @default(1500)
+  updatedAt         DateTime @updatedAt
   /// User.id of the admin who last changed it.
-  updatedBy        String?
+  updatedBy         String?
 }
 
 /// A ride request the server refused (2026-11-24), kept anonymous: no rider,
