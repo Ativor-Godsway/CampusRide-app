@@ -47,3 +47,21 @@ describe("resolveServerUrl", () => {
     expect(resolveServerUrl({ envUrl: "  ", configUrl: undefined, isDev: true })).toBe("http://localhost:3000");
   });
 });
+
+describe("the staging app (STAGING.md)", () => {
+  const STAGING = "https://campusride-staging-api.onrender.com";
+  it("always talks to its staging server, never the production URL it was bundled with", () => {
+    for (const isDev of [false, true]) {
+      expect(resolveServerUrl({ envUrl: "https://api.campusride.app", configUrl: STAGING, isDev, variant: "staging" })).toBe(STAGING);
+      expect(resolveServerUrl({ envUrl: undefined, configUrl: STAGING, isDev, variant: "staging" })).toBe(STAGING);
+    }
+  });
+
+  it("without a staging URL it refuses to start rather than fall back to production", () => {
+    expect(() => resolveServerUrl({ envUrl: "https://api.campusride.app", configUrl: undefined, isDev: false, variant: "staging" })).toThrow();
+  });
+
+  it("the production apps are unchanged", () => {
+    expect(resolveServerUrl({ envUrl: "https://api.campusride.app", configUrl: "https://api.campusride.app", isDev: false })).toBe("https://api.campusride.app");
+  });
+});

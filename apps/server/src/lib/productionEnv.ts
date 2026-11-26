@@ -1,4 +1,5 @@
 import { normalizePhone } from "./phone";
+import { isStagingServer, stagingProblems } from "./stagingMode";
 import { parsePhoneList } from "../config";
 
 /**
@@ -73,6 +74,11 @@ function httpsUrl(value: string): boolean {
 export function checkProductionEnv(env: Env): EnvCheck {
   const errors: string[] = [];
   const warnings: string[] = [];
+  // The staging server (lib/stagingMode.ts): every check below, except the
+  // few staging allows by design — and its own, which refuse a production
+  // database outright.
+  const staging = isStagingServer(env);
+  errors.push(...stagingProblems(env));
   const requireSet = (name: string, why: string) => {
     if (blank(env[name])) errors.push(`${name} is not set (${why})`);
   };
@@ -106,7 +112,7 @@ export function checkProductionEnv(env: Env): EnvCheck {
     .filter(Boolean);
   if (origins.length === 0)
     errors.push("CORS_ALLOWED_ORIGINS is not set (the admin site can't reach the API without it)");
-  else if (origins.some((o) => !httpsUrl(o)))
+  else if (origins.some((o) => !httpsUrl(o) && !(staging && /^http:\/\/localhost(:\d+)?$/.test(o))))
     errors.push("CORS_ALLOWED_ORIGINS must list only https:// origins");
 
   // Admins and safety.
@@ -126,9 +132,11 @@ export function checkProductionEnv(env: Env): EnvCheck {
     errors.push("SUPPORT_CONTACT_PHONE is not a Ghanaian number");
   }
 
-  // Login codes must really be sent.
+  // Login codes must really be sent (staging sends none: its test numbers use a fixed code).
   const provider = env.OTP_PROVIDER ?? "dummy";
-  if (provider === "moolre") {
+  if (staging) {
+    if (provider !== "dummy") errors.push("OTP_PROVIDER must be unset on staging (no login code is ever texted)");
+  } else if (provider === "moolre") {
     if (!isTrue(env.MOOLRE_SMS_ENABLED ?? env.MOOLRE_ENABLED))
       errors.push("MOOLRE_SMS_ENABLED must be true with OTP_PROVIDER=moolre");
     requireSet("MOOLRE_VAS_KEY", "Moolre SMS key, for login codes");
@@ -195,7 +203,7 @@ export function checkProductionEnv(env: Env): EnvCheck {
     warnings.push(
       "PAYSTACK_SECRET_KEY is not set: drivers can't pay their commission in the app (Pay now answers 503)",
     );
-  else if (env.PAYSTACK_SECRET_KEY!.trim().startsWith("sk_test_"))
+  else if (!staging && env.PAYSTACK_SECRET_KEY!.trim().startsWith("sk_test_"))
     errors.push(
       "PAYSTACK_SECRET_KEY is a Paystack TEST key (sk_test_…): production needs the live key (sk_live_…), or drivers' payments collect no real money",
     );

@@ -13,7 +13,7 @@
  * "no drivers online" block off), for testing outside service hours.
  * Clean up with `npm run simulate:requests:cleanup`.
  */
-import "./env"; // MUST stay first: loads .env.phase2-test and refuses anything else.
+import { SIM_ON_STAGING } from "./env"; // MUST stay first: loads .env.phase2-test (or, --staging, .env.staging) and refuses anything else.
 import { PrismaClient } from "@prisma/client";
 import { DEFAULT_WEEKLY_SCHEDULE, formatCedis } from "@rida/shared";
 import { assertLocalApiUrl } from "../../db/devDbGuard";
@@ -37,16 +37,29 @@ async function main() {
   const count = Math.min(MAX_SIM_RIDERS, Math.max(1, Math.round(num("count", 12))));
   const minutes = Math.max(0, num("minutes", 4));
   const sharedRatio = Math.min(1, Math.max(0, num("shared", 0.75)));
-  const server = arg("server") ?? `http://localhost:${process.env.PORT ?? 3000}`;
-  assertLocalApiUrl(server, "simulate:requests");
+  // Staging: the deployed staging server (STAGING_API_URL) and nothing else.
+  const server = SIM_ON_STAGING ? process.env.STAGING_API_URL! : (arg("server") ?? `http://localhost:${process.env.PORT ?? 3000}`);
+  if (!SIM_ON_STAGING) assertLocalApiUrl(server, "simulate:requests");
 
   const prisma = new PrismaClient({ log: ["error"] });
   try {
-    console.log("\nCampusRide request simulator  (phase2-test only)");
+    console.log(`\nCampusRide request simulator  (${SIM_ON_STAGING ? "STAGING" : "phase2-test only"})`);
     console.log(`  database: ${dbHostFromUrl(process.env.DATABASE_URL ?? "")}`);
     console.log(`  server:   ${server}`);
-    const health = await fetch(`${server}/health`).catch(() => null);
-    if (!health?.ok) throw new Error(`The local server isn't answering at ${server}. Start it first (npm run dev:phase2 --workspace apps/server).`);
+    // A sleeping free staging server takes up to a minute to wake.
+    let health = await fetch(`${server}/health`).catch(() => null);
+    for (let i = 0; SIM_ON_STAGING && !health?.ok && i < 12; i++) {
+      if (i === 0) console.log("  waking the staging server (free plan: up to a minute)…");
+      await sleep(5_000);
+      health = await fetch(`${server}/health`).catch(() => null);
+    }
+    if (!health?.ok) {
+      throw new Error(
+        SIM_ON_STAGING
+          ? `The staging server isn't answering at ${server}. Check it on Render (STAGING.md).`
+          : `The local server isn't answering at ${server}. Start it first (npm run dev:phase2 --workspace apps/server).`,
+      );
+    }
 
     if (process.argv.includes("--open-now")) {
       const data = { overrideMode: "OPEN" as const, overrideUntil: null, blockWhenNoDrivers: false };
@@ -55,7 +68,7 @@ async function main() {
         create: { id: "service", weekly: DEFAULT_WEEKLY_SCHEDULE as unknown as object, ...data },
         update: data,
       });
-      console.log("  CampusRide opened on the test copy (Open now; no-drivers block off). Takes up to a minute to show.");
+      console.log(`  CampusRide opened on ${SIM_ON_STAGING ? "staging" : "the test copy"} (Open now; no-drivers block off). Takes up to a minute to show.`);
     }
 
     // The real places for each spot (first active match by name).
@@ -101,7 +114,9 @@ async function main() {
         console.log(`  ${clock}  ✗ ${rider.name.padEnd(14)} ${kind} ${label} — ${res.status} ${body.code ?? ""} ${body.error ?? ""}`);
       }
     }
-    console.log("\nDone. Requests search for 7 minutes, then show \"no driver found\". Clean up: npm run simulate:requests:cleanup --workspace apps/server\n");
+    console.log(
+      `\nDone. Requests search for 7 minutes, then show "no driver found". Clean up: ${SIM_ON_STAGING ? "npm run staging:fake-requests:cleanup" : "npm run simulate:requests:cleanup --workspace apps/server"}\n`,
+    );
   } finally {
     await prisma.$disconnect();
   }

@@ -4,7 +4,7 @@
  * phase2-test branch only. Never touches any other account: the real drivers
  * and riders copied from production stay (dev/sim/cleanup.ts).
  */
-import "./env"; // MUST stay first: loads .env.phase2-test and refuses anything else.
+import "./env"; // MUST stay first: loads .env.phase2-test (or, --staging, .env.staging) and refuses anything else.
 import { PrismaClient } from "@prisma/client";
 import { dbHostFromUrl } from "../../db/dbHostGuard";
 import { cleanupSimulatorData, SimCleanupEntangledError } from "../sim/cleanup";

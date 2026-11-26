@@ -19,5 +19,6 @@ export function getServerUrl(): string {
     envUrl: process.env.EXPO_PUBLIC_API_URL,
     configUrl: Constants.expoConfig?.extra?.SERVER_URL as string | undefined,
     isDev: typeof __DEV__ !== "undefined" && __DEV__,
+    variant: Constants.expoConfig?.extra?.APP_VARIANT as string | undefined,
   });
 }

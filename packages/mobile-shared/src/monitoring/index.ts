@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import * as Sentry from "@sentry/react-native";
+import Constants from "expo-constants";
 import { channel, isEmbeddedLaunch, runtimeVersion, updateId } from "expo-updates";
 import { scrubSentryBreadcrumb, scrubSentryEvent } from "@rida/shared";
 
@@ -29,7 +30,9 @@ export function initMonitoring(app: "rider" | "driver"): boolean {
   const rate = raw ? Number(raw) : NaN;
   Sentry.init({
     dsn,
-    environment: channel || (__DEV__ ? "development" : "production"),
+    // The CampusRide Staging apps (STAGING.md) report as "staging", whatever their channel.
+    environment:
+      Constants.expoConfig?.extra?.APP_VARIANT === "staging" ? "staging" : channel || (__DEV__ ? "development" : "production"),
     sendDefaultPii: false,
     tracesSampleRate: rate >= 0 && rate <= 1 ? rate : 0.02,
     // A screenshot or the screen's layout could show a phone number or a pin.
