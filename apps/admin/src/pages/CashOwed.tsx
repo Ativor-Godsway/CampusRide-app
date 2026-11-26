@@ -14,6 +14,7 @@ import { periodLabel, periodQuery } from "../lib/period";
 import { useRouter } from "../lib/router";
 import { ago, dayAndTime, isoDay } from "../lib/time";
 import { usePagePeriod } from "../lib/usePeriod";
+import { WaitFeesSection } from "../screens/WaitFeesSection";
 import { usePolled } from "../lib/usePolled";
 import { Freshness, Page, Section } from "../shell/Page";
 import { useShell } from "../shell/ShellContext";
@@ -246,6 +247,8 @@ export function CashOwedPage() {
           </>
         )}
       </Loaded>
+
+      <WaitFeesSection query={query} />
 
       <Section
         title="Payments"

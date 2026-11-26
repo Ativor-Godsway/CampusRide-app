@@ -286,8 +286,19 @@ describe("sendPush", () => {
     fake.failSends();
     await expect(
       sendPush(prisma, { userIds: [rider.id], kind: "TRIP_STARTED", rideId: "ride7" }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(0); // no phone accepted it
     expect(await prisma.pushToken.count({ where: { token } })).toBe(1);
+  });
+
+  it("says how many phones Expo accepted it for; its own dedupe key lets a second, different push through", async () => {
+    const { rider } = await riderWithToken();
+    expect(await sendPush(prisma, { userIds: [rider.id], kind: "DRIVER_ARRIVED", rideId: "ride9" })).toBe(1);
+    // The same kind and ride again: suppressed…
+    expect(await sendPush(prisma, { userIds: [rider.id], kind: "DRIVER_ARRIVED", rideId: "ride9" })).toBe(0);
+    // …but the wait warning has its own key (services/ride/waitFee.ts).
+    expect(
+      await sendPush(prisma, { userIds: [rider.id], kind: "DRIVER_ARRIVED", rideId: "ride9", dedupeKey: "DRIVER_ARRIVED:wait:seat9" }),
+    ).toBe(1);
   });
 
   it("does nothing when push is switched off", async () => {

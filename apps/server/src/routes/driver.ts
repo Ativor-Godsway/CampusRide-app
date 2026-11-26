@@ -3,6 +3,7 @@ import { announceServiceSoon } from "../services/service/serviceAnnouncer";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { PassengerStatus, UndoableStep } from "@rida/shared";
+import { CLIENT_FEATURES_HEADER, WAIT_FEE_FEATURE, hasClientFeature, seatWaitForApp, type StoredSeatWait } from "@rida/shared";
 import {
   DRIVER_CANCEL_NOTE_MAX,
   DRIVER_CANCEL_REASONS,
@@ -34,6 +35,15 @@ import { ACCEPTED_VIA, departRide, addRiderToCar, FILLABLE_STATUSES, type Accept
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
 import { liveDriverWhere, noteDriverHeartbeat } from "../services/zones/driverLiveness";
 import { searchWindowMs } from "../services/ride/searchWindow";
+import {
+  GET_CLOSER_MESSAGE,
+  WAIT_POSITION_FRESH_MS,
+  checkWaitTimer,
+  seatPickupPoint,
+  waitFeeSettings,
+  warnRiderOfWait,
+} from "../services/ride/waitFee";
+import { latestDriverPosition } from "../services/zones/livePositions";
 import { suggestFillsForRide } from "../services/ride/ranking";
 import {
   carSeats,
@@ -46,7 +56,7 @@ import {
   seatFit,
 } from "../services/ride/requestFit";
 import { isServiceOpen, serviceHoursGateOn } from "../services/service/serviceHours";
-import { applyRideTransition, applyPassengerTransition, undoPassengerStep } from "../services/ride/rideService";
+import { applyRideTransition, applyPassengerTransition, undoPassengerStep, type ArrivalWaitOptions } from "../services/ride/rideService";
 import { finalizeRideCompletion } from "../services/ride/completion";
 import { announceClaim, announcePassengerChange, announcePassengerUndo } from "../services/ride/driverActionEvents";
 import { driverCancelPickup } from "../services/ride/cancels";
@@ -130,7 +140,13 @@ const SCHEMAS = {
   passengerAction: {
     params: object({ id, passengerId: id }, ["id", "passengerId"]),
     // reason/note: "Cancel pickup" (DRIVER_CANCEL_REASONS) or NO_SHOW.
-    body: object({ reason: oneOf(["NO_SHOW", ...DRIVER_CANCEL_REASONS]), note: text(DRIVER_CANCEL_NOTE_MAX, { nullable: true }) }),
+    body: object({
+      reason: oneOf(["NO_SHOW", ...DRIVER_CANCEL_REASONS]),
+      note: text(DRIVER_CANCEL_NOTE_MAX, { nullable: true }),
+      // "arrived": where the driver's phone is now (the wait timer's GPS check).
+      lat: latitude,
+      lng: longitude,
+    }),
   },
   passengerUndo: {
     params: object({ id, passengerId: id }, ["id", "passengerId"]),
@@ -177,7 +193,8 @@ function passengerRefusal(from: string, to: string): string {
   if (from === "CANCELLED") return "This rider has cancelled.";
   if (from === "DROPPED_OFF") return "This rider has already been dropped off.";
   if (to === "CANCELLED" && from === "ARRIVED") {
-    return "You've already arrived. If the rider doesn't come out, use \"Rider didn't show\" after 3 minutes.";
+    const minutes = waitFeeSettings().noShowMinutes;
+    return `You've already arrived. If the rider doesn't come out, use "Rider didn't show" after ${minutes} minutes.`;
   }
   if (to === "CANCELLED" && from === "PICKED_UP") return "This rider is already in the car. Drop them off instead.";
   if (to === "PICKED_UP" && from === "WAITING") return "Mark that you're at the pickup first.";
@@ -194,7 +211,18 @@ function passengerRefusal(from: string, to: string): string {
  * or cancelled, the driver has no reason to call them.
  */
 function passengerForApp(
-  p: { id: string; riderId: string; pickupZoneId: string; dropoffZoneId: string; lockedFare: number | null; status: string; arrivedAt: Date | null } & Partial<RidePinFields>,
+  p: {
+    id: string;
+    riderId: string;
+    pickupZoneId: string;
+    dropoffZoneId: string;
+    lockedFare: number | null;
+    status: string;
+    arrivedAt: Date | null;
+    waitFee?: number | null;
+    noShowOpensAt?: Date | null;
+  } & Partial<StoredSeatWait> &
+    Partial<RidePinFields>,
   zones: Map<string, { name: string }>,
   rider?: { name: string; phone: string } | null,
 ) {
@@ -208,9 +236,21 @@ function passengerForApp(
     dropoffZoneId: p.dropoffZoneId,
     pickupZoneName: zones.get(p.pickupZoneId)?.name ?? "",
     dropoffZoneName: zones.get(p.dropoffZoneId)?.name ?? "",
+    // Includes a wait fee charged at pickup (waitFeePesewas says how much of it).
     lockedFare: p.lockedFare,
     status: p.status as PassengerStatus,
     arrivedAt: p.arrivedAt ? p.arrivedAt.toISOString() : null,
+    // The pickup wait (services/ride/waitFee.ts): the countdown and the fee
+    // to come while ARRIVED, the fee charged, when "rider didn't show" opens.
+    wait: seatWaitForApp({
+      status: p.status,
+      waitStartedAt: p.waitStartedAt ?? null,
+      freeWaitEndsAt: p.freeWaitEndsAt ?? null,
+      waitFeeAmount: p.waitFeeAmount ?? null,
+      riderWarnedAt: p.riderWarnedAt ?? null,
+    }),
+    waitFeePesewas: p.waitFee ?? null,
+    noShowOpensAt: p.noShowOpensAt ? p.noShowOpensAt.toISOString() : null,
   };
 }
 
@@ -1571,6 +1611,19 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         return driverCancel(request, reply, rideId, passengerId, userId);
       }
 
+      // "Arrived" from an app that shows the wait timer starts it when the
+      // driver's GPS (sent with it, else their latest from the trip) is near
+      // this rider's pickup. Older apps: no timer, no fee (services/ride/waitFee.ts).
+      const settings = waitFeeSettings();
+      let wait: ArrivalWaitOptions | undefined;
+      if (action === "arrived" && hasClientFeature(request.headers[CLIENT_FEATURES_HEADER], WAIT_FEE_FEATURE)) {
+        const body = request.body as { lat?: number; lng?: number } | undefined;
+        const sent = typeof body?.lat === "number" && typeof body?.lng === "number" ? { latitude: body.lat, longitude: body.lng } : null;
+        const driverPoint = sent ?? latestDriverPosition(userId, WAIT_POSITION_FRESH_MS);
+        const zones = await getZoneMap(prisma);
+        wait = { settings, check: (seat) => checkWaitTimer(driverPoint, seatPickupPoint(seat, zones)) };
+      }
+
       let result;
       try {
         result = await applyPassengerTransition(prisma, passengerId, spec.to, new Date(), {
@@ -1578,6 +1631,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           expectedDriverId: userId,
           onlyFrom: spec.onlyFrom,
           noShow: spec.noShow,
+          wait,
+          legacyNoShowMinutes: settings.noShowMinutes,
         });
       } catch (err) {
         // A seat on another driver's trip is answered exactly like a seat
@@ -1586,14 +1641,15 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           return refuse(reply, 404, "PASSENGER_NOT_FOUND", "This rider is no longer on your trip.");
         }
         if (err instanceof NoShowTooEarlyError) {
-          const wait = err.availableAt ? Math.max(1, Math.ceil((err.availableAt.getTime() - Date.now()) / 60_000)) : null;
+          const left = err.availableAt ? Math.max(1, Math.ceil((err.availableAt.getTime() - Date.now()) / 60_000)) : null;
           return refuse(
             reply,
             409,
             "NO_SHOW_TOO_EARLY",
-            wait
-              ? `Give the rider a little longer — you can mark a no-show in ${wait} min.`
-              : "Mark that you're at the pickup first.",
+            left
+              ? `Give the rider a little longer — you can mark a no-show in ${left} min.`
+              : // Arrived, but the wait timer never started: the driver wasn't near the pickup.
+                GET_CLOSER_MESSAGE,
           );
         }
         if (err instanceof InvalidTransitionError) {
@@ -1605,14 +1661,49 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         throw err;
       }
 
-      const { passenger, ride, changed, rideStatusBefore } = result;
-      reply.code(200).send({ passenger, ride });
-      if (!changed) return reply;
+      const { passenger, ride, changed, rideStatusBefore, waitTimer } = result;
+      reply.code(200).send({
+        passenger,
+        ride,
+        // "arrived" from an app with the wait timer: STARTED, or why not (with the words to show).
+        ...(waitTimer ? { waitTimer, ...(waitTimer === "STARTED" ? {} : { waitTimerMessage: GET_CLOSER_MESSAGE }) } : {}),
+      });
+      // The timer started now: the rider's arrival push says the free wait and the fee.
+      const warning =
+        waitTimer === "STARTED" && passenger.waitStartedAt && passenger.freeWaitEndsAt && passenger.waitFeeAmount
+          ? {
+              id: passenger.id,
+              riderId: passenger.riderId,
+              rideId: ride.id,
+              waitStartedAt: passenger.waitStartedAt,
+              freeWaitEndsAt: passenger.freeWaitEndsAt,
+              waitFeeAmount: passenger.waitFeeAmount,
+            }
+          : null;
+      if (!changed) {
+        // A second tap that started the timer: only the warning (the rider already heard the driver is here).
+        if (warning) {
+          // The rider's app reads the seat again and shows the countdown.
+          emitToRider(passenger.riderId, "ride:passenger_status", {
+            rideId: ride.id,
+            ridePassengerId: passenger.id,
+            riderId: passenger.riderId,
+            status: "ARRIVED",
+          });
+          void warnRiderOfWait(prisma, warning);
+        }
+        return reply;
+      }
 
       // After the reply: tell the rider(s). Never blocks or fails the action.
-      announcePassengerChange(prisma, { passenger, ride, rideStatusBefore, driverUserId: userId, noShow: spec.noShow }).catch(
-        (err) => request.log.error({ err, rideId, passengerId }, `passenger ${action}: follow-up failed`),
-      );
+      announcePassengerChange(prisma, {
+        passenger,
+        ride,
+        rideStatusBefore,
+        driverUserId: userId,
+        noShow: spec.noShow,
+        waitWarning: warning,
+      }).catch((err) => request.log.error({ err, rideId, passengerId }, `passenger ${action}: follow-up failed`));
       return reply;
     });
   }

@@ -14,7 +14,7 @@ import type {
   UndoableStep,
   Zone,
 } from "@rida/shared";
-import { asArray, readList } from "@rida/shared";
+import { asArray, readList, type SeatWait } from "@rida/shared";
 import { api } from "../auth/apiClient";
 
 export interface DriverProfile {
@@ -390,11 +390,17 @@ export interface PassengerInCar extends Partial<RidePinFields> {
   /** Zone ids, for placing the rider's stops on the map. Optional: older servers don't send them. */
   pickupZoneId?: string;
   dropoffZoneId?: string;
-  /** The passenger's current downward-ratcheted fare in pesewas. */
+  /** The passenger's fare in pesewas, including a wait fee charged at pickup. */
   lockedFare: number | null;
   status: PassengerStatus;
   /** ISO time the driver reached this rider's pickup (wait timer, "rider didn't show"). */
   arrivedAt?: string | null;
+  /** The pickup wait while ARRIVED (@rida/shared rides/waitFee.ts); absent from older servers. */
+  wait?: SeatWait | null;
+  /** A wait fee charged at pickup (already in lockedFare). */
+  waitFeePesewas?: number | null;
+  /** ISO time "Rider didn't show" opens; null: not yet (no wait timer). Absent from older servers. */
+  noShowOpensAt?: string | null;
 }
 
 /**
@@ -497,17 +503,26 @@ export interface PassengerLifecycleResult {
   /** The anchor ride, including ALL passengers — its status may have changed
    * as a side effect (first pickup -> IN_PROGRESS, last dropoff -> COMPLETED). */
   ride: Ride & { passengers: RidePassengerRecord[] };
+  /** "arrived": whether the rider's wait timer started, or why not (absent from older servers). */
+  waitTimer?: "STARTED" | "TOO_FAR" | "NO_POSITION";
+  /** With a waitTimer that didn't start: "Get closer to the pickup to start the wait timer." */
+  waitTimerMessage?: string;
 }
 
-/** Driver has arrived at this one passenger's pickup point. WAITING -> ARRIVED. No ride-level effect. */
+/**
+ * Driver has arrived at this one passenger's pickup point. WAITING -> ARRIVED.
+ * `position`: where the phone is now — the server starts the rider's wait
+ * timer only within 100 m of their pickup. Again on an ARRIVED seat whose
+ * timer didn't start: tries to start it.
+ */
 export async function passengerArrived(
   rideId: string,
   passengerId: string,
-  options?: { timeoutMs?: number },
+  options?: { timeoutMs?: number; position?: { latitude: number; longitude: number } | null },
 ): Promise<PassengerLifecycleResult> {
   const res = await api.post<PassengerLifecycleResult>(
     `/rides/${rideId}/passengers/${passengerId}/arrived`,
-    undefined,
+    options?.position ? { lat: options.position.latitude, lng: options.position.longitude } : undefined,
     options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : undefined,
   );
   return res.data;

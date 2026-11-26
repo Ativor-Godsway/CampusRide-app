@@ -1,10 +1,11 @@
 import type { PrismaClient, Prisma, Ride, RidePassenger } from "@prisma/client";
 import {
-  NO_SHOW_AFTER_MS,
   PRICING,
   UNDO_ACCEPTED_FOR_MS,
   getSharedFarePerRider,
   validateSharedOccupancy,
+  waitFeeDue,
+  type WaitFeeSettings,
 } from "@rida/shared";
 import type { PassengerStatus, RideStatus, RidePinFields, UndoableStep } from "@rida/shared";
 import {
@@ -14,6 +15,8 @@ import {
   type RideTransitionContext,
 } from "./stateMachine";
 import { recomputeLockedFares, type LockedFarePassenger } from "./lockedFare";
+import { currentSeatFare } from "./fares";
+import { CLEARED_WAIT, type WaitTimerCheck } from "./waitFee";
 import {
   InvalidTransitionError,
   NoShowTooEarlyError,
@@ -136,6 +139,22 @@ export interface PassengerTransitionResult {
   changed: boolean;
   /** The ride's status before this call, so callers can tell what moved. */
   rideStatusBefore: RideStatus;
+  /**
+   * An "arrived" with `wait`: whether this call started the rider's wait
+   * timer ("STARTED"), or why not. Absent for other actions, for an older
+   * driver app, and for a seat whose timer was already running.
+   */
+  waitTimer?: WaitTimerCheck;
+}
+
+/**
+ * "Arrived" from a driver app that knows the wait fee (services/ride/
+ * waitFee.ts): the settings now, and whether the driver is close enough to
+ * this seat's pickup (worked out from the seat read in the transaction).
+ */
+export interface ArrivalWaitOptions {
+  settings: WaitFeeSettings;
+  check: (seat: RidePassenger) => WaitTimerCheck;
 }
 
 export interface PassengerTransitionOptions {
@@ -149,8 +168,18 @@ export interface PassengerTransitionOptions {
   expectedRideId?: string;
   /** The acting driver; any other driver gets NotRideOwnerError. */
   expectedDriverId?: string;
-  /** Cancel as "rider didn't show": only from ARRIVED, and only NO_SHOW_AFTER_MS after arrival. */
+  /** Cancel as "rider didn't show": only from ARRIVED, and only once the seat's noShowOpensAt has passed. */
   noShow?: boolean;
+  /**
+   * "Arrived" from a driver app that shows the wait timer: starts it if the
+   * driver is close enough — also on a seat already ARRIVED without one
+   * (the driver tapped again from nearer). Without it (an older driver app)
+   * an arrival starts no timer and no fee, and "rider didn't show" opens
+   * `legacyNoShowMinutes` after arriving.
+   */
+  wait?: ArrivalWaitOptions;
+  /** The no-show wait for an arrival without `wait` (the setting now). */
+  legacyNoShowMinutes?: number;
 }
 
 /**
@@ -166,12 +195,16 @@ export interface PassengerTransitionOptions {
  * two concurrent taps on the same car serialize and never both think they
  * were "last"):
  *
- * - WAITING -> ARRIVED: stamps arrivedAt (the rider's wait timer). If the ride
- *   is still MATCHED it moves to ARRIVED too, so a Ride-alone rider's app,
- *   which reads the ride status, says "your driver has arrived".
- * - ARRIVED -> PICKED_UP: stamps pickedUpAt; the ride's first pickup walks
- *   it to IN_PROGRESS (through ARRIVED if needed — RIDE_TRANSITIONS is
- *   checked for each hop).
+ * - WAITING -> ARRIVED: stamps arrivedAt. If the ride is still MATCHED it
+ *   moves to ARRIVED too, so a Ride-alone rider's app, which reads the ride
+ *   status, says "your driver has arrived". With `wait` and the driver near
+ *   the pickup, the rider's wait timer starts (startWait below).
+ * - ARRIVED -> PICKED_UP: stamps pickedUpAt, and the wait fee if the rider
+ *   came out after their free wait (waitFeeDue): stamped in waitFee and
+ *   ADDED to lockedFare, so the fare, the cash to collect, the commission
+ *   and every summary include it. The ride's first pickup walks it to
+ *   IN_PROGRESS (through ARRIVED if needed — RIDE_TRANSITIONS is checked for
+ *   each hop).
  * - PICKED_UP -> DROPPED_OFF: stamps fareCharged from lockedFare and
  *   droppedOffAt; the last active passenger's drop-off completes the ride.
  *
@@ -222,6 +255,18 @@ export async function applyPassengerTransition(
 
     const rideStatusBefore = ride.status as RideStatus;
     if (passenger.status === toStatus) {
+      // Already there by the driver's earlier tap, but without a timer: a
+      // tap from close enough starts it now (nothing else changes).
+      if (toStatus === "ARRIVED" && options.wait && !passenger.waitStartedAt) {
+        const check = options.wait.check(passenger);
+        if (check !== "STARTED") return { passenger, ride: { ...ride, passengers }, changed: false, rideStatusBefore, waitTimer: check };
+        const started = await tx.ridePassenger.update({
+          where: { id: passengerId },
+          data: await startWait(tx, passenger, options.wait.settings, now),
+        });
+        const withStarted = passengers.map((p) => (p.id === passengerId ? started : p));
+        return { passenger: started, ride: { ...ride, passengers: withStarted }, changed: false, rideStatusBefore, waitTimer: "STARTED" };
+      }
       return { passenger, ride: { ...ride, passengers }, changed: false, rideStatusBefore };
     }
     if (options.onlyFrom && !options.onlyFrom.includes(passenger.status as PassengerStatus)) {
@@ -230,12 +275,27 @@ export async function applyPassengerTransition(
     transitionPassenger(passenger, toStatus);
 
     if (options.noShow) {
-      const availableAt = passenger.arrivedAt
-        ? new Date(passenger.arrivedAt.getTime() + NO_SHOW_AFTER_MS)
-        : null;
+      // Set when the wait timer started (or at arrival, from an older driver
+      // app); null: no timer yet — the driver wasn't near the pickup.
+      const availableAt = passenger.noShowOpensAt;
       if (passenger.status !== "ARRIVED" || !availableAt || availableAt > now) {
         throw new NoShowTooEarlyError(availableAt);
       }
+    }
+
+    let waitTimer: WaitTimerCheck | undefined;
+    let waitData: Prisma.RidePassengerUpdateInput = {};
+    if (toStatus === "ARRIVED") {
+      if (options.wait) {
+        waitTimer = options.wait.check(passenger);
+        if (waitTimer === "STARTED") waitData = await startWait(tx, passenger, options.wait.settings, now);
+      } else if (options.legacyNoShowMinutes) {
+        waitData = { noShowOpensAt: new Date(now.getTime() + options.legacyNoShowMinutes * 60_000) };
+      }
+    }
+    const fee = toStatus === "PICKED_UP" ? waitFeeDue(passenger, now) : 0;
+    if (fee > 0) {
+      waitData = { waitFee: fee, lockedFare: (passenger.lockedFare ?? currentSeatFare(ride.type)) + fee };
     }
 
     const updatedPassenger = await tx.ridePassenger.update({
@@ -246,6 +306,7 @@ export async function applyPassengerTransition(
         ...(toStatus === "PICKED_UP" ? { pickedUpAt: now } : {}),
         ...(toStatus === "DROPPED_OFF" ? { fareCharged: passenger.lockedFare, droppedOffAt: now } : {}),
         ...(options.noShow ? { noShowAt: now } : {}),
+        ...waitData,
       },
     });
     const allPassengers = passengers.map((p) => (p.id === passengerId ? updatedPassenger : p));
@@ -295,9 +356,33 @@ export async function applyPassengerTransition(
       ride: { ...finalRide, passengers: allPassengers },
       changed: true,
       rideStatusBefore,
+      ...(waitTimer ? { waitTimer } : {}),
     };
   }, PASSENGER_TX_OPTIONS);
 }
+
+/**
+ * The columns that start a rider's wait timer now, from the settings now:
+ * free wait, fee (none when the setting is 0), when "rider didn't show"
+ * opens — and warned at once if their app already shows the countdown (the
+ * arrival push, sent after the commit, may warn them too: waitFee.ts).
+ */
+async function startWait(
+  tx: Tx,
+  seat: RidePassenger,
+  settings: WaitFeeSettings,
+  now: Date,
+): Promise<Prisma.RidePassengerUpdateInput> {
+  const rider = await tx.user.findUnique({ where: { id: seat.riderId }, select: { waitFeeAppAt: true } });
+  return {
+    waitStartedAt: now,
+    freeWaitEndsAt: new Date(now.getTime() + settings.freeWaitSeconds * 1000),
+    waitFeeAmount: settings.feePesewas > 0 ? settings.feePesewas : null,
+    noShowOpensAt: new Date(now.getTime() + settings.noShowMinutes * 60_000),
+    riderWarnedAt: rider?.waitFeeAppAt ? now : null,
+  };
+}
+
 
 export interface UndoStepOptions {
   /** The ride id from the URL; a passenger on another ride is "not found". */
@@ -327,8 +412,9 @@ export interface UndoStepOptions {
  *   undone after another rider's later drop-off closed the trip).
  *
  * What is put back:
- * - pickup: the seat to ARRIVED (or WAITING, `withArrival`), pickedUpAt
- *   cleared. If no rider is in the car or dropped off any more, the ride
+ * - pickup: the seat to ARRIVED (or WAITING, `withArrival`, with its wait
+ *   timer), pickedUpAt cleared, and a wait fee charged at it taken off
+ *   lockedFare again. If no rider is in the car or dropped off any more, the ride
  *   leaves IN_PROGRESS again (to ARRIVED, or MATCHED when no one is being
  *   waited for) and departedAt is cleared — the one way back out of
  *   IN_PROGRESS, so the car is exactly as it was before that pickup.
@@ -377,7 +463,13 @@ export async function undoPassengerStep(
       }
       if (!recent(passenger.pickedUpAt)) throw new UndoRefusedError("UNDO_EXPIRED", "Too late to undo this pickup.");
       const clearArrival = !!options.withArrival && recent(passenger.arrivedAt);
-      data = { status: clearArrival ? "WAITING" : "ARRIVED", pickedUpAt: null, ...(clearArrival ? { arrivedAt: null } : {}) };
+      data = {
+        status: clearArrival ? "WAITING" : "ARRIVED",
+        pickedUpAt: null,
+        ...(clearArrival ? { arrivedAt: null, ...CLEARED_WAIT } : {}),
+        // A wait fee charged at that pickup goes with it (the next pickup works it out again).
+        ...(passenger.waitFee ? { waitFee: null, lockedFare: (passenger.lockedFare ?? 0) - passenger.waitFee } : {}),
+      };
     } else {
       if (passenger.status === "PICKED_UP") return unchanged;
       if (passenger.status !== "DROPPED_OFF") {

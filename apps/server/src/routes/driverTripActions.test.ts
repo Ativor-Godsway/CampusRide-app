@@ -145,19 +145,19 @@ describe("passenger actions", () => {
 });
 
 describe("rider didn't show", () => {
-  it("is refused before 3 minutes and allowed after, marking the seat as a no-show", async () => {
+  it("is refused before 5 minutes (the wait fee setting) and allowed after, marking the seat as a no-show", async () => {
     const { ride, seats, act } = await driverWithCar(["WAITING"], "MATCHED", "LONE");
     await act(seats[0]!.id, "arrived");
 
     const early = await act(seats[0]!.id, "no-show");
     expect(early.statusCode).toBe(409);
     expect(early.json()).toMatchObject({ code: "NO_SHOW_TOO_EARLY" });
-    expect(early.json().error).toMatch(/in 3 min/);
+    expect(early.json().error).toMatch(/in 5 min/);
 
     // Wind the clock back instead of waiting.
     await prisma.ridePassenger.update({
       where: { id: seats[0]!.id },
-      data: { arrivedAt: new Date(Date.now() - 3 * 60_000 - 1_000) },
+      data: { arrivedAt: new Date(Date.now() - 5 * 60_000 - 1_000), noShowOpensAt: new Date(Date.now() - 1_000) },
     });
     const late = await act(seats[0]!.id, "no-show");
     expect(late.statusCode).toBe(200);
@@ -399,7 +399,7 @@ describe("adding a rider while the car is moving (IN_PROGRESS)", () => {
 });
 
 describe("rider didn't show, through the passenger cancel", () => {
-  it("cancel with reason NO_SHOW works three minutes after arriving, and not before", async () => {
+  it("cancel with reason NO_SHOW works five minutes after arriving, and not before", async () => {
     const { ride, seats, token } = await driverWithCar(["WAITING"], "MATCHED", "LONE");
     const cancel = (reason?: string) =>
       app.inject({
@@ -413,7 +413,7 @@ describe("rider didn't show, through the passenger cancel", () => {
     expect((await cancel()).json()).toMatchObject({ code: "INVALID_PASSENGER_STATE" }); // plain cancel: not after "I'm here"
     expect((await cancel("NO_SHOW")).json()).toMatchObject({ code: "NO_SHOW_TOO_EARLY" });
 
-    await prisma.ridePassenger.update({ where: { id: seats[0]!.id }, data: { arrivedAt: new Date(Date.now() - 181_000) } });
+    await prisma.ridePassenger.update({ where: { id: seats[0]!.id }, data: { arrivedAt: new Date(Date.now() - 301_000), noShowOpensAt: new Date(Date.now() - 1_000) } });
     expect((await cancel("NO_SHOW")).statusCode).toBe(200);
     const seat = await prisma.ridePassenger.findUniqueOrThrow({ where: { id: seats[0]!.id } });
     expect(seat.status).toBe("CANCELLED");

@@ -1,7 +1,10 @@
 import { StyleSheet, View } from "react-native";
 import {
   firstName,
+  formatCedis,
   noShowAvailableAt,
+  waitClock,
+  waitView,
   riderName,
   riderStatusWord,
   stopMarkAction,
@@ -16,6 +19,7 @@ import {
   Text,
   callPhone,
   colors,
+  serverNow,
   spacing,
   type PassengerInCar,
   type StatusTone,
@@ -49,7 +53,8 @@ export function StopListSheet({
   stops,
   passengers,
   nextEtaMinutes,
-  now,
+  // Ticks each second, so the countdowns re-render; the times use serverNow().
+  now: _now,
   onMark,
   onNoShow,
   onCancelPickup,
@@ -89,8 +94,19 @@ export function StopListSheet({
               ? ` · ${nextEtaMinutes} min`
               : "";
           const mark = stopMarkAction(stop);
-          const noShowAt = stop.kind === "PICKUP" ? noShowAvailableAt(stop.arrivedAt) : null;
-          const canNoShow = stop.passengerStatus === "ARRIVED" && noShowAt !== null && now >= noShowAt;
+          const clock = serverNow();
+          const noShowAt = stop.kind === "PICKUP" ? noShowAvailableAt(stop.arrivedAt, stop.noShowOpensAt) : null;
+          const canNoShow = stop.passengerStatus === "ARRIVED" && noShowAt !== null && clock >= noShowAt;
+          // Each waiting rider's own countdown (@rida/shared rides/waitFee.ts).
+          const wait = stop.kind === "PICKUP" && stop.passengerStatus === "ARRIVED" ? waitView(stop.wait, clock) : null;
+          const waitNote =
+            wait?.phase === "FREE"
+              ? ` · Free wait ${waitClock(wait.freeLeftMs)}`
+              : wait?.phase === "OVER" && wait.feePesewas !== null
+                ? ` · Wait fee +${formatCedis(wait.feePesewas)}`
+                : wait?.phase === "NOT_STARTED"
+                  ? " · Get closer to start the wait timer"
+                  : "";
           const canCancel =
             !!onCancelPickup && stop.kind === "PICKUP" && (stop.passengerStatus === "WAITING" || stop.passengerStatus === "ARRIVED");
           return (
@@ -98,7 +114,7 @@ export function StopListSheet({
               <ListRow
                 divider={i > 0}
                 title={`${stop.kind === "PICKUP" ? "Pick up" : "Drop off"} ${name}`}
-                subtitle={`${stop.label}${eta}`}
+                subtitle={`${stop.label}${eta}${waitNote}`}
                 leading={<StopMarker kind={stop.kind} number={i + 1} />}
                 trailing={
                   <StatusChip label={word} tone={TONE[stop.passengerStatus]} style={styles.chip} />

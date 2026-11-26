@@ -175,7 +175,7 @@ describe("rider notifications from driver actions", () => {
     const arrived = await carWithRider("ARRIVED", "ARRIVED");
     await prisma.ridePassenger.update({
       where: { id: arrived.seat.id },
-      data: { arrivedAt: new Date(Date.now() - 10 * 60_000) },
+      data: { arrivedAt: new Date(Date.now() - 10 * 60_000), noShowOpensAt: new Date(Date.now() - 5 * 60_000) },
     });
     const res = await app.inject({
       method: "POST",

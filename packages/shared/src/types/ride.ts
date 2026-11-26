@@ -1,3 +1,4 @@
+import type { SeatWait } from "../rides/waitFee";
 import type { RiderCancelReason } from "../rides/riderCancel";
 import type { RidePinFields } from "../rides/ridePins";
 export type RideType = "LONE" | "SHARED";
@@ -75,6 +76,14 @@ export interface RidePassenger extends Partial<RidePinFields> {
   pickupZoneId: string;
   dropoffZoneId: string;
   fareCharged: number | null;
+  /** This rider's fare, including a wait fee charged at pickup. */
   lockedFare: number | null;
   status: PassengerStatus;
+  /**
+   * The rider's own seat only (GET /rides/:id): their pickup wait while the
+   * driver is there (rides/waitFee.ts), and a wait fee charged (already in
+   * lockedFare). Absent from older servers and on other riders' seats.
+   */
+  wait?: SeatWait | null;
+  waitFeePesewas?: number | null;
 }

@@ -139,7 +139,7 @@ The request names a resource. If it isn't the caller's: **404**, same body as
 | `GET /rides/:id/fill-suggestions` | Yes | DRIVER | The car's own driver. Other open shared requests appear by first name and place name only. | account default |
 | `GET /rides/:id/add-preview` | Yes | DRIVER | The car's own driver. The rider being considered is shown by place name, never their pin. | account default |
 | `POST /rides/:id/add-passenger` | Yes | DRIVER | The car's own driver. | account default |
-| `POST /rides/:id/passengers/:passengerId/arrived` | Yes | DRIVER | The car's own driver, for a seat on that car. | account default |
+| `POST /rides/:id/passengers/:passengerId/arrived` | Yes | DRIVER | The car's own driver, for a seat on that car. Optional `{ lat, lng }` (the phone now) for the wait timer's 100 m check. | account default |
 | `POST /rides/:id/passengers/:passengerId/pickup` | Yes | DRIVER | As above. | account default |
 | `POST /rides/:id/passengers/:passengerId/dropoff` | Yes | DRIVER | As above. | account default |
 | `POST /rides/:id/passengers/:passengerId/cancel` | Yes | DRIVER | As above (the assigned driver only, before pickup). "Cancel pickup" with a reason: the rider's request searches again for another driver; recorded as a `DriverCancellation`. With `{ reason: "NO_SHOW" }`: "Rider didn't show", unchanged. | account default |
@@ -221,6 +221,9 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `GET /admin/refused-bookings` | Yes | ADMIN | Refused bookings in a period, per day and per reason, and the most refused pickup zones. Anonymous records only. Cached 60 s per period. | account default |
 | `GET /admin/dispatch-settings` | Yes | ADMIN | How long a request searches for a driver (seconds), the default and the bounds. | account default |
 | `PUT /admin/dispatch-settings` | Yes | ADMIN | Saves the search window (1–30 minutes). Audit-logged (`dispatch.search_window`). | account default; plus 60 changes / 15 min |
+| `GET /admin/wait-fee-settings` | Yes | ADMIN | The pickup wait fee settings (free wait seconds, fee in pesewas, no-show minutes), the defaults and the bounds. | account default |
+| `PUT /admin/wait-fee-settings` | Yes | ADMIN | Saves them for waits that start from then on. Audit-logged (`ride.wait_fee`). | account default; plus 60 changes / 15 min |
+| `GET /admin/wait-fees` | Yes | ADMIN | Wait fees collected (pesewas, riders) and no-shows per Accra day in the period (`?from=&to=`). Counts only. | account default |
 | `GET /admin/riders` | Yes | ADMIN | Rider totals for a period, sign-ups per day, and a page of riders (phones masked; search by phone or name). | account default |
 | `GET /admin/riders/:id` | Yes | ADMIN | One rider in full, incl. their phone number: rides, ratings given, SOS. | account default |
 | `GET /admin/safety` | Yes | ADMIN | Open SOS (any date) and the period's handled ones, SOS from before records, 1–2 star ratings. Cached 60 s per period. | account default |

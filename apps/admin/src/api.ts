@@ -1249,3 +1249,30 @@ export interface DispatchSettings {
 export const getDispatchSettings = (token: string) => get<DispatchSettings>(token, "/admin/dispatch-settings");
 export const saveDispatchSettings = (token: string, searchWindowSeconds: number) =>
   request<DispatchSettings>("/admin/dispatch-settings", { method: "PUT", body: JSON.stringify({ searchWindowSeconds }) }, token);
+
+// ─── Pickup wait fee (2026-11-25) ───────────────────────────────────────────
+
+export interface WaitFeeValues {
+  freeWaitSeconds: number;
+  feePesewas: number;
+  noShowMinutes: number;
+}
+
+export interface WaitFeeSettingsBody {
+  settings: WaitFeeValues & { updatedAt: string | null; updatedBy: { id: string; name: string } | null };
+  defaults: WaitFeeValues;
+  bounds: { [K in keyof WaitFeeValues]: { min: number; max: number } };
+}
+
+export const getWaitFeeSettings = (token: string) => get<WaitFeeSettingsBody>(token, "/admin/wait-fee-settings");
+export const saveWaitFeeSettings = (token: string, values: WaitFeeValues) =>
+  request<WaitFeeSettingsBody>("/admin/wait-fee-settings", { method: "PUT", body: JSON.stringify(values) }, token);
+
+export interface WaitFees {
+  days: Array<{ day: string; feesPesewas: number; lateRiders: number; noShows: number }>;
+  totalPesewas: number;
+  lateRiders: number;
+  noShows: number;
+}
+
+export const getWaitFees = (token: string, period: string) => get<WaitFees>(token, `/admin/wait-fees?${period}`);

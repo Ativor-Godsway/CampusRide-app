@@ -32,6 +32,7 @@ import {
   type PassengerInCar,
   type RideWithZones,
 } from "@rida/mobile-shared";
+import { latestFix } from "./positionSender";
 
 /**
  * Driver actions that feel instant (like the online toggle).
@@ -66,8 +67,18 @@ const TARGET: Record<PassengerAction, PassengerStatus> = {
   "no-show": "CANCELLED",
 };
 
+/** A fix this old still counts as where the phone is, for the wait timer's 100 m check. */
+const ARRIVED_FIX_MAX_AGE_MS = 30_000;
+
 const CALL: Record<PassengerAction, (rideId: string, passengerId: string, o: { timeoutMs: number }) => Promise<unknown>> = {
-  arrived: passengerArrived,
+  // With where the phone is now: the server starts the rider's wait timer
+  // only near their pickup, and says so if not (shown like a refusal, but the
+  // arrival itself stands).
+  arrived: async (rideId, passengerId, o) => {
+    const result = await passengerArrived(rideId, passengerId, { ...o, position: latestFix(ARRIVED_FIX_MAX_AGE_MS) });
+    if (result.waitTimer && result.waitTimer !== "STARTED" && result.waitTimerMessage) refuse(result.waitTimerMessage);
+    return result;
+  },
   pickup: passengerPickup,
   dropoff: passengerDropoff,
   cancel: passengerCancel,

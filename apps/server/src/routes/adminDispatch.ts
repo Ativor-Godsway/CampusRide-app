@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
+import { DEFAULT_WAIT_FEE_SETTINGS, WAIT_FEE_BOUNDS, waitFeeSettingsProblem, type WaitFeeSettings } from "@rida/shared";
 import { DEFAULT_SEARCH_WINDOW_SECONDS, SEARCH_WINDOW_BOUNDS_SECONDS, searchWindowProblem, DEFAULT_SHARED_FARE_PRICES, FAR_ENDS, PRICING, REFUSED_BOOKING_REASON_LABELS, sharedFarePricesProblem, type FarEnd } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
@@ -10,6 +11,7 @@ import { accraDay, daysIn, periodKey } from "../services/admin/period";
 import { getFarePricing, saveFarePricing } from "../services/ride/farePricing";
 import { refusedBookingCounts } from "../services/ride/refusedBookings";
 import { readSearchWindow, saveSearchWindow } from "../services/ride/searchWindow";
+import { readWaitFeeSettings, saveWaitFeeSettings, waitFeesByDay } from "../services/ride/waitFee";
 import {
   ZoneNeighbourError,
   currentZoneNeighbours,
@@ -47,6 +49,14 @@ const SCHEMAS = {
   refused: { querystring: object({ from: text(40), to: text(40) }, ["from", "to"]) },
   dispatchSettings: noInput,
   saveDispatchSettings: { body: object({ searchWindowSeconds: integer(1, 100_000) }, ["searchWindowSeconds"]) },
+  waitFeeSettings: noInput,
+  saveWaitFeeSettings: {
+    body: object(
+      { freeWaitSeconds: integer(1, 100_000), feePesewas: integer(0, 100_000), noShowMinutes: integer(1, 1_000) },
+      ["freeWaitSeconds", "feePesewas", "noShowMinutes"],
+    ),
+  },
+  waitFees: { querystring: object({ from: text(40), to: text(40) }, ["from", "to"]) },
 };
 
 export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: PrismaClient): void {
@@ -160,6 +170,49 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
     if (problem) return reply.code(400).send({ error: problem });
     await saveSearchWindow(prisma, searchWindowSeconds, request.user!.userId);
     return reply.send(await dispatchSettingsBody());
+  });
+
+  async function waitFeeSettingsBody() {
+    const setting = await readWaitFeeSettings(prisma);
+    const admin = setting.updatedBy ? await prisma.user.findUnique({ where: { id: setting.updatedBy }, select: { id: true, name: true } }) : null;
+    return {
+      settings: {
+        freeWaitSeconds: setting.freeWaitSeconds,
+        feePesewas: setting.feePesewas,
+        noShowMinutes: setting.noShowMinutes,
+        updatedAt: setting.updatedAt?.toISOString() ?? null,
+        updatedBy: admin,
+      },
+      defaults: DEFAULT_WAIT_FEE_SETTINGS,
+      bounds: WAIT_FEE_BOUNDS,
+    };
+  }
+
+  /** The pickup wait fee (2026-11-25, services/ride/waitFee.ts): free wait, fee, no-show wait. */
+  app.get("/admin/wait-fee-settings", { ...gate, schema: SCHEMAS.waitFeeSettings }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    return reply.send(await waitFeeSettingsBody());
+  });
+
+  /** Saves them for waits that start from now on (a wait already running keeps its own). Audit-logged. */
+  app.put("/admin/wait-fee-settings", { ...gate, schema: SCHEMAS.saveWaitFeeSettings, config: write }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const { freeWaitSeconds, feePesewas, noShowMinutes } = request.body as WaitFeeSettings;
+    const next = { freeWaitSeconds, feePesewas, noShowMinutes };
+    const problem = waitFeeSettingsProblem(next);
+    if (problem) return reply.code(400).send({ error: problem });
+    await saveWaitFeeSettings(prisma, next, request.user!.userId);
+    clearAdminCache();
+    return reply.send(await waitFeeSettingsBody());
+  });
+
+  /** Wait fees collected and no-shows in the period, per Accra day (Finances). */
+  app.get("/admin/wait-fees", { ...gate, schema: SCHEMAS.waitFees }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const p = periodOr400(request.query, reply);
+    if (!p) return;
+    const body = await cached(`wait-fees:${periodKey(p)}`, () => waitFeesByDay(prisma, p, accraDay, daysIn(p)));
+    return reply.send(body);
   });
 
   /** Refused bookings in the period: per Accra day and per reason (anonymous; services/ride/refusedBookings.ts). */

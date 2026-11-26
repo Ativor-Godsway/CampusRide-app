@@ -7,6 +7,7 @@ import { getDriverInfo } from "../user/driverInfo";
 import { closeOffer, reofferToDriver } from "./dispatch";
 import { announceRiderTripComplete, finalizeRideCompletion } from "./completion";
 import { sendRiderEtasNow } from "./riderEta";
+import { warnRiderOfWait } from "./waitFee";
 import { isActivePassengerStatus } from "./stateMachine";
 
 /**
@@ -51,9 +52,11 @@ export async function announcePassengerChange(
     rideStatusBefore: RideStatus;
     driverUserId: string;
     noShow?: boolean;
+    /** "Arrived" started the rider's wait timer: the arrival push states the free wait and the fee (waitFee.ts). */
+    waitWarning?: Parameters<typeof warnRiderOfWait>[1] | null;
   },
 ): Promise<void> {
-  const { passenger, ride, rideStatusBefore, driverUserId, noShow } = change;
+  const { passenger, ride, rideStatusBefore, driverUserId, noShow, waitWarning } = change;
   emitToRider(passenger.riderId, "ride:passenger_status", {
     rideId: ride.id,
     ridePassengerId: passenger.id,
@@ -64,7 +67,8 @@ export async function announcePassengerChange(
     emitRideEvent(ride.id, "ride:status", { rideId: ride.id, status: ride.status as RideStatus });
   }
   const pushKind = PASSENGER_PUSH[passenger.status as PassengerStatus];
-  if (pushKind) notifyRider(prisma, passenger.riderId, pushKind, ride.id, { driverUserId, noShow });
+  if (passenger.status === "ARRIVED" && waitWarning) void warnRiderOfWait(prisma, waitWarning);
+  else if (pushKind) notifyRider(prisma, passenger.riderId, pushKind, ride.id, { driverUserId, noShow });
   if (passenger.status === "ARRIVED" && ride.source === "USSD") {
     void notifyUssdRider(prisma, passenger.riderId, "Your driver has arrived.");
   }

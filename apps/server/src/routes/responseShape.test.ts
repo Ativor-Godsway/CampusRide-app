@@ -168,7 +168,8 @@ describe("GET /rides/:id", () => {
     expect(body.ride).not.toHaveProperty("driverShare");
 
     expect(Object.keys(body.ride.passengers[0]).sort()).toEqual(
-      ["id", "rideId", "riderId", "pickupZoneId", "dropoffZoneId", "fareCharged", "lockedFare", "status", ...PIN_KEYS].sort(),
+      // wait / waitFeePesewas: the rider's own seat only (routes/ridePins.ts riderSeatsView).
+      ["id", "rideId", "riderId", "pickupZoneId", "dropoffZoneId", "fareCharged", "lockedFare", "status", "wait", "waitFeePesewas", ...PIN_KEYS].sort(),
     );
   });
 

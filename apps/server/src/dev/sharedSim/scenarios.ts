@@ -291,9 +291,9 @@ export const SCENARIOS: Scenario[] = [
       await expectShown(world, a, r5!, since, "seat freed by a cancel — live");
       check((await a.accept(r5!.requestId!, label(r5!))).ok, "Driver A should take Rider 5");
 
-      // A no-show (3 minutes after arriving).
+      // A no-show (5 minutes after arriving: the wait fee setting's default).
       check((await a.seat(r2!, "arrived")).status === 200, "Driver A should arrive for Rider 2");
-      await world.advance(3 * 60_000 + 5_000);
+      await world.advance(5 * 60_000 + 5_000);
       since = Date.now();
       await r6!.request("SHARED");
       await expectHidden(world, a, r6!, since, "car full");

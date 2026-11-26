@@ -71,7 +71,8 @@ export function useRideTracking(rideId: string | undefined) {
       queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current) => withRideStatus(current, payload));
       // Back to searching (the driver had to cancel): a fresh read brings the
       // new search's start time, for the countdown.
-      if (payload.status === "CANCELLED" || payload.status === "COMPLETED" || payload.status === "REQUESTED") refetch();
+      // Arrived: the fresh read brings this rider's free-wait countdown (rides/waitFee).
+      if (payload.status === "CANCELLED" || payload.status === "COMPLETED" || payload.status === "REQUESTED" || payload.status === "ARRIVED") refetch();
     };
 
     const onDriverAssigned = (payload: DriverAssignedPayload) => {
@@ -104,7 +105,15 @@ export function useRideTracking(rideId: string | undefined) {
       queryClient.setQueryData<GetRideResult | undefined>(queryKey, (current) => withSeatStatus(current, payload));
       // A drop-off undone (back in the car): read the ride again, which also
       // starts the poll again (it stops once a fare summary is in hand).
-      if (payload.status === "DROPPED_OFF" || payload.status === "CANCELLED" || (hadFare && isLiveSeatStatus(payload.status))) {
+      // Arrived (or the wait timer started on a second tap): the fresh read
+      // brings the free-wait countdown (a wait fee charged at pickup comes
+      // with the next poll).
+      if (
+        payload.status === "DROPPED_OFF" ||
+        payload.status === "CANCELLED" ||
+        payload.status === "ARRIVED" ||
+        (hadFare && isLiveSeatStatus(payload.status))
+      ) {
         refetch();
       }
     };

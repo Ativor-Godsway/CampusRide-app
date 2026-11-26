@@ -10,6 +10,7 @@
  * Fields are blanked to null rather than removed, so every response keeps
  * one shape and an app can't tell "hidden" from "booked without a pin".
  */
+import { seatWaitForApp, type SeatWait } from "@rida/shared";
 import { RIDE_PIN_FIELDS, stopLabel, type RidePinFields } from "@rida/shared";
 
 type WithPins = Partial<RidePinFields>;
@@ -72,4 +73,36 @@ export function requestPlaceNames(
     pickupPlaceName: stopLabel(ride.pickupLabel, pickupZoneName),
     dropoffPlaceName: stopLabel(ride.dropoffLabel, dropoffZoneName),
   };
+}
+
+type StoredWait = {
+  status: string;
+  waitStartedAt: Date | null;
+  freeWaitEndsAt: Date | null;
+  waitFeeAmount: number | null;
+  riderWarnedAt: Date | null;
+  waitFee: number | null;
+};
+
+/**
+ * The seats as one rider may see them, wait-wise (services/ride/waitFee.ts):
+ * their own seat gets `wait` (the free-wait countdown and the fee to come,
+ * while their driver is at the pickup) and `waitFeePesewas` (a fee charged,
+ * already in lockedFare); every seat loses the stored wait columns, so a
+ * fellow rider's lateness is nobody else's business.
+ */
+export function riderSeatsView<P extends StoredWait & { riderId: string }>(
+  passengers: readonly P[],
+  viewerId: string,
+): Array<Omit<P, keyof StoredWait> & { status: string; wait?: SeatWait | null; waitFeePesewas?: number | null }> {
+  return passengers.map((p) => {
+    const { waitStartedAt, freeWaitEndsAt, waitFeeAmount, riderWarnedAt, waitFee, ...others } = p;
+    const rest = { ...others, status: p.status } as Omit<P, keyof StoredWait> & { status: string };
+    if (p.riderId !== viewerId) return rest;
+    return {
+      ...rest,
+      wait: seatWaitForApp({ status: p.status, waitStartedAt, freeWaitEndsAt, waitFeeAmount, riderWarnedAt }),
+      waitFeePesewas: waitFee,
+    };
+  });
 }
