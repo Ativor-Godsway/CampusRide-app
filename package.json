@@ -30,7 +30,14 @@
     "test:coverage": "npm run test:coverage --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "screens": "node scripts/screens/run.mjs"
+    "screens": "node scripts/screens/run.mjs",
+    "staging:deploy": "bash scripts/staging-deploy.sh",
+    "staging:wake": "bash scripts/staging-wake.sh",
+    "staging:update": "bash scripts/staging-update.sh",
+    "staging:admin": "bash scripts/staging-admin.sh",
+    "staging:accounts": "npm run staging:accounts --workspace apps/server",
+    "staging:fake-requests": "npm run staging:fake-requests --workspace apps/server --",
+    "staging:fake-requests:cleanup": "npm run staging:fake-requests:cleanup --workspace apps/server"
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.3"

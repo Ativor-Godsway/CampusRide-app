@@ -4,6 +4,7 @@ import { OTP } from "./constants";
 import { generateOtpCode, sha256 } from "./hash";
 import { loadTestOtpCode } from "./loadTestOtp";
 import { reviewDemoCodeFor } from "../reviewDemo/accounts";
+import { stagingOtpCodeFor } from "../../lib/stagingMode";
 import { InvalidOtpError, OtpAttemptsExceededError, OtpExpiredError } from "./errors";
 import { signVerificationToken } from "./tokens";
 import { enforce, type LimitCheck } from "../../rateLimit/limiter";
@@ -64,7 +65,10 @@ export async function requestOtp(
   // and no SMS (services/reviewDemo); every other number a random code by SMS.
   // The limits above apply to them all the same.
   const demoCode = await reviewDemoCodeFor(prisma, phone);
-  const code = demoCode ?? LOAD_TEST_CODE ?? generateOtpCode();
+  // On the staging server only, its test numbers (+233 99 …) get the fixed
+  // STAGING_TEST_OTP (lib/stagingMode.ts); nothing is texted there anyway.
+  const stagingCode = stagingOtpCodeFor(phone);
+  const code = demoCode ?? stagingCode ?? LOAD_TEST_CODE ?? generateOtpCode();
   const codeHash = sha256(code);
   const expiresAt = new Date(now.getTime() + (options.ttlMinutes ?? OTP.OTP_TTL_MINUTES) * MINUTE_MS);
 
@@ -72,7 +76,7 @@ export async function requestOtp(
     data: { phone, codeHash, purpose, expiresAt, createdAt: now },
   });
 
-  if (demoCode) return;
+  if (demoCode || stagingCode) return;
   await otpService.sendOtp(phone, code, options.message?.(code));
 }
 
