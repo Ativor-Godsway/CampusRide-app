@@ -73,6 +73,14 @@ export function useRideTracking(rideId: string | undefined) {
       // new search's start time, for the countdown.
       // Arrived: the fresh read brings this rider's free-wait countdown (rides/waitFee).
       if (payload.status === "CANCELLED" || payload.status === "COMPLETED" || payload.status === "REQUESTED" || payload.status === "ARRIVED") refetch();
+      // Accepted: "Driver found" shows at once; if the driver's details
+      // (ride:driver_assigned, a moment behind) aren't here yet, read them
+      // rather than wait for the next poll.
+      if (payload.status === "MATCHED") {
+        setTimeout(() => {
+          if (!queryClient.getQueryData<GetRideResult>(queryKey)?.driver) refetch();
+        }, 1500);
+      }
     };
 
     const onDriverAssigned = (payload: DriverAssignedPayload) => {

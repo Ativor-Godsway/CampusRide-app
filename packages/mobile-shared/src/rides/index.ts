@@ -5,3 +5,4 @@ export * from "./useRideTracking";
 export * from "./tripOutcome";
 export * from "./useLiveRoute";
 export * from "./eta";
+export * from "./searchStatus";

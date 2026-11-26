@@ -215,7 +215,13 @@ export async function requestsThatFitCar(
  * the broadcast reaches them; drivers with no trip are found by zone
  * (dispatch.getEligibleDrivers).
  */
-export async function carsThatFitRequest(prisma: PrismaClient, request: RequestRow, now: Date = new Date()) {
+export async function carsThatFitRequest(
+  prisma: PrismaClient,
+  request: RequestRow,
+  now: Date = new Date(),
+  /** Collects the drivers whose car was looked at (the rider's "cars checked"). */
+  seen?: Set<string>,
+) {
   if (request.type !== "SHARED") return [];
   if (request.status !== "REQUESTED" || request.driverId !== null) return [];
   const started = request.broadcastStartedAt?.getTime() ?? 0;
@@ -236,6 +242,7 @@ export async function carsThatFitRequest(prisma: PrismaClient, request: RequestR
       driver: { select: { driver: { select: { lastLat: true, lastLng: true } } } },
     },
   });
+  if (seen) for (const car of cars) if (car.driverId) seen.add(car.driverId);
   const fitting = cars.filter(
     (car) =>
       car.driverId !== null &&

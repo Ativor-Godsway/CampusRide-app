@@ -12,10 +12,23 @@ import {
 const ALL_KINDS = [...RIDER_PUSH_KINDS, ...DRIVER_PUSH_KINDS];
 
 describe("pushText", () => {
-  it("uses only the first name", () => {
-    expect(pushText("DRIVER_ASSIGNED", { driverName: "Kofi Mensah Boateng" }).body).toBe(
-      "Kofi is coming to pick you up.",
+  it("driver found: the first name and the car, colour first", () => {
+    const text = pushText("DRIVER_ASSIGNED", {
+      driverName: "Kofi Mensah",
+      car: { color: "Silver", make: "Toyota", model: "Vitz" },
+    });
+    expect(text).toEqual({ title: "Driver found!", body: "Kofi is on the way in a silver Toyota Vitz." });
+    expect(pushText("DRIVER_ASSIGNED", { driverName: "Ama", car: { color: "Orange", make: "Kia", model: null } }).body).toBe(
+      "Ama is on the way in an orange Kia.",
     );
+    expect(pushText("DRIVER_ASSIGNED", { driverName: "Ama", car: { model: "  Vitz " } }).body).toBe("Ama is on the way in a Vitz.");
+    // No car on the profile, or no name: no made-up words.
+    expect(pushText("DRIVER_ASSIGNED", { driverName: "Ama", car: { color: " ", make: null } }).body).toBe("Ama is on the way.");
+    expect(pushText("DRIVER_ASSIGNED", {}).body).toBe("Your driver is on the way.");
+  });
+
+  it("uses only the first name", () => {
+    expect(pushText("DRIVER_ASSIGNED", { driverName: "Kofi Mensah Boateng" }).body).toBe("Kofi is on the way.");
     expect(pushText("RIDER_CANCELLED", { riderName: "  Ama  Serwaa " }).body).toBe(
       "Ama cancelled the ride.",
     );

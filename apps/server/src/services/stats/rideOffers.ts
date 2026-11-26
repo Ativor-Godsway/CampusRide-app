@@ -2,6 +2,7 @@ import type { PrismaClient, RideOfferOutcome } from "@prisma/client";
 import type { OfferClosedReason } from "@rida/shared";
 import { logger } from "../../lib/logger";
 import { noteRequestAnswer } from "../admin/liveRequests";
+import { noteSearchDeclined } from "../ride/searchProgress";
 
 /**
  * Every request offered to a driver, and what became of it (RideOffer), for
@@ -48,6 +49,8 @@ export function recordOfferAnswer(
   now: Date = new Date(),
 ): Promise<void> {
   noteRequestAnswer(rideId, driverUserId, outcome, now.getTime());
+  // A decline: that driver no longer has it (the rider's search screen).
+  if (outcome === "DECLINED") noteSearchDeclined(rideId, driverUserId, now.getTime());
   return quietly(
     "answer",
     prisma.rideOffer.updateMany({

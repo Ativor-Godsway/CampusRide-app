@@ -24,7 +24,7 @@ import {
   resetPushStateForTests,
   setPushTransportForTests,
 } from "../services/push/pushService";
-import { checkDriverArriving, resetArrivingChecksForTests } from "../services/push/notify";
+import { checkDriverArriving, notifyRider, resetArrivingChecksForTests } from "../services/push/notify";
 import { fakeTransport, newToken } from "../services/push/testFixtures";
 
 vi.mock("../services/sms/sendSms", () => ({
@@ -219,9 +219,26 @@ describe("rider notifications from driver actions", () => {
     await vi.waitFor(() => expect(fake.sent).toHaveLength(1));
     expect(fake.sent[0]).toMatchObject({
       to: token,
-      body: "Yaw is coming to pick you up.",
+      title: "Driver found!",
+      body: "Yaw is on the way in a blue Toyota Corolla.",
       data: { kind: "DRIVER_ASSIGNED" },
     });
+  });
+
+  it("driver found again: a second driver accepting the same request within a minute still notifies", async () => {
+    const first = await driver("Yaw Owusu");
+    const second = await driver("Esi Badu");
+    const { ride, rider } = await createTestRide({ type: "LONE", status: "REQUESTED", broadcastStartedAt: new Date() });
+    rideIds.push(ride.id);
+    const token = await withToken(rider.id, "RIDER");
+    notifyRider(prisma, rider.id, "DRIVER_ASSIGNED", ride.id, { driverUserId: first.user.id });
+    await vi.waitFor(() => expect(fake.sent).toHaveLength(1));
+    // The same driver again (a retried request): once only.
+    notifyRider(prisma, rider.id, "DRIVER_ASSIGNED", ride.id, { driverUserId: first.user.id });
+    // The first had to cancel; another accepts.
+    notifyRider(prisma, rider.id, "DRIVER_ASSIGNED", ride.id, { driverUserId: second.user.id });
+    await vi.waitFor(() => expect(fake.sent).toHaveLength(2));
+    expect(fake.sent[1]).toMatchObject({ to: token, title: "Driver found!", body: "Esi is on the way in a blue Toyota Corolla." });
   });
 
   it("driver arriving: once, when the driver comes close to a rider still waiting", async () => {

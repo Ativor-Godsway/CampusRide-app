@@ -18,6 +18,9 @@ import { scheduleRequestExpiry } from "./timeouts";
 import type { AcceptedVia } from "./assembly";
 import { getZoneMap } from "../zones/zoneCache";
 import { liveDriverWhere } from "../zones/driverLiveness";
+import type { SearchScope } from "@rida/shared";
+import { forgetSearch, noteSearchDispatched, noteSearchOfferedTo } from "./searchProgress";
+import { pushSearchStatus } from "./searchStatus";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -89,7 +92,27 @@ function declinedNone(rideId: string) {
  * full car, a Ride alone car and an offline or stale driver are never in it.
  */
 export async function driversOfferedTo(prisma: PrismaClient, ride: RequestRow): Promise<string[]> {
+  return (await dispatchPlan(prisma, ride)).driverIds;
+}
+
+/**
+ * driversOfferedTo, with what the rider's search screen says about it
+ * (services/ride/searchStatus.ts): whether it went to drivers near the
+ * pickup or, nobody free there, to every driver on campus; and how many
+ * live drivers' cars were looked at — the nearby ones (free or on a trip),
+ * the campus-wide free ones when it fell back, and the Shared cars checked
+ * for a free seat and the detour.
+ */
+export interface DispatchPlan {
+  driverIds: string[];
+  scope: SearchScope;
+  carsChecked: number;
+}
+
+export async function dispatchPlan(prisma: PrismaClient, ride: RequestRow): Promise<DispatchPlan> {
   const nearby = await getEligibleDrivers(prisma, ride);
+  const considered = new Set(nearby.map((d) => d.userId));
+  let scope: SearchScope = "nearby";
   const onTrip = nearby.length
     ? await prisma.ride.findMany({
         where: { driverId: { in: nearby.map((d) => d.userId) }, status: { in: [...ACTIVE_DRIVER_STATUSES] } },
@@ -112,9 +135,13 @@ export async function driversOfferedTo(prisma: PrismaClient, ride: RequestRow): 
           ).map((r) => r.driverUserId),
         )
       : new Set<string>();
-    free = [...(await liveFreeDrivers(prisma)).keys()].filter((id) => !declined.has(id));
+    const campus = [...(await liveFreeDrivers(prisma)).keys()];
+    for (const id of campus) considered.add(id);
+    free = campus.filter((id) => !declined.has(id));
+    scope = "campus";
   }
-  return [...new Set([...free, ...(await carsThatFitRequest(prisma, ride))])];
+  const fitting = await carsThatFitRequest(prisma, ride, new Date(), considered);
+  return { driverIds: [...new Set([...free, ...fitting])], scope, carsChecked: considered.size };
 }
 
 /**
@@ -130,6 +157,8 @@ export function closeOffer(
   ride: { id: string; pickupZoneId: string; isReviewDemo?: boolean; driverId?: string | null },
   reason: OfferClosedReason,
 ): void {
+  // The rider's search screen stops counting it.
+  forgetSearch(ride.id);
   // Stats (services/stats/rideOffers.ts): the taker accepted, the rest closed with the reason.
   void recordOffersClosed(prisma, ride.id, reason, reason === "TAKEN" ? (ride.driverId ?? null) : null);
   // The admin live map stops showing it as waiting.
@@ -167,7 +196,13 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
   }
   // The search ends exactly when its window does, not at the next sweep.
   if (ride.status === "REQUESTED") scheduleRequestExpiry(prisma, ride.id, ride.broadcastStartedAt ?? ride.createdAt);
-  const eligible = (await driversOfferedTo(prisma, ride)).map((userId) => ({ userId }));
+  const plan = await dispatchPlan(prisma, ride);
+  const eligible = plan.driverIds.map((userId) => ({ userId }));
+  // The rider's search screen: who has it, how far it went, what was checked.
+  if (ride.status === "REQUESTED") {
+    noteSearchDispatched(ride.id, (ride.broadcastStartedAt ?? ride.createdAt).getTime(), plan);
+    pushSearchStatus(prisma, ride.id);
+  }
   // The admin live map's "waiting for a driver" (memory only), offered or not.
   if (!ride.isReviewDemo) {
     noteRequestOffered(
@@ -242,6 +277,9 @@ export function reofferToDriver(prisma: PrismaClient, driverUserId: string | nul
   void Promise.all([requestsForDriver(prisma, driverUserId), getZoneMap(prisma)])
     .then(([rides, zones]) => {
       for (const ride of rides) {
+        // The rider's search screen counts this driver too.
+        noteSearchOfferedTo(ride.id, (ride.broadcastStartedAt ?? ride.createdAt).getTime(), driverUserId);
+        pushSearchStatus(prisma, ride.id);
         emitDriverBroadcast(
           [driverUserId],
           broadcastPayload(ride, zones.get(ride.pickupZoneId)?.name ?? "", zones.get(ride.dropoffZoneId)?.name ?? ""),

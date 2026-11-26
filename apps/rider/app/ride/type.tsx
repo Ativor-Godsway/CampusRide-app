@@ -30,6 +30,7 @@ import {
   tripEndFromParams,
   tripEndParams,
   fareWithWait,
+  cancelSearchLine,
 } from "@rida/shared";
 import {
   ActiveRideExistsError,
@@ -82,6 +83,7 @@ import {
   RideOptionCard,
   illustrations,
   serverNow,
+  useRideSearchStatus,
 } from "@rida/mobile-shared";
 import { CancelRideContent, type SwitchOffer } from "../../components/ride/CancelRideContent";
 import {
@@ -452,6 +454,12 @@ export default function RideTypeScreen() {
   // ── Phase ───────────────────────────────────────────────────────────────────
   const isSearching = activeRideId !== null && (!ride || ride.status === "REQUESTED" || isMerged || movedTo !== null);
   const hasDriver = ride?.status === "MATCHED" || ride?.status === "ARRIVED";
+  // What the search is doing (counts, nearest car, the usual wait, cars for
+  // the map): only while this ride is really searching.
+  const searchStatus = useRideSearchStatus(
+    activeRideId ?? undefined,
+    !!ride && ride.status === "REQUESTED" && !isMerged && movedTo === null,
+  );
   /**
    * Over: a modal sheet over the dimmed map takes the ride sheet's place.
    * From this rider's own seat (riderTripOutcome): on a Shared trip, being
@@ -756,6 +764,8 @@ export default function RideTypeScreen() {
         showRecenter
         rounded={false}
         pulseZoneId={isSearching ? "pickup" : undefined}
+        // Free cars near the pickup while searching: approximate, no names (the Home map's).
+        cars={isSearching ? searchStatus?.cars : undefined}
         fitTo={fitTo}
         fitPadding={fitPadding}
         refitKey={framePhase}
@@ -917,6 +927,7 @@ export default function RideTypeScreen() {
             <FadeIn key="cancel">
               <CancelRideContent
                 stage={hasDriver ? "driver_assigned" : "searching"}
+                searchLine={isSearching ? cancelSearchLine(searchStatus) : null}
                 switchOffer={switchOffer}
                 switching={switching}
                 cancelling={cancelling}
@@ -930,12 +941,11 @@ export default function RideTypeScreen() {
               {isSearching && (
                 <FadeIn key="searching">
                   <SearchingPanel
-                    pickupZoneName={pickupEnd.label}
                     pickupPlaceName={pickupWhere?.name ?? null}
-                    dropoffZoneName={dropoffEnd.label}
                     rideType={rideType}
                     priceLabel={priceLabel}
                     broadcastStartedAt={ride?.broadcastStartedAt}
+                    status={searchStatus}
                     onCancel={() => setCancelOpen(true)}
                   />
                 </FadeIn>
@@ -956,6 +966,20 @@ export default function RideTypeScreen() {
                     onSwitch={() => void handleSwitch(switchTarget, "no_drivers")}
                     onCancel={() => setCancelOpen(true)}
                   />
+                </FadeIn>
+              )}
+
+              {/* A driver accepted and their details are still on the way (a
+                  moment, or one poll if the event was missed): say so at
+                  once rather than leave the sheet empty. */}
+              {hasDriver && !driver && !isMerged && (
+                <FadeIn key="driver-found">
+                  <SkeletonGroup label="Driver found. Loading your driver's details" style={styles.foundSkeleton}>
+                    <Text variant="title2" accessibilityRole="header">
+                      Driver found
+                    </Text>
+                    <Skeleton height={64} radius={radii.lg} />
+                  </SkeletonGroup>
                 </FadeIn>
               )}
 
@@ -1236,5 +1260,6 @@ const styles = StyleSheet.create({
   pickupDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.green500 },
   pillRoute: { flexShrink: 1 },
   resumeSkeleton: { gap: spacing.lg, paddingTop: spacing.md },
+  foundSkeleton: { gap: spacing.md },
   centerSelf: { alignSelf: "center" },
 });

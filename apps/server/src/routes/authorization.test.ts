@@ -109,6 +109,7 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /uploads/driver-photo/failure": "self",
 
   "GET /rides/:id": "owner",
+  "GET /rides/:id/search-status": "owner",
   "POST /rides/:id/decision": "owner",
   "POST /rides/:id/cancel": "owner",
   "POST /rides/:id/switch": "owner",
@@ -583,6 +584,12 @@ function cases(): OwnershipCase[] {
       route: "GET /rides/:id",
       name: "rider B can't read rider A's ride",
       run: () => as(riderB, "GET", `/rides/${car.id}`),
+      expectStatus: 404,
+    },
+    {
+      route: "GET /rides/:id/search-status",
+      name: "rider B can't see how rider A's search is going",
+      run: () => as(riderB, "GET", `/rides/${searching.id}/search-status`),
       expectStatus: 404,
     },
     {

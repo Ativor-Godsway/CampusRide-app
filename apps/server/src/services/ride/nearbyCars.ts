@@ -85,7 +85,7 @@ const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 /**
  * Up to NEARBY_CARS_MAX cars for this rider, nearest to `near` first (any
  * order without it). None while the rider has a ride going on: they follow
- * their own driver.
+ * their own driver (the search screen asks carsNear itself).
  */
 export async function nearbyCars(
   prisma: PrismaClient,
@@ -98,11 +98,35 @@ export async function nearbyCars(
   // Nobody to show: no database read at all.
   if (fresh.size === 0) return [];
   if (await findActiveRideForRider(prisma, riderId)) return [];
+  return (await carsNear(prisma, near, now)).cars;
+}
+
+/**
+ * The available cars around `near` (rules above), disguised for a rider's
+ * map, nearest first; and how far the nearest one really is (metres, from
+ * its true position, not the disguised one), or null with none. Drivers in
+ * `leaveOut` (e.g. those who declined the rider's request) don't count for
+ * the nearest.
+ */
+export async function carsNear(
+  prisma: PrismaClient,
+  near: LatLng | null,
+  now: number = Date.now(),
+  leaveOut: ReadonlySet<string> = new Set(),
+): Promise<{ cars: NearbyCar[]; nearestMeters: number | null }> {
+  const fresh = freshDriverPositions(NEARBY_CAR_FRESH_MS, now);
+  for (const [userId, p] of fresh) if (!isInServiceArea(p)) fresh.delete(userId);
+  if (fresh.size === 0) return { cars: [], nearestMeters: null };
 
   const available = await availableDriverIds(prisma, now);
   const cars: Array<NearbyCar & { distance: number }> = [];
+  let nearestMeters: number | null = null;
   for (const [userId, p] of fresh) {
     if (!available.has(userId)) continue;
+    if (near && !leaveOut.has(userId)) {
+      const real = haversineDistanceMeters(near, p);
+      if (nearestMeters === null || real < nearestMeters) nearestMeters = real;
+    }
     const { key, north, east } = disguise(userId, now);
     const latitude = p.latitude + north / METERS_PER_DEGREE;
     const longitude = p.longitude + east / (METERS_PER_DEGREE * Math.cos((p.latitude * Math.PI) / 180));
@@ -114,10 +138,13 @@ export async function nearbyCars(
       distance: near ? haversineDistanceMeters(near, { latitude, longitude }) : 0,
     });
   }
-  return cars
-    .sort((a, b) => a.distance - b.distance || a.key.localeCompare(b.key))
-    .slice(0, NEARBY_CARS_MAX)
-    .map(({ distance: _distance, ...car }) => car);
+  return {
+    cars: cars
+      .sort((a, b) => a.distance - b.distance || a.key.localeCompare(b.key))
+      .slice(0, NEARBY_CARS_MAX)
+      .map(({ distance: _distance, ...car }) => car),
+    nearestMeters,
+  };
 }
 
 /** Tests only: forget who was available. */

@@ -429,3 +429,41 @@ describe("a deleted account", () => {
     expect(await refusal(token)).toBe(SOCKET_AUTH_ERROR);
   });
 });
+
+describe("ride:search_status (the rider's Finding your driver screen)", () => {
+  it("goes to the booking rider's own room only, and never once the ride stops searching", async () => {
+    const { pushSearchStatus, resetSearchStatusForTests } = await import("../services/ride/searchStatus");
+    resetSearchStatusForTests();
+    const { pickup, dropoff } = await getTestZones();
+    const rider = await createTestUser("RIDER");
+    const other = await createTestUser("RIDER");
+    userIds.push(rider.id, other.id);
+    const ride = await prisma.ride.create({
+      data: {
+        riderId: rider.id,
+        type: "LONE",
+        status: "REQUESTED",
+        pickupZoneId: pickup.id,
+        dropoffZoneId: dropoff.id,
+        broadcastStartedAt: new Date(),
+      },
+    });
+    const mine = await connectAs(tokenFor(rider));
+    const theirs = await connectAs(tokenFor(other));
+    const seenByMe = collect<{ rideId: string; driversOffered: number | null }>(mine, RIDE_EVENTS.SEARCH_STATUS, 1500);
+    const seenByThem = collect(theirs, RIDE_EVENTS.SEARCH_STATUS, 1500);
+    pushSearchStatus(prisma, ride.id);
+    const [me, them] = await Promise.all([seenByMe, seenByThem]);
+    expect(me).toHaveLength(1);
+    expect(me[0]!.rideId).toBe(ride.id);
+    expect(typeof me[0]!.driversOffered).toBe("number");
+    expect(them).toHaveLength(0);
+
+    // Taken: nothing more is sent.
+    await prisma.ride.update({ where: { id: ride.id }, data: { status: "CANCELLED" } });
+    resetSearchStatusForTests();
+    const after = collect(mine, RIDE_EVENTS.SEARCH_STATUS, 800);
+    pushSearchStatus(prisma, ride.id);
+    expect(await after).toHaveLength(0);
+  });
+});

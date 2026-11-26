@@ -1,3 +1,4 @@
+import type { RideSearchStatus } from "../rides/searchStatus";
 import type { PassengerStatus, PaymentMethod, PaymentStatus, RideCancelReason, RideStatus, RideType } from "./ride";
 
 /**
@@ -16,6 +17,8 @@ export const RIDE_EVENTS = {
   CAR_NOTICE: "ride:car_notice",
   /** This rider's road ETA, worked out by the server (to their own room only). */
   ETA: "ride:eta",
+  /** What the search for a driver is doing (rides/searchStatus.ts), to the rider's own room only. */
+  SEARCH_STATUS: "ride:search_status",
 } as const;
 
 export type RideServerEvent = (typeof RIDE_EVENTS)[keyof typeof RIDE_EVENTS];
@@ -126,6 +129,7 @@ export interface RideServerEventPayloads {
   "ride:passenger_status": PassengerStatusPayload;
   "ride:car_notice": CarNoticePayload;
   "ride:eta": RideEtaPayload;
+  "ride:search_status": RideSearchStatus;
 }
 
 /**
