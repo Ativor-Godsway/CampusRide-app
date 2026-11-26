@@ -38,7 +38,9 @@ type Step = "confirm" | "reason";
  * mounts it fresh).
  *
  * 1. "Cancel this ride?" — the other ride type at its price as one tonal
- *    row, then "Keep waiting" (primary) and "Cancel ride" (red text).
+ *    row, then "Keep my ride" (primary) and "Cancel ride" (red text). While
+ *    still searching: "Cancel your request?", how many drivers have it
+ *    (when there is a real number), "Keep searching" and "Cancel request".
  * 2. Only after "Cancel ride": "Why are you cancelling?" — one tap on a
  *    reason chip is required, typing never is ("Other" reveals an optional
  *    note). "Cancel ride" confirms; "Back" returns to step 1.
@@ -51,8 +53,14 @@ export function CancelRideContent({
   onKeep,
   onSwitch,
   onConfirmCancel,
+  searchLine = null,
 }: {
   stage: "searching" | "driver_assigned";
+  /**
+   * While searching: "3 drivers have it." from the search status (a real
+   * count, cancelSearchLine), or null to say nothing.
+   */
+  searchLine?: string | null;
   switchOffer: SwitchOffer | null;
   switching: boolean;
   cancelling: boolean;
@@ -66,13 +74,23 @@ export function CancelRideContent({
   const [note, setNote] = useState("");
 
   const busy = switching || cancelling;
+  const searching = stage === "searching";
+  // While searching it is a request, not yet a ride.
+  const cancelLabel = searching ? "Cancel request" : "Cancel ride";
 
   if (step === "confirm") {
     return (
       <FadeIn key="confirm" style={styles.step}>
-        <Text variant="title2" accessibilityRole="header">
-          Cancel this ride?
-        </Text>
+        <View style={styles.heading}>
+          <Text variant="title2" accessibilityRole="header">
+            {searching ? "Cancel your request?" : "Cancel this ride?"}
+          </Text>
+          {searching && searchLine ? (
+            <Text variant="body" color="secondary" testID="cancel-search-line">
+              {searchLine}
+            </Text>
+          ) : null}
+        </View>
 
         {switchOffer ? (
           <Button
@@ -87,17 +105,8 @@ export function CancelRideContent({
         ) : null}
 
         <View style={styles.actions}>
-          <Button
-            label={stage === "searching" ? "Keep waiting" : "Keep my ride"}
-            onPress={onKeep}
-            disabled={busy}
-          />
-          <Button
-            label="Cancel ride"
-            variant="danger"
-            onPress={() => setStep("reason")}
-            disabled={busy}
-          />
+          <Button label={searching ? "Keep searching" : "Keep my ride"} onPress={onKeep} disabled={busy} />
+          <Button label={cancelLabel} variant="danger" onPress={() => setStep("reason")} disabled={busy} />
         </View>
       </FadeIn>
     );
@@ -147,7 +156,7 @@ export function CancelRideContent({
 
       <View style={styles.actions}>
         <Button
-          label="Cancel ride"
+          label={cancelLabel}
           variant="danger"
           onPress={() => reason && onConfirmCancel(reason, note)}
           disabled={!reason}
@@ -167,6 +176,7 @@ export function CancelRideContent({
 
 const styles = StyleSheet.create({
   step: { gap: spacing[5] },
+  heading: { gap: spacing[1] },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: spacing[2] },
   noteWrap: { gap: spacing[1] },
   // A filled field, as Input (docs/design-system.md): surface-2, radius 14.

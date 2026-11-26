@@ -93,6 +93,8 @@ export interface PushTextInput {
   rebooked?: boolean;
   /** DRIVER_CANCELLED / RIDER_CANCELLED: CampusRide (an admin) cancelled it, not the other person. */
   byAdmin?: boolean;
+  /** DRIVER_ASSIGNED: the driver's car as stored on their profile ("Silver", "Toyota", "Vitz"). */
+  car?: { color?: string | null; make?: string | null; model?: string | null } | null;
   /** DRIVER_ARRIVED: the rider's free wait started (rides/waitFee.ts) — the push states it and the fee. */
   freeWait?: { seconds: number; feePesewas: number };
 }
@@ -102,13 +104,27 @@ export interface PushText {
   body: string;
 }
 
+/**
+ * "a silver Toyota Vitz", "an orange Kia", "a Vitz": the car as the rider
+ * will see it, colour first and in lower case. Null when nothing is stored.
+ */
+export function carWords(car: PushTextInput["car"]): string | null {
+  const clean = (v: string | null | undefined) => (v ?? "").replace(/\s+/g, " ").trim().slice(0, 30);
+  const color = clean(car?.color).toLowerCase();
+  const words = [color, clean(car?.make), clean(car?.model)].filter(Boolean).join(" ");
+  if (!words) return null;
+  return `${/^[aeiou]/i.test(words) ? "an" : "a"} ${words}`;
+}
+
 /** The title and body for a notification. Names are reduced to a first name. */
 export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
   const driver = firstName(input.driverName) || "Your driver";
   const rider = firstName(input.riderName) || "The rider";
   switch (kind) {
-    case "DRIVER_ASSIGNED":
-      return { title: "Driver on the way", body: `${driver} is coming to pick you up.` };
+    case "DRIVER_ASSIGNED": {
+      const car = carWords(input.car);
+      return { title: "Driver found!", body: car ? `${driver} is on the way in ${car}.` : `${driver} is on the way.` };
+    }
     case "DRIVER_ARRIVING":
       return { title: "Driver almost there", body: `${driver} is almost at your pickup.` };
     case "DRIVER_ARRIVED":

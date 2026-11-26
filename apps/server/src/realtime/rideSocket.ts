@@ -383,6 +383,11 @@ export function addRiderToRide(riderId: string, rideId: string): void {
   ioRef?.in(roomForRider(riderId)).socketsJoin(roomForRide(rideId));
 }
 
+/** Whether the socket server is running (not in route tests): work done only to emit can be skipped. */
+export function hasSocketServer(): boolean {
+  return ioRef !== null;
+}
+
 /** Emits a contract event to everyone subscribed to a ride's room. No-op if the socket server isn't initialized (e.g. tests). */
 export function emitRideEvent<E extends RideServerEvent>(
   rideId: string,

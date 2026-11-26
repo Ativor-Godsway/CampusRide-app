@@ -28,6 +28,19 @@ async function nameOf(
   return user?.name ?? null;
 }
 
+/** The driver's car as their profile has it, for "in a silver Toyota Vitz". */
+async function carOf(
+  prisma: PrismaClient,
+  userId: string | null | undefined,
+): Promise<{ color: string | null; make: string | null; model: string | null } | null> {
+  if (!userId) return null;
+  const driver = await prisma.driver.findUnique({
+    where: { userId },
+    select: { carColor: true, carMake: true, carModel: true },
+  });
+  return driver ? { color: driver.carColor, make: driver.carMake, model: driver.carModel } : null;
+}
+
 /** A rider-facing update that names their driver (by first name). */
 export function notifyRider(
   prisma: PrismaClient,
@@ -37,12 +50,21 @@ export function notifyRider(
   options: { driverUserId?: string | null; noShow?: boolean; rebooked?: boolean; byAdmin?: boolean } = {},
 ): void {
   run(kind, rideId, async () => {
-    const driverName = await nameOf(prisma, options.driverUserId);
+    const [driverName, car] = await Promise.all([
+      nameOf(prisma, options.driverUserId),
+      // "Driver found! Kofi is on the way in a silver Toyota Vitz."
+      kind === "DRIVER_ASSIGNED" ? carOf(prisma, options.driverUserId) : Promise.resolve(null),
+    ]);
     await sendPush(prisma, {
       userIds: typeof riderIds === "string" ? [riderIds] : riderIds,
       kind,
       rideId,
-      text: { driverName, noShow: options.noShow, rebooked: options.rebooked, byAdmin: options.byAdmin },
+      text: { driverName, car, noShow: options.noShow, rebooked: options.rebooked, byAdmin: options.byAdmin },
+      // A second driver accepting the same request (the first had to cancel)
+      // is news too: the repeat guard is per driver, not per ride.
+      ...(kind === "DRIVER_ASSIGNED" && options.driverUserId
+        ? { dedupeKey: `${kind}:${rideId}:${options.driverUserId}` }
+        : {}),
     });
   });
 }

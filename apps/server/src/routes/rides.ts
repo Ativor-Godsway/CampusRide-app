@@ -65,6 +65,7 @@ import { notifyRiderCancelled } from "../services/push/notify";
 import { resolveRiderCancelTarget, seatCancelledBy } from "../services/ride/cancels";
 import { finalizeRideCompletion } from "../services/ride/completion";
 import { nearbyCars } from "../services/ride/nearbyCars";
+import { searchStatusOf } from "../services/ride/searchStatus";
 import { LaunchNotOpenError, assertCanBook } from "../services/launch/launchSettings";
 import { ServiceClosedError, assertServiceOpen } from "../services/service/serviceHours";
 
@@ -127,6 +128,7 @@ const SCHEMAS = {
   mine: { querystring: object({ cursor: id, limit: text(20) }) },
   active: noInput,
   detail: { params: idParams, querystring: empty },
+  searchStatus: { params: idParams, querystring: empty },
   decision: { params: idParams, body: object({ action: oneOf(DECISION_ACTIONS) }, ["action"]) },
   cancel: {
     params: idParams,
@@ -477,6 +479,27 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       return reply.header("cache-control", "no-store").send({ cars } satisfies NearbyCarsResponse);
     },
   );
+
+  /**
+   * What the search for this ride is doing, for the rider's "Finding your
+   * driver" screen (services/ride/searchStatus.ts): counts, a distance, an
+   * estimate and approximate cars — no driver ids, names or exact
+   * positions. `{ status: null }` once the ride isn't searching. The app
+   * asks every 10 s while the screen is on show; `ride:search_status`
+   * brings changes sooner.
+   */
+  app.get("/rides/:id/search-status", { onRequest: requireAuth, schema: SCHEMAS.searchStatus }, async (request, reply) => {
+    if (!(await requireRider(request, reply))) return;
+    const { id } = request.params as { id: string };
+    const userId = request.user!.userId;
+    const ride = await prisma.ride.findUnique({
+      where: { id },
+      select: { riderId: true, passengers: { where: { riderId: userId }, select: { id: true } } },
+    });
+    if (!ride || (ride.riderId !== userId && ride.passengers.length === 0)) return rideNotFound(reply);
+    const found = ride.riderId === userId ? await searchStatusOf(prisma, id) : null;
+    return reply.header("cache-control", "no-store").send({ status: found?.status ?? null });
+  });
 
   app.get("/rides/active", { onRequest: requireAuth, schema: SCHEMAS.active }, async (request, reply) => {
     if (!(await requireRider(request, reply))) return;

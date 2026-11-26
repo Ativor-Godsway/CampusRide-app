@@ -88,6 +88,42 @@ const searching = (extra: Partial<Scene>, openCancel = false): Scene => ({
   position: here,
   ...extra,
 });
+/** What the server says about Ama's search (GET /rides/:id/search-status): real-looking counts. */
+const searchStatus = (over: Record<string, unknown> = {}) => ({
+  status: {
+    rideId: riderSearching.ride.id,
+    searchStartedAt: null,
+    driversOffered: 3,
+    driversWithIt: 3,
+    scope: "nearby",
+    carsChecked: 5,
+    nearestFreeCarMeters: 300,
+    driversOnTrips: null,
+    firstInLine: true,
+    usualWait: { fromMinutes: 1, toMinutes: 3 },
+    freeWaitSeconds: 150,
+    cars: [
+      { key: "car-a", latitude: here.latitude + 0.0024, longitude: here.longitude + 0.0008, heading: 200 },
+      { key: "car-b", latitude: here.latitude - 0.003, longitude: here.longitude - 0.0021, heading: 40 },
+    ],
+    ...over,
+  },
+});
+/** Ama's search, `ago` ms in (the checklist's step), with this status (null: an old server, none). */
+const searchingAt = (name: string, ago: number, status: object | null = searchStatus(), extra: Partial<Scene> = {}) =>
+  searching({
+    name,
+    routes: {
+      ...signedIn,
+      [`GET /rides/${riderSearching.ride.id}`]: {
+        ...riderSearching,
+        ride: { ...riderSearching.ride, broadcastStartedAt: new Date(Date.now() - ago), createdAt: new Date(Date.now() - ago) },
+      },
+      ...(status ? { [`GET /rides/${riderSearching.ride.id}/search-status`]: status } : {}),
+    },
+    ...extra,
+  });
+
 /** Ama's ride with Kwame (riderTrip), with one GPS fix from him so there's an ETA. */
 const trip = (stage: "coming" | "arrived" | "onboard", extra: Partial<Scene>): Scene => {
   const live = riderTrip(stage);
@@ -317,12 +353,20 @@ const scenes: Scene[] = [
       { type: "Note for driver", text: "At the main gate, blue shirt" },
     ],
   },
-  searching({ name: "searching" }),
-  searching({ name: "cancel-confirm" }, true),
-  searching(
-    { name: "cancel-reason", steps: [{ press: "Cancel ride" }, { press: "Changed plans" }] },
-    true,
-  ),
+  searchingAt("search-1-sending", 1_000),
+  searchingAt("search-2-finding", 12_000),
+  searchingAt("search-3-checking", 30_000),
+  searchingAt("search-4-waiting", 75_000),
+  searchingAt("search-5-finishing-trips", 175_000, searchStatus({ driversOnTrips: "nearby", nearestFreeCarMeters: null })),
+  searchingAt("search-campus-wide", 75_000, searchStatus({ scope: "campus", driversOffered: 1, carsChecked: 1, nearestFreeCarMeters: 1200 })),
+  searchingAt("search-old-server", 75_000, null),
+  searchingAt("cancel-confirm", 40_000, searchStatus(), {
+    params: { ...routeParams, rideId: riderSearching.ride.id, openCancel: "1" },
+  }),
+  searchingAt("cancel-reason", 40_000, searchStatus(), {
+    params: { ...routeParams, rideId: riderSearching.ride.id, openCancel: "1" },
+    steps: [{ press: "Cancel request" }, { press: "Changed plans" }],
+  }),
   searching({
     name: "no-drivers",
     routes: {
