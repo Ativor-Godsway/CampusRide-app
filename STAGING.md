@@ -250,7 +250,7 @@ PR review, the production migration (if any), merge, production deploy, and the 
 
 ### The admin site against staging
 
-This runs the admin site on this Mac. Open http://localhost:5173 and sign in as Admin Staging with the staging code.
+This runs the admin site on this Mac. Open http://localhost:5173 and sign in as Admin Staging with the staging code. Type the number as `99 000 0021` or `+233 99 000 0021`: the site takes the short form only when the server says it is staging (its `/health` answers `staging: true`).
 
 ```sh
 npm run staging:admin

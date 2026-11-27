@@ -4,10 +4,10 @@ import {
   OTP_RESEND_COOLDOWN_SECONDS,
   formatCountdown,
   formatGhanaPhone,
-  normalizeGhanaPhone,
 } from "@rida/shared";
 import { browserSupportsWebAuthn } from "@simplewebauthn/browser";
-import { ApiError, login, requestOtp, signInWithPasskey, verifyOtp } from "../api";
+import { ApiError, login, requestOtp, serverIsStaging, signInWithPasskey, verifyOtp } from "../api";
+import { loginPhone } from "../lib/loginPhone";
 import { useAuth } from "../auth";
 
 /** What the browser's own refusal means, in words ("NotAllowedError" is a cancel or a timeout). */
@@ -81,7 +81,7 @@ export function LoginScreen() {
     setError(null);
     setBusy(true);
     try {
-      const canonical = normalizeGhanaPhone(phone);
+      const canonical = await loginPhone(phone, serverIsStaging);
       if (!canonical) {
         setError(GHANA_PHONE_EXAMPLE);
         return;
