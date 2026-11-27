@@ -91,6 +91,11 @@ export type CreateRideInput = {
    * when the price has just changed.
    */
   shownFarePesewas?: number;
+  /**
+   * Seats in this booking (Shared 1–3: the rider and friends) or people
+   * (Ride alone 1–4). `shownFarePesewas` is the price for these seats.
+   */
+  seats?: number;
 } & ({ pickup: RideEndBody; dropoff: RideEndBody } | { pickupZoneId: string; dropoffZoneId: string });
 
 /**

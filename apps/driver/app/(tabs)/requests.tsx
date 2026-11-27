@@ -13,6 +13,7 @@ import {
   planBoardTake,
   settleBoardFilter,
   spokenCedis,
+  bookingLabel,
 } from "@rida/shared";
 import {
   Button,
@@ -33,6 +34,7 @@ import {
 } from "@rida/mobile-shared";
 import { useDriverPresence } from "../../lib/presence";
 import { refreshAfterTake, takeFromBoard, useRequestBoard } from "../../lib/board";
+import { ScheduledCarCard } from "../../components/schedule/ScheduledCarCard";
 
 /** "Waiting 3 min" (or "Waiting <1 min"). */
 function waiting(since: string, now: number): string {
@@ -40,9 +42,9 @@ function waiting(since: string, now: number): string {
   return !Number.isFinite(mins) || mins < 1 ? "Waiting <1 min" : `Waiting ${mins} min`;
 }
 
+/** "Shared · 2 seats", "Ride alone · 3 people" (@rida/shared rides/seats). */
 function kind(item: BoardRideItem): string {
-  const seats = item.seats ?? 1;
-  return item.type === "LONE" ? "Ride alone" : `Shared · ${seats} seat${seats === 1 ? "" : "s"}`;
+  return bookingLabel(item.type, item.seats ?? 1);
 }
 
 /**
@@ -70,6 +72,8 @@ export default function RequestsScreen() {
   }, []);
 
   const rides = useMemo(() => board.data?.rides ?? [], [board.data]);
+  // Scheduled cars open to drivers, labelled "Scheduled" (rides/scheduled.ts).
+  const scheduled = board.data?.scheduled ?? [];
   const car = board.data?.car ?? null;
   const shown = settleBoardFilter(rides, filter);
   const pickupChips = boardPickupChips(rides);
@@ -188,7 +192,18 @@ export default function RequestsScreen() {
         keyExtractor={(r) => r.rideId}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={board.isRefetching} onRefresh={() => void board.refetch()} />}
-        ListEmptyComponent={<EmptyState title="No one is waiting" message="New requests appear here the moment riders ask." />}
+        ListHeaderComponent={
+          scheduled.length > 0 ? (
+            <View style={styles.scheduled}>
+              {scheduled.map((c) => (
+                <ScheduledCarCard key={c.carId} car={c} source="BOARD" />
+              ))}
+            </View>
+          ) : null
+        }
+        ListEmptyComponent={
+          scheduled.length > 0 ? null : <EmptyState title="No one is waiting" message="New requests appear here the moment riders ask." />
+        }
         renderItem={({ item }) => {
           const on = selected.has(item.rideId);
           const from = item.pickupPlaceName ?? item.pickupZoneName;
@@ -254,6 +269,7 @@ export default function RequestsScreen() {
 }
 
 const styles = StyleSheet.create({
+  scheduled: { gap: spacing[3], marginBottom: spacing[3] },
   screen: { flex: 1, backgroundColor: colors.surface },
   header: { paddingHorizontal: spacing.gutter, paddingTop: spacing[4], gap: spacing[1] },
   chips: { paddingHorizontal: spacing.gutter, paddingVertical: spacing[2], gap: spacing[2] },

@@ -22,6 +22,11 @@ export interface PushNotificationsProps {
   showInForeground: (data: PushData, pathname: string) => boolean;
   /** A notification was tapped: open the right screen. */
   onOpen: (data: PushData) => void;
+  /**
+   * One of a notification's action buttons was tapped (the scheduled
+   * reminder's "I'm coming"). The app registers the categories it uses.
+   */
+  onAction?: (actionId: string, data: PushData) => void;
 }
 
 /**
@@ -31,14 +36,14 @@ export interface PushNotificationsProps {
  * waits until sign-in has loaded and the app is past its start screen.
  * Never asks for permission (see usePushPermissionPrompt).
  */
-export function PushNotifications({ app, showInForeground, onOpen }: PushNotificationsProps) {
+export function PushNotifications({ app, showInForeground, onOpen, onAction }: PushNotificationsProps) {
   const { user, isLoading } = useAuth();
   const signedIn = user !== null && user.role === (app === "rider" ? "RIDER" : "DRIVER");
   const pathname = usePathname();
   const segments = useSegments();
 
-  const live = useRef({ signedIn, pathname, showInForeground, onOpen });
-  live.current = { signedIn, pathname, showInForeground, onOpen };
+  const live = useRef({ signedIn, pathname, showInForeground, onOpen, onAction });
+  live.current = { signedIn, pathname, showInForeground, onOpen, onAction };
 
   // While the app is open: ride notifications show unless the current screen
   // covers it; admin notifications (no screen ever covers them) always show;
@@ -88,12 +93,20 @@ export function PushNotifications({ app, showInForeground, onOpen }: PushNotific
   const handled = useRef<string | null>(null);
   useEffect(() => {
     if (!response || !ready) return;
-    if (response.actionIdentifier !== Notifications.DEFAULT_ACTION_IDENTIFIER) return;
-    const id = response.notification.request.identifier;
+    const action = response.actionIdentifier;
+    const id = `${response.notification.request.identifier}:${action}`;
     if (handled.current === id) return;
+    const data = parsePushData(response.notification.request.content.data);
+    if (action !== Notifications.DEFAULT_ACTION_IDENTIFIER) {
+      // An action button: only the ones the app asked to hear.
+      if (!live.current.onAction || !data) return;
+      handled.current = id;
+      void Notifications.clearLastNotificationResponseAsync();
+      live.current.onAction(action, data);
+      return;
+    }
     handled.current = id;
     void Notifications.clearLastNotificationResponseAsync();
-    const data = parsePushData(response.notification.request.content.data);
     if (data) live.current.onOpen(data);
   }, [response, ready]);
 

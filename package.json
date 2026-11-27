@@ -37,7 +37,9 @@
     "staging:admin": "bash scripts/staging-admin.sh",
     "staging:accounts": "npm run staging:accounts --workspace apps/server",
     "staging:fake-requests": "npm run staging:fake-requests --workspace apps/server --",
-    "staging:fake-requests:cleanup": "npm run staging:fake-requests:cleanup --workspace apps/server"
+    "staging:fake-requests:cleanup": "npm run staging:fake-requests:cleanup --workspace apps/server",
+    "staging:fake-schedule": "npm run staging:fake-schedule --workspace apps/server --",
+    "staging:fake-schedule:cleanup": "npm run staging:fake-schedule:cleanup --workspace apps/server"
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.3"

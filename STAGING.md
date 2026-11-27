@@ -32,7 +32,7 @@ No Ghanaian network uses +233 99. The `+233099…` numbers the fake-request simu
 grep STAGING_TEST_OTP apps/server/.env.staging
 ```
 
-The drivers are approved, with a car, and owe nothing. To repair the accounts at any time (put the drivers back to approved, offline and owing nothing):
+The drivers are approved, with a car, and owe nothing. To repair the accounts at any time (put the drivers back to approved, offline and owing nothing, and clear the riders' scheduled-ride strikes):
 
 ```sh
 npm run staging:accounts
@@ -325,3 +325,82 @@ npm run staging:update -- driver "seats on bookings"
 5. **Admin site:** Settings → Prices shows the table. Change a price there and check new quotes use it.
 
 Then clean up the fake riders if you used them, and continue with the PR as usual.
+
+## Scheduled rides (`scheduled-shared-rides`)
+
+This branch is stacked on `ride-seats` (it needs seats on bookings). Deploying it to staging also adds its migrations: `20261127120000_scheduled_rides` and `20261128120000_scheduled_matching_limits`.
+
+### Deploy it
+
+```sh
+npm run staging:deploy -- scheduled-shared-rides
+```
+
+```sh
+npm run staging:wake
+```
+
+```sh
+git checkout scheduled-shared-rides
+```
+
+```sh
+npm run staging:update -- rider "scheduled rides"
+```
+
+```sh
+npm run staging:update -- driver "scheduled rides"
+```
+
+Open each staging app, close it, and open it again. From this version on, a fresh launch shows "Updating…" for a few seconds when a newer staging update is waiting, and reloads into it (never during a ride).
+
+### The three dispatch paths with fake riders
+
+Sign in to the staging driver app as Yaw (`99 000 0011`) and go online. Then book fake scheduled riders. `--open-now` opens CampusRide on staging first, so this works at any time of day:
+
+```sh
+npm run staging:fake-schedule -- --open-now
+```
+
+It books three cars at three times later today, at least 40 minutes ahead and 30 minutes apart, all going to Balme Library. Run it early enough in the day. With `--open-now`, staging stays open until midnight.
+
+1. **3 riders, 3 seats:** offered to drivers at once. Yaw gets a pop-up ("New scheduled trip", "Scheduled · 9:30 · 3 seats · GH₵21"). The car is also on the Requests board with a Scheduled label, and under "Open scheduled cars" in the Schedule tab.
+2. **2 riders, 2 seats:** nothing yet. 30 minutes before its time, it is offered the same way.
+3. **1 rider:** never offered. 20 minutes before its time, it becomes a normal live request: a pop-up and the board, as any request.
+
+Then check:
+
+- **Accept** car 1 in the pop-up. It moves to "My scheduled trips" with its riders and a **Leave by** time. Yaw gets a reminder notification 10 minutes before leave-by. At leave-by, the car becomes a normal trip and opens on its own.
+- **Overlap:** try to accept car 2 with Yaw. If it is under 25 minutes from car 1, it says so. Car 2 is 30 minutes away by default, so it accepts.
+- **Give back** car 1 (before leave-by). It is open again, and the riders hear "Finding you a new driver".
+- **No driver:** leave car 2 alone. At 25 minutes before, its riders become live requests.
+- **Admin site** (`npm run staging:admin`), **Scheduled**: the day's slots and cars, accepted, converted to live, no-shows and strikes. **Settings → Scheduled rides** has every number, and the intro switch.
+
+To try the paths faster, lower the numbers in Settings → Scheduled rides on staging (for example "Offer later" 30 → 15 minutes). The server picks them up within a minute.
+
+### The rider side with the test accounts
+
+1. **Rider (Ama, `99 000 0001`):** on Home after a fresh launch, the "Book your ride ahead" intro shows. "Maybe later" closes it until the next launch. "Don't show again" closes it for good on this phone.
+2. **Home → Schedule ahead** (the green card under "Where to?"). Step 1, "Scheduled ride · step 1 of 3": pick the pickup and drop-off. A small "Schedule for later" link under the Shared button on Choose a ride leads to the same time picker.
+3. **Step 2, the time (today only):** a green banner ("Join cars going your way…"), "Join a car" chips, then **Arrive by** with the hours in 12-hour time ("9 AM", "1 PM") and wide tiles: the time big ("9:20") and under it "2 going your way" or "Join Yaw's car · 1 seat left". Tiles with riders are lightly green. Only times within today's service hours show (with 08:00–17:00, the last is 5:00 PM). Past times and times under 20 minutes away are hidden, unless there's a car with a driver to join. Then "Need a ride sooner? Book a normal ride instead." shows.
+   - **Check the fixed bug:** pick a time, then tap another hour. The button goes back to "Choose a time" until you pick a tile in that hour. It never names a time from another hour.
+   - **Check the tiles:** "9:20" never wraps.
+4. **Step 3, confirm:** "Scheduled · arrive by 9:20 AM · Today", the pickup and drop-off, seats, the car you're joining (if any), the price and the free-cancel rule. Tap "Reserve seat · GH₵7".
+5. Home now shows the card: seats filled ("2 of 4 seats filled"), "Waiting for riders". Once Yaw accepts, it shows "Car confirmed", Yaw, the car and the pickup window, plus "I'm coming". 10 minutes before the pickup window, Ama gets a reminder with an "I'm coming" button.
+6. **Join a car that already has a driver:** once Yaw has accepted a car, sign in as Kofi (`99 000 0002`) and open the same time. The chip and the tile say "Join Yaw's car · 1 seat left". This stays open after the 20-minute cutoff, until the car's leave-by time.
+7. **Matching by direction:** as Ama, book Pentagon → TF Hall for a time. As Kofi, book Pentagon → Alexander Kwapong Hall for the same time. They get different cars (the Schedule tab and the admin Scheduled page show two cars), and Kofi's tile doesn't count Ama as "going your way". Pentagon → a place next to TF does join Ama's car. The limits are in admin Settings → Scheduled rides: most extra route per added rider (1,000 m), while the car has few riders (1,500 m), and most extra driving (5 min).
+8. **Cancel and strikes (Esi, `99 000 0003`):** cancel more than 30 minutes before the time: free. Book again and cancel within 30 minutes: a strike. A second strike blocks scheduling for 7 days, and the screen says until when. To clear Esi's strikes and block on staging, run `npm run staging:accounts`.
+
+### The driver side (Yaw)
+
+- The **Schedule tab** and the pop-up show each car as a card: the arrive-by time big, the total and "you get", **Leave by**, and a route summary ("2 pickups · 1 drop-off · 2.4 km").
+- On your own cars, each rider is listed **in stop order**: name, seats, pickup place, and drop-off place. If they all go to the same place, it's one line, "All drop-offs: Balme Library". Each rider has a **Call** button, which opens the phone's dialler as on a trip. The staging test numbers aren't real phones, so the call itself won't connect.
+- At leave-by, the trip opens with the riders in that same pickup order.
+
+### Clean up
+
+```sh
+npm run staging:fake-schedule:cleanup
+```
+
+It removes the fake riders' scheduled bookings, and any car only they were in, then the fake riders and their rides. Real staging accounts and their bookings stay. The tool and the cleanup refuse any database but staging.

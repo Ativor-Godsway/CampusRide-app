@@ -169,7 +169,7 @@ describe("GET /rides/:id", () => {
 
     expect(Object.keys(body.ride.passengers[0]).sort()).toEqual(
       // wait / waitFeePesewas: the rider's own seat only (routes/ridePins.ts riderSeatsView).
-      ["id", "rideId", "riderId", "pickupZoneId", "dropoffZoneId", "fareCharged", "lockedFare", "status", "wait", "waitFeePesewas", ...PIN_KEYS].sort(),
+      ["id", "rideId", "riderId", "pickupZoneId", "dropoffZoneId", "fareCharged", "lockedFare", "status", "seats", "wait", "waitFeePesewas", ...PIN_KEYS].sort(),
     );
   });
 

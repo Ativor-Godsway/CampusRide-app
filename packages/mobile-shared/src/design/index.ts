@@ -21,6 +21,8 @@ export * from "./components/Illustration";
 export * from "./components/Motion";
 export * from "./components/Skeleton";
 export * from "./useCountUp";
+export * from "./useTweenNumber";
+export * from "./components/Stepper";
 export * from "./components/ProgressBar";
 export * from "./components/BottomSheet";
 export * from "./components/OtpInput";

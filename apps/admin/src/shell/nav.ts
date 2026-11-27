@@ -14,6 +14,7 @@ export const NAV: NavItem[] = [
   { path: "/", label: "Overview", icon: "overview", tab: true },
   { path: "/live", label: "Live map", icon: "map", tab: true },
   { path: "/rides", label: "Rides", icon: "car", tab: true },
+  { path: "/scheduled", label: "Scheduled", icon: "clock" },
   { path: "/supply", label: "Supply & demand", icon: "chart" },
   { path: "/cancellations", label: "Cancellations", icon: "cancel" },
   { path: "/drivers", label: "Drivers", icon: "driver", badge: "approvals" },

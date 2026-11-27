@@ -14,7 +14,7 @@ import { applyPassengerTransition, applyRideTransition } from "../services/ride/
 import { isActivePassengerStatus } from "../services/ride/stateMachine";
 import { riderDecision, type RiderDecisionAction } from "../services/ride/riderDecision";
 import { InvalidTransitionError, RideSwitchNotAllowedError } from "../services/ride/errors";
-import { switchRideType } from "../services/ride/switchRideType";
+import { TooManyForSharedError, switchRideType } from "../services/ride/switchRideType";
 import { findActiveRideForRider, riderTripComplete } from "../services/ride/activeRide";
 import { emitRideEvent, emitToRider, removeRiderFromRide } from "../realtime/rideSocket";
 import { broadcastRide, closeOffer, reofferToDriver } from "../services/ride/dispatch";
@@ -22,6 +22,7 @@ import {
   createRide,
   ActiveRideExistsError,
   SameZoneError,
+  InvalidBookingSeatsError,
   TripTooShortError,
   ZoneNotFoundError,
   ZoneRetiredError,
@@ -46,6 +47,7 @@ import { logger } from "../lib/logger";
 import { riderRideDetailSelect, riderRideListSelect } from "./selects";
 import { startMockDriverForRide } from "../dev/mockDriver";
 import { RULES } from "../rateLimit/rules";
+import { noteScheduledTripCancel } from "../services/scheduled/booking";
 import {
   MAX,
   bodyOptional,
@@ -120,6 +122,8 @@ const SCHEMAS = {
         paymentMethod: text(20),
         // The price Choose a ride showed (POST /rides/quote); older apps send none.
         shownFarePesewas: integer(0, 100_000),
+        // Seats in this booking (Shared 1-3) or people (Ride alone 1-4); older apps send none: 1.
+        seats: integer(1, 4),
       },
       ["type"],
     ),
@@ -227,6 +231,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       type?: unknown;
       paymentMethod?: unknown;
       shownFarePesewas?: number;
+      seats?: number;
     };
 
     // Each end is a pin/place (current apps) or a zone id (older builds).
@@ -268,6 +273,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         pickupNote: note.note,
         paymentMethod,
         shownFare: body.shownFarePesewas ?? null,
+        seats: body.seats ?? 1,
       });
     } catch (err) {
       // Demand that never became a ride: an anonymous record (no rider, no pin).
@@ -306,6 +312,9 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       }
       if (err instanceof SameZoneError) {
         return reply.code(400).send({ error: err.message });
+      }
+      if (err instanceof InvalidBookingSeatsError) {
+        return reply.code(400).send({ error: err.message, code: err.code });
       }
       if (err instanceof TripTooShortError) {
         return reply.code(400).send({ error: err.message, code: err.code });
@@ -745,6 +754,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         }
         // A seat freed: requests that fit the car now reach its driver at once.
         reofferToDriver(prisma, rideRow.driverId);
+        // Leaving a scheduled trip after it started is a late cancel (a strike).
+        if (rideRow.booking === "SCHEDULED") void noteScheduledTripCancel(prisma, ride.id, userId);
         logCancel("ride_seat_cancelled_by_rider", "Rider left a car; it carries on for the others");
       }
       return reply;
@@ -768,6 +779,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       }
       // A driver who had it is free again: their list is worked out at once.
       reofferToDriver(prisma, ride.driverId);
+      if (ride.booking === "SCHEDULED") void noteScheduledTripCancel(prisma, ride.id, userId);
 
       logCancel("ride_cancelled_by_rider", "Rider cancelled their ride");
       return reply.code(200).send({ ride: updated });
@@ -820,6 +832,10 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         const seat = updated.passengers.find((p) => p.riderId === request.user!.userId && p.status !== "CANCELLED");
         return reply.code(200).send({ ride: updated, farePesewas: seat?.lockedFare ?? null });
       } catch (err) {
+        if (err instanceof TooManyForSharedError) {
+          // 422 + code + error: shown in the server's own words (a 409 reads as "a driver took it").
+          return reply.code(422).send({ error: err.message, code: err.code });
+        }
         if (err instanceof RideSwitchNotAllowedError) {
           return reply.code(409).send({ error: err.message, code: "RIDE_NOT_SWITCHABLE" });
         }

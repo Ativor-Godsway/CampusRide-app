@@ -1,5 +1,5 @@
 import { StyleSheet, View } from "react-native";
-import { formatDistance, requestedAgo, spokenCedis, type RideType } from "@rida/shared";
+import { formatDistance, requestedAgo, spokenCedis, type RideType, bookingLabel } from "@rida/shared";
 import { Button, Card, StatusChip, Text, colors, formatCedis, spacing } from "@rida/mobile-shared";
 
 /** One request on Home, already measured from the driver. */
@@ -27,12 +27,13 @@ function to(item: HomeRequest): string {
   return item.dropoffPlaceName ?? item.dropoffZoneName;
 }
 
+/** "Shared · 2 seats", "Ride alone · 3 people" (@rida/shared rides/seats). */
 function typeLabel(item: HomeRequest): string {
-  return item.type === "LONE" ? "Private" : `Shared · ${item.seats ?? 1}`;
+  return bookingLabel(item.type, item.seats ?? 1);
 }
 
 function spoken(item: HomeRequest): string {
-  const kind = item.type === "LONE" ? "Private ride" : `Shared ride, ${item.seats ?? 1} rider${(item.seats ?? 1) === 1 ? "" : "s"}`;
+  const kind = typeLabel(item).replace(" · ", ", ");
   const who = item.riderFirstName ? `${item.riderFirstName}, ` : "";
   const distance = item.distanceMeters !== null ? `${formatDistance(item.distanceMeters)} away, ` : "";
   return `${who}${kind}, ${distance}${spokenCedis(item.farePesewas)}. From ${from(item)} to ${to(item)}. ${requestedAgo(item.createdAt)}.`;

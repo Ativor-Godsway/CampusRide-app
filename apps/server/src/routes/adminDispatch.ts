@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { PrismaClient } from "@prisma/client";
 import { DEFAULT_WAIT_FEE_SETTINGS, WAIT_FEE_BOUNDS, waitFeeSettingsProblem, type WaitFeeSettings } from "@rida/shared";
-import { DEFAULT_SEARCH_WINDOW_SECONDS, SEARCH_WINDOW_BOUNDS_SECONDS, searchWindowProblem, DEFAULT_SHARED_FARE_PRICES, FAR_ENDS, PRICING, REFUSED_BOOKING_REASON_LABELS, sharedFarePricesProblem, type FarEnd } from "@rida/shared";
+import { DEFAULT_SEARCH_WINDOW_SECONDS, SEARCH_WINDOW_BOUNDS_SECONDS, searchWindowProblem, DEFAULT_FARE_PRICES, FAR_ENDS, REFUSED_BOOKING_REASON_LABELS, farePricesProblem, type FarEnd, type FarePrices } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
 import { id, integer, noInput, object, oneOf, text } from "../http/schemas";
@@ -38,10 +38,15 @@ const SCHEMAS = {
     body: object(
       {
         sharedPesewas: integer(1, 100_000),
+        shared2Pesewas: integer(1, 100_000),
+        shared3Pesewas: integer(1, 100_000),
+        farPerSeatPesewas: integer(0, 100_000),
+        lonePesewas: integer(1, 100_000),
+        // An admin page from before seat prices sends this instead of farPerSeatPesewas.
         sharedFarPesewas: integer(1, 100_000),
         farPlaces: { type: "array", maxItems: MAX_FAR_PLACES, items: object({ id, end: oneOf(FAR_ENDS) }, ["id", "end"]) },
       },
-      ["sharedPesewas", "sharedFarPesewas", "farPlaces"],
+      ["sharedPesewas", "farPlaces"],
     ),
   },
   zoneNeighbours: noInput,
@@ -79,17 +84,22 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
     return {
       settings: {
         sharedPesewas: pricing.sharedPesewas,
-        sharedFarPesewas: pricing.sharedFarPesewas,
-        loneFarePesewas: PRICING.LONE_FARE,
+        shared2Pesewas: pricing.shared2Pesewas,
+        shared3Pesewas: pricing.shared3Pesewas,
+        farPerSeatPesewas: pricing.farPerSeatPesewas,
+        lonePesewas: pricing.lonePesewas,
+        // As an admin page from before seat prices reads them.
+        sharedFarPesewas: pricing.sharedPesewas + pricing.farPerSeatPesewas,
+        loneFarePesewas: pricing.lonePesewas,
         updatedAt: pricing.updatedAt?.toISOString() ?? null,
         updatedBy: admin,
       },
-      defaults: DEFAULT_SHARED_FARE_PRICES,
+      defaults: { ...DEFAULT_FARE_PRICES, sharedFarPesewas: DEFAULT_FARE_PRICES.sharedPesewas + DEFAULT_FARE_PRICES.farPerSeatPesewas },
       farPlaces: places.map((p) => ({ id: p.id, name: p.name, isActive: p.isActive, zoneName: p.zone.name, end: p.farEnd! })),
     };
   }
 
-  /** The Shared prices (normal, far) and the places in each far end (NORTH / SOUTH). */
+  /** The prices (Shared by seats, far per seat, Ride alone) and the places in each far end (NORTH / SOUTH). */
   app.get("/admin/far-pricing", { ...gate, schema: SCHEMAS.farPricing }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
     return reply.send(await farPricingBody());
@@ -98,8 +108,24 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
   /** Saves both prices and exactly these far-end places. New requests use them at once; requested rides keep theirs. */
   app.put("/admin/far-pricing", { ...gate, schema: SCHEMAS.saveFarPricing, config: write }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
-    const body = request.body as { sharedPesewas: number; sharedFarPesewas: number; farPlaces: Array<{ id: string; end: FarEnd }> };
-    const problem = sharedFarePricesProblem(body);
+    const body = request.body as Partial<FarePrices> & {
+      sharedPesewas: number;
+      sharedFarPesewas?: number;
+      farPlaces: Array<{ id: string; end: FarEnd }>;
+    };
+    // A price left out keeps today's (an admin page from before seat prices
+    // sends only the 1-seat and far 1-seat prices).
+    const now = await getFarePricing(prisma);
+    const prices: FarePrices = {
+      sharedPesewas: body.sharedPesewas,
+      shared2Pesewas: body.shared2Pesewas ?? now.shared2Pesewas,
+      shared3Pesewas: body.shared3Pesewas ?? now.shared3Pesewas,
+      farPerSeatPesewas:
+        body.farPerSeatPesewas ??
+        (body.sharedFarPesewas !== undefined ? body.sharedFarPesewas - body.sharedPesewas : now.farPerSeatPesewas),
+      lonePesewas: body.lonePesewas ?? now.lonePesewas,
+    };
+    const problem = farePricesProblem(prices);
     if (problem) return reply.code(400).send({ error: problem });
     const byId = new Map(body.farPlaces.map((p) => [p.id, p.end]));
     if (byId.size !== body.farPlaces.length) return reply.code(400).send({ error: "A place can be in one far end only." });
@@ -107,7 +133,7 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
     if (known !== byId.size) return reply.code(400).send({ error: "One of those places doesn't exist any more. Reload and try again." });
     await saveFarePricing(
       prisma,
-      { sharedPesewas: body.sharedPesewas, sharedFarPesewas: body.sharedFarPesewas, farPlaces: [...byId].map(([placeId, end]) => ({ placeId, end })) },
+      { ...prices, farPlaces: [...byId].map(([placeId, end]) => ({ placeId, end })) },
       request.user!.userId,
     );
     clearAdminCache();

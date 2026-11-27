@@ -37,6 +37,8 @@ export interface TripPassenger {
   dropoffZoneId: string;
   lockedFare: number | null;
   status: PassengerStatus;
+  /** Seats this booking takes (people for Ride alone), rides/seats.ts; absent: 1. */
+  seats?: number;
   /** ISO time the driver reached this rider's pickup. */
   arrivedAt?: string | null;
   /** The pickup wait while ARRIVED (rides/waitFee.ts); absent from older servers. */
@@ -80,6 +82,8 @@ export interface TripStop {
   note: string | null;
   /** What this rider pays (shown large at their drop-off), without a wait fee not charged yet: see fareWithWait. */
   farePesewas: number | null;
+  /** Seats in this rider's booking (people for Ride alone): "Pick up Ama · 2 seats". */
+  seats: number;
   passengerStatus: PassengerStatus;
   arrivedAt: string | null;
   /** The pickup wait (rides/waitFee.ts), or null. */
@@ -207,6 +211,7 @@ export function planTripStops(input: {
       riderFirstName: firstName(p.riderName),
       riderPhone: p.riderPhone ?? null,
       farePesewas: p.lockedFare,
+      seats: p.seats && p.seats > 0 ? p.seats : 1,
       passengerStatus: p.status,
       arrivedAt: p.arrivedAt ?? null,
       wait: p.wait ?? null,
@@ -290,9 +295,15 @@ export function stopsBeforeDropoff(plan: TripPlan, passengerId: string): number 
 export type SeatState = "onboard" | "coming" | "empty";
 
 /** Seat dots: filled = on board, light = being picked up, empty = free. */
-export function seatStates(passengers: readonly Pick<TripPassenger, "status">[], seats = CAR_SEATS): SeatState[] {
-  const onboard = passengers.filter((p) => p.status === "PICKED_UP").length;
-  const coming = passengers.filter((p) => p.status === "WAITING" || p.status === "ARRIVED").length;
+export function seatStates(
+  passengers: readonly (Pick<TripPassenger, "status"> & { seats?: number | null })[],
+  seats = CAR_SEATS,
+): SeatState[] {
+  // A booking for 2 takes 2 seats (rides/seats.ts).
+  const count = (keep: (status: string) => boolean) =>
+    passengers.reduce((n, p) => (keep(p.status) ? n + (p.seats && p.seats > 0 ? p.seats : 1) : n), 0);
+  const onboard = count((s) => s === "PICKED_UP");
+  const coming = count((s) => s === "WAITING" || s === "ARRIVED");
   return Array.from({ length: seats }, (_, i) =>
     i < onboard ? "onboard" : i < onboard + coming ? "coming" : "empty",
   );

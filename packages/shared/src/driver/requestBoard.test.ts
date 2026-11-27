@@ -71,9 +71,9 @@ describe("Add to my trip: what a selection may hold", () => {
     });
   });
 
-  it("no trip: at most 4 riders", () => {
+  it("no trip: at most 4 seats (a booking for 2 takes 2)", () => {
     expect(planBoardTake([shared("a", 2), shared("b", 2)], null)).toMatchObject({ ok: true, seats: 4 });
-    expect(planBoardTake([shared("a", 2), shared("b", 2), shared("c")], null)).toEqual({ ok: false, message: "A car takes at most 4 riders." });
+    expect(planBoardTake([shared("a", 2), shared("b", 2), shared("c")], null)).toEqual({ ok: false, message: "Needs 5 seats: a car has 4." });
   });
 
   it("Ride alone is taken on its own, never with others", () => {
@@ -85,7 +85,10 @@ describe("Add to my trip: what a selection may hold", () => {
   it("on a Shared trip: Shared only, within the free seats; a full car takes nobody", () => {
     const car = { rideId: "car", type: "SHARED" as const, freeSeats: 2 };
     expect(planBoardTake([shared("a"), shared("b")], car)).toEqual({ ok: true, claim: null, add: ["a", "b"], seats: 2 });
-    expect(planBoardTake([shared("a"), shared("b"), shared("c")], car)).toEqual({ ok: false, message: "Only 2 free seats in your car." });
+    expect(planBoardTake([shared("a"), shared("b"), shared("c")], car)).toEqual({ ok: false, message: "Needs 3 seats, you have 2." });
+    // Seats, not bookings: one 2-seat booking doesn't fit a car with 1 free seat.
+    expect(planBoardTake([shared("a", 2)], { ...car, freeSeats: 1 })).toEqual({ ok: false, message: "Needs 2 seats, you have 1." });
+    expect(planBoardTake([shared("a", 2), shared("b", 1)], { ...car, freeSeats: 3 })).toMatchObject({ ok: true, seats: 3 });
     expect(planBoardTake([shared("a")], { ...car, freeSeats: 0 })).toEqual({ ok: false, message: "Your car is full." });
     expect(planBoardTake([req("l", "JQB", "TF", { type: "LONE" })], car)).toMatchObject({ ok: false });
   });

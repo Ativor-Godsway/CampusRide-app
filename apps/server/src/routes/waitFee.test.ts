@@ -216,6 +216,17 @@ describe("the wait fee", () => {
     expect((await seatOf(seats[0]!.id)).fareCharged).toBe(900);
   });
 
+  it("per booking, not per seat: a 2-seat booking 14 + 2 = 16 (once)", async () => {
+    const { seats, act } = await car([1400], { riderAppHasIt: true });
+    await prisma.ridePassenger.update({ where: { id: seats[0]!.id }, data: { seats: 2 } });
+    await act(seats[0]!.id, "arrived", { at: near() });
+    await windBack(seats[0]!.id, 4 * 60 * SEC);
+    await act(seats[0]!.id, "pickup");
+    const s = await seatOf(seats[0]!.id);
+    expect(s.waitFee).toBe(200);
+    expect(s.lockedFare).toBe(1600);
+  });
+
   it("far Shared 9 + 2 = 11", async () => {
     const { seats, act } = await car([900], { riderAppHasIt: true });
     await act(seats[0]!.id, "arrived", { at: near() });

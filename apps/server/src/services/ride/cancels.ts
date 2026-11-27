@@ -1,5 +1,6 @@
 import type { Prisma, PrismaClient, Ride, RidePassenger } from "@prisma/client";
 import type { DriverCancelReason, PassengerStatus, RideStatus } from "@rida/shared";
+import { seatsTaken } from "@rida/shared";
 import { InvalidTransitionError, NotRideOwnerError, PassengerNotFoundError } from "./errors";
 import { currentSeatFare } from "./fares";
 import { isActivePassengerStatus } from "./stateMachine";
@@ -191,7 +192,15 @@ export async function driverCancelPickup(prisma: PrismaClient, input: DriverCanc
     if (requeue) {
       const updatedRide = await tx.ride.update({
         where: { id: ride.id },
-        data: { status: "REQUESTED", driverId: null, broadcastStartedAt: now, decisionStartedAt: null, cancelReason: null },
+        data: {
+          status: "REQUESTED",
+          driverId: null,
+          broadcastStartedAt: now,
+          decisionStartedAt: null,
+          cancelReason: null,
+          // The request asks for this booking's seats again.
+          occupancy: seat.seats,
+        },
       });
       // A fresh search, as for any return to REQUESTED — but never back to this driver.
       await tx.rideRejection.deleteMany({ where: { rideId: ride.id } });
@@ -212,7 +221,8 @@ export async function driverCancelPickup(prisma: PrismaClient, input: DriverCanc
 
     // Cancel the seat in this car (the car carries on for the others)…
     const passenger = await tx.ridePassenger.update({ where: { id: seat.id }, data: { status: "CANCELLED" } });
-    const rideData: Prisma.RideUpdateInput = { occupancy: others.length };
+    // Seats left in the car (a booking for 2 takes 2).
+    const rideData: Prisma.RideUpdateInput = { occupancy: seatsTaken(others) };
     if (others.length === 0) {
       if (ride.status === "IN_PROGRESS") Object.assign(rideData, { status: "COMPLETED", completedAt: now, cancelReason: null });
       else Object.assign(rideData, { status: "CANCELLED", cancelReason: "ALL_PASSENGERS_LEFT", cancelledAt: now });
@@ -244,7 +254,8 @@ export async function driverCancelPickup(prisma: PrismaClient, input: DriverCanc
         paymentMethod: ownRequest?.paymentMethod ?? ride.paymentMethod,
         pickupZoneId: seat.pickupZoneId,
         dropoffZoneId: seat.dropoffZoneId,
-        occupancy: 1,
+        // The same booking: its seats (and its fare, below) go with it.
+        occupancy: seat.seats,
         broadcastStartedAt: now,
         isReviewDemo: ride.isReviewDemo,
         ...pins,
@@ -255,6 +266,7 @@ export async function driverCancelPickup(prisma: PrismaClient, input: DriverCanc
             dropoffZoneId: seat.dropoffZoneId,
             status: "WAITING",
             lockedFare: seat.lockedFare ?? currentSeatFare(type),
+            seats: seat.seats,
             ...pins,
           },
         },
@@ -333,7 +345,7 @@ function endIfEmpty(ride: Ride, seatsAfter: readonly RidePassenger[], now: Date)
   const data: Prisma.RideUpdateInput = {};
   if (!ACTIVE_RIDE_STATUSES.includes(ride.status as RideStatus)) return data;
   const remaining = seatsAfter.filter((p) => isActivePassengerStatus(p.status)).length;
-  data.occupancy = remaining;
+  data.occupancy = seatsTaken(seatsAfter);
   if (remaining > 0) return data;
   if (seatsAfter.some((p) => p.status === "DROPPED_OFF")) {
     Object.assign(data, { status: "COMPLETED", completedAt: now, cancelReason: null });

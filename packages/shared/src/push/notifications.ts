@@ -21,8 +21,25 @@ export const RIDER_PUSH_KINDS = [
   "TRIP_COMPLETED",
   "DRIVER_CANCELLED",
   "NO_DRIVER_FOUND",
+  // Scheduled rides (rides/scheduled.ts): a driver took the car; "be ready"
+  // (with the I'm coming button); news about the booking (a driver had to
+  // cancel, a seat removed); it became a live request (opens the search).
+  "SCHEDULE_CONFIRMED",
+  "SCHEDULE_REMINDER",
+  "SCHEDULE_UPDATE",
+  "SCHEDULE_LIVE",
 ] as const;
-export const DRIVER_PUSH_KINDS = ["RIDE_REQUEST", "RIDER_CANCELLED", "WENT_OFFLINE"] as const;
+export const DRIVER_PUSH_KINDS = [
+  "RIDE_REQUEST",
+  "RIDER_CANCELLED",
+  "WENT_OFFLINE",
+  // Scheduled rides: a car offered; "leave in 10 minutes"; riders joined or
+  // left, or the car went to others; the trip started (opens it).
+  "SCHEDULE_OFFER",
+  "SCHEDULE_LEAVE_SOON",
+  "SCHEDULE_CHANGED",
+  "SCHEDULE_STARTED",
+] as const;
 
 export type RiderPushKind = (typeof RIDER_PUSH_KINDS)[number];
 export type DriverPushKind = (typeof DRIVER_PUSH_KINDS)[number];
@@ -97,6 +114,8 @@ export interface PushTextInput {
   car?: { color?: string | null; make?: string | null; model?: string | null } | null;
   /** DRIVER_ARRIVED: the rider's free wait started (rides/waitFee.ts) — the push states it and the fee. */
   freeWait?: { seconds: number; feePesewas: number };
+  /** SCHEDULE_* kinds: the words, written by the server from rides/scheduled.ts (first names only). */
+  schedule?: { title: string; body: string };
 }
 
 export interface PushText {
@@ -175,6 +194,15 @@ export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
         title: DRIVER_AUTO_OFFLINE_TITLE,
         body: DRIVER_AUTO_OFFLINE_MESSAGE,
       };
+    case "SCHEDULE_CONFIRMED":
+    case "SCHEDULE_REMINDER":
+    case "SCHEDULE_UPDATE":
+    case "SCHEDULE_LIVE":
+    case "SCHEDULE_OFFER":
+    case "SCHEDULE_LEAVE_SOON":
+    case "SCHEDULE_CHANGED":
+    case "SCHEDULE_STARTED":
+      return input.schedule ?? { title: "Scheduled ride", body: "Open CampusRide to see your scheduled ride." };
   }
 }
 
@@ -182,9 +210,11 @@ export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
  * Where tapping a notification takes the person:
  * - "trip": the ride's screen (rider: their active ride; driver: /ride/:id)
  * - "rides": the rider's ride history (the trip is over)
- * - "home": the start screen (driver: where the request's offer pops up)
+ * - "home": the start screen (driver: where the request's offer pops up;
+ *   rider: where the upcoming scheduled ride card is)
+ * - "schedule": the driver's Schedule tab (rider: Home)
  */
-export type PushTapTarget = "trip" | "rides" | "home";
+export type PushTapTarget = "trip" | "rides" | "home" | "schedule";
 
 export function pushTapTarget(kind: PushKind): PushTapTarget {
   switch (kind) {
@@ -193,7 +223,14 @@ export function pushTapTarget(kind: PushKind): PushTapTarget {
     case "RIDE_REQUEST":
     case "DRIVER_CANCELLED":
     case "WENT_OFFLINE":
+    case "SCHEDULE_CONFIRMED":
+    case "SCHEDULE_REMINDER":
+    case "SCHEDULE_UPDATE":
       return "home";
+    case "SCHEDULE_OFFER":
+    case "SCHEDULE_LEAVE_SOON":
+    case "SCHEDULE_CHANGED":
+      return "schedule";
     default:
       return "trip";
   }

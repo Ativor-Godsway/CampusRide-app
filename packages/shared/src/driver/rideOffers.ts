@@ -1,3 +1,4 @@
+import { bookingLabel } from "../rides/seats";
 /**
  * Ride offers: each new request pops up for the driver as ONE offer with a
  * countdown (Bolt/Uber style), the Home list staying as the backup. Pure, so
@@ -87,7 +88,7 @@ export function isOfferLive(
 
 /** "Shared · 1 seat", "Ride alone". */
 export function offerKindLabel(type: "LONE" | "SHARED", seats: number): string {
-  return type === "LONE" ? "Ride alone" : `Shared · ${seats} seat${seats === 1 ? "" : "s"}`;
+  return bookingLabel(type, seats);
 }
 
 /** "4 min · 1.2 km" / "under 1 min · 300 m"; null pieces are left out. */

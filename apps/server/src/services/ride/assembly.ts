@@ -1,5 +1,5 @@
 import type { PrismaClient, Prisma } from "@prisma/client";
-import { PRICING, type RidePinFields } from "@rida/shared";
+import { PRICING, seatsTaken, type RidePinFields } from "@rida/shared";
 import {
   NoSeatsAvailableError,
   NotRideOwnerError,
@@ -10,7 +10,6 @@ import {
 import type { Ride, RidePassenger } from "@prisma/client";
 import { applyRideTransition, joinLoadedSharedRideTx } from "./rideService";
 import { currentSeatFare } from "./fares";
-import { isActivePassengerStatus } from "./stateMachine";
 
 /**
  * `maxWait` (time allowed to acquire a pooled connection before the
@@ -33,6 +32,8 @@ export interface AddCandidate extends RidePinFields {
   dropoffZoneId: string;
   /** The fare on the rider's own request (services/ride/fares): it comes with them. */
   quotedFare: number;
+  /** Seats the booking takes (the request's occupancy; 1 from older apps). */
+  seats: number;
 }
 
 export interface AddRiderOptions {
@@ -109,7 +110,8 @@ export async function addRiderToCar(
       orderBy: { createdAt: "asc" },
     });
     const fillable = (FILLABLE_STATUSES as readonly string[]).includes(anchor.status);
-    const seated = passengers.filter((p) => isActivePassengerStatus(p.status)).length;
+    // Seats, not bookings: a booking for 2 takes 2 (@rida/shared rides/seats).
+    const seated = seatsTaken(passengers);
 
     // Closes the request and, in the same round trip, reads the fare its
     // rider was quoted (their seat's lockedFare, services/ride/fares).
@@ -148,13 +150,15 @@ export async function addRiderToCar(
       throw new RequestRideUnavailableError(requestRideId);
     }
 
-    // Seats are counted again here, with the car locked: a request for more
-    // seats than are left (none from today's apps) is refused, not squeezed in.
+    // Seats are counted again here, with the car locked: a booking for more
+    // seats than are left is refused (the whole transaction, request
+    // included, rolls back), never squeezed in.
     if (request.occupancy > PRICING.MAX_SHARED_OCCUPANCY - seated) throw new NoSeatsAvailableError(anchorRideId);
 
     // The rider's own pins, note and quoted fare travel with them onto their new seat.
     const candidate: AddCandidate = {
       quotedFare: request.quotedFare ?? currentSeatFare("SHARED"),
+      seats: request.occupancy,
       riderId: request.riderId,
       pickupZoneId: request.pickupZoneId,
       dropoffZoneId: request.dropoffZoneId,

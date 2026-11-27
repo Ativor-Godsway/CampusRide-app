@@ -3,7 +3,7 @@ import { announceServiceSoon } from "../services/service/serviceAnnouncer";
 import { useRequestValidation } from "../http/validation";
 import type { PrismaClient } from "@prisma/client";
 import type { PassengerStatus, UndoableStep } from "@rida/shared";
-import { CLIENT_FEATURES_HEADER, WAIT_FEE_FEATURE, hasClientFeature, seatWaitForApp, type StoredSeatWait } from "@rida/shared";
+import { CLIENT_FEATURES_HEADER, WAIT_FEE_FEATURE, hasClientFeature, notEnoughSeatsText, seatWaitForApp, seatsTaken, type StoredSeatWait } from "@rida/shared";
 import {
   DRIVER_CANCEL_NOTE_MAX,
   DRIVER_CANCEL_REASONS,
@@ -85,6 +85,7 @@ import { RULES } from "../rateLimit/rules";
 import { checkDriverPosition, hasActiveTrip, lastPositionData, parseDriverPoint } from "../services/zones/driverPosition";
 import { closeDriverSession, openDriverSession } from "../services/stats/driverSessions";
 import { commissionBlock } from "../services/commission/enforcement";
+import { driverSchedule } from "../services/scheduled/views";
 import { recordOfferAnswer } from "../services/stats/rideOffers";
 import {
   MAX,
@@ -218,6 +219,7 @@ function passengerForApp(
     dropoffZoneId: string;
     lockedFare: number | null;
     status: string;
+    seats?: number;
     arrivedAt: Date | null;
     waitFee?: number | null;
     noShowOpensAt?: Date | null;
@@ -239,6 +241,8 @@ function passengerForApp(
     // Includes a wait fee charged at pickup (waitFeePesewas says how much of it).
     lockedFare: p.lockedFare,
     status: p.status as PassengerStatus,
+    // Seats this booking takes (Shared) or people in it (Ride alone); one fare for all.
+    seats: p.seats ?? 1,
     arrivedAt: p.arrivedAt ? p.arrivedAt.toISOString() : null,
     // The pickup wait (services/ride/waitFee.ts): the countdown and the fee
     // to come while ARRIVED, the fee charged, when "rider didn't show" opens.
@@ -265,7 +269,7 @@ function passengerForApp(
  * route (the driver far from any campus road); the trip then shows none.
  */
 /** Why the board says a driver can't take a request now (null refusal: the car's detour check). */
-function boardNote(refusal: ReturnType<typeof seatFit>): string {
+function boardNote(refusal: ReturnType<typeof seatFit>, needed = 1, free = 0): string {
   switch (refusal) {
     case "LONE_CAR":
       return "Your trip is Ride alone";
@@ -274,7 +278,8 @@ function boardNote(refusal: ReturnType<typeof seatFit>): string {
     case "CAR_FULL":
       return "Your car is full";
     case "NOT_ENOUGH_SEATS":
-      return "Not enough free seats";
+      // "Needs 2 seats, you have 1." (a booking for 2 takes 2).
+      return notEnoughSeatsText(needed, free).replace(/\.$/, "");
     case "CAR_CLOSED":
       return "Your trip can't take more riders now";
     default:
@@ -1078,6 +1083,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply.code(200).send({ open: true, online: false, car: null, rides: [] });
     }
     noteDriverHeartbeat(prisma, userId);
+    // Scheduled cars open to drivers (services/scheduled): on the board with a "Scheduled" label.
+    const scheduled = (await driverSchedule(prisma, userId, now)).open;
     const carSummary = car
       ? { rideId: car.id, type: car.type, status: car.status, freeSeats: car.type === "SHARED" ? carSeats(car.passengers).free : 0 }
       : null;
@@ -1085,7 +1092,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // whatever the hours, like demo riders book whatever the hours.
     const service = serviceHoursGateOn() && !driver.user.isReviewDemo ? await isServiceOpen(prisma, now) : null;
     if (service && !service.open && service.reason !== "NO_DRIVERS") {
-      return reply.code(200).send({ open: false, online: true, car: carSummary, rides: [] });
+      return reply.code(200).send({ open: false, online: true, car: carSummary, rides: [], scheduled });
     }
 
     const rows = await prisma.ride.findMany({
@@ -1098,7 +1105,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       include: { rider: { select: { name: true } }, passengers: { select: { riderId: true, status: true, lockedFare: true } } },
       orderBy: { createdAt: "desc" },
     });
-    if (rows.length === 0) return reply.code(200).send({ open: true, online: true, car: carSummary, rides: [] });
+    if (rows.length === 0) return reply.code(200).send({ open: true, online: true, car: carSummary, rides: [], scheduled });
 
     const fitting = car
       ? new Set((await requestsThatFitCar(prisma, car, { userId, isOnline: true, lastLat: driver.lastLat, lastLng: driver.lastLng }, now)).map((r) => r.id))
@@ -1132,12 +1139,12 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           expiresAt: new Date((ride.broadcastStartedAt ?? ride.createdAt).getTime() + searchWindowMs()).toISOString(),
           offerSeconds: config.driverOfferSeconds,
           boardCanTake: canTake,
-          boardNote: canTake ? null : boardNote(refusal),
+          boardNote: canTake ? null : boardNote(refusal, ride.occupancy, carSummary?.freeSeats ?? 0),
         };
       }),
     );
     rides.sort((a, b) => (a.pickupDistanceMeters ?? Infinity) - (b.pickupDistanceMeters ?? Infinity) || b.createdAt.localeCompare(a.createdAt));
-    return reply.code(200).send({ open: true, online: true, car: carSummary, rides });
+    return reply.code(200).send({ open: true, online: true, car: carSummary, rides, scheduled });
   });
 
   /**
@@ -1283,8 +1290,12 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     if (car.type !== "SHARED" || !(FILLABLE_STATUSES as readonly string[]).includes(car.status)) {
       return refuse(reply, 409, "CAR_CLOSED", "Riders can't be added to this trip now.");
     }
-    const seated = car.passengers.filter((p) => isActivePassengerStatus(p.status)).length;
+    // Seats, not bookings (a booking for 2 takes 2).
+    const seated = seatsTaken(car.passengers);
     if (seated >= PRICING.MAX_SHARED_OCCUPANCY) return refuse(reply, 409, "CAR_FULL", NO_LONGER_FITS_MESSAGE);
+    if (requestRide && requestRide.occupancy > PRICING.MAX_SHARED_OCCUPANCY - seated) {
+      return refuse(reply, 409, "CAR_FULL", notEnoughSeatsText(requestRide.occupancy, PRICING.MAX_SHARED_OCCUPANCY - seated));
+    }
     if (
       !requestRide ||
       requestRide.isReviewDemo !== car.isReviewDemo ||

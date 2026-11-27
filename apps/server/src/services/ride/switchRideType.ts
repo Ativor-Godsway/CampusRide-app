@@ -1,10 +1,20 @@
 import type { PrismaClient } from "@prisma/client";
 import type { RideType } from "@rida/shared";
-import { fareForNewSeat, type PricedEnd } from "./farePricing";
+import { MAX_SHARED_BOOKING_SEATS } from "@rida/shared";
+import { fareForNewBooking, type PricedEnd } from "./farePricing";
 import { isActivePassengerStatus } from "./stateMachine";
 import { InvalidSwitchToLoneError, RideSwitchNotAllowedError } from "./errors";
 
 const TX_OPTIONS = { timeout: 20000 } as const;
+
+/** A Ride alone booking for 4 can't become Shared (3 seats at most). Nothing changes. */
+export class TooManyForSharedError extends RideSwitchNotAllowedError {
+  readonly code = "TOO_MANY_FOR_SHARED";
+  constructor(readonly seats: number) {
+    super(`Shared takes at most ${MAX_SHARED_BOOKING_SEATS} people in one booking. Keep Ride alone for ${seats}.`);
+    this.name = "TooManyForSharedError";
+  }
+}
 
 /** Statuses in which no driver holds the ride yet, so its type may change. */
 export const SWITCHABLE_STATUSES = ["REQUESTED", "AWAITING_RIDER_DECISION"] as const;
@@ -40,7 +50,7 @@ export async function switchRideType(
   rideId: string,
   toType: RideType,
   now: Date = new Date(),
-  /** The price the app showed for the new type (see fareForNewSeat); absent from older apps. */
+  /** The price the app showed for the new type and this booking's seats (see fareForNewBooking); absent from older apps. */
   shownFare?: number | null,
 ) {
   const fromType: RideType = toType === "LONE" ? "SHARED" : "LONE";
@@ -73,11 +83,14 @@ export async function switchRideType(
       throw new InvalidSwitchToLoneError(active.length);
     }
 
-    // The new type's price for this trip, set now (far-trip pricing).
+    // The new type's price for this trip and this booking's seats, set now.
+    // Ride alone keeps the party size (people); Shared takes at most 3 seats.
     const seat = active[0]!;
-    const lockedFare = await fareForNewSeat(
+    if (toType === "SHARED" && seat.seats > MAX_SHARED_BOOKING_SEATS) throw new TooManyForSharedError(seat.seats);
+    const lockedFare = await fareForNewBooking(
       prisma,
       toType,
+      seat.seats,
       seatEnd(seat.pickupLat, seat.pickupLng, seat.pickupPlaceId),
       seatEnd(seat.dropoffLat, seat.dropoffLng, seat.dropoffPlaceId),
       shownFare,

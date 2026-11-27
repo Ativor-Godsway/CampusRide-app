@@ -447,3 +447,19 @@ export function emitDriverBroadcast(
 export function emitServiceStatus(payload: ServiceStatus): void {
   ioRef?.emit(SERVICE_STATUS_EVENT, payload);
 }
+
+/**
+ * Scheduled rides (services/scheduled, @rida/shared SCHEDULE_EVENTS): an
+ * event to these drivers' own rooms (an offer, their Schedule tab changed).
+ * Older driver apps don't listen for them.
+ */
+export function emitToDrivers(driverUserIds: readonly string[], event: string, payload: unknown): void {
+  if (!ioRef || driverUserIds.length === 0) return;
+  ioRef.to(driverUserIds.map(roomForDriver)).emit(event, payload);
+}
+
+/** A scheduled-ride event to riders' own rooms (their booking changed). */
+export function emitToRiders(riderIds: readonly string[], event: string, payload: unknown): void {
+  if (!ioRef || riderIds.length === 0) return;
+  ioRef.to(riderIds.map(roomForRider)).emit(event, payload);
+}

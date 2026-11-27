@@ -1213,24 +1213,40 @@ export const getZones = (token: string) => get<{ zones: Array<{ id: string; name
 
 // ─── Far-trip pricing, zone neighbours, refused bookings (2026-11-24) ───────
 
+/** Every price an admin sets (2026-11-26): Shared by seats in one booking, far per seat, Ride alone. */
+export interface FarePriceSettings {
+  sharedPesewas: number;
+  shared2Pesewas: number;
+  shared3Pesewas: number;
+  farPerSeatPesewas: number;
+  lonePesewas: number;
+}
+
 export interface FarPricing {
-  settings: {
-    sharedPesewas: number;
+  settings: FarePriceSettings & {
+    /** Older names, still sent: a far 1-seat booking, and Ride alone. */
     sharedFarPesewas: number;
     loneFarePesewas: number;
     updatedAt: string | null;
     updatedBy: { id: string; name: string } | null;
   };
-  defaults: { sharedPesewas: number; sharedFarPesewas: number };
+  defaults: FarePriceSettings;
   farPlaces: Array<{ id: string; name: string; isActive: boolean; zoneName: string; end: "NORTH" | "SOUTH" }>;
 }
 
 export const getFarPricing = (token: string) => get<FarPricing>(token, "/admin/far-pricing");
+/** Saves the prices and exactly these far-end places together. */
 export const saveFarPricing = (
   token: string,
-  input: { sharedPesewas: number; sharedFarPesewas: number; farPlaces: Array<{ id: string; end: "NORTH" | "SOUTH" }> },
+  input: FarePriceSettings & { farPlaces: Array<{ id: string; end: "NORTH" | "SOUTH" }> },
 ) =>
   request<FarPricing>("/admin/far-pricing", { method: "PUT", body: JSON.stringify(input) }, token);
+
+/** The prices as they are saved now (what a save of the far places sends back unchanged). */
+export function priceSettingsOf(f: FarPricing): FarePriceSettings {
+  const { sharedPesewas, shared2Pesewas, shared3Pesewas, farPerSeatPesewas, lonePesewas } = f.settings;
+  return { sharedPesewas, shared2Pesewas, shared3Pesewas, farPerSeatPesewas, lonePesewas };
+}
 
 export interface ZoneNeighbours {
   zones: Array<{ id: string; name: string }>;
@@ -1290,3 +1306,52 @@ export interface WaitFees {
 }
 
 export const getWaitFees = (token: string, period: string) => get<WaitFees>(token, `/admin/wait-fees?${period}`);
+
+// ─── Scheduled rides (server: routes/scheduled.ts) ──────────────────────────
+
+export interface ScheduledCarRow {
+  id: string;
+  status: "OPEN" | "ACCEPTED" | "STARTED" | "LIVE" | "CANCELLED";
+  seats: number;
+  bookings: number;
+  cancelled: number;
+  noShows: number;
+  driverName: string | null;
+  acceptedVia: string | null;
+  offeredAt: string | null;
+  leaveBy: string | null;
+  liveReason: string | null;
+  rideId: string | null;
+}
+
+export interface ScheduledDayBody {
+  day: string;
+  totals: {
+    bookings: number;
+    seats: number;
+    cars: number;
+    accepted: number;
+    started: number;
+    toLive: number;
+    carsToLive: number;
+    noShows: number;
+    lateCancels: number;
+    cancels: number;
+    strikes: number;
+    blockedRiders: number;
+  };
+  slots: Array<{ arriveBy: string; cars: ScheduledCarRow[] }>;
+  recent: Array<{ day: string; bookings: number; seats: number; cars: number; started: number; toLive: number; noShows: number; strikes: number }>;
+}
+
+export const getScheduledDay = (token: string, day?: string) =>
+  get<ScheduledDayBody>(token, `/admin/scheduled${day ? `?day=${encodeURIComponent(day)}` : ""}`);
+
+export interface ScheduleSettingsBody {
+  settings: import("@rida/shared").ScheduleSettings & { updatedAt: string | null; updatedBy: { id: string; name: string } | null };
+  defaults: import("@rida/shared").ScheduleSettings;
+}
+
+export const getScheduleSettings = (token: string) => get<ScheduleSettingsBody>(token, "/admin/schedule-settings");
+export const saveScheduleSettings = (token: string, values: import("@rida/shared").ScheduleSettings) =>
+  request<ScheduleSettingsBody>("/admin/schedule-settings", { method: "PUT", body: JSON.stringify(values) }, token);

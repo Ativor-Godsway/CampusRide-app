@@ -6,6 +6,8 @@ import { DRIVER_DEEP_LINK_POLICY, holdUpdateScreen } from "@rida/shared";
 import {
   AppErrorScreen,
   AppUpdateGate,
+  LaunchUpdateGate,
+  getDriverActiveRide,
   AuthProvider,
   TermsConfirmationGate,
   hideSplashScreen,
@@ -79,6 +81,13 @@ function DriverUpdateGate() {
   return <AppUpdateGate app="driver" hold={holdUpdateScreen({ trip, onTripScreen })} onShow={goOffline} />;
 }
 
+/** A newer bundle on a fresh launch: never mid-trip (then from the next launch). Signed out: no trip. */
+const driverTripActive = () =>
+  getDriverActiveRide().then(
+    (ride) => ride !== null,
+    (err: { response?: { status?: number } }) => err?.response?.status !== 401,
+  );
+
 function RootLayout() {
   const fontsReady = useAppFonts();
   if (!fontsReady) return null;
@@ -104,6 +113,7 @@ function RootLayout() {
                 <TermsConfirmationGate />
                 {/* Last, so it covers everything else, the terms confirmation included. */}
                 <DriverUpdateGate />
+                <LaunchUpdateGate app="driver" isRideActive={driverTripActive} />
               </DriverPresenceProvider>
             </LocationDisclosureProvider>
           </DriverLocationProvider>

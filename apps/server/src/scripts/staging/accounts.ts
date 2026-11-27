@@ -72,6 +72,11 @@ async function main(): Promise<void> {
         // Nothing owed: no commission rows for a test driver.
         await prisma.commissionLedger.deleteMany({ where: { driverUserId: user.id } });
       }
+      if (a.role === "RIDER") {
+        // Scheduled rides: strikes and any block cleared, so a test rider can schedule again.
+        await prisma.scheduleStrike.deleteMany({ where: { riderId: user.id } });
+        await prisma.user.update({ where: { id: user.id }, data: { scheduleBlockedAt: null, scheduleBlockedUntil: null } });
+      }
       console.log(`  ${a.role.padEnd(6)}  ${a.name.padEnd(14)}  ${a.phone}  (type ${a.typed})`);
     }
     console.log("\nSign in with the fixed code STAGING_TEST_OTP from apps/server/.env.staging.\n");

@@ -43,6 +43,11 @@ import {
   type DriverCancelReason,
   type TripStop,
   type TripZone,
+  seatsTaken,
+  carSeatsLabel,
+  bookingLabel,
+  peopleWord,
+  seatsWord,
 } from "@rida/shared";
 import {
   BottomSheet,
@@ -358,7 +363,8 @@ export default function TripScreen() {
       serverRide.type === "SHARED" &&
       (serverRide.status === "MATCHED" || serverRide.status === "ARRIVED" || serverRide.status === "IN_PROGRESS"),
   );
-  const activeSeats = passengers.filter((p) => p.status === "WAITING" || p.status === "ARRIVED" || p.status === "PICKED_UP").length;
+  // Seats, not bookings: a booking for 2 takes 2 (@rida/shared rides/seats).
+  const activeSeats = seatsTaken(passengers);
   const freeSeats = Math.max(0, CAR_SEATS - activeSeats);
   const { data: fill, refetch: refetchFill } = useQuery({
     queryKey: ["fillSuggestions", ride?.id],
@@ -681,10 +687,11 @@ export default function TripScreen() {
     .filter((p) => p.status !== "CANCELLED")
     .reduce((sum, p) => sum + (fareWithWait(p.lockedFare, p.wait, clock) ?? 0), 0);
   const price = tripFare > 0 ? ` · ${formatCedis(tripFare)}` : "";
+  // "Shared · 3 of 4 seats taken · GH₵21"; "Ride alone · 3 people · GH₵15".
   const pill =
     ride.type === "SHARED"
-      ? `Shared · ${activeSeats}/${CAR_SEATS} seats${price}`
-      : `Ride alone${price}`;
+      ? `Shared · ${carSeatsLabel(activeSeats, CAR_SEATS)}${price}`
+      : `${bookingLabel("LONE", passengers.find((p) => p.status !== "CANCELLED")?.seats ?? 1)}${price}`;
 
   // The next pickup's own actions, for the ⋯ menu.
   const nextPickup = next?.kind === "PICKUP" ? next : null;
@@ -1017,6 +1024,8 @@ function NextStopCard({
         {/* What to do now, in plain words. */}
         <Text style={styles.instruction} numberOfLines={2} accessibilityRole="header">
           {pickup ? "Pick up" : "Drop off"} {name}
+          {/* A booking for more than one: how many to expect (or let out). */}
+          {stop.seats > 1 ? ` · ${ride.type === "LONE" ? peopleWord(stop.seats) : seatsWord(stop.seats)}` : ""}
         </Text>
         <Text variant="subhead" color="secondary" numberOfLines={2}>
           {where}

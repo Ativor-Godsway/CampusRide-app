@@ -106,6 +106,15 @@ const DEDUPE_MS: Record<PushKind, number> = {
   RIDE_REQUEST: 10 * 60_000,
   RIDER_CANCELLED: 60_000,
   WENT_OFFLINE: 10 * 60_000,
+  // Scheduled rides: each send passes its own dedupe key (what changed).
+  SCHEDULE_CONFIRMED: 60_000,
+  SCHEDULE_REMINDER: 60 * 60_000,
+  SCHEDULE_UPDATE: 60_000,
+  SCHEDULE_LIVE: 60_000,
+  SCHEDULE_OFFER: 30 * 60_000,
+  SCHEDULE_LEAVE_SOON: 60 * 60_000,
+  SCHEDULE_CHANGED: 30_000,
+  SCHEDULE_STARTED: 60_000,
 };
 
 /**
@@ -114,7 +123,7 @@ const DEDUPE_MS: Record<PushKind, number> = {
  */
 const TTL_SECONDS: Record<PushApp, Partial<Record<PushKind, number>>> = {
   rider: {},
-  driver: { RIDE_REQUEST: 90, WENT_OFFLINE: 6 * 60 * 60 },
+  driver: { RIDE_REQUEST: 90, WENT_OFFLINE: 6 * 60 * 60, SCHEDULE_OFFER: 30 * 60 },
 };
 const DEFAULT_TTL_SECONDS = 10 * 60;
 
@@ -139,6 +148,8 @@ export interface SendPushInput {
   text?: PushTextInput;
   /** Repeat suppression key; default `${kind}:${rideId}`. */
   dedupeKey?: string;
+  /** A notification category the app registered (action buttons: the scheduled reminder's "I'm coming"). */
+  categoryId?: string;
 }
 
 /**
@@ -174,6 +185,7 @@ export async function sendPush(prisma: PrismaClient, input: SendPushInput): Prom
       priority: "high",
       channelId: ANDROID_CHANNELS[app].id,
       ttl: TTL_SECONDS[app][input.kind] ?? DEFAULT_TTL_SECONDS,
+      ...(input.categoryId ? { categoryId: input.categoryId } : {}),
     }));
 
     const tickets = await transport.send(messages);

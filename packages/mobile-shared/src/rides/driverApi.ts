@@ -289,6 +289,8 @@ export interface RequestBoard {
   /** The driver's trip, if any. */
   car: { rideId: string; type: RideType; status: string; freeSeats: number } | null;
   rides: BoardRideItem[];
+  /** Scheduled cars open to drivers ("Scheduled" on the board); [] from servers before scheduled rides. */
+  scheduled: import("@rida/shared").DriverScheduledCarView[];
 }
 
 /** Every open request on campus, nearest first (GET /driver/requests/board). */
@@ -296,7 +298,7 @@ export async function getRequestBoard(position?: { latitude: number; longitude: 
   const res = await api.get<RequestBoard>("/driver/requests/board", {
     params: position ? { lat: position.latitude.toFixed(5), lng: position.longitude.toFixed(5) } : undefined,
   });
-  return { open: res.data.open ?? true, online: res.data.online ?? true, car: res.data.car ?? null, rides: readList<BoardRideItem>(res.data, "rides") };
+  return { open: res.data.open ?? true, online: res.data.online ?? true, car: res.data.car ?? null, rides: readList<BoardRideItem>(res.data, "rides"), scheduled: Array.isArray(res.data.scheduled) ? res.data.scheduled : [] };
 }
 
 // ─── Completed-ride history (read-only, derived earnings) ────────────────────
@@ -390,9 +392,14 @@ export interface PassengerInCar extends Partial<RidePinFields> {
   /** Zone ids, for placing the rider's stops on the map. Optional: older servers don't send them. */
   pickupZoneId?: string;
   dropoffZoneId?: string;
-  /** The passenger's fare in pesewas, including a wait fee charged at pickup. */
+  /** The booking's fare in pesewas (all its seats), including a wait fee charged at pickup. */
   lockedFare: number | null;
   status: PassengerStatus;
+  /**
+   * Seats this booking takes (Shared 1–3) or people in it (Ride alone 1–4),
+   * @rida/shared rides/seats.ts. Absent from older servers: 1.
+   */
+  seats?: number;
   /** ISO time the driver reached this rider's pickup (wait timer, "rider didn't show"). */
   arrivedAt?: string | null;
   /** The pickup wait while ARRIVED (@rida/shared rides/waitFee.ts); absent from older servers. */

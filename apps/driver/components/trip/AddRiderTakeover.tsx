@@ -1,4 +1,4 @@
-import { splitFare, type LatLng, type TripZone } from "@rida/shared";
+import { splitFare, type LatLng, type TripZone, bookingLabel } from "@rida/shared";
 import { StatusChip, type AddRiderPreviewResult, type FillSuggestion } from "@rida/mobile-shared";
 import { RequestTakeover, type TakeoverCountdown } from "../offers/RequestTakeover";
 
@@ -71,7 +71,7 @@ export function AddRiderTakeover({
       eyebrow="Add a rider"
       chips={
         <>
-          <StatusChip tone="neutral" icon="people-outline" label="Shared · 1 seat" />
+          <StatusChip tone="neutral" icon="people-outline" label={bookingLabel("SHARED", suggestion.seats ?? 1)} />
           {preview ? (
             <StatusChip
               tone="neutral"

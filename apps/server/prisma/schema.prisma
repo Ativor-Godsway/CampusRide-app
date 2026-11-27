@@ -22,6 +22,13 @@ enum RideType {
   SHARED
 }
 
+/// How a ride was booked (Ride.booking). See services/scheduled.
+enum RideBooking {
+  LIVE
+  SCHEDULED
+  SCHEDULED_TO_LIVE
+}
+
 enum RideSource {
   APP
   USSD
@@ -161,6 +168,12 @@ model User {
   /// the countdown before the public launch, null if not. Set one by one or
   /// for every current rider at once in the admin site's Settings.
   earlyAccessAt         DateTime?
+  /// Scheduled rides (2026-11-27): late cancels and no-shows are strikes;
+  /// enough of them (ScheduleSetting) and this rider can't schedule until
+  /// `scheduleBlockedUntil`. `scheduleBlockedAt`: when that block began
+  /// (strikes before it are used up).
+  scheduleBlockedAt     DateTime?
+  scheduleBlockedUntil  DateTime?
 
   driver                 Driver?
   ridesAsRider           Ride[]                  @relation("RiderRides")
@@ -183,6 +196,8 @@ model User {
   paystackPayments       DriverPaystackPayment[]
   sosEvents              SosEvent[]
   serviceOpenWaiter      ServiceOpenWaiter?
+  scheduledBookings      ScheduledBooking[]
+  scheduledCarsDriven    ScheduledCar[]          @relation("ScheduledCarDriver")
 
   /// Sign-ups per day (admin Riders page).
   @@index([createdAt])
@@ -453,6 +468,11 @@ model Ride {
   /// A review demo ride (services/reviewDemo): only demo accounts ever see,
   /// take or are matched to it; left out of admin lists and stats.
   isReviewDemo       Boolean            @default(false)
+  /// Scheduled or live (2026-11-27, for analysis): LIVE (asked for now),
+  /// SCHEDULED (a scheduled car that started as a trip, scheduledCarId), or
+  /// SCHEDULED_TO_LIVE (a scheduled seat that became a live request).
+  booking            RideBooking        @default(LIVE)
+  scheduledCarId     String?
 
   rider            User              @relation("RiderRides", fields: [riderId], references: [id], onDelete: Restrict)
   driver           User?             @relation("DriverRides", fields: [driverId], references: [id], onDelete: Restrict)
@@ -478,6 +498,7 @@ model Ride {
   @@index([driverId])
   @@index([pickupZoneId])
   @@index([mergedIntoRideId])
+  @@index([scheduledCarId])
 }
 
 /// One driver cancelling one rider's pickup before it happened ("Cancel
@@ -520,6 +541,9 @@ model RidePassenger {
   /// Price-locked fare in pesewas, set at join-time and ratcheted downward
   /// only as occupancy increases; frozen permanently once the ride departs
   lockedFare     Int?
+  /// Seats this booking takes (Shared 1-3: the rider and friends) or people
+  /// in it (Ride alone 1-4), @rida/shared rides/seats.ts. One fare for all.
+  seats          Int             @default(1)
   status         PassengerStatus @default(WAITING)
   /// When the driver reached this rider's pickup (WAITING -> ARRIVED). Starts
   /// the rider's wait timer; "rider didn't show" unlocks 3 minutes after it.
@@ -1202,12 +1226,21 @@ enum FarEnd {
 /// stays PRICING.LONE_FARE. A price is locked on the seat when the ride is
 /// requested, so a change only reaches new requests.
 model FarePricingSetting {
-  id               String   @id @default("fares")
-  sharedPesewas    Int      @default(700)
-  sharedFarPesewas Int      @default(900)
-  updatedAt        DateTime @updatedAt
+  id                String   @id @default("fares")
+  /// A 1-seat Shared booking.
+  sharedPesewas     Int      @default(700)
+  /// Kept in step (1 seat + the far surcharge) for older code; prices read farPerSeatPesewas.
+  sharedFarPesewas  Int      @default(900)
+  /// A 2-seat and a 3-seat Shared booking (2026-11-26).
+  shared2Pesewas    Int      @default(1400)
+  shared3Pesewas    Int      @default(1800)
+  /// Added per seat on a North <-> South trip.
+  farPerSeatPesewas Int      @default(200)
+  /// Ride alone (the whole car, 1-4 people).
+  lonePesewas       Int      @default(1500)
+  updatedAt         DateTime @updatedAt
   /// User.id of the admin who last changed it.
-  updatedBy        String?
+  updatedBy         String?
 }
 
 /// A ride request the server refused (2026-11-24), kept anonymous: no rider,
@@ -1250,4 +1283,175 @@ model DispatchSetting {
   updatedAt           DateTime @updatedAt
   /// User.id of the admin who last changed it.
   updatedBy           String?
+}
+
+/// Scheduled Shared rides (2026-11-27, services/scheduled, rules in
+/// @rida/shared rides/scheduled.ts). A rider books seats for an "arrive by"
+/// slot; bookings going the same way in the same slot share a car (at most
+/// 4 seats). A car is offered to drivers by how full it is; once a driver
+/// accepts it is theirs, and at its leave-by time it becomes a NORMAL Shared
+/// trip (a Ride, rideId). A car no driver took in time becomes live requests.
+enum ScheduledCarStatus {
+  /// No driver yet (offered to drivers once offeredAt is set).
+  OPEN
+  /// A driver accepted; it starts at leaveBy.
+  ACCEPTED
+  /// Became a normal trip (rideId).
+  STARTED
+  /// Its seats became live requests (liveReason).
+  LIVE
+  /// Every booking cancelled.
+  CANCELLED
+}
+
+enum ScheduledBookingStatus {
+  /// Waiting for its car to start.
+  BOOKED
+  /// On its car's trip (rideId, ridePassengerId).
+  STARTED
+  /// Became a live request (rideId).
+  LIVE
+  CANCELLED
+}
+
+model ScheduledCar {
+  id               String             @id @default(cuid())
+  /// The slot: when the riders want to be at their drop-off (Accra time = UTC).
+  arriveBy         DateTime
+  status           ScheduledCarStatus @default(OPEN)
+  driverId         String?
+  acceptedAt       DateTime?
+  /// Where the driver took it: POPUP, BOARD, SCHEDULE (the Schedule tab).
+  acceptedVia      String?            @db.VarChar(10)
+  /// First offered to drivers (null: not yet).
+  offeredAt        DateTime?
+  /// When the driver must set off (worked out again as riders join or leave).
+  leaveBy          DateTime?
+  driverRemindedAt DateTime?
+  startedAt        DateTime?
+  /// The trip it became.
+  rideId           String?            @unique
+  /// When and why it became live requests: NO_DRIVER, ONE_SEAT, DRIVER_BUSY, LATE.
+  liveAt           DateTime?
+  liveReason       String?            @db.VarChar(20)
+  cancelledAt      DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  driver   User?              @relation("ScheduledCarDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  bookings ScheduledBooking[]
+
+  @@index([arriveBy])
+  @@index([status, arriveBy])
+  @@index([driverId])
+}
+
+model ScheduledBooking {
+  id              String                 @id @default(cuid())
+  carId           String
+  riderId         String
+  /// The car's slot, copied (per-day admin counts, the rider's card).
+  arriveBy        DateTime
+  /// 1-3 seats, one fare for all (the price shown, locked like a live booking).
+  seats           Int                    @default(1)
+  lockedFare      Int
+  status          ScheduledBookingStatus @default(BOOKED)
+  pickupZoneId    String
+  dropoffZoneId   String
+  pickupLat       Float?
+  pickupLng       Float?
+  pickupLabel     String?                @db.VarChar(120)
+  pickupPlaceId   String?
+  dropoffLat      Float?
+  dropoffLng      Float?
+  dropoffLabel    String?                @db.VarChar(120)
+  dropoffPlaceId  String?
+  pickupNote      String?                @db.VarChar(140)
+  createdAt       DateTime               @default(now())
+  cancelledAt     DateTime?
+  /// Cancelled after the free-cancel time (a strike).
+  lateCancel      Boolean                @default(false)
+  /// The "be ready" reminder push, and the rider's "I'm coming".
+  remindedAt      DateTime?
+  comingAt        DateTime?
+  /// The trip (STARTED) or live request (LIVE) it became, and its seat on the trip.
+  rideId          String?
+  ridePassengerId String?                @unique
+  liveAt          DateTime?
+  /// The driver marked this rider as not at the pickup (a strike).
+  noShowAt        DateTime?
+
+  car   ScheduledCar @relation(fields: [carId], references: [id], onDelete: Cascade)
+  rider User         @relation(fields: [riderId], references: [id], onDelete: Cascade)
+
+  @@index([carId])
+  @@index([riderId, status])
+  @@index([arriveBy])
+  @@index([rideId])
+}
+
+/// A late cancel or no-show on a scheduled ride. Plain columns, a record.
+model ScheduleStrike {
+  id        String   @id @default(cuid())
+  riderId   String
+  bookingId String
+  /// LATE_CANCEL or NO_SHOW.
+  kind      String   @db.VarChar(20)
+  createdAt DateTime @default(now())
+
+  @@unique([bookingId, kind])
+  @@index([riderId, createdAt])
+  @@index([createdAt])
+}
+
+/// What happened to scheduled cars, for analysis (admin Scheduled page):
+/// BOOKED, JOINED, OFFERED, ACCEPTED, DRIVER_CANCELLED, RIDER_CANCELLED,
+/// TO_LIVE, STARTED, NO_SHOW, BLOCKED, REMOVED. Plain columns, a record.
+model ScheduledRideEvent {
+  id        String   @id @default(cuid())
+  carId     String
+  bookingId String?
+  kind      String   @db.VarChar(24)
+  detail    String?  @db.VarChar(200)
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([carId])
+}
+
+/// Scheduled ride settings (admin Settings), one row id "schedule"; no row =
+/// the defaults (DEFAULT_SCHEDULE_SETTINGS in @rida/shared).
+model ScheduleSetting {
+  id                    String   @id @default("schedule")
+  enabled               Boolean  @default(true)
+  /// The rider app's "Book your ride ahead" intro on fresh launches.
+  introEnabled          Boolean  @default(true)
+  slotMinutes           Int      @default(10)
+  bookingCutoffMinutes  Int      @default(20)
+  carSeats              Int      @default(4)
+  groupRadiusMeters     Int      @default(600)
+  offerNowSeats         Int      @default(3)
+  offerLaterSeats       Int      @default(2)
+  offerLaterMinutes     Int      @default(30)
+  soloLiveMinutes       Int      @default(20)
+  noDriverMinutes       Int      @default(25)
+  driverReminderMinutes Int      @default(10)
+  riderReminderMinutes  Int      @default(10)
+  driverGapMinutes      Int      @default(25)
+  freeCancelMinutes     Int      @default(30)
+  strikesToBlock        Int      @default(2)
+  blockDays             Int      @default(7)
+  strikeWindowDays      Int      @default(30)
+  pickupMinutesPerStop  Int      @default(3)
+  leaveBufferMinutes    Int      @default(5)
+  pickupWindowMinutes   Int      @default(7)
+  /// Matching (2026-11-28): the most road a rider's stops may add to a car's
+  /// route, the looser limit while the car has few riders, and the most
+  /// extra driving minutes.
+  maxExtraMeters        Int      @default(1000)
+  sparseExtraMeters     Int      @default(1500)
+  maxExtraMinutes       Int      @default(5)
+  updatedAt             DateTime @updatedAt
+  /// User.id of the admin who last changed it.
+  updatedBy             String?
 }

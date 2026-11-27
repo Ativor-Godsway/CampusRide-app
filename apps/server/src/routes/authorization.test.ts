@@ -199,6 +199,17 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "GET /admin/dispatch-settings": "admin",
   "PUT /admin/dispatch-settings": "admin",
   "GET /admin/wait-fee-settings": "admin",
+  "GET /admin/scheduled": "admin",
+  "GET /admin/schedule-settings": "admin",
+  "PUT /admin/schedule-settings": "admin",
+  "POST /rides/scheduled/options": "self",
+  "POST /rides/scheduled": "self",
+  "GET /rides/scheduled/mine": "self",
+  "POST /rides/scheduled/:id/cancel": "owner",
+  "POST /rides/scheduled/:id/coming": "owner",
+  "GET /driver/scheduled": "self",
+  "POST /driver/scheduled/:id/accept": "owner",
+  "POST /driver/scheduled/:id/cancel": "owner",
   "PUT /admin/wait-fee-settings": "admin",
   "GET /admin/wait-fees": "admin",
   "GET /admin/riders": "admin",
@@ -313,6 +324,8 @@ interface World {
 }
 
 let w: World;
+/** Scheduled rides: A's booking in a car D1 accepted. */
+let sched: { carId: string; bookingId: string };
 
 beforeAll(async () => {
   app = Fastify();
@@ -386,9 +399,19 @@ beforeAll(async () => {
     }),
     openRequest: await ride({ type: "SHARED", status: "REQUESTED", riderId: requester.user.id }),
   };
+  const zonesForSched = await getTestZones();
+  const arriveBy = new Date(Date.now() + 2 * 60 * 60_000);
+  const schedCar = await prisma.scheduledCar.create({
+    data: { arriveBy, status: "ACCEPTED", driverId: driver1.user.id, acceptedAt: new Date(), offeredAt: new Date(), leaveBy: new Date(arriveBy.getTime() - 20 * 60_000) },
+  });
+  const schedBooking = await prisma.scheduledBooking.create({
+    data: { carId: schedCar.id, riderId: a, arriveBy, seats: 1, lockedFare: 700, pickupZoneId: zonesForSched.pickup.id, dropoffZoneId: zonesForSched.dropoff.id },
+  });
+  sched = { carId: schedCar.id, bookingId: schedBooking.id };
 });
 
 afterAll(async () => {
+  if (sched) await prisma.scheduledCar.deleteMany({ where: { id: sched.carId } });
   await prisma.driverPaystackPayment.deleteMany({ where: { driverUserId: { in: userIds } } });
   await prisma.ride.deleteMany({
     where: { OR: [{ riderId: { in: userIds } }, { driverId: { in: userIds } }] },
@@ -742,6 +765,35 @@ function cases(): OwnershipCase[] {
       unchanged: async () => expect(await statusOf(w.openRequest.id)).toBe("REQUESTED"),
     },
     ...passengerActions,
+    // Scheduled rides
+    {
+      route: "POST /rides/scheduled/:id/cancel",
+      name: "rider B can't cancel rider A's scheduled ride",
+      run: () => as(riderB, "POST", `/rides/scheduled/${sched.bookingId}/cancel`, {}),
+      expectStatus: 404,
+      unchanged: async () => expect((await prisma.scheduledBooking.findUniqueOrThrow({ where: { id: sched.bookingId } })).status).toBe("BOOKED"),
+    },
+    {
+      route: "POST /rides/scheduled/:id/coming",
+      name: "rider B can't say 'I'm coming' for rider A",
+      run: () => as(riderB, "POST", `/rides/scheduled/${sched.bookingId}/coming`, {}),
+      expectStatus: 404,
+      unchanged: async () => expect((await prisma.scheduledBooking.findUniqueOrThrow({ where: { id: sched.bookingId } })).comingAt).toBeNull(),
+    },
+    {
+      route: "POST /driver/scheduled/:id/cancel",
+      name: "another driver can't give back D1's scheduled car",
+      run: () => as(driver2, "POST", `/driver/scheduled/${sched.carId}/cancel`, {}),
+      expectStatus: 404,
+      unchanged: async () => expect((await prisma.scheduledCar.findUniqueOrThrow({ where: { id: sched.carId } })).driverId).toBe(driver1.user.id),
+    },
+    {
+      route: "POST /driver/scheduled/:id/accept",
+      name: "another driver can't take D1's scheduled car",
+      run: () => as(driver2, "POST", `/driver/scheduled/${sched.carId}/accept`, {}),
+      expectStatus: 409,
+      unchanged: async () => expect((await prisma.scheduledCar.findUniqueOrThrow({ where: { id: sched.carId } })).driverId).toBe(driver1.user.id),
+    },
     {
       route: "GET /rides/:id/rateable-riders",
       name: "another driver can't list D1's riders",

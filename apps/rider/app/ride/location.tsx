@@ -194,6 +194,11 @@ export default function PlanRideScreen() {
         return;
       }
       setProblem(null);
+      // From the "Book your ride ahead" intro: straight to the Schedule screen.
+      if (params.intent === "schedule") {
+        router.push({ pathname: "/ride/schedule", params: { ...tripEndParams("pickup", nextPickup), ...tripEndParams("dropoff", nextDropoff) } });
+        return;
+      }
       router.push({
         pathname: "/ride/type",
         params: chooseRideParams(nextPickup, nextDropoff, "plan"),
@@ -298,6 +303,11 @@ export default function PlanRideScreen() {
         <Ionicons name="arrow-back" size={22} color={colors.ink} />
       </Pressable>
 
+      {params.intent === "schedule" ? (
+        <Text variant="eyebrow" color="brand">
+          Scheduled ride · step 1 of 3
+        </Text>
+      ) : null}
       <Text variant="title1" accessibilityRole="header" style={styles.title}>
         Where to?
       </Text>
