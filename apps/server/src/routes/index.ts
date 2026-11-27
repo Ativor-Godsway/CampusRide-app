@@ -11,6 +11,7 @@ import { registerRideRoutes } from "./rides";
 import { registerRatingRoutes } from "./ratings";
 import { registerDriverRoutes } from "./driver";
 import { installWaitFeeAppMarker } from "../services/ride/waitFee";
+import { installAutoAddAppMarker } from "../services/ride/movingFirst";
 import { registerAdminRoutes } from "./admin";
 import { registerAdminAccountDeletionRoutes } from "./adminAccountDeletion";
 import { registerUssdRoutes } from "./ussd";
@@ -66,6 +67,8 @@ export function registerAllRoutes(
   // A signed-in rider whose app shows the wait timer counts as warned about
   // the wait fee (services/ride/waitFee.ts).
   installWaitFeeAppMarker(app, prisma);
+  // A driver whose app can show an auto-added rider with Undo (services/ride/movingFirst.ts).
+  installAutoAddAppMarker(app, prisma);
 
   // /health (Render) and /health/ready (UptimeRobot): unlimited, see health.ts.
   registerHealthRoutes(app, prisma);

@@ -51,6 +51,7 @@ import { SWEEP_GRACE_AFTER_START_MS, takeStaleDriversOffline } from "./services/
 import { startReviewDemo } from "./services/reviewDemo/simulation";
 import { reviewDemoConfig } from "./services/reviewDemo/config";
 import { scheduleTick } from "./services/scheduled/dispatch";
+import { sweepExpiredHolds } from "./services/ride/movingFirst";
 import { refreshScheduleSettings } from "./services/scheduled/settings";
 
 /** How often scheduled cars are moved along (offers, live requests, reminders, starts). */
@@ -272,6 +273,8 @@ async function bootstrap() {
   // 2-minute dispatch window (each request also has its own exact timer:
   // scheduleRequestExpiry) and the 90s decision grace (see services/ride/timeouts.ts).
   const timeoutSweep = setInterval(() => {
+    // Fill moving cars first: holds whose own timer was lost (a restart) go to normal dispatch.
+    void sweepExpiredHolds(prisma).catch((err) => app.log.warn({ err }, "moving first: hold sweep failed"));
     processTimeouts(prisma, new Date(), { logger: app.log }).catch((err) => {
       app.log.error({ err }, "processTimeouts failed");
       noteDatabaseError(err, "timeout_sweep");

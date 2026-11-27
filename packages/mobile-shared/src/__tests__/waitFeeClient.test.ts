@@ -17,10 +17,10 @@ function answer(headers: Record<string, string>, seen: InternalAxiosRequestConfi
 
 afterEach(() => setServerClockOffsetForTests(0));
 
-it("sends the wait-fee feature header", async () => {
+it("sends the wait-fee and auto-add feature header", async () => {
   const seen: InternalAxiosRequestConfig[] = [];
   await api.get("/rides/1", { adapter: answer({}, seen) });
-  expect(seen[0]!.headers[CLIENT_FEATURES_HEADER]).toBe("wait-fee");
+  expect(seen[0]!.headers[CLIENT_FEATURES_HEADER]).toBe("wait-fee,auto-add");
 });
 
 it("follows the server's clock from the Date header", async () => {

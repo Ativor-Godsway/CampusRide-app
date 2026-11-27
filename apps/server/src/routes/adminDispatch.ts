@@ -4,13 +4,13 @@ import { DEFAULT_WAIT_FEE_SETTINGS, WAIT_FEE_BOUNDS, waitFeeSettingsProblem, typ
 import { DEFAULT_SEARCH_WINDOW_SECONDS, SEARCH_WINDOW_BOUNDS_SECONDS, searchWindowProblem, DEFAULT_FARE_PRICES, FAR_ENDS, REFUSED_BOOKING_REASON_LABELS, farePricesProblem, type FarEnd, type FarePrices } from "@rida/shared";
 import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
-import { id, integer, noInput, object, oneOf, text } from "../http/schemas";
+import { boolean, id, integer, noInput, object, oneOf, text } from "../http/schemas";
 import { RULES } from "../rateLimit/rules";
 import { cached, clearAdminCache } from "../services/admin/cache";
 import { accraDay, daysIn, periodKey } from "../services/admin/period";
 import { getFarePricing, saveFarePricing } from "../services/ride/farePricing";
 import { refusedBookingCounts } from "../services/ride/refusedBookings";
-import { readSearchWindow, saveSearchWindow } from "../services/ride/searchWindow";
+import { readSearchWindow, saveMovingFirstSettings, saveSearchWindow } from "../services/ride/searchWindow";
 import { readWaitFeeSettings, saveWaitFeeSettings, waitFeesByDay } from "../services/ride/waitFee";
 import {
   ZoneNeighbourError,
@@ -53,7 +53,9 @@ const SCHEMAS = {
   saveZoneNeighbours: { body: object({ pairs: { type: "array", maxItems: MAX_PAIRS, items: pair } }, ["pairs"]) },
   refused: { querystring: object({ from: text(40), to: text(40) }, ["from", "to"]) },
   dispatchSettings: noInput,
-  saveDispatchSettings: { body: object({ searchWindowSeconds: integer(1, 100_000) }, ["searchWindowSeconds"]) },
+  saveDispatchSettings: {
+    body: object({ searchWindowSeconds: integer(1, 100_000), movingFirstEnabled: boolean, autoAddDefault: boolean }, ["searchWindowSeconds"]),
+  },
   waitFeeSettings: noInput,
   saveWaitFeeSettings: {
     body: object(
@@ -175,10 +177,24 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
   async function dispatchSettingsBody() {
     const setting = await readSearchWindow(prisma);
     const admin = setting.updatedBy ? await prisma.user.findUnique({ where: { id: setting.updatedBy }, select: { id: true, name: true } }) : null;
+    // Fill moving cars first: what the step did with live Shared requests, last 7 days (analysis).
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60_000);
+    const steps = await prisma.ride.groupBy({
+      by: ["movingStep"],
+      where: { createdAt: { gte: since }, isReviewDemo: false, type: "SHARED", movingStep: { not: null } },
+      _count: { _all: true },
+    });
     return {
-      settings: { searchWindowSeconds: setting.searchWindowSeconds, updatedAt: setting.updatedAt?.toISOString() ?? null, updatedBy: admin },
-      defaults: { searchWindowSeconds: DEFAULT_SEARCH_WINDOW_SECONDS },
+      settings: {
+        searchWindowSeconds: setting.searchWindowSeconds,
+        movingFirstEnabled: setting.movingFirstEnabled,
+        autoAddDefault: setting.autoAddDefault,
+        updatedAt: setting.updatedAt?.toISOString() ?? null,
+        updatedBy: admin,
+      },
+      defaults: { searchWindowSeconds: DEFAULT_SEARCH_WINDOW_SECONDS, movingFirstEnabled: true, autoAddDefault: true },
       bounds: SEARCH_WINDOW_BOUNDS_SECONDS,
+      movingSteps7d: Object.fromEntries(steps.map((r) => [r.movingStep!, r._count._all])),
     };
   }
 
@@ -191,10 +207,20 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
   /** Saves it: requests already searching follow the new length too. Audit-logged. */
   app.put("/admin/dispatch-settings", { ...gate, schema: SCHEMAS.saveDispatchSettings, config: write }, async (request, reply) => {
     if (!(await requireAdmin(request, reply))) return;
-    const { searchWindowSeconds } = request.body as { searchWindowSeconds: number };
+    const { searchWindowSeconds, movingFirstEnabled, autoAddDefault } = request.body as {
+      searchWindowSeconds: number;
+      movingFirstEnabled?: boolean;
+      autoAddDefault?: boolean;
+    };
     const problem = searchWindowProblem(searchWindowSeconds);
     if (problem) return reply.code(400).send({ error: problem });
-    await saveSearchWindow(prisma, searchWindowSeconds, request.user!.userId);
+    const now = await readSearchWindow(prisma);
+    if (now.searchWindowSeconds !== searchWindowSeconds) await saveSearchWindow(prisma, searchWindowSeconds, request.user!.userId);
+    // An admin page from before the moving-car switches sends only the window: they stay as they are.
+    const moving = { movingFirstEnabled: movingFirstEnabled ?? now.movingFirstEnabled, autoAddDefault: autoAddDefault ?? now.autoAddDefault };
+    if (moving.movingFirstEnabled !== now.movingFirstEnabled || moving.autoAddDefault !== now.autoAddDefault) {
+      await saveMovingFirstSettings(prisma, moving, request.user!.userId);
+    }
     return reply.send(await dispatchSettingsBody());
   });
 

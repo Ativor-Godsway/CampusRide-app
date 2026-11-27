@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SIM_SPOTS, planRequests } from "./plan";
+import { SIM_SPOTS, planRequests, spotKey } from "./plan";
 
 describe("the request simulator's plan", () => {
   const plan = planRequests({ count: 12, minutes: 4, sharedRatio: 0.75, seed: 7 });
@@ -26,5 +26,14 @@ describe("the request simulator's plan", () => {
   it("works with only some spots, and refuses fewer than two", () => {
     expect(new Set(planRequests({ count: 4, minutes: 1, sharedRatio: 1, seed: 1, spots: ["bani", "jean-nelson"] }).map((p) => p.pickup))).toEqual(new Set(["bani", "jean-nelson"]));
     expect(() => planRequests({ count: 1, minutes: 1, sharedRatio: 1, seed: 1, spots: ["bani"] })).toThrow();
+  });
+});
+
+describe("one route (--from / --to)", () => {
+  it("puts every request on it; unknown spots are refused", () => {
+    const plan = planRequests({ count: 3, minutes: 1, sharedRatio: 1, seed: 1, route: { pickup: "pentagon", dropoff: "balme" } });
+    expect(plan.every((p) => p.pickup === "pentagon" && p.dropoff === "balme" && p.type === "SHARED")).toBe(true);
+    expect(spotKey("tf")).toBe("tf");
+    expect(spotKey("nowhere")).toBeNull();
   });
 });

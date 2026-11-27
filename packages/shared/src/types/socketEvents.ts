@@ -159,6 +159,12 @@ export type RideClientEvent = (typeof RIDE_CLIENT_EVENTS)[keyof typeof RIDE_CLIE
 /** Server → driver events emitted to the driver's personal socket room. */
 export const DRIVER_EVENTS = {
   RIDE_BROADCAST: "ride:broadcast",
+  /**
+   * A rider was auto-added to this driver's car (rides/movingCar.ts): the
+   * trip screen's "Rider added" banner with Undo. Payload: RiderAddedPayload.
+   * Older apps never get auto-added riders (they don't send the feature).
+   */
+  RIDER_ADDED: "driver:rider_added",
   /** A request offered to this driver was taken, cancelled or expired: drop it from the offer queue. */
   OFFER_CLOSED: "ride:offer_closed",
   /**
@@ -206,6 +212,28 @@ export interface RideBroadcastPayload {
   driverSharePesewas: number;
   /** Unix ms timestamp when the request's search window (admin setting, 7 min by default) ends. */
   expiresAt: number;
+  /**
+   * Fill moving cars first: offered to this driver ONLY, as their car is on
+   * the way (until `until`, unix ms), adding about `extraMinutes`. Absent
+   * otherwise and from older servers.
+   */
+  movingCar?: { until: number; extraMinutes: number };
+}
+
+/** driver:rider_added (DRIVER_EVENTS.RIDER_ADDED). */
+export interface RiderAddedPayload {
+  rideId: string;
+  passengerId: string;
+  /** "Rider added · Ama · Pentagon Block C · 2 seats · +GH₵14 · +3 min". */
+  text: string;
+  firstName: string;
+  pickupLabel: string;
+  dropoffLabel: string;
+  seats: number;
+  farePesewas: number;
+  extraMinutes: number;
+  /** Undo until (unix ms). */
+  undoUntil: number;
 }
 
 /** Driver → server events. */

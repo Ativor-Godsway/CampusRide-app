@@ -279,6 +279,8 @@ export interface BoardRideItem extends EligibleRideItem {
   boardCanTake: boolean;
   /** Why not, in words ("Your car is full"), or null. */
   boardNote: string | null;
+  /** It fits the car this driver is driving: "On your way · +3 min" (newer servers). */
+  onYourWay?: { extraMinutes: number; label: string } | null;
 }
 
 export interface RequestBoard {
@@ -438,6 +440,8 @@ export interface FillSuggestion {
   farePesewas?: number;
   /** Seats this request needs (servers from 2026-11; 1 from every app). */
   seats?: number;
+  /** Fill moving cars first: offered to this driver only until `until` (ISO), adding about `extraMinutes`. */
+  movingOffer?: { until: string; extraMinutes: number } | null;
 }
 
 export interface FillSuggestionsResult {
@@ -797,4 +801,30 @@ export async function submitCommissionOtp(reference: string, otp: string): Promi
     { timeout: 45_000 },
   );
   return res.data.payment;
+}
+
+// ─── Fill moving cars first: auto-add (services/ride/movingFirst.ts) ────────
+
+export interface DriverSettings {
+  /** "Auto-add riders on my way". */
+  autoAddRiders: boolean;
+  autoAddDefault: boolean;
+  movingFirstEnabled: boolean;
+}
+
+export const driverSettingsQueryKey = ["driverSettings"] as const;
+
+export async function getDriverSettings(): Promise<DriverSettings> {
+  const res = await api.get<DriverSettings>("/driver/settings");
+  return res.data;
+}
+
+export async function saveDriverSettings(autoAddRiders: boolean): Promise<DriverSettings> {
+  const res = await api.patch<DriverSettings>("/driver/settings", { autoAddRiders });
+  return res.data;
+}
+
+/** Undo an auto-added rider (within 15 s, before pickup). */
+export async function undoAutoAdd(carId: string, passengerId: string): Promise<void> {
+  await api.post(`/rides/${carId}/passengers/${passengerId}/undo-add`, {});
 }

@@ -28,6 +28,8 @@ export const RIDER_PUSH_KINDS = [
   "SCHEDULE_REMINDER",
   "SCHEDULE_UPDATE",
   "SCHEDULE_LIVE",
+  // Fill moving cars first (rides/movingCar.ts): joined a car already on its way.
+  "JOINED_CAR",
 ] as const;
 export const DRIVER_PUSH_KINDS = [
   "RIDE_REQUEST",
@@ -39,6 +41,8 @@ export const DRIVER_PUSH_KINDS = [
   "SCHEDULE_LEAVE_SOON",
   "SCHEDULE_CHANGED",
   "SCHEDULE_STARTED",
+  // A rider auto-added to the driver's car (Undo on the trip screen).
+  "RIDER_ADDED",
 ] as const;
 
 export type RiderPushKind = (typeof RIDER_PUSH_KINDS)[number];
@@ -114,7 +118,7 @@ export interface PushTextInput {
   car?: { color?: string | null; make?: string | null; model?: string | null } | null;
   /** DRIVER_ARRIVED: the rider's free wait started (rides/waitFee.ts) — the push states it and the fee. */
   freeWait?: { seconds: number; feePesewas: number };
-  /** SCHEDULE_* kinds: the words, written by the server from rides/scheduled.ts (first names only). */
+  /** SCHEDULE_* kinds (and JOINED_CAR, RIDER_ADDED): the words, written by the server (first names only). */
   schedule?: { title: string; body: string };
 }
 
@@ -203,6 +207,10 @@ export function pushText(kind: PushKind, input: PushTextInput = {}): PushText {
     case "SCHEDULE_CHANGED":
     case "SCHEDULE_STARTED":
       return input.schedule ?? { title: "Scheduled ride", body: "Open CampusRide to see your scheduled ride." };
+    case "JOINED_CAR":
+      return input.schedule ?? { title: "You've joined a car", body: `${driver} is already on the way.` };
+    case "RIDER_ADDED":
+      return input.schedule ?? { title: "Rider added", body: "A rider on your way was added to your trip." };
   }
 }
 

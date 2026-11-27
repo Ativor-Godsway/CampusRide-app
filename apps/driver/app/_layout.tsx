@@ -26,6 +26,7 @@ import { LocationDisclosureProvider } from "../components/LocationDisclosure";
 // before this layout loads; imported here too, harmlessly, for the provider.
 import "../lib/backgroundLocation";
 import { TripRuntime } from "../lib/tripRuntime";
+import { RiderAddedListener } from "../lib/riderAdded";
 import { RequestsSync } from "../lib/requestsSync";
 import { DriverPushNotifications } from "../lib/push";
 import { useDriverTripState } from "../lib/activeTrip";
@@ -106,6 +107,8 @@ function RootLayout() {
                 <DriverPushNotifications />
                 {/* Live location + automatic arrival on every screen during a trip. */}
                 <TripRuntime />
+                {/* Auto-added riders (fill moving cars first): the banner's data and its sound. */}
+                <RiderAddedListener />
                 {/* Requests lists follow seat changes, closed requests and reconnects live. */}
                 <RequestsSync />
                 <Stack screenOptions={{ headerShown: false }} />

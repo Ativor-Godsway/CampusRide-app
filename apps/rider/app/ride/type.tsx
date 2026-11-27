@@ -73,6 +73,7 @@ import {
   useRideTracking,
   isMergedRequest,
   rebookedRideId,
+  rebookIsSilent,
   riderTripOutcome,
   useToast,
   RideRequestRefusedError,
@@ -100,6 +101,7 @@ import {
   InRideContent,
 } from "../../components/ride/DriverTripContent";
 import { NoDriversPanel } from "../../components/ride/NoDriversPanel";
+import { JoinedCarCard } from "../../components/ride/JoinedCarCard";
 import { SearchingPanel } from "../../components/ride/SearchingPanel";
 import { RideInProgressSheet } from "../../components/ride/RideInProgressSheet";
 import { SafetySheet } from "../../components/ride/SafetySheet";
@@ -280,9 +282,10 @@ export default function RideTypeScreen() {
     if (!movedTo || movedTo === activeRideId) return;
     setActiveRideId(movedTo);
     setDriverLocation(null);
-    showToast(DRIVER_HAD_TO_CANCEL);
+    // The driver undid an auto-add (fill moving cars first): the search just carries on, nothing to say.
+    if (!rebookIsSilent(trackingData)) showToast(DRIVER_HAD_TO_CANCEL);
     void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
-  }, [movedTo, activeRideId, showToast, queryClient]);
+  }, [movedTo, activeRideId, showToast, queryClient, trackingData]);
 
   // A driver accepted: one success buzz, only on the live transition (not
   // when reopening a ride that was already matched). The driver had to
@@ -504,6 +507,9 @@ export default function RideTypeScreen() {
     if (tripEnded) void queryClient.invalidateQueries({ queryKey: activeRideQueryKey });
   }, [tripEnded, queryClient]);
   const driverComing = hasDriver && !!driver && (myLegStatus === "WAITING" || myLegStatus === "ARRIVED");
+  // Joined a car already on its way (fill moving cars first): "You've joined Kofi's car…", until pickup.
+  const joined = driverComing && myLegStatus === "WAITING" ? (trackingData?.joinedMovingCar ?? null) : null;
+  const [joinedClosed, setJoinedClosed] = useState(false);
 
   // Still unclaimed and holding only this rider: the server will accept a
   // type switch (POST /rides/:id/switch — same rule, checked again there).
@@ -814,6 +820,10 @@ export default function RideTypeScreen() {
         onZoneDragEnd={(_id, point) => onPickupDragged(point)}
         circle={inOptions && adjusting ? { center: initialPickup, radiusMeters: MAX_PIN_ADJUST_METERS } : null}
       />
+
+      {joined && driver && !joinedClosed ? (
+        <JoinedCarCard driver={driver} pickupEtaMinutes={joined.pickupEtaMinutes} top={insets.top + PILL_TOP_GAP + 64} onClose={() => setJoinedClosed(true)} />
+      ) : null}
 
       {carNotice ? (
         <View

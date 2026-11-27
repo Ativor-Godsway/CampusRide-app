@@ -133,6 +133,9 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /rides/:id/passengers/:passengerId/cancel": "owner",
   "POST /rides/:id/passengers/:passengerId/no-show": "owner",
   "POST /rides/:id/passengers/:passengerId/undo": "owner",
+  "POST /rides/:id/passengers/:passengerId/undo-add": "owner",
+  "GET /driver/settings": "self",
+  "PATCH /driver/settings": "self",
 
   "GET /admin/drivers/pending": "admin",
   "POST /admin/drivers/:id/approve": "admin",
@@ -554,7 +557,7 @@ function cases(): OwnershipCase[] {
     w;
   const seatA = car.seatIds[riderA.user.id]!;
 
-  const passengerActions = ["arrived", "pickup", "dropoff", "cancel", "no-show"].map(
+  const passengerActions = ["arrived", "pickup", "dropoff", "cancel", "no-show", "undo-add"].map(
     (action): OwnershipCase => ({
       route: `POST /rides/:id/passengers/:passengerId/${action}`,
       name: `another driver can't ${action} a rider on D1's car`,

@@ -1271,14 +1271,23 @@ export const getRefusedBookings = (token: string, period: string) => get<Refused
 // ─── Ride requests: the search window (2026-11-25) ──────────────────────────
 
 export interface DispatchSettings {
-  settings: { searchWindowSeconds: number; updatedAt: string | null; updatedBy: { id: string; name: string } | null };
+  settings: {
+    searchWindowSeconds: number;
+    /** Fill moving cars first: the whole step, and drivers' auto-add default. Absent from older servers. */
+    movingFirstEnabled?: boolean;
+    autoAddDefault?: boolean;
+    updatedAt: string | null;
+    updatedBy: { id: string; name: string } | null;
+  };
   defaults: { searchWindowSeconds: number };
   bounds: { min: number; max: number };
+  /** What the moving-car step did with live Shared requests in the last 7 days. */
+  movingSteps7d?: Record<string, number>;
 }
 
 export const getDispatchSettings = (token: string) => get<DispatchSettings>(token, "/admin/dispatch-settings");
-export const saveDispatchSettings = (token: string, searchWindowSeconds: number) =>
-  request<DispatchSettings>("/admin/dispatch-settings", { method: "PUT", body: JSON.stringify({ searchWindowSeconds }) }, token);
+export const saveDispatchSettings = (token: string, searchWindowSeconds: number, moving?: { movingFirstEnabled: boolean; autoAddDefault: boolean }) =>
+  request<DispatchSettings>("/admin/dispatch-settings", { method: "PUT", body: JSON.stringify({ searchWindowSeconds, ...(moving ?? {}) }) }, token);
 
 // ─── Pickup wait fee (2026-11-25) ───────────────────────────────────────────
 

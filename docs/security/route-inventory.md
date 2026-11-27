@@ -107,6 +107,8 @@ always the one in the token.
 | `GET /driver/scheduled` | Yes | DRIVER | The Schedule tab: the scheduled cars this driver accepted (riders' first names, seats and place names, never pins) and the open scheduled cars offered to drivers, with whether this driver can accept each. | account default |
 | `POST /driver/scheduled/:id/accept` | Yes | DRIVER | Accepts an open, offered scheduled car (first wins; online drivers only; refused within the driver gap of another scheduled car they hold). A car another driver holds answers 409. | 60 / 15 min; account default |
 | `POST /driver/scheduled/:id/cancel` | Yes | DRIVER | The driver who accepted a scheduled car gives it back before it starts: it is open again and its riders are told. Anyone else gets 404. | account default |
+| `GET /driver/settings` | Yes | DRIVER | The driver's own settings: "Auto-add riders on my way" (their choice, else the admin default). | account default |
+| `PATCH /driver/settings` | Yes | DRIVER | Saves the driver's own "Auto-add riders on my way". | account default |
 | `GET /driver/requests/board` | Yes | DRIVER | The request board: every open request on campus still searching (not ones this driver declined), with whether this driver can take each now. First names and place names, never pins. Empty when offline or while CampusRide is closed. | account default |
 | `GET /rides/mine` | Yes | RIDER | Own bookings only. | account default |
 | `GET /rides/active` | Yes | RIDER | Own current ride (as booker or passenger), own stops only. | account default |
@@ -154,6 +156,7 @@ The request names a resource. If it isn't the caller's: **404**, same body as
 | `POST /rides/:id/passengers/:passengerId/cancel` | Yes | DRIVER | As above (the assigned driver only, before pickup). "Cancel pickup" with a reason: the rider's request searches again for another driver; recorded as a `DriverCancellation`. With `{ reason: "NO_SHOW" }`: "Rider didn't show", unchanged. | account default |
 | `POST /rides/:id/passengers/:passengerId/no-show` | Yes | DRIVER | As above (older app builds). | account default |
 | `POST /rides/:id/passengers/:passengerId/undo` | Yes | DRIVER | As above; only shortly after the step, never the trip's last drop-off. | account default |
+| `POST /rides/:id/passengers/:passengerId/undo-add` | Yes | DRIVER | The car's driver undoes a rider who was auto-added (fill moving cars first) within 15 s, before pickup: no penalty, the rider's request searches again. Anyone else gets 404. | account default |
 
 ## Admin
 

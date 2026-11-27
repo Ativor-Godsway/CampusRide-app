@@ -48,6 +48,7 @@ import {
   bookingLabel,
   peopleWord,
   seatsWord,
+  type RiderAddedPayload,
 } from "@rida/shared";
 import {
   BottomSheet,
@@ -67,6 +68,7 @@ import {
   getAddRiderPreview,
   getFillSuggestions,
   serverReason,
+  undoAutoAdd,
   getRideSocket,
   goHome as goToHomeTab,
   openDirections,
@@ -86,7 +88,7 @@ import {
 import { driverActiveRideQueryKey, useDriverActiveTrip } from "../../lib/activeTrip";
 import { useDriverLocation, useLocationDemand } from "../../lib/location";
 import { useZoneRoutes, useZones } from "../../lib/zones";
-import { alertNewOffer } from "../../lib/offerAlert";
+import { alertMovingOffer, alertNewOffer } from "../../lib/offerAlert";
 import {
   claimPassengerId,
   clearClaim,
@@ -104,6 +106,8 @@ import { StopListSheet } from "../../components/trip/StopListSheet";
 import { CancelPickupSheet } from "../../components/trip/CancelPickupSheet";
 import { AddRiderSheet } from "../../components/trip/AddRiderSheet";
 import { AddRiderTakeover } from "../../components/trip/AddRiderTakeover";
+import { RiderAddedBanner } from "../../components/trip/RiderAddedBanner";
+import { useRiderAdded } from "../../lib/riderAdded";
 import { TripCompleteView, TripEndedView } from "../../components/trip/TripEndScreens";
 import { useDriverPresence } from "../../lib/presence";
 import { driverRideHistoryQueryKey, fetchRecentRideHistory } from "../../lib/earnings";
@@ -383,6 +387,8 @@ export default function TripScreen() {
   }, [canAddRiders, refetchFill]);
   const suggestions = (fill?.suggestions ?? []).filter((s) => !actions.adds[s.requestRideId]);
 
+
+
   // ─── Route preview before adding a rider ─────────────────────────────────
   // A rider who fits the route is offered automatically (once); any waiting
   // rider can be previewed from the "Add rider" sheet. The server works out
@@ -458,11 +464,18 @@ export default function TripScreen() {
   useEffect(() => {
     if (!autoOffer || !previewData || offerClock?.rideId === previewData.requestRideId) return;
     const shownAt = Date.now();
-    // The same countdown as a Home offer (DRIVER_OFFER_SECONDS on the server).
+    // An exclusive "on your way" offer (fill moving cars first) runs to the
+    // server's hold, with a louder alert; anything else, the usual countdown.
+    const moving = previewing?.suggestion.movingOffer;
+    if (moving) {
+      setOfferClock({ rideId: previewData.requestRideId, shownAt, deadline: Math.max(shownAt + 3_000, Date.parse(moving.until)) });
+      alertMovingOffer();
+      return;
+    }
     const seconds = previewData.offerSeconds ?? DEFAULT_OFFER_SECONDS;
     setOfferClock({ rideId: previewData.requestRideId, shownAt, deadline: offerDeadline(shownAt, seconds, previewData.expiresAt) });
     alertNewOffer();
-  }, [autoOffer, previewData, offerClock?.rideId]);
+  }, [autoOffer, previewData, offerClock?.rideId, previewing?.suggestion.movingOffer]);
   useEffect(() => {
     if (!autoOffer) setOfferClock(null);
   }, [autoOffer]);
@@ -539,6 +552,31 @@ export default function TripScreen() {
 
   // After each step, a short note: "Ama is in the car · next: pick up Kofi".
   const { showToast, toast } = useToast();
+
+  // ─── Auto-added riders (fill moving cars first) ──────────────────────────
+  // The rider is already in the stop list (the server's ride:status refetches
+  // it); the banner offers Undo for 15 s, without penalty.
+  const riderAdded = useRiderAdded(ride?.id);
+  const [undoing, setUndoing] = useState(false);
+  const undoAdded = useCallback(
+    async (added: RiderAddedPayload) => {
+      setUndoing(true);
+      try {
+        await undoAutoAdd(added.rideId, added.passengerId);
+        riderAdded.dismiss();
+        showToast(`${added.firstName} removed. They'll be offered to other drivers.`);
+      } catch (err) {
+        riderAdded.dismiss();
+        setRefusal(serverReason(err) ?? "It's too late to undo this.");
+      } finally {
+        setUndoing(false);
+        void queryClient.invalidateQueries({ queryKey: driverActiveRideQueryKey });
+        void refetchFill();
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [queryClient, refetchFill, showToast],
+  );
   const onArrived = useCallback(
     (stop: TripStop) => showToast(`${riderName(stop)} has been told you're here`),
     [showToast],
@@ -919,9 +957,21 @@ export default function TripScreen() {
           }
           sharedFarePesewas={getSharedFarePerRider(1)}
           freeSeats={freeSeats}
+          movingOffer={previewing.suggestion.movingOffer ?? null}
           committing={committing}
           onAdd={acceptPreview}
           onDecline={() => passOnOffer("DECLINED")}
+        />
+      ) : null}
+
+      {/* An auto-added rider (fill moving cars first): Undo for 15 s. */}
+      {riderAdded.added ? (
+        <RiderAddedBanner
+          key={riderAdded.added.passengerId}
+          added={riderAdded.added}
+          undoing={undoing}
+          onUndo={() => void undoAdded(riderAdded.added!)}
+          onDone={riderAdded.dismiss}
         />
       ) : null}
 

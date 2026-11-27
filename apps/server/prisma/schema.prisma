@@ -262,6 +262,11 @@ model Driver {
   suspendedAt     DateTime?
   suspendedReason String?   @db.VarChar(500)
   suspendedBy     String?
+  /// "Auto-add riders on my way" (2026-11-28): null = the admin default.
+  autoAddRiders   Boolean?
+  /// First time this driver's app said it can show an auto-added rider (with
+  /// Undo): header x-campusride-features: auto-add. Never auto-add otherwise.
+  autoAddAppAt    DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -473,6 +478,17 @@ model Ride {
   /// SCHEDULED_TO_LIVE (a scheduled seat that became a live request).
   booking            RideBooking        @default(LIVE)
   scheduledCarId     String?
+  /// Fill moving cars first (2026-11-28, services/ride/movingFirst.ts): what
+  /// the moving-car step did with this request — NONE, AUTO_ADDED, OFFERED
+  /// (an exclusive offer; accepted or still open), DECLINED, EXPIRED, UNDONE.
+  /// Null: the step never ran (older rows, Ride alone, the step off).
+  movingStep         String?            @db.VarChar(12)
+  /// While offered to one moving car only: that driver, and until when.
+  /// Nobody else sees or can take the request before then.
+  movingHoldDriverId String?
+  movingHoldUntil    DateTime?
+  /// The route the request would add to that car (metres), for analysis.
+  movingDetourMeters Int?
 
   rider            User              @relation("RiderRides", fields: [riderId], references: [id], onDelete: Restrict)
   driver           User?             @relation("DriverRides", fields: [driverId], references: [id], onDelete: Restrict)
@@ -589,6 +605,14 @@ model RidePassenger {
   dropoffLabel   String?         @db.VarChar(120)
   dropoffPlaceId String?
   pickupNote     String?         @db.VarChar(140)
+  /// Auto-added to a moving car (services/ride/movingFirst.ts): the driver
+  /// may undo it until then, without penalty.
+  autoAddUndoUntil   DateTime?
+  /// The driver undid the auto-add: the rider's request searching again (the
+  /// rider app follows it, as for a driver-cancel rebook).
+  undoneRequestRideId String?
+  /// Joined a car already on its way (moving-car step): the pickup estimate then, in minutes.
+  movingJoinEtaMin   Int?
 
   ride        Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
   rider       User @relation(fields: [riderId], references: [id], onDelete: Restrict)
@@ -1280,6 +1304,11 @@ model DispatchSetting {
   id                  String   @id @default("dispatch")
   /// How long a request searches before "no driver found" (default 7 min).
   searchWindowSeconds Int      @default(420)
+  /// Fill moving cars first (2026-11-28): a Shared request goes first to the
+  /// best compatible car already on a trip. Off: dispatch as before.
+  movingFirstEnabled  Boolean  @default(true)
+  /// "Auto-add riders on my way" for drivers who haven't chosen.
+  autoAddDefault      Boolean  @default(true)
   updatedAt           DateTime @updatedAt
   /// User.id of the admin who last changed it.
   updatedBy           String?

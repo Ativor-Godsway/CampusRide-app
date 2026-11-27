@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useRouter } from "expo-router";
-import { ActivityIndicator, Alert, Image, StyleSheet, View } from "react-native";
+import { ActivityIndicator, Alert, Image, StyleSheet, Switch, View } from "react-native";
 import {
   PRIVACY_URL,
   TERMS_URL,
@@ -29,6 +29,7 @@ import {
   useAuth,
 } from "@rida/mobile-shared";
 import { useDriverActiveTrip } from "../../lib/activeTrip";
+import { useAutoAdd } from "../../lib/autoAdd";
 import { FakeLocationCard } from "../../components/dev/FakeLocationCard";
 import { CarDetailsForm, type CarDetails } from "../../components/CarDetailsForm";
 import {
@@ -45,6 +46,7 @@ import {
  * fake location under it.
  */
 export default function AccountTab() {
+  const autoAdd = useAutoAdd();
   const router = useRouter();
   const { user, refreshMe, signOut } = useAuth();
   const driver = user?.driver;
@@ -230,6 +232,17 @@ export default function AccountTab() {
           subtitle="Commission you owe"
           leading={<ListRow.Icon name="wallet-outline" />}
           onPress={() => router.push("/balance")}
+        />
+        <ListRow
+          divider
+          title="Auto-add riders on my way"
+          subtitle="On a Shared trip, riders going your way join at once. You can undo for 15 seconds."
+          leading={<ListRow.Icon name="person-add-outline" />}
+          showChevron={false}
+          onPress={() => autoAdd.toggle()}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: autoAdd.on }}
+          trailing={<Switch value={autoAdd.on} onValueChange={() => autoAdd.toggle()} disabled={autoAdd.saving} testID="auto-add-switch" />}
         />
         <ListRow
           divider

@@ -7,6 +7,7 @@ import { prisma } from "../db/prisma";
 import { config } from "../config";
 import { assertDatabaseAllowedForEnv } from "../db/dbHostGuard";
 import { setServiceHoursGateForTests } from "../services/service/serviceHours";
+import { setMovingFirstForTests } from "../services/ride/searchWindow";
 
 /**
  * SAFETY GATE. The suite creates and deletes rows, so it must never run
@@ -28,6 +29,13 @@ assertDatabaseAllowedForEnv(config.databaseUrl, config.nodeEnv, "test setup");
  * gate is off for the suite; serviceHours.test.ts turns it on for its own tests.
  */
 setServiceHoursGateForTests(false);
+
+/**
+ * Fill moving cars first would hold Shared requests for cars already on a
+ * trip, changing what every dispatch test sees. Off for the suite;
+ * movingFirst.test.ts turns it on for its own tests.
+ */
+setMovingFirstForTests({ movingFirstEnabled: false });
 
 /**
  * Each test file gets a fresh Prisma Client / DB connection. Neon's pooled
