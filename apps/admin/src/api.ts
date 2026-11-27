@@ -206,6 +206,20 @@ export interface LoginResult {
   sessionExpiresAt?: string;
 }
 
+/**
+ * Whether the API is the STAGING server: its /health says `staging: true`
+ * (only a staging server that passes its checks does). Any failure: no.
+ */
+export async function serverIsStaging(): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_URL}/health`);
+    const body = (await res.json()) as { staging?: unknown };
+    return res.ok && body.staging === true;
+  } catch {
+    return false;
+  }
+}
+
 export function requestOtp(phone: string): Promise<{ ok: true }> {
   return request("/auth/request-otp", {
     method: "POST",
