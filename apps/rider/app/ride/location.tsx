@@ -194,6 +194,11 @@ export default function PlanRideScreen() {
         return;
       }
       setProblem(null);
+      // From the "Book your ride ahead" intro: straight to the Schedule screen.
+      if (params.intent === "schedule") {
+        router.push({ pathname: "/ride/schedule", params: { ...tripEndParams("pickup", nextPickup), ...tripEndParams("dropoff", nextDropoff) } });
+        return;
+      }
       router.push({
         pathname: "/ride/type",
         params: chooseRideParams(nextPickup, nextDropoff, "plan"),

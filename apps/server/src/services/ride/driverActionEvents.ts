@@ -9,6 +9,7 @@ import { announceRiderTripComplete, finalizeRideCompletion } from "./completion"
 import { sendRiderEtasNow } from "./riderEta";
 import { warnRiderOfWait } from "./waitFee";
 import { isActivePassengerStatus } from "./stateMachine";
+import { noteScheduledNoShow } from "../scheduled/booking";
 
 /**
  * What riders hear after a driver acts on a ride: live events, push
@@ -66,6 +67,8 @@ export async function announcePassengerChange(
   if (ride.status !== rideStatusBefore) {
     emitRideEvent(ride.id, "ride:status", { rideId: ride.id, status: ride.status as RideStatus });
   }
+  // A no-show on a scheduled trip is a strike (services/scheduled).
+  if (noShow && passenger.status === "CANCELLED" && ride.booking === "SCHEDULED") void noteScheduledNoShow(prisma, passenger.id);
   const pushKind = PASSENGER_PUSH[passenger.status as PassengerStatus];
   if (passenger.status === "ARRIVED" && waitWarning) void warnRiderOfWait(prisma, waitWarning);
   else if (pushKind) notifyRider(prisma, passenger.riderId, pushKind, ride.id, { driverUserId, noShow });

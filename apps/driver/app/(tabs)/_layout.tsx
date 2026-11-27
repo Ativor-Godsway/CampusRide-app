@@ -12,6 +12,8 @@ import {
 import { driverSetupRoute } from "../../lib/driverGate";
 import { ActiveTripBanner } from "../../components/ActiveTripBanner";
 import { useDriverActiveTrip } from "../../lib/activeTrip";
+import { ScheduledOfferPopup } from "../../components/schedule/ScheduledOfferPopup";
+import { useDriverSchedule } from "../../lib/schedule";
 
 /** Bottom tab shell — Home / Requests / Earnings / Account. Re-checks auth, role, onboarding and approval so a signed-out, mismatched-role, not-yet-onboarded or not-yet-approved user can't land here directly. */
 export default function TabsLayout() {
@@ -22,6 +24,8 @@ export default function TabsLayout() {
   // The trip banner is on Earnings and Account — the way back to the trip.
   // Home shows the trip as the dark first row of its sheet instead.
   const showTripBanner = Boolean(activeTrip) && pathname !== "/";
+  // Scheduled rides: keeps the Schedule tab fresh and opens a scheduled trip when it starts.
+  useDriverSchedule();
 
   // Once, after login and approval, and never mid-trip: explain
   // notifications (ride requests reach a closed app through them), then ask.
@@ -49,6 +53,8 @@ export default function TabsLayout() {
     <View style={{ flex: 1, backgroundColor: colors.surface }}>
       {/* Above the tabs, so a trip is one tap away from every tab. */}
       {showTripBanner && activeTrip ? <ActiveTripBanner ride={activeTrip} /> : null}
+      {/* A scheduled car offered to drivers; never over a trip. */}
+      <ScheduledOfferPopup hidden={Boolean(activeTrip)} />
     <Tabs
       screenOptions={{
         headerShown: false,
@@ -91,6 +97,15 @@ export default function TabsLayout() {
         }}
       />
       {/* The route stays "rides"; it shows the driver's earnings and completed trips. */}
+      <Tabs.Screen
+        name="schedule"
+        options={{
+          title: "Schedule",
+          tabBarIcon: ({ focused, color, size }) => (
+            <Ionicons name={focused ? "calendar" : "calendar-outline"} size={size} color={color} />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="rides"
         options={{

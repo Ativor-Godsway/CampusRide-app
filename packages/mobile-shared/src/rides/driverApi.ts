@@ -289,6 +289,8 @@ export interface RequestBoard {
   /** The driver's trip, if any. */
   car: { rideId: string; type: RideType; status: string; freeSeats: number } | null;
   rides: BoardRideItem[];
+  /** Scheduled cars open to drivers ("Scheduled" on the board); [] from servers before scheduled rides. */
+  scheduled: import("@rida/shared").DriverScheduledCarView[];
 }
 
 /** Every open request on campus, nearest first (GET /driver/requests/board). */
@@ -296,7 +298,7 @@ export async function getRequestBoard(position?: { latitude: number; longitude: 
   const res = await api.get<RequestBoard>("/driver/requests/board", {
     params: position ? { lat: position.latitude.toFixed(5), lng: position.longitude.toFixed(5) } : undefined,
   });
-  return { open: res.data.open ?? true, online: res.data.online ?? true, car: res.data.car ?? null, rides: readList<BoardRideItem>(res.data, "rides") };
+  return { open: res.data.open ?? true, online: res.data.online ?? true, car: res.data.car ?? null, rides: readList<BoardRideItem>(res.data, "rides"), scheduled: Array.isArray(res.data.scheduled) ? res.data.scheduled : [] };
 }
 
 // ─── Completed-ride history (read-only, derived earnings) ────────────────────

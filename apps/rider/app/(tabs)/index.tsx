@@ -45,6 +45,8 @@ import {
   useNearbyCars,
   useNotificationsOffReminderOnce,
   useServiceStatus,
+  useMyScheduledRide,
+  FadeIn,
   type ActiveRideSummary,
   type RideSummary,
 } from "@rida/mobile-shared";
@@ -53,6 +55,9 @@ import { activeRideParams, useActiveRide } from "../../lib/activeRide";
 import { useActiveRideStatus } from "../../lib/activeRideStatus";
 import { chooseRideParams, usePlaces, useResolvePickup } from "../../lib/chooseRide";
 import { useHomeLocation } from "../../lib/homeLocation";
+import { useScheduleIntro, type IntroClose } from "../../lib/scheduleIntro";
+import { ScheduleIntroSheet } from "../../components/schedule/ScheduleIntroSheet";
+import { UpcomingRideCard } from "../../components/schedule/UpcomingRideCard";
 
 /** "Good evening": by the phone's clock. */
 function greetingFor(hour: number): string {
@@ -105,6 +110,10 @@ export default function HomeTab() {
   const cars = useNearbyCars(activeRide === null, location.state === "here" ? location.coords : null);
   // "Don't allow" was chosen: said once, never again (not during a ride).
   const pushReminder = useNotificationsOffReminderOnce(activeRide === null);
+  // The upcoming scheduled ride (rides/scheduled.ts) and the "Book your ride ahead" intro.
+  const scheduled = useMyScheduledRide();
+  const booking = scheduled.data?.booking ?? null;
+  const intro = useScheduleIntro(activeRide === undefined ? undefined : activeRide === null ? scheduled.data?.intro.show : false);
 
   // Own cache key: the Rides tab caches history pages, a different shape.
   // Fetch a few more than we show so repeat trips still leave 3 distinct places.
@@ -131,6 +140,11 @@ export default function HomeTab() {
       : CAMPUS_REGION;
 
   const planRide = () => router.push("/ride/location");
+  const closeIntro = (how: IntroClose) => {
+    intro.close(how);
+    // Where to, then straight to the Schedule screen.
+    if (how === "schedule") router.push({ pathname: "/ride/location", params: { intent: "schedule" } });
+  };
 
   /**
    * A place goes STRAIGHT to Choose a ride, from where the rider is now. If we
@@ -190,6 +204,7 @@ export default function HomeTab() {
         </Text>
       </Pressable>
 
+      <ScheduleIntroSheet visible={intro.visible} onClose={closeIntro} />
       <BottomSheet
         maxHeightRatio={0.75}
         contentStyle={styles.sheet}
@@ -206,6 +221,15 @@ export default function HomeTab() {
             {firstName ? `, ${firstName}` : ""}
           </Text>
         )}
+
+        {booking && !(activeRide && booking.state === "DRIVER_ON_THE_WAY") ? (
+          <FadeIn>
+            <UpcomingRideCard
+              booking={booking}
+              onTrack={activeRide ? () => router.push({ pathname: "/ride/type", params: activeRideParams(activeRide) }) : undefined}
+            />
+          </FadeIn>
+        ) : null}
 
         {launch.kind === "countdown" ? (
           <LaunchCountdownCard launchAt={launch.launchAt} parts={launch.parts} />

@@ -20,6 +20,7 @@ const DriversPage = lazy(() => import("./pages/Drivers").then((m) => ({ default:
 const CashPage = lazy(() => import("./pages/CashOwed").then((m) => ({ default: m.CashOwedPage })));
 const RidersPage = lazy(() => import("./pages/Riders").then((m) => ({ default: m.RidersPage })));
 const PlacesPage = lazy(() => import("./pages/Places").then((m) => ({ default: m.PlacesPage })));
+const ScheduledPage = lazy(() => import("./pages/Scheduled").then((m) => ({ default: m.ScheduledPage })));
 const SafetyPage = lazy(() => import("./pages/Safety").then((m) => ({ default: m.SafetyPage })));
 const NotificationsPage = lazy(() => import("./pages/Notifications").then((m) => ({ default: m.NotificationsPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
@@ -33,6 +34,8 @@ function Routes() {
       return <LiveMapPage />;
     case "/rides":
       return <RidesPage />;
+    case "/scheduled":
+      return <ScheduledPage />;
     case "/supply":
       return <SupplyPage />;
     case "/cancellations":

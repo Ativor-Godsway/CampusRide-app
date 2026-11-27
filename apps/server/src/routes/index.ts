@@ -31,6 +31,7 @@ import { registerAdminDispatchRoutes } from "./adminDispatch";
 import { registerAdminPeopleRoutes } from "./adminPeople";
 import { registerAdminRideCancelRoutes } from "./adminRideCancel";
 import { registerDriverBalanceRoutes } from "./driverBalance";
+import { registerScheduledRoutes } from "./scheduled";
 import { createPaystackClient, type PaystackClient } from "../services/commission/paystack";
 import { installRateLimits } from "../rateLimit/http";
 import { installErrorHandling } from "../http/errors";
@@ -106,4 +107,6 @@ export function registerAllRoutes(
   registerAdminDispatchRoutes(app, prisma);
   registerAdminPeopleRoutes(app, prisma);
   registerAdminRideCancelRoutes(app, prisma);
+  // Scheduled Shared rides: rider, driver and admin (services/scheduled).
+  registerScheduledRoutes(app, prisma);
 }

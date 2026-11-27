@@ -1306,3 +1306,52 @@ export interface WaitFees {
 }
 
 export const getWaitFees = (token: string, period: string) => get<WaitFees>(token, `/admin/wait-fees?${period}`);
+
+// ─── Scheduled rides (server: routes/scheduled.ts) ──────────────────────────
+
+export interface ScheduledCarRow {
+  id: string;
+  status: "OPEN" | "ACCEPTED" | "STARTED" | "LIVE" | "CANCELLED";
+  seats: number;
+  bookings: number;
+  cancelled: number;
+  noShows: number;
+  driverName: string | null;
+  acceptedVia: string | null;
+  offeredAt: string | null;
+  leaveBy: string | null;
+  liveReason: string | null;
+  rideId: string | null;
+}
+
+export interface ScheduledDayBody {
+  day: string;
+  totals: {
+    bookings: number;
+    seats: number;
+    cars: number;
+    accepted: number;
+    started: number;
+    toLive: number;
+    carsToLive: number;
+    noShows: number;
+    lateCancels: number;
+    cancels: number;
+    strikes: number;
+    blockedRiders: number;
+  };
+  slots: Array<{ arriveBy: string; cars: ScheduledCarRow[] }>;
+  recent: Array<{ day: string; bookings: number; seats: number; cars: number; started: number; toLive: number; noShows: number; strikes: number }>;
+}
+
+export const getScheduledDay = (token: string, day?: string) =>
+  get<ScheduledDayBody>(token, `/admin/scheduled${day ? `?day=${encodeURIComponent(day)}` : ""}`);
+
+export interface ScheduleSettingsBody {
+  settings: import("@rida/shared").ScheduleSettings & { updatedAt: string | null; updatedBy: { id: string; name: string } | null };
+  defaults: import("@rida/shared").ScheduleSettings;
+}
+
+export const getScheduleSettings = (token: string) => get<ScheduleSettingsBody>(token, "/admin/schedule-settings");
+export const saveScheduleSettings = (token: string, values: import("@rida/shared").ScheduleSettings) =>
+  request<ScheduleSettingsBody>("/admin/schedule-settings", { method: "PUT", body: JSON.stringify(values) }, token);

@@ -58,7 +58,9 @@
     "staging:db:migrate": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/staging/migrate.ts",
     "staging:db:rebuild": "ts-node --transpile-only -r tsconfig-paths/register src/scripts/staging/rebuild.ts",
     "staging:fake-requests": "ts-node --transpile-only -r tsconfig-paths/register src/dev/requestSim/cli.ts --staging",
-    "staging:fake-requests:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/requestSim/cleanupCli.ts --staging"
+    "staging:fake-requests:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/requestSim/cleanupCli.ts --staging",
+    "staging:fake-schedule": "ts-node --transpile-only -r tsconfig-paths/register src/dev/scheduleSim/cli.ts --staging",
+    "staging:fake-schedule:cleanup": "ts-node --transpile-only -r tsconfig-paths/register src/dev/scheduleSim/cleanupCli.ts --staging"
   },
   "dependencies": {
     "@fastify/ajv-compiler": "^4.0.6",

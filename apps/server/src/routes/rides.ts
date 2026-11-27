@@ -47,6 +47,7 @@ import { logger } from "../lib/logger";
 import { riderRideDetailSelect, riderRideListSelect } from "./selects";
 import { startMockDriverForRide } from "../dev/mockDriver";
 import { RULES } from "../rateLimit/rules";
+import { noteScheduledTripCancel } from "../services/scheduled/booking";
 import {
   MAX,
   bodyOptional,
@@ -753,6 +754,8 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
         }
         // A seat freed: requests that fit the car now reach its driver at once.
         reofferToDriver(prisma, rideRow.driverId);
+        // Leaving a scheduled trip after it started is a late cancel (a strike).
+        if (rideRow.booking === "SCHEDULED") void noteScheduledTripCancel(prisma, ride.id, userId);
         logCancel("ride_seat_cancelled_by_rider", "Rider left a car; it carries on for the others");
       }
       return reply;
@@ -776,6 +779,7 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
       }
       // A driver who had it is free again: their list is worked out at once.
       reofferToDriver(prisma, ride.driverId);
+      if (ride.booking === "SCHEDULED") void noteScheduledTripCancel(prisma, ride.id, userId);
 
       logCancel("ride_cancelled_by_rider", "Rider cancelled their ride");
       return reply.code(200).send({ ride: updated });

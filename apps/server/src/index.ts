@@ -50,6 +50,11 @@ import { sweepDriverPresence } from "./services/zones/driverPresence";
 import { SWEEP_GRACE_AFTER_START_MS, takeStaleDriversOffline } from "./services/zones/driverLiveness";
 import { startReviewDemo } from "./services/reviewDemo/simulation";
 import { reviewDemoConfig } from "./services/reviewDemo/config";
+import { scheduleTick } from "./services/scheduled/dispatch";
+import { refreshScheduleSettings } from "./services/scheduled/settings";
+
+/** How often scheduled cars are moved along (offers, live requests, reminders, starts). */
+const SCHEDULE_TICK_MS = 30_000;
 
 // From the very first line: an error nothing caught is logged and ends the
 // process (Render restarts it), never left to run in an unknown state.
@@ -324,6 +329,7 @@ async function bootstrap() {
     sweepDriverPresence();
     void refreshSearchWindow(prisma);
     void refreshWaitFeeSettings(prisma);
+    void refreshScheduleSettings(prisma);
     if (Date.now() < staleSweepFrom) return;
     takeStaleDriversOffline(prisma).then(
       (taken) => {
@@ -343,7 +349,13 @@ async function bootstrap() {
   void purgeTrail();
   const trailPurge = setInterval(() => void purgeTrail(), OTP_PURGE_INTERVAL_MS);
 
+  // Scheduled rides (services/scheduled): offers, live requests, reminders,
+  // and cars starting as normal trips at their leave-by time.
+  void refreshScheduleSettings(prisma).then(() => scheduleTick(prisma));
+  const scheduledTick = setInterval(() => void scheduleTick(prisma), SCHEDULE_TICK_MS);
+
   const timers = [
+    scheduledTick,
     timeoutSweep,
     receiptSweep,
     accountPurge,

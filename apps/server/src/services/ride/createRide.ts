@@ -104,6 +104,12 @@ export interface CreateRideInput {
    * apps, USSD): never more than the standard Shared price they show.
    */
   shownFare?: number | null;
+  /**
+   * A scheduled seat becoming a live request (services/scheduled): booked
+   * already, so launch mode and service hours aren't asked again, and its
+   * fare is the one locked when it was booked. Tagged SCHEDULED_TO_LIVE.
+   */
+  fromSchedule?: { lockedFare: number; scheduledCarId: string };
 }
 
 /**
@@ -131,12 +137,13 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
 
   // Launch mode: during the countdown only exempt riders book, and everyone
   // else hears when CampusRide opens before anything else (LaunchNotOpenError).
-  await assertCanBook(prisma, riderId);
+  // (A scheduled seat was checked when it was booked.)
+  if (!input.fromSchedule) await assertCanBook(prisma, riderId);
   // Service hours: outside them (or with no driver online, when that switch
   // is on) new requests are refused with when CampusRide is back
   // (ServiceClosedError). Review demo accounts and admins always book.
   // Requests already searching and trips going on are never touched.
-  await assertServiceOpen(prisma, riderId);
+  if (!input.fromSchedule) await assertServiceOpen(prisma, riderId);
 
   // Pins first: they can be refused (outside the area, unknown place) before
   // anything else is read.
@@ -182,7 +189,9 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
   // The price is set now and locked on the booking (services/ride/farePricing.ts):
   // Ride alone GH₵15 whoever comes; Shared GH₵7 / 14 / 18 for 1 / 2 / 3 seats,
   // plus GH₵2 a seat between the north and south ends of campus.
-  const lockedFare = await fareForNewBooking(prisma, type, occupancy, pickupPin, dropoffPin, input.shownFare);
+  const lockedFare = input.fromSchedule
+    ? input.fromSchedule.lockedFare
+    : await fareForNewBooking(prisma, type, occupancy, pickupPin, dropoffPin, input.shownFare);
 
   const ride = await prisma.ride.create({
     data: {
@@ -196,6 +205,7 @@ export async function createRide(prisma: PrismaClient, input: CreateRideInput) {
       paymentMethod,
       broadcastStartedAt: new Date(),
       isReviewDemo: rider?.isReviewDemo ?? false,
+      ...(input.fromSchedule ? { booking: "SCHEDULED_TO_LIVE" as const, scheduledCarId: input.fromSchedule.scheduledCarId } : {}),
       ...pins,
       passengers: {
         create: {

@@ -160,6 +160,16 @@ export default tseslint.config(
     },
   },
 
+  // ── The one place an update may restart the app ──────────────────────────
+  // Faster updates (2026-11-27, @rida/shared config/launchUpdate.ts): on a
+  // FRESH launch only, with no request or trip going on, LaunchUpdateGate
+  // downloads a newer bundle behind "Updating…" (8 s at most) and reloads
+  // into it. Everywhere else reloadAsync stays banned (mid-ride restarts).
+  {
+    files: ["packages/mobile-shared/src/appUpdate/LaunchUpdateGate.tsx", "packages/mobile-shared/src/__tests__/launchUpdate.test.tsx"],
+    rules: { "no-restricted-imports": "off", "no-restricted-properties": "off" },
+  },
+
   // ── Browser workspace (the Vite admin SPA) ────────────────────────────────
   // Separate from the React Native block: this one runs in a real browser, so
   // it gets the DOM globals and none of React Native's injected ones.

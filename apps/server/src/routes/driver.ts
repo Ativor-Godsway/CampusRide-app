@@ -85,6 +85,7 @@ import { RULES } from "../rateLimit/rules";
 import { checkDriverPosition, hasActiveTrip, lastPositionData, parseDriverPoint } from "../services/zones/driverPosition";
 import { closeDriverSession, openDriverSession } from "../services/stats/driverSessions";
 import { commissionBlock } from "../services/commission/enforcement";
+import { driverSchedule } from "../services/scheduled/views";
 import { recordOfferAnswer } from "../services/stats/rideOffers";
 import {
   MAX,
@@ -1082,6 +1083,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       return reply.code(200).send({ open: true, online: false, car: null, rides: [] });
     }
     noteDriverHeartbeat(prisma, userId);
+    // Scheduled cars open to drivers (services/scheduled): on the board with a "Scheduled" label.
+    const scheduled = (await driverSchedule(prisma, userId, now)).open;
     const carSummary = car
       ? { rideId: car.id, type: car.type, status: car.status, freeSeats: car.type === "SHARED" ? carSeats(car.passengers).free : 0 }
       : null;
@@ -1089,7 +1092,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // whatever the hours, like demo riders book whatever the hours.
     const service = serviceHoursGateOn() && !driver.user.isReviewDemo ? await isServiceOpen(prisma, now) : null;
     if (service && !service.open && service.reason !== "NO_DRIVERS") {
-      return reply.code(200).send({ open: false, online: true, car: carSummary, rides: [] });
+      return reply.code(200).send({ open: false, online: true, car: carSummary, rides: [], scheduled });
     }
 
     const rows = await prisma.ride.findMany({
@@ -1102,7 +1105,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       include: { rider: { select: { name: true } }, passengers: { select: { riderId: true, status: true, lockedFare: true } } },
       orderBy: { createdAt: "desc" },
     });
-    if (rows.length === 0) return reply.code(200).send({ open: true, online: true, car: carSummary, rides: [] });
+    if (rows.length === 0) return reply.code(200).send({ open: true, online: true, car: carSummary, rides: [], scheduled });
 
     const fitting = car
       ? new Set((await requestsThatFitCar(prisma, car, { userId, isOnline: true, lastLat: driver.lastLat, lastLng: driver.lastLng }, now)).map((r) => r.id))
@@ -1141,7 +1144,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       }),
     );
     rides.sort((a, b) => (a.pickupDistanceMeters ?? Infinity) - (b.pickupDistanceMeters ?? Infinity) || b.createdAt.localeCompare(a.createdAt));
-    return reply.code(200).send({ open: true, online: true, car: carSummary, rides });
+    return reply.code(200).send({ open: true, online: true, car: carSummary, rides, scheduled });
   });
 
   /**

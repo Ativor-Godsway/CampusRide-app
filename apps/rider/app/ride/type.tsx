@@ -91,6 +91,7 @@ import {
   useRideSearchStatus,
   Stepper,
   useTweenNumber,
+  useMyScheduledRide,
 } from "@rida/mobile-shared";
 import { CancelRideContent, type SwitchOffer } from "../../components/ride/CancelRideContent";
 import {
@@ -215,6 +216,8 @@ export default function RideTypeScreen() {
         ? { label: "No drivers online", spoken: service.view.title }
         : null;
   const { data: trackingData } = useRideTracking(activeRideId ?? undefined);
+  // Whether scheduling is on (the "Schedule for later" link).
+  const scheduling = useMyScheduledRide();
 
   // "Picking up 1 more rider on the way · ~3 min" when the driver adds a
   // rider while this rider is in the car. Shown for a few seconds.
@@ -851,7 +854,8 @@ export default function RideTypeScreen() {
           // The one action, pinned at the bottom (above the keyboard while the
           // note is being typed).
           footer={
-            launch.kind === "countdown" ? (
+            <View style={styles.footerStack}>
+            {            launch.kind === "countdown" ? (
               // Before the public launch: the prices are real, booking opens at launch time.
               <Button
                 label={opensInText(launch.parts)}
@@ -871,7 +875,25 @@ export default function RideTypeScreen() {
                 accessibilityLabel={requestLabel(selectedType, formatCedis(selectedOption.farePesewas))}
                 accessibilityHint={`${bookingPriceLabel(selectedType, chosenSeats, spokenCedis(selectedOption.farePesewas))}, paid in cash`}
               />
-            )
+            )}
+            {
+            // Scheduled rides are Shared only (rides/scheduled.ts).
+            selectedType === "SHARED" && scheduling.data?.enabled && launch.kind !== "countdown" ? (
+              <Button
+                label="Schedule for later"
+                variant="text"
+                size="md"
+                icon="calendar-outline"
+                onPress={() =>
+                  router.push({
+                    pathname: "/ride/schedule",
+                    params: { ...tripEndParams("pickup", pickupEnd), ...tripEndParams("dropoff", dropoffEnd), seats: String(sharedSeats) },
+                  })
+                }
+                accessibilityHint="Book a seat for a time later today or tomorrow"
+              />
+            ) : null}
+            </View>
           }
         >
           <Text variant="title2" accessibilityRole="header">
@@ -1301,6 +1323,7 @@ function RoutePill({
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
+  footerStack: { gap: spacing[1] },
   // A filled field, as Input (docs/design-system.md): surface-2, radius 14.
   noteInput: {
     minHeight: 48,

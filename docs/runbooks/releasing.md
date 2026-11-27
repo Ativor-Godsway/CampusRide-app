@@ -26,13 +26,20 @@ release the rider app and then the driver app.
 3. If there is one, it downloads it quietly.
 4. The new version is used **the next time the app is opened from fully closed**.
 
-The app never restarts itself to apply an update, so nobody is interrupted in the
-middle of a ride. A lint rule (`reloadAsync` is banned in `eslint.config.mjs`)
-keeps it that way.
+**Faster updates (2026-11-27):** on a fresh launch the app also asks EAS itself.
+If a newer update is there and **no request or trip is going on**, it shows a short
+"Updating…" screen, downloads it (8 seconds at most) and restarts into it, so one
+launch is enough. Too slow or offline: it carries on with the version it has, and
+the update applies on the next launch. During a request or trip it only downloads,
+and the update applies on the next launch. This is the only place the app restarts
+itself (`LaunchUpdateGate` in packages/mobile-shared); a lint rule bans
+`reloadAsync` everywhere else in `eslint.config.mjs`, so nobody is interrupted in
+the middle of a ride.
 
-So after you publish, a phone usually needs **two launches** to show the change:
-one to download the update, and one to start using it. "Fully closed" means swiped
-away from the app switcher, not just sent to the background.
+So after you publish, a phone with this version usually shows the change on its
+**next launch** (an older version still needs two: one to download, one to use it).
+"Fully closed" means swiped away from the app switcher, not just sent to the
+background.
 
 ### Channels: which phones get which update
 

@@ -11,6 +11,7 @@ import { SettingsScreen } from "../screens/SettingsScreen";
 import { CommissionRulesCard } from "../screens/CommissionRulesCard";
 import { RideRequestsCard } from "../screens/RideRequestsCard";
 import { WaitFeeCard } from "../screens/WaitFeeCard";
+import { ScheduleSettingsCard } from "../screens/ScheduleSettingsCard";
 import { PricesCard } from "../screens/PricesCard";
 import { Page, Section } from "../shell/Page";
 
@@ -141,6 +142,7 @@ export function SettingsPage() {
         <RideRequestsCard />
         <PricesCard />
         <WaitFeeCard />
+        <ScheduleSettingsCard />
         <CommissionRulesCard />
       </div>
       <Section title="Admin sign-ins" className="anchor" >

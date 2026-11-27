@@ -17,7 +17,9 @@ export function DriverPushNotifications() {
 
   const onOpen = useCallback(
     (data: PushData) => {
-      if (pushTapTarget(data.kind) === "trip") router.navigate(`/ride/${data.rideId}`);
+      const target = pushTapTarget(data.kind);
+      if (target === "trip") router.navigate(`/ride/${data.rideId}`);
+      else if (target === "schedule") router.navigate("/schedule");
       else router.navigate("/(tabs)");
     },
     [router],

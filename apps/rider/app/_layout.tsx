@@ -7,6 +7,8 @@ import {
   AppErrorScreen,
   AppUpdateGate,
   AuthProvider,
+  LaunchUpdateGate,
+  getActiveRide,
   TermsConfirmationGate,
   hideSplashScreen,
   holdSplashScreen,
@@ -62,6 +64,17 @@ function RiderUpdateGate() {
   return <AppUpdateGate app="rider" hold={holdUpdateScreen({ trip, onTripScreen: false })} />;
 }
 
+/**
+ * A newer JavaScript bundle on a fresh launch (@rida/shared launchUpdate):
+ * "Updating…" and a reload, never during a request or ride (then it is
+ * used from the next launch). Signed out: no ride.
+ */
+const riderRideActive = () =>
+  getActiveRide().then(
+    (ride) => ride !== null,
+    (err: { response?: { status?: number } }) => err?.response?.status !== 401,
+  );
+
 function RootLayout() {
   const fontsReady = useAppFonts();
   if (!fontsReady) return null;
@@ -78,6 +91,7 @@ function RootLayout() {
           <TermsConfirmationGate />
           {/* Last, so it covers everything else, the terms confirmation included. */}
           <RiderUpdateGate />
+          <LaunchUpdateGate app="rider" isRideActive={riderRideActive} />
         </AuthProvider>
       </QueryClientProvider>
     </GestureHandlerRootView>
