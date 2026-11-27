@@ -3,6 +3,7 @@ import type { PrismaClient } from "@prisma/client";
 import { APP_NAME } from "../config";
 import { noInput } from "../http/schemas";
 import { noteDatabaseError } from "../lib/alerts";
+import { isStagingServer, stagingProblems } from "../lib/stagingMode";
 
 /** How long /health/ready waits for the database (a Neon compute waking up takes well under this). */
 export const READY_DB_TIMEOUT_MS = 3000;
@@ -32,8 +33,19 @@ export async function checkDatabase(
 }
 
 /**
+ * True only on a STAGING server that passes every staging check
+ * (lib/stagingMode.ts): the same condition that lets the test numbers sign
+ * in with the fixed code. /health then says `staging: true`, so the admin
+ * site can accept the test numbers as typed ("99 000 0021"). Production
+ * never has the field.
+ */
+export function isWorkingStagingServer(env: Record<string, string | undefined> = process.env): boolean {
+  return isStagingServer(env) && stagingProblems(env).length === 0;
+}
+
+/**
  * Two health checks (Stage 5), both unlimited and public, saying nothing
- * beyond up or down:
+ * beyond up or down (and, on the staging server only, that it is staging):
  *
  * - GET /health — the process is running. Render's health check: kept free
  *   of any database call, so a database outage doesn't make Render restart a
@@ -48,7 +60,7 @@ export function registerHealthRoutes(
   timeoutMs = READY_DB_TIMEOUT_MS,
 ): void {
   app.get("/health", { config: { limits: false }, schema: noInput }, async () => {
-    return { status: "ok", app: APP_NAME };
+    return isWorkingStagingServer() ? { status: "ok", app: APP_NAME, staging: true } : { status: "ok", app: APP_NAME };
   });
 
   app.get(
