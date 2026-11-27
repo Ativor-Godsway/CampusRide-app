@@ -328,7 +328,7 @@ Then clean up the fake riders if you used them, and continue with the PR as usua
 
 ## Scheduled rides (`scheduled-shared-rides`)
 
-This branch is stacked on `ride-seats` (it needs seats on bookings). Deploying it to staging also adds the migration `20261127120000_scheduled_rides`.
+This branch is stacked on `ride-seats` (it needs seats on bookings). Deploying it to staging also adds its migrations: `20261127120000_scheduled_rides` and `20261128120000_scheduled_matching_limits`.
 
 ### Deploy it
 
@@ -362,7 +362,7 @@ Sign in to the staging driver app as Yaw (`99 000 0011`) and go online. Then boo
 npm run staging:fake-schedule -- --open-now
 ```
 
-It books three cars in three slots at least 40 minutes ahead, 30 minutes apart, all going to Balme Library:
+It books three cars at three times later today, at least 40 minutes ahead and 30 minutes apart, all going to Balme Library. Run it early enough in the day. With `--open-now`, staging stays open until midnight.
 
 1. **3 riders, 3 seats:** offered to drivers at once. Yaw gets a pop-up ("New scheduled trip", "Scheduled · 9:30 · 3 seats · GH₵21"). The car is also on the Requests board with a Scheduled label, and under "Open scheduled cars" in the Schedule tab.
 2. **2 riders, 2 seats:** nothing yet. 30 minutes before its time, it is offered the same way.
@@ -381,12 +381,21 @@ To try the paths faster, lower the numbers in Settings → Scheduled rides on st
 ### The rider side with the test accounts
 
 1. **Rider (Ama, `99 000 0001`):** on Home after a fresh launch, the "Book your ride ahead" intro shows. "Maybe later" closes it until the next launch. "Don't show again" closes it for good on this phone.
-2. Plan a trip to Balme Library. On Choose a ride, under the Shared button, tap **Schedule for later**.
-3. On the Schedule screen: Today / Tomorrow, then "Join a car" chips for the fake riders' slots ("9:00 · 3 going"), then the hour strip and its tiles (a green dot where others are going your way). Pick a tile, set "Bringing a friend?", and tap "Reserve seat · 9:00 · GH₵7".
-4. Home now shows the card: seats filled ("2 of 4 seats filled"), "Waiting for riders". Once Yaw accepts, it shows "Car confirmed", Yaw, the car and the pickup window, plus "I'm coming". 10 minutes before the pickup window, Ama gets a reminder with an "I'm coming" button.
-5. **Join a car that already has a driver:** once Yaw has accepted a car, sign in as Kofi (`99 000 0002`) and open the same slot. The chip says "Join Yaw's car · 1 seat left". This stays open after the 20-minute cutoff, until the car's leave-by time.
-6. **Need a ride sooner:** pick a tile less than 20 minutes away with no car to join. The screen offers "Book a normal ride instead".
-7. **Cancel and strikes (Esi, `99 000 0003`):** cancel more than 30 minutes before the slot: free. Book again and cancel within 30 minutes: a strike. A second strike blocks scheduling for 7 days, and the Schedule screen says until when. To clear Esi's strikes and block on staging, run `npm run staging:accounts`.
+2. **Home → Schedule ahead** (the green card under "Where to?"). Step 1, "Scheduled ride · step 1 of 3": pick the pickup and drop-off. A small "Schedule for later" link under the Shared button on Choose a ride leads to the same time picker.
+3. **Step 2, the time (today only):** a green banner ("Join cars going your way…"), "Join a car" chips, then **Arrive by** with the hours in 12-hour time ("9 AM", "1 PM") and wide tiles: the time big ("9:20") and under it "2 going your way" or "Join Yaw's car · 1 seat left". Tiles with riders are lightly green. Only times within today's service hours show (with 08:00–17:00, the last is 5:00 PM). Past times and times under 20 minutes away are hidden, unless there's a car with a driver to join. Then "Need a ride sooner? Book a normal ride instead." shows.
+   - **Check the fixed bug:** pick a time, then tap another hour. The button goes back to "Choose a time" until you pick a tile in that hour. It never names a time from another hour.
+   - **Check the tiles:** "9:20" never wraps.
+4. **Step 3, confirm:** "Scheduled · arrive by 9:20 AM · Today", the pickup and drop-off, seats, the car you're joining (if any), the price and the free-cancel rule. Tap "Reserve seat · GH₵7".
+5. Home now shows the card: seats filled ("2 of 4 seats filled"), "Waiting for riders". Once Yaw accepts, it shows "Car confirmed", Yaw, the car and the pickup window, plus "I'm coming". 10 minutes before the pickup window, Ama gets a reminder with an "I'm coming" button.
+6. **Join a car that already has a driver:** once Yaw has accepted a car, sign in as Kofi (`99 000 0002`) and open the same time. The chip and the tile say "Join Yaw's car · 1 seat left". This stays open after the 20-minute cutoff, until the car's leave-by time.
+7. **Matching by direction:** as Ama, book Pentagon → TF Hall for a time. As Kofi, book Pentagon → Alexander Kwapong Hall for the same time. They get different cars (the Schedule tab and the admin Scheduled page show two cars), and Kofi's tile doesn't count Ama as "going your way". Pentagon → a place next to TF does join Ama's car. The limits are in admin Settings → Scheduled rides: most extra route per added rider (1,000 m), while the car has few riders (1,500 m), and most extra driving (5 min).
+8. **Cancel and strikes (Esi, `99 000 0003`):** cancel more than 30 minutes before the time: free. Book again and cancel within 30 minutes: a strike. A second strike blocks scheduling for 7 days, and the screen says until when. To clear Esi's strikes and block on staging, run `npm run staging:accounts`.
+
+### The driver side (Yaw)
+
+- The **Schedule tab** and the pop-up show each car as a card: the arrive-by time big, the total and "you get", **Leave by**, and a route summary ("2 pickups · 1 drop-off · 2.4 km").
+- On your own cars, each rider is listed **in stop order**: name, seats, pickup place, and drop-off place. If they all go to the same place, it's one line, "All drop-offs: Balme Library". Each rider has a **Call** button, which opens the phone's dialler as on a trip. The staging test numbers aren't real phones, so the call itself won't connect.
+- At leave-by, the trip opens with the riders in that same pickup order.
 
 ### Clean up
 

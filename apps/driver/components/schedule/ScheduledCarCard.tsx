@@ -1,14 +1,32 @@
 import { useState } from "react";
 import { Alert, StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { leaveByLabel, scheduleClock, seatsFilledLabel, seatsWord, type DriverScheduledCarView, type ScheduleAcceptedVia } from "@rida/shared";
-import { Button, StatusChip, Text, colors, formatCedis, haptics, radii, scheduleErrorText, spacing } from "@rida/mobile-shared";
+import {
+  formatDistance,
+  leaveByLabel,
+  scheduleClock,
+  seatsFilledLabel,
+  seatsWord,
+  sharedDropoff,
+  type DriverScheduledCarView,
+  type ScheduleAcceptedVia,
+} from "@rida/shared";
+import { Button, IconButton, StatusChip, Text, callPhone, colors, formatCedis, haptics, radii, scheduleErrorText, spacing } from "@rida/mobile-shared";
 import { useScheduleActions } from "../../lib/schedule";
 
+/** "2 pickups · 1 drop-off · 2.4 km". */
+export function routeSummary(route: DriverScheduledCarView["route"]): string | null {
+  if (!route) return null;
+  const word = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+  return `${word(route.pickups, "pickup")} · ${word(route.dropoffs, "drop-off")} · ${formatDistance(route.meters)}`;
+}
+
 /**
- * One scheduled car (rides/scheduled.ts): "Scheduled · 9:30 · 3 seats ·
- * GH₵21", where from and to, the driver's share; for the driver's own cars,
- * Leave by, and each rider's first name, seats, pickup and "coming".
+ * One scheduled car (rides/scheduled.ts). The time big, the total and what
+ * the driver gets, Leave by and a route summary; for the driver's own cars
+ * each rider in stop order with seats, pickup and drop-off (one shared
+ * drop-off line when they all go to the same place) and a Call button (the
+ * same call as on a trip). Open cars: where from and to, and Accept.
  */
 export function ScheduledCarCard({
   car,
@@ -22,6 +40,8 @@ export function ScheduledCarCard({
 }) {
   const actions = useScheduleActions();
   const [busy, setBusy] = useState(false);
+  const allTo = sharedDropoff(car.riders);
+  const summary = routeSummary(car.route);
 
   async function accept() {
     setBusy(true);
@@ -55,60 +75,117 @@ export function ScheduledCarCard({
   }
 
   return (
-    <View style={styles.card} accessibilityLabel={`${car.label}, ${car.pickupArea} to ${car.dropoffArea}`}>
-      <View style={styles.head}>
-        <StatusChip label="Scheduled" tone="brand" icon="calendar-outline" />
-        <Text variant="title3" tabular style={styles.flex}>
-          {scheduleClock(car.arriveBy)}
-        </Text>
-        <Text variant="title3" tabular>
-          {formatCedis(car.farePesewas)}
-        </Text>
+    <View style={styles.card}>
+      <View style={styles.hero} accessible accessibilityLabel={`${car.label}. ${car.pickupArea} to ${car.dropoffArea}. You get ${formatCedis(car.driverSharePesewas)}.`}>
+        <View style={styles.flex}>
+          <StatusChip label={car.mine ? "Your scheduled trip" : "Scheduled"} tone="brand" icon="calendar-outline" />
+          <Text variant="caption" color="onDark2" style={styles.heroCaption}>
+            Arrive by
+          </Text>
+          <Text variant="display" color="onDark" tabular style={styles.time}>
+            {scheduleClock(car.arriveBy)}
+          </Text>
+        </View>
+        <View style={styles.money}>
+          <Text variant="caption" color="onDark2">
+            Total
+          </Text>
+          <Text variant="title2" color="onDark" tabular>
+            {formatCedis(car.farePesewas)}
+          </Text>
+          <Text variant="caption" color="greenOnDark" tabular>
+            {`you get ${formatCedis(car.driverSharePesewas)}`}
+          </Text>
+        </View>
       </View>
-      <Text variant="bodyStrong" numberOfLines={2}>
-        {`${car.pickupArea} → ${car.dropoffArea}`}
-      </Text>
-      <Text variant="subhead" color="secondary">
-        {`${car.mine ? seatsFilledLabel(car.seats, car.carSeats) : seatsWord(car.seats)} · you get ${formatCedis(car.driverSharePesewas)}`}
-      </Text>
-      {car.mine && car.leaveBy ? (
-        <View style={styles.row}>
-          <Ionicons name="time-outline" size={18} color={colors.green700} />
-          <Text variant="bodyStrong" color="brand">
-            {leaveByLabel(Date.parse(car.leaveBy))}
-          </Text>
-        </View>
-      ) : null}
-      {car.riders.map((r, i) => (
-        <View key={`${r.firstName}-${i}`} style={styles.row}>
-          <Ionicons name={r.coming ? "checkmark-circle" : "person-outline"} size={18} color={r.coming ? colors.green500 : colors.ink2} />
-          <Text variant="subhead" style={styles.flex} numberOfLines={1}>
-            {`${r.firstName}${r.seats > 1 ? ` +${r.seats - 1}` : ""} · ${r.pickupLabel}`}
-          </Text>
-          {r.coming ? (
-            <Text variant="caption" color="brand">
-              Coming
+
+      <View style={styles.body}>
+        {car.mine && car.leaveBy ? (
+          <View style={styles.leave}>
+            <Ionicons name="time" size={18} color={colors.green700} />
+            <Text variant="bodyStrong" color="brand">
+              {leaveByLabel(Date.parse(car.leaveBy))}
             </Text>
-          ) : null}
+          </View>
+        ) : null}
+
+        <View style={styles.row}>
+          <Ionicons name="navigate-outline" size={18} color={colors.ink2} />
+          <Text variant="bodyStrong" numberOfLines={2} style={styles.flex}>
+            {`${car.pickupArea} → ${car.dropoffArea}`}
+          </Text>
         </View>
-      ))}
-      {car.note ? (
-        <Text variant="caption" color="warning">
-          {car.note}
+        <Text variant="subhead" color="secondary">
+          {[car.mine ? seatsFilledLabel(car.seats, car.carSeats) : seatsWord(car.seats), summary].filter(Boolean).join(" · ")}
         </Text>
-      ) : null}
-      {car.mine ? (
-        <Button label="Give back" variant="text" size="md" loading={busy} onPress={giveBack} />
-      ) : (
-        <Button label={`Accept · ${formatCedis(car.farePesewas)}`} size="md" disabled={!car.canAccept} loading={busy} onPress={() => void accept()} />
-      )}
+
+        {car.riders.length > 0 ? (
+          <View style={styles.riders}>
+            {car.riders.map((r, i) => (
+              <View key={`${r.firstName}-${i}`} style={styles.rider} testID={`scheduled-rider-${i}`}>
+                <View style={styles.order}>
+                  <Text variant="caption" color="onBrand" tabular>
+                    {i + 1}
+                  </Text>
+                </View>
+                <View style={styles.flex}>
+                  <Text variant="bodyStrong" numberOfLines={1}>
+                    {`${r.firstName}${r.seats > 1 ? ` · ${seatsWord(r.seats)}` : ""}${r.coming ? " · coming" : ""}`}
+                  </Text>
+                  <Text variant="subhead" color="secondary" numberOfLines={1}>
+                    {`Pickup: ${r.pickupLabel}`}
+                  </Text>
+                  {allTo === null ? (
+                    <Text variant="subhead" color="secondary" numberOfLines={1}>
+                      {`Drop-off: ${r.dropoffLabel}`}
+                    </Text>
+                  ) : null}
+                </View>
+                <IconButton
+                  icon="call"
+                  variant="compact"
+                  accessibilityLabel={`Call ${r.firstName}`}
+                  disabled={!r.phone}
+                  onPress={() => void callPhone(r.phone, r.firstName)}
+                  testID={`call-rider-${i}`}
+                />
+              </View>
+            ))}
+            {allTo !== null ? (
+              <View style={styles.row}>
+                <Ionicons name="flag-outline" size={18} color={colors.ink2} />
+                <Text variant="subhead" style={styles.flex}>{`All drop-offs: ${allTo}`}</Text>
+              </View>
+            ) : null}
+          </View>
+        ) : null}
+
+        {car.note ? (
+          <Text variant="caption" color="warning">
+            {car.note}
+          </Text>
+        ) : null}
+        {car.mine ? (
+          <Button label="Give back" variant="text" size="md" loading={busy} onPress={giveBack} />
+        ) : (
+          <Button label={`Accept · ${formatCedis(car.farePesewas)}`} size="md" disabled={!car.canAccept} loading={busy} onPress={() => void accept()} />
+        )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: radii.lg, backgroundColor: colors.surface2, padding: spacing[4], gap: spacing[2] },
-  head: { flexDirection: "row", alignItems: "center", gap: spacing[2] },
+  card: { borderRadius: radii.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, overflow: "hidden" },
+  hero: { flexDirection: "row", alignItems: "flex-end", gap: spacing[3], padding: spacing[4], backgroundColor: colors.surfaceDark },
+  heroCaption: { marginTop: spacing[3] },
+  time: { marginTop: 2 },
+  money: { alignItems: "flex-end", gap: 2 },
+  body: { padding: spacing[4], gap: spacing[3] },
+  leave: { flexDirection: "row", alignItems: "center", gap: spacing[2], alignSelf: "flex-start", backgroundColor: colors.green50, borderRadius: radii.full, paddingHorizontal: spacing[3], paddingVertical: spacing[1] },
   row: { flexDirection: "row", alignItems: "center", gap: spacing[2] },
   flex: { flex: 1 },
+  riders: { gap: spacing[3], paddingTop: spacing[1], borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.line },
+  rider: { flexDirection: "row", alignItems: "center", gap: spacing[3], paddingTop: spacing[2] },
+  order: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.green500, alignItems: "center", justifyContent: "center" },
 });

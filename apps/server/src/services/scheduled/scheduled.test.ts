@@ -15,7 +15,9 @@ import { setScheduleSettingsForTests } from "./settings";
 import { bookScheduledSeat, cancelScheduledBooking, noteScheduledNoShow } from "./booking";
 import { acceptScheduledCar, driverCancelScheduledCar, evaluateCarNow, scheduleTick } from "./dispatch";
 import { ScheduleError } from "./core";
-import { riderUpcomingBooking, scheduleOptionsFor } from "./views";
+import { driverSchedule, riderUpcomingBooking, scheduleOptionsFor } from "./views";
+import { groupable } from "./core";
+import { planStops } from "@rida/shared";
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
@@ -47,10 +49,19 @@ function newDay() {
   return { at, slot: at };
 }
 
-async function book(riderId: string, arriveBy: Date, now: Date, opts: { seats?: number; to?: Zone; carId?: string } = {}) {
+/** Two drop-offs at opposite ends of campus (inside the service area). */
+const NORTH = { latitude: 5.664, longitude: -0.183 };
+const SOUTH = { latitude: 5.643, longitude: -0.19 };
+
+async function book(
+  riderId: string,
+  arriveBy: Date,
+  now: Date,
+  opts: { seats?: number; to?: Zone; toPin?: { latitude: number; longitude: number }; carId?: string } = {},
+) {
   return bookScheduledSeat(
     prisma,
-    { riderId, arriveBy, pickup: pin(zones.pickup), dropoff: pin(opts.to ?? zones.adjacent), seats: opts.seats ?? 1, carId: opts.carId ?? null },
+    { riderId, arriveBy, pickup: pin(zones.pickup), dropoff: opts.toPin ?? pin(opts.to ?? zones.adjacent), seats: opts.seats ?? 1, carId: opts.carId ?? null },
     now,
   );
 }
@@ -76,12 +87,12 @@ afterAll(async () => {
 });
 
 describe("booking and grouping", () => {
-  it("riders going the same way in one slot share a car; another drop-off gets its own", async () => {
+  it("riders going the same way in one slot share a car; the opposite direction from the same pickup gets its own", async () => {
     const { at, slot } = newDay();
     const [a, b, c] = [await rider(), await rider(), await rider()];
-    const first = await book(a.id, slot(10), at(6));
-    const second = await book(b.id, slot(10), at(6));
-    const third = await book(c.id, slot(10), at(6), { to: zones.distant });
+    const first = await book(a.id, slot(10), at(6), { toPin: NORTH });
+    const second = await book(b.id, slot(10), at(6), { toPin: NORTH });
+    const third = await book(c.id, slot(10), at(6), { toPin: SOUTH });
     expect(second.carId).toBe(first.carId);
     expect(third.carId).not.toBe(first.carId);
   });
@@ -213,7 +224,7 @@ describe("drivers", () => {
     const d = await driver();
     const nine = await book((await rider()).id, slot(9), at(6), { seats: 3 });
     const nineTwenty = await book((await rider()).id, slot(9, 20), at(6), { seats: 3 });
-    const nineThirty = await book((await rider()).id, slot(9, 30), at(6), { seats: 3, to: zones.distant });
+    const nineThirty = await book((await rider()).id, slot(9, 30), at(6), { seats: 3, toPin: SOUTH });
     await acceptScheduledCar(prisma, d.id, nine.carId, "BOARD", at(6, 1));
     await expect(acceptScheduledCar(prisma, d.id, nineTwenty.carId, "BOARD", at(6, 2))).rejects.toMatchObject({ code: "SCHEDULE_OVERLAP" });
     await expect(acceptScheduledCar(prisma, d.id, nineThirty.carId, "BOARD", at(6, 2))).resolves.toMatchObject({ status: "ACCEPTED" });
@@ -263,6 +274,35 @@ describe("drivers", () => {
     expect(started.bookings.every((x) => x.status === "STARTED" && x.ridePassengerId)).toBe(true);
     // The rider's card now says the driver is on the way.
     expect(await riderUpcomingBooking(prisma, b.id, accepted.leaveBy!)).toMatchObject({ state: "DRIVER_ON_THE_WAY", rideId: ride.id });
+  });
+});
+
+describe("stop order", () => {
+  it("riders are listed (driver) and seated (trip) in pickup order, each with their drop-off and phone", async () => {
+    const { at, slot } = newDay();
+    const d = await driver();
+    const [a, b] = [await rider(), await rider()];
+    // a books from the pickup zone; b from the adjacent zone; both towards the north end.
+    const first = await book(a.id, slot(10), at(6), { seats: 2, toPin: NORTH });
+    await bookScheduledSeat(prisma, { riderId: b.id, arriveBy: slot(10), pickup: pin(zones.adjacent), dropoff: { latitude: 5.6635, longitude: -0.1835 }, seats: 1 }, at(6));
+    expect((await car(first.carId)).bookings).toHaveLength(2);
+    await evaluateCarNow(prisma, first.carId, at(9, 30));
+    const accepted = await acceptScheduledCar(prisma, d.id, first.carId, "SCHEDULE", at(9, 31));
+
+    const tab = await driverSchedule(prisma, d.id, at(9, 32));
+    const mine = tab.mine.find((c) => c.carId === first.carId)!;
+    const bookings = (await car(first.carId)).bookings;
+    const plan = planStops(bookings.map(groupable))!;
+    const expectedFirst = bookings[plan.pickupOrder[0]!]!;
+    expect(mine.riders).toHaveLength(2);
+    expect(mine.riders[0]!.seats).toBe(expectedFirst.seats);
+    expect(mine.riders.every((r) => r.phone?.startsWith("+233") && r.dropoffLabel)).toBe(true);
+    expect(mine.route).toMatchObject({ pickups: expect.any(Number), meters: expect.any(Number) });
+
+    await scheduleTick(prisma, accepted.leaveBy!);
+    const started = await car(first.carId);
+    const seats = await prisma.ridePassenger.findMany({ where: { rideId: started.rideId! }, orderBy: { createdAt: "asc" } });
+    expect(seats.map((p) => p.riderId)).toEqual(plan.pickupOrder.map((i) => bookings[i]!.riderId));
   });
 });
 

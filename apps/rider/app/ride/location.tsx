@@ -303,6 +303,11 @@ export default function PlanRideScreen() {
         <Ionicons name="arrow-back" size={22} color={colors.ink} />
       </Pressable>
 
+      {params.intent === "schedule" ? (
+        <Text variant="eyebrow" color="brand">
+          Scheduled ride · step 1 of 3
+        </Text>
+      ) : null}
       <Text variant="title1" accessibilityRole="header" style={styles.title}>
         Where to?
       </Text>

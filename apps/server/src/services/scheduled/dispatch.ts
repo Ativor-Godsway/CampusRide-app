@@ -30,6 +30,7 @@ import {
   UPCOMING_CAR_STATUSES,
   bookedOf,
   leaveByForCar,
+  stopOrder,
   lockedTotal,
   logScheduleEvent,
   seatsOf,
@@ -352,8 +353,10 @@ export async function startCar(prisma: PrismaClient, car: CarWithBookings, now: 
         dropoffZoneId: first.dropoffZoneId,
         occupancy: seatsOf(riding),
         ...pinsOf(first),
+        // In pickup order (the driver's list keeps the order seats were added).
         passengers: {
-          create: riding.map((b) => ({
+          create: stopOrder(riding).pickups.map((b, i) => ({
+            createdAt: new Date(now.getTime() + i),
             riderId: b.riderId,
             pickupZoneId: b.pickupZoneId,
             dropoffZoneId: b.dropoffZoneId,

@@ -19,7 +19,7 @@ import {
 } from "@rida/shared";
 import { readServiceHours } from "../service/serviceHours";
 import { getZoneMap } from "../zones/zoneCache";
-import { bookedOf, groupable, lockedTotal, seatsOf, zoneNeighbours, type CarWithBookings } from "./core";
+import { bookedOf, groupable, lockedTotal, seatsOf, stopOrder, zoneNeighbours, type CarWithBookings } from "./core";
 import { scheduleSettings } from "./settings";
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -45,16 +45,23 @@ export async function driverCarView(
   const mine = ctx.viewerId !== null && car.driverId === ctx.viewerId;
   const overlap = !mine && scheduleOverlaps(car.arriveBy.getTime(), ctx.held, s);
   const canAccept = car.status === "OPEN" && car.offeredAt !== null && ctx.online && !overlap;
-  const riders = mine
-    ? await Promise.all(
-        booked.map(async (b) => ({
-          firstName: firstName((await prisma.user.findUnique({ where: { id: b.riderId }, select: { name: true } }))?.name) || "Rider",
-          seats: b.seats,
-          pickupLabel: b.pickupLabel ?? zones.get(b.pickupZoneId)?.name ?? "Pickup",
-          dropoffLabel: b.dropoffLabel ?? zones.get(b.dropoffZoneId)?.name ?? "Drop-off",
-          coming: b.comingAt !== null,
-        })),
+  // The driver's own car: riders in pickup order, each with their drop-off and a number to call.
+  const ordered = stopOrder(booked);
+  const people = mine
+    ? new Map(
+        (await prisma.user.findMany({ where: { id: { in: booked.map((b) => b.riderId) } }, select: { id: true, name: true, phone: true } })).map((u) => [u.id, u]),
       )
+    : new Map<string, { name: string; phone: string }>();
+  const place = (label: string | null, zoneId: string, fallback: string) => label ?? zones.get(zoneId)?.name ?? fallback;
+  const riders = mine
+    ? ordered.pickups.map((b) => ({
+        firstName: firstName(people.get(b.riderId)?.name) || "Rider",
+        seats: b.seats,
+        pickupLabel: place(b.pickupLabel, b.pickupZoneId, "Pickup"),
+        dropoffLabel: place(b.dropoffLabel, b.dropoffZoneId, "Drop-off"),
+        coming: b.comingAt !== null,
+        phone: people.get(b.riderId)?.phone ?? null,
+      }))
     : [];
   return {
     carId: car.id,
@@ -72,6 +79,8 @@ export async function driverCarView(
     canAccept,
     note: mine || canAccept ? null : overlap ? scheduleOverlapText(s) : !ctx.online ? "Go online to accept." : null,
     riders,
+    dropoffOrder: mine ? [...new Set(ordered.dropoffs.map((b) => place(b.dropoffLabel, b.dropoffZoneId, "Drop-off")))] : [],
+    route: booked.length > 0 && ordered.meters !== null ? { pickups: new Set(booked.map((b) => b.pickupLabel)).size, dropoffs: new Set(booked.map((b) => b.dropoffLabel)).size, meters: Math.round(ordered.meters) } : null,
     rideId: car.rideId,
   };
 }

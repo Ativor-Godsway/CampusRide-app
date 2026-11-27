@@ -58,6 +58,7 @@ import { useHomeLocation } from "../../lib/homeLocation";
 import { useScheduleIntro, type IntroClose } from "../../lib/scheduleIntro";
 import { ScheduleIntroSheet } from "../../components/schedule/ScheduleIntroSheet";
 import { UpcomingRideCard } from "../../components/schedule/UpcomingRideCard";
+import { ScheduleAheadCard } from "../../components/schedule/ScheduleAheadCard";
 
 /** "Good evening": by the phone's clock. */
 function greetingFor(hour: number): string {
@@ -246,6 +247,10 @@ export default function HomeTab() {
           <Ionicons name="search" size={24} color={colors.ink} />
           <Text variant="title2">Where to?</Text>
         </Pressable>
+
+        {scheduled.data?.enabled && !booking && launch.kind !== "countdown" ? (
+          <ScheduleAheadCard onPress={() => router.push({ pathname: "/ride/location", params: { intent: "schedule" } })} />
+        ) : null}
 
         {location.state === "off" ? (
           <View style={styles.notice}>

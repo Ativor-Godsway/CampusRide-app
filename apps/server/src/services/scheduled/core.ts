@@ -1,6 +1,8 @@
 import type { Prisma, PrismaClient, ScheduledBooking, ScheduledCar } from "@prisma/client";
 import {
+  drivingMinutes,
   estimateEtaMinutes,
+  planStops,
   leaveByFor,
   neighboursFrom,
   scheduleBlockUntil,
@@ -69,8 +71,17 @@ export async function zoneNeighbours(prisma: PrismaClient): Promise<AreNeighbour
   return neighboursFrom(await getZoneAdjacency(prisma));
 }
 
-/** Minutes for the longest pickup → drop-off in the car (pins, else zone centres). */
+/** A car's bookings in stop order (@rida/shared planStops): pickups, and drop-offs; as booked when points are missing. */
+export function stopOrder<T extends ScheduledBooking>(bookings: readonly T[]): { pickups: T[]; dropoffs: T[]; meters: number | null } {
+  const plan = planStops(bookings.map(groupable));
+  if (!plan) return { pickups: [...bookings], dropoffs: [...bookings], meters: null };
+  return { pickups: plan.pickupOrder.map((i) => bookings[i]!), dropoffs: plan.dropoffOrder.map((i) => bookings[i]!), meters: plan.meters };
+}
+
+/** Minutes for the car's whole route in stop order (pins; else the longest trip by zone centres). */
 export async function tripMinutesFor(prisma: PrismaClient, bookings: readonly ScheduledBooking[]): Promise<number> {
+  const ordered = stopOrder(bookings);
+  if (ordered.meters !== null && bookings.length > 0) return Math.max(1, Math.round(drivingMinutes(ordered.meters)));
   const zones = await getZoneMap(prisma);
   const point = (lat: number | null, lng: number | null, zoneId: string) => {
     if (lat != null && lng != null) return { latitude: lat, longitude: lng };

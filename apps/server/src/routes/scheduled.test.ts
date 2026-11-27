@@ -6,7 +6,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
-import { DEFAULT_SCHEDULE_SETTINGS, type ScheduleOptions } from "@rida/shared";
+import { DEFAULT_SCHEDULE_SETTINGS, DEFAULT_WEEKLY_SCHEDULE, type ScheduleOptions } from "@rida/shared";
+import { clearServiceHoursCache } from "../services/service/serviceHours";
 
 vi.mock("../services/ride/dispatch", async (original) => ({
   ...(await original<typeof import("../services/ride/dispatch")>()),
@@ -37,7 +38,14 @@ async function as(role: "RIDER" | "DRIVER" | "ADMIN") {
   return { id: user.id, auth: { authorization: `Bearer ${signAccessToken({ userId: user.id, role: user.role })}` } };
 }
 
+/** Service hours as they were, put back after (today-only slots would otherwise depend on the time of day). */
+let savedHours: Awaited<ReturnType<typeof prisma.serviceHoursSetting.findUnique>> = null;
+
 beforeAll(async () => {
+  savedHours = await prisma.serviceHoursSetting.findUnique({ where: { id: "service" } });
+  const open = { overrideMode: "OPEN" as const, overrideUntil: null, blockWhenNoDrivers: false };
+  await prisma.serviceHoursSetting.upsert({ where: { id: "service" }, create: { id: "service", weekly: DEFAULT_WEEKLY_SCHEDULE as unknown as object, ...open }, update: open });
+  clearServiceHoursCache();
   setScheduleSettingsForTests();
   app = Fastify();
   registerScheduledRoutes(app, prisma);
@@ -55,6 +63,11 @@ afterAll(async () => {
   await prisma.adminAuditLog.deleteMany({ where: { actor: { in: userIds } } });
   await prisma.driver.deleteMany({ where: { userId: { in: userIds } } });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
+  if (savedHours) {
+    const { id: _id, updatedAt: _u, ...rest } = savedHours;
+    await prisma.serviceHoursSetting.update({ where: { id: "service" }, data: { ...rest, weekly: rest.weekly as object } });
+  } else await prisma.serviceHoursSetting.deleteMany({ where: { id: "service" } });
+  clearServiceHoursCache();
   await app.close();
 });
 
@@ -135,7 +148,7 @@ describe("driver", () => {
     const tab = (await app.inject({ method: "GET", url: "/driver/scheduled", headers: driver.auth })).json();
     const offer = tab.open.find((c: { carId: string }) => c.carId === carId);
     expect(offer).toMatchObject({ seats: 3, canAccept: true, mine: false, riders: [] });
-    expect(offer.label).toMatch(/^Scheduled · \d{1,2}:\d{2} · 3 seats · GH₵18$/);
+    expect(offer.label).toMatch(/^Scheduled · \d{1,2}:\d{2} (AM|PM) · 3 seats · GH₵18$/);
 
     const board = (await app.inject({ method: "GET", url: "/driver/requests/board", headers: driver.auth })).json();
     expect(board.scheduled.some((c: { carId: string }) => c.carId === carId)).toBe(true);

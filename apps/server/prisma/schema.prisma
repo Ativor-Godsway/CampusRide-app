@@ -1445,6 +1445,12 @@ model ScheduleSetting {
   pickupMinutesPerStop  Int      @default(3)
   leaveBufferMinutes    Int      @default(5)
   pickupWindowMinutes   Int      @default(7)
+  /// Matching (2026-11-28): the most road a rider's stops may add to a car's
+  /// route, the looser limit while the car has few riders, and the most
+  /// extra driving minutes.
+  maxExtraMeters        Int      @default(1000)
+  sparseExtraMeters     Int      @default(1500)
+  maxExtraMinutes       Int      @default(5)
   updatedAt             DateTime @updatedAt
   /// User.id of the admin who last changed it.
   updatedBy             String?

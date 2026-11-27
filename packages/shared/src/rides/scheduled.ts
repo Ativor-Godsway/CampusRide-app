@@ -26,6 +26,7 @@
  */
 import { formatCedis } from "../format/currency";
 import { haversineDistanceMeters } from "../geo/distance";
+import { ASSUMED_AVERAGE_SPEED_KMH, ROAD_CIRCUITY_FACTOR } from "../eta/eta";
 import { serviceStateAt, type ServiceSettings } from "../service/serviceHours";
 import { seatsWord } from "./seats";
 
@@ -58,6 +59,12 @@ export interface ScheduleSettings {
   pickupMinutesPerStop: number;
   leaveBufferMinutes: number;
   pickupWindowMinutes: number;
+  /** A rider joins a car only if their stops add at most this much road (metres) … */
+  maxExtraMeters: number;
+  /** … or this much while the car is still short of `offerNowSeats` (it would go out emptier otherwise). */
+  sparseExtraMeters: number;
+  /** … and at most this many minutes of driving. */
+  maxExtraMinutes: number;
 }
 
 export type ScheduleNumberSetting = Exclude<keyof ScheduleSettings, "enabled" | "introEnabled">;
@@ -84,6 +91,9 @@ export const DEFAULT_SCHEDULE_SETTINGS: ScheduleSettings = {
   pickupMinutesPerStop: 3,
   leaveBufferMinutes: 5,
   pickupWindowMinutes: 7,
+  maxExtraMeters: 1000,
+  sparseExtraMeters: 1500,
+  maxExtraMinutes: 5,
 };
 
 /** What each number means, in the order the admin card lists them, with its unit and bounds. */
@@ -113,6 +123,9 @@ export const SCHEDULE_SETTING_FIELDS: ReadonlyArray<{
   { key: "pickupMinutesPerStop", label: "Minutes per pickup (leave-by)", unit: "min", min: 1, max: 15 },
   { key: "leaveBufferMinutes", label: "Spare minutes (leave-by)", unit: "min", min: 0, max: 30 },
   { key: "pickupWindowMinutes", label: "Rider's pickup window", unit: "min", min: 3, max: 30 },
+  { key: "maxExtraMeters", label: "Most extra route per added rider", unit: "m", min: 200, max: 5_000 },
+  { key: "sparseExtraMeters", label: "…while the car has few riders", unit: "m", min: 200, max: 5_000 },
+  { key: "maxExtraMinutes", label: "Most extra driving per added rider", unit: "min", min: 1, max: 20 },
 ];
 
 /** Why these settings can't be saved, in words, or null. */
@@ -127,7 +140,8 @@ export function scheduleSettingsProblem(s: ScheduleSettings): string | null {
   if (s.offerNowSeats > s.carSeats) return "“Offer at once from” can't be more than the seats in a car.";
   if (s.offerLaterMinutes <= s.noDriverMinutes) return "Cars must be offered before the “no driver” time.";
   if (s.soloLiveMinutes < s.bookingCutoffMinutes) return "A 1-seat car can't become live before booking closes.";
-  if (s.noDriverMinutes < s.bookingCutoffMinutes) return "The “no driver” time can't be after booking closes.";
+  if (s.noDriverMinutes < s.bookingCutoffMinutes) return "The \u201cno driver\u201d time can't be after booking closes.";
+  if (s.sparseExtraMeters < s.maxExtraMeters) return "The extra route for a car with few riders can't be less than the usual limit.";
   return null;
 }
 
@@ -146,10 +160,21 @@ export function readScheduleSettings(value: Partial<Record<keyof ScheduleSetting
 
 // ─── Clock words (Accra = UTC) ──────────────────────────────────────────────
 
-/** "9:30", "14:10": a scheduled time, Accra clock, 24-hour (the hour strip's numbers). */
-export function scheduleClock(at: number | Date | string): string {
+/** "9:30", "1:10": a scheduled time on the Accra clock, 12-hour, no AM/PM (a slot tile's big time). */
+export function scheduleTime(at: number | Date | string): string {
   const d = new Date(at);
-  return `${d.getUTCHours()}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  const h = d.getUTCHours() % 12 || 12;
+  return `${h}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+}
+
+/** "9:30 AM", "1:10 PM": a scheduled time, Accra clock (buttons, labels, notifications). */
+export function scheduleClock(at: number | Date | string): string {
+  return `${scheduleTime(at)} ${new Date(at).getUTCHours() < 12 ? "AM" : "PM"}`;
+}
+
+/** "9 AM", "12 PM", "1 PM": an hour in the hour strip. */
+export function scheduleHourLabel(hour: number): string {
+  return `${hour % 12 || 12} ${hour < 12 ? "AM" : "PM"}`;
 }
 
 /** The hour (0–23) a slot is in, Accra. */
@@ -162,8 +187,9 @@ export function scheduleDayStart(at: number): number {
   return Math.floor(at / DAY_MS) * DAY_MS;
 }
 
-export const SCHEDULE_DAYS = ["today", "tomorrow"] as const;
-export type ScheduleDay = (typeof SCHEDULE_DAYS)[number];
+/** Scheduling is for later TODAY (2026-11-27, after staging): "tomorrow" stays in the type for older payloads. */
+export const SCHEDULE_DAYS = ["today"] as const;
+export type ScheduleDay = "today" | "tomorrow";
 
 /** "Today" or "Tomorrow" for a slot (null: neither). */
 export function scheduleDayOf(arriveBy: number, now: number): ScheduleDay | null {
@@ -184,9 +210,16 @@ export function scheduleWhen(arriveBy: number, now: number): string {
   return `${day ? `${scheduleDayWord(day)} ` : ""}${scheduleClock(arriveBy)}`;
 }
 
-/** "8:38–8:45". */
+/** "8:38–8:45 AM" ("11:55 AM–12:02 PM" across noon). */
 export function pickupWindowLabel(window: { start: number; end: number }): string {
-  return `${scheduleClock(window.start)}–${scheduleClock(window.end)}`;
+  const sameHalf = new Date(window.start).getUTCHours() < 12 === new Date(window.end).getUTCHours() < 12;
+  return `${sameHalf ? scheduleTime(window.start) : scheduleClock(window.start)}–${scheduleClock(window.end)}`;
+}
+
+/** "Scheduled · arrive by 9:20 AM · Today" (the confirm screen). */
+export function scheduledConfirmLine(arriveBy: number, now: number): string {
+  const day = scheduleDayOf(arriveBy, now);
+  return `Scheduled · arrive by ${scheduleClock(arriveBy)}${day ? ` · ${scheduleDayWord(day)}` : ""}`;
 }
 
 // ─── Slots ──────────────────────────────────────────────────────────────────
@@ -203,15 +236,19 @@ export function bookingClosesAt(arriveBy: number, s: ScheduleSettings): number {
   return arriveBy - s.bookingCutoffMinutes * MINUTE_MS;
 }
 
-/** Whether CampusRide is open (by its hours, or an admin override then) at this arrive-by time. Drivers online don't matter. */
+/**
+ * Whether riders can arrive at this time: CampusRide is open then (by its
+ * hours, or an admin override), or it closes exactly then — closing at 17:00
+ * means 17:00 is the last arrive-by. Drivers online don't matter.
+ */
 function servedAt(service: ServiceSettings, at: number): boolean {
-  return serviceStateAt(service, new Date(at), 1).open;
+  return serviceStateAt(service, new Date(at), 1).open || serviceStateAt(service, new Date(at - 1), 1).open;
 }
 
 /**
  * Every arrive-by slot of the Accra day starting at `dayStart`: every
- * `slotMinutes` while CampusRide is open (a slot at the opening minute, none
- * at the closing minute: 8:00 … 16:50 for 08:00–17:00), each marked
+ * `slotMinutes` while CampusRide is open, from the opening minute to the
+ * closing minute (8:00 … 17:00 for 08:00–17:00), each marked
  * bookable until its booking closes.
  */
 export function slotsForDay(dayStart: number, service: ServiceSettings, s: ScheduleSettings, now: number): ScheduleSlot[] {
@@ -225,10 +262,9 @@ export function slotsForDay(dayStart: number, service: ServiceSettings, s: Sched
   return out;
 }
 
-/** Today's and tomorrow's slots. */
-export function scheduleSlots(service: ServiceSettings, s: ScheduleSettings, now: number): Record<ScheduleDay, ScheduleSlot[]> {
-  const today = scheduleDayStart(now);
-  return { today: slotsForDay(today, service, s, now), tomorrow: slotsForDay(today + DAY_MS, service, s, now) };
+/** Today's slots (scheduling is for later today). */
+export function scheduleSlots(service: ServiceSettings, s: ScheduleSettings, now: number): { today: ScheduleSlot[] } {
+  return { today: slotsForDay(scheduleDayStart(now), service, s, now) };
 }
 
 /** Why a booking can't be made for this arrive-by time, in words, or null. */
@@ -242,7 +278,7 @@ export function slotProblem(
 ): string | null {
   if (!s.enabled) return "Scheduling isn't available right now.";
   if (!Number.isFinite(arriveBy) || arriveBy % (s.slotMinutes * MINUTE_MS) !== 0) return "Choose one of the times shown.";
-  if (!scheduleDayOf(arriveBy, now)) return "You can schedule for today or tomorrow.";
+  if (scheduleDayOf(arriveBy, now) !== "today") return "You can schedule a ride for later today.";
   if (!servedAt(service, arriveBy)) return "CampusRide isn't open at that time.";
   if (opts.lateJoin) return now < arriveBy ? null : `${scheduleClock(arriveBy)} has passed. Choose a later time or ride now.`;
   if (now > bookingClosesAt(arriveBy, s)) {
@@ -300,7 +336,78 @@ export function carSeatsBooked(bookings: ReadonlyArray<{ seats: number }>): numb
   return bookings.reduce((sum, b) => sum + b.seats, 0);
 }
 
-/** Whether this booking can join a car with these bookings: free seats, and on the way with every one of them. */
+// ─── Stop order and the extra route a rider adds ────────────────────────────
+
+function pointOf(e: ScheduleEnd): { latitude: number; longitude: number } | null {
+  return e.latitude != null && e.longitude != null ? { latitude: e.latitude, longitude: e.longitude } : null;
+}
+
+function permutations(n: number): number[][] {
+  if (n <= 1) return [Array.from({ length: n }, (_, i) => i)];
+  const out: number[][] = [];
+  for (const rest of permutations(n - 1)) {
+    for (let i = 0; i <= rest.length; i++) out.push([...rest.slice(0, i), n - 1, ...rest.slice(i)]);
+  }
+  return out;
+}
+
+export interface StopPlan {
+  /** Bookings in pickup order, then in drop-off order (indexes into the list given). */
+  pickupOrder: number[];
+  dropoffOrder: number[];
+  /** Road metres (straight lines × ROAD_CIRCUITY_FACTOR) from the first pickup to the last drop-off. */
+  meters: number;
+}
+
+/**
+ * The best order for a car's stops: every pickup first, then every drop-off,
+ * in the orders that make the shortest route (a car holds at most 4 bookings,
+ * so every order is tried). Null when a stop has no exact point.
+ */
+export function planStops(bookings: ReadonlyArray<{ pickup: ScheduleEnd; dropoff: ScheduleEnd }>): StopPlan | null {
+  const pickups = bookings.map((b) => pointOf(b.pickup));
+  const dropoffs = bookings.map((b) => pointOf(b.dropoff));
+  if (pickups.some((p) => !p) || dropoffs.some((p) => !p)) return null;
+  if (bookings.length === 0) return { pickupOrder: [], dropoffOrder: [], meters: 0 };
+  const orders = permutations(bookings.length);
+  let best: StopPlan | null = null;
+  for (const po of orders) {
+    for (const dorder of orders) {
+      const path = [...po.map((i) => pickups[i]!), ...dorder.map((i) => dropoffs[i]!)];
+      let m = 0;
+      for (let i = 1; i < path.length; i++) m += haversineDistanceMeters(path[i - 1]!, path[i]!);
+      if (!best || m * ROAD_CIRCUITY_FACTOR < best.meters) best = { pickupOrder: po, dropoffOrder: dorder, meters: m * ROAD_CIRCUITY_FACTOR };
+    }
+  }
+  return best;
+}
+
+/** Minutes of driving for this many road metres (ASSUMED_AVERAGE_SPEED_KMH). */
+export function drivingMinutes(meters: number): number {
+  return meters / ((ASSUMED_AVERAGE_SPEED_KMH * 1000) / 60);
+}
+
+/** The road a new booking adds to a car's best route (metres), or null without exact points. */
+export function extraRouteMeters(car: ReadonlyArray<GroupableBooking>, candidate: GroupableBooking): number | null {
+  const before = planStops(car);
+  const after = planStops([...car, candidate]);
+  if (!before || !after) return null;
+  return Math.max(0, after.meters - before.meters);
+}
+
+/**
+ * Whether this booking can join a car with these bookings — THE rule for
+ * grouping, "going your way" and "Join a car" alike:
+ * - a free seat for its party;
+ * - its pickup close to every pickup in the car (same zone, a neighbour, or
+ *   within `groupRadiusMeters`);
+ * - its drop-off in the same direction: the car's best route (pickups, then
+ *   drop-offs) grows by at most `maxExtraMeters` and `maxExtraMinutes` —
+ *   `sparseExtraMeters` while the car is short of `offerNowSeats`, since it
+ *   would otherwise leave emptier. (Pentagon → TF and Pentagon → Kwapong are
+ *   opposite ends of campus: never one car.) Without exact points, the old
+ *   rule: drop-offs in the same or neighbour zones.
+ */
 export function bookingFitsCar(
   candidate: GroupableBooking,
   car: ReadonlyArray<GroupableBooking>,
@@ -308,11 +415,12 @@ export function bookingFitsCar(
   s: ScheduleSettings,
 ): boolean {
   if (carSeatsBooked(car) + candidate.seats > s.carSeats) return false;
-  return car.every(
-    (b) =>
-      pickupsClose(candidate.pickup, b.pickup, neighbours, s.groupRadiusMeters) &&
-      dropoffsCompatible(candidate.dropoff, b.dropoff, neighbours),
-  );
+  if (!car.every((b) => pickupsClose(candidate.pickup, b.pickup, neighbours, s.groupRadiusMeters))) return false;
+  if (car.length === 0) return true;
+  const extra = extraRouteMeters(car, candidate);
+  if (extra === null) return car.every((b) => dropoffsCompatible(candidate.dropoff, b.dropoff, neighbours));
+  const limit = carSeatsBooked(car) < s.offerNowSeats ? s.sparseExtraMeters : s.maxExtraMeters;
+  return extra <= limit && drivingMinutes(extra) <= s.maxExtraMinutes;
 }
 
 export interface CarCandidate {
@@ -373,7 +481,7 @@ export function needsLiveRideInstead(arriveBy: number, now: number, s: Pick<Sche
   return !hasCarToJoin && arriveBy - now < s.bookingCutoffMinutes * MINUTE_MS;
 }
 
-export const SCHEDULE_JOIN_HINT = "Join a car that already has riders. It fills faster and gets confirmed sooner.";
+export const SCHEDULE_JOIN_HINT = "Join cars going your way. They fill faster and get confirmed sooner.";
 export const SCHEDULE_SOONER_TEXT = "Need a ride sooner? Book a normal ride instead.";
 
 // ─── Dispatch ───────────────────────────────────────────────────────────────
@@ -622,6 +730,8 @@ export interface DriverScheduledRider {
   pickupLabel: string;
   dropoffLabel: string;
   coming: boolean;
+  /** To call them (the driver's own accepted cars only, like a trip's riders). */
+  phone: string | null;
 }
 
 export interface DriverScheduledCarView {
@@ -641,8 +751,12 @@ export interface DriverScheduledCarView {
   canAccept: boolean;
   /** Why not, in words. */
   note: string | null;
-  /** Riders (own cars only: first names and place names, never pins). */
+  /** Riders in pickup order (own cars only: first names, place names and phone, never pins). */
   riders: DriverScheduledRider[];
+  /** Drop-off place names in drop-off order (own cars only). */
+  dropoffOrder: string[];
+  /** The car's route: stops and road metres (pickups, then drop-offs), when known. */
+  route: { pickups: number; dropoffs: number; meters: number } | null;
   rideId: string | null;
 }
 
@@ -678,7 +792,7 @@ export function shouldShowScheduleIntro(input: {
 }
 
 export const SCHEDULE_INTRO_STEPS = [
-  { key: "ahead", title: "Schedule ahead", body: "Pick the time you need to arrive. Tonight for tomorrow, or later today." },
+  { key: "ahead", title: "Schedule ahead", body: "Pick the time you need to arrive, later today." },
   { key: "join", title: "Join a car going your way", body: "Share with students heading the same way. From GH₵7." },
   { key: "ontime", title: "Picked up on time", body: "Your driver is confirmed early, and we remind you before pickup." },
 ] as const;
@@ -725,4 +839,21 @@ export function joinChips(slots: readonly ScheduleSlotView[], limit = 6): JoinCh
 /** The first slot to show selected: the first chip, else the first bookable slot. */
 export function firstChoice(slots: readonly ScheduleSlotView[]): ScheduleSlotView | null {
   return slots.find((s) => s.bookable && s.join) ?? slots.find((s) => s.bookable && s.going > 0) ?? slots.find((s) => s.bookable) ?? null;
+}
+
+/** A slot tile's second line: "Join Kofi's car · 1 seat left", "2 going your way", or null. */
+export function slotTileLine(slot: Pick<ScheduleSlotView, "going" | "join">): string | null {
+  if (slot.join) return joinCarLabel(slot.join.driverFirstName, slot.join.seatsLeft);
+  return slot.going > 0 ? `${slot.going} going your way` : null;
+}
+
+/** The slots a rider can pick: still to come and bookable (the server marks a late join into a car with a driver bookable). */
+export function pickableSlots(slots: readonly ScheduleSlotView[], now: number): ScheduleSlotView[] {
+  return slots.filter((s) => s.bookable && Date.parse(s.arriveBy) > now);
+}
+
+/** One drop-off line for a driver's car when every rider goes to the same place, else null (show it per rider). */
+export function sharedDropoff(riders: ReadonlyArray<{ dropoffLabel: string }>): string | null {
+  const labels = new Set(riders.map((r) => r.dropoffLabel));
+  return labels.size === 1 ? [...labels][0]! : null;
 }

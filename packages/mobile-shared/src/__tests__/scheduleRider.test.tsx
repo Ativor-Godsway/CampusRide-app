@@ -10,7 +10,8 @@ import { AuthProvider, useAuth } from "../auth/AuthContext";
 import { installFakeServer, type FakeServer } from "./fakeServer";
 import { freshLaunch, storeRefreshToken } from "./routes";
 // The rider app's real screens.
-import ScheduleScreen from "../../../../apps/rider/app/ride/schedule";
+import ScheduleScreen, { tileWidth } from "../../../../apps/rider/app/ride/schedule";
+import ScheduleConfirmScreen from "../../../../apps/rider/app/ride/schedule-confirm";
 import { UpcomingRideCard, cancelQuestion } from "../../../../apps/rider/components/schedule/UpcomingRideCard";
 import { ScheduleIntroSheet } from "../../../../apps/rider/components/schedule/ScheduleIntroSheet";
 
@@ -37,7 +38,6 @@ jest.setTimeout(30_000);
 const PICKUP = { kind: "place" as const, latitude: 5.6494, longitude: -0.1861, label: "Akuafo Hall", placeId: "akuafo" };
 const DROPOFF = { kind: "place" as const, latitude: 5.652, longitude: -0.187, label: "Balme Library", placeId: "balme" };
 
-const HOUR = 60 * 60_000;
 /** A tomorrow slot at h:m (UTC = Accra). */
 function tomorrow(h: number, m = 0): string {
   const d = new Date();
@@ -96,48 +96,96 @@ async function openSchedule(answer: ScheduleOptions) {
   // Anything started on renderRouter's fake clock (sign-in, the first fetch) finishes, then the real clock.
   for (let i = 0; i < 5; i++) await act(async () => void jest.advanceTimersByTime(500));
   jest.useRealTimers();
-  await screen.findByText("Schedule a ride", {}, { timeout: 8000 });
+  await screen.findByText("When do you need to arrive?", {}, { timeout: 8000 });
   await waitFor(() => expect(server.calls).toContain("POST /rides/scheduled/options"));
 }
 
 describe("the Schedule screen", () => {
-  it("join chips with the message above them; tiles; the button shows the real total and books what it says", async () => {
-    await openSchedule(
-      options({
-        tomorrow: [
-          slot(tomorrow(9, 0), { going: 2 }),
-          slot(tomorrow(9, 10), { going: 3, join: { carId: "car-k", driverFirstName: "Kofi", seatsLeft: 1 } }),
-          slot(tomorrow(9, 20)),
-          slot(tomorrow(10, 0)),
-        ],
-      }),
-    );
-    expect(await screen.findByText("Join a car that already has riders. It fills faster and gets confirmed sooner.")).toBeOnTheScreen();
-    expect(screen.getByText("9:10 · Join Kofi's car · 1 seat left")).toBeOnTheScreen();
-    expect(screen.getByText("9:00 · 2 going")).toBeOnTheScreen();
-    // The car with a driver is chosen first.
-    expect(await screen.findByText("Reserve seat · 9:10 · GH₵7")).toBeOnTheScreen();
+  // Slots are put on tomorrow's date so they're always still to come; the screen shows them as today's list.
+  const MORNING = [
+    slot(tomorrow(9, 0), { going: 2 }),
+    slot(tomorrow(9, 10), { going: 3, join: { carId: "car-k", driverFirstName: "Kofi", seatsLeft: 1 } }),
+    slot(tomorrow(9, 20)),
+    slot(tomorrow(13, 0)),
+    slot(tomorrow(13, 10), { bookable: false }),
+  ];
 
-    await act(async () => void (await fireEvent.press(screen.getByText("9:00 · 2 going"))));
-    expect(await screen.findByText("Reserve seat · 9:00 · GH₵7")).toBeOnTheScreen();
-    const plus = await screen.findByTestId("schedule-seats-plus", { includeHiddenElements: true });
-    await act(async () => void (await fireEvent.press(plus)));
-    await waitFor(() => expect(server.calls.filter((c) => c === "POST /rides/scheduled/options").length).toBeGreaterThan(1));
-    const button = await screen.findByText("Reserve 2 seats · 9:00 · GH₵14");
-    await act(async () => void (await fireEvent.press(button)));
-    await waitFor(() => expect(booked).not.toBeNull());
-    expect(booked).toMatchObject({ arriveBy: tomorrow(9, 0), seats: 2, shownFarePesewas: 1400 });
-    expect(booked!.carId).toBeUndefined();
+  it("today only, no day toggle: the banner, join chips, 12-hour 'Arrive by' hours, wide tiles with who's going", async () => {
+    await openSchedule(options({ today: MORNING }));
+    expect(await screen.findByText("Join cars going your way. They fill faster and get confirmed sooner.")).toBeOnTheScreen();
+    expect(screen.queryByText("Tomorrow")).toBeNull();
+    expect(screen.getByText("Arrive by")).toBeOnTheScreen();
+    expect(screen.getByText("9 AM")).toBeOnTheScreen();
+    expect(screen.getByText("1 PM")).toBeOnTheScreen();
+    expect(screen.getByText("9:10 AM · Join Kofi's car · 1 seat left")).toBeOnTheScreen();
+    expect(screen.getByText("9:00 AM · 2 going")).toBeOnTheScreen();
+    // A tile: the time big, and under it who's going your way.
+    expect(screen.getByText("2 going your way")).toBeOnTheScreen();
+    expect(screen.getAllByText("9:20").length).toBe(1);
+    // A closed slot (no car to join) isn't shown at all.
+    await act(async () => void (await fireEvent.press(screen.getByLabelText("1 PM hour"))));
+    expect(await screen.findByTestId("slot-1:00 PM")).toBeOnTheScreen();
+    expect(screen.queryByTestId("slot-1:10 PM")).toBeNull();
   });
 
-  it("a slot under 20 minutes away with no car to join: 'Need a ride sooner?'", async () => {
-    const soon = new Date(Math.ceil((Date.now() + 5 * 60_000) / 600_000) * 600_000);
-    // Keep it under 20 minutes away (and on the grid).
-    const at = soon.getTime() - Date.now() < 20 * 60_000 ? soon : new Date(soon.getTime() - 600_000);
-    await openSchedule(options({ today: [slot(at.toISOString(), { bookable: false }), slot(new Date(at.getTime() + HOUR).toISOString())] }));
-    await act(async () => void (await fireEvent.press(await screen.findByLabelText(`${at.getUTCHours()}:00 hour`))));
-    await act(async () => void (await fireEvent.press(await screen.findByTestId(`slot-${at.getUTCHours()}:${String(at.getUTCMinutes()).padStart(2, "0")}`))));
+  it("the button always names the slot picked: changing the hour clears it until a time is picked", async () => {
+    await openSchedule(options({ today: MORNING }));
+    // The car with a driver is picked first.
+    expect(await screen.findByText("Continue · arrive by 9:10 AM")).toBeOnTheScreen();
+    await act(async () => void (await fireEvent.press(screen.getByLabelText("1 PM hour"))));
+    expect(await screen.findByText("Choose a time")).toBeOnTheScreen();
+    expect(screen.queryByText(/9:10 AM$/)).toBeNull();
+    await act(async () => void (await fireEvent.press(screen.getByTestId("slot-1:00 PM"))));
+    expect(await screen.findByText("Continue · arrive by 1:00 PM")).toBeOnTheScreen();
+  });
+
+  it("slots under 20 minutes away are hidden; 'Need a ride sooner?' says so", async () => {
+    const soon = new Date(Math.floor((Date.now() + 15 * 60_000) / 600_000) * 600_000 + 600_000);
+    const close = soon.getTime() - Date.now() < 20 * 60_000 ? soon : new Date(soon.getTime() - 600_000);
+    await openSchedule(options({ today: [slot(close.toISOString(), { bookable: false }), slot(tomorrow(9, 0))] }));
     expect(await screen.findByText("Need a ride sooner? Book a normal ride instead.")).toBeOnTheScreen();
+  });
+});
+
+describe("tile layout", () => {
+  it("two tiles a row, as wide as the row allows (no squeezed '9:00')", () => {
+    expect(tileWidth(350)).toBe(169);
+    expect(tileWidth(300)).toBeGreaterThanOrEqual(140);
+  });
+});
+
+describe("confirm", () => {
+  it("says it's scheduled, shows the trip, and reserves what was picked", async () => {
+    booked = null;
+    await freshLaunch();
+    server = installFakeServer("RIDER");
+    server.routes["POST /rides/scheduled"] = (body) => {
+      booked = body as Record<string, unknown>;
+      return { booking: { id: "b1" } };
+    };
+    await storeRefreshToken(server.issue().refreshToken);
+    const arriveBy = tomorrow(9, 20);
+    const query = new URLSearchParams({
+      ...tripEndParams("pickup", PICKUP),
+      ...tripEndParams("dropoff", DROPOFF),
+      arriveBy,
+      seats: "2",
+      fare: "1400",
+      freeCancel: "30",
+      carId: "car-k",
+      driver: "Kofi",
+    }).toString();
+    const Confirm = () => (useAuth().user ? <ScheduleConfirmScreen /> : null);
+    await renderRouter({ _layout: () => <Root />, "ride/schedule-confirm": Confirm, "(tabs)/index": () => null }, { initialUrl: `/ride/schedule-confirm?${query}` });
+    for (let i = 0; i < 5; i++) await act(async () => void jest.advanceTimersByTime(500));
+    jest.useRealTimers();
+    expect(await screen.findByText(/^Scheduled · arrive by 9:20 AM/, {}, { timeout: 8000 })).toBeOnTheScreen();
+    expect(screen.getByText("Akuafo Hall")).toBeOnTheScreen();
+    expect(screen.getByText("Balme Library")).toBeOnTheScreen();
+    expect(screen.getByText("Joining Kofi's car")).toBeOnTheScreen();
+    await act(async () => void (await fireEvent.press(screen.getByText("Reserve 2 seats · GH₵14"))));
+    await waitFor(() => expect(booked).not.toBeNull());
+    expect(booked).toMatchObject({ arriveBy, seats: 2, shownFarePesewas: 1400, carId: "car-k" });
   });
 });
 
@@ -173,7 +221,7 @@ describe("the Home card", () => {
     expect(screen.getByText("3 of 4 seats filled")).toBeOnTheScreen();
     expect(screen.getByText("Car confirmed")).toBeOnTheScreen();
     expect(screen.getByText("Kofi · a silver Toyota Vitz · GT 1234-24")).toBeOnTheScreen();
-    expect(screen.getByText("Be ready 8:38–8:45 at Akuafo Hall")).toBeOnTheScreen();
+    expect(screen.getByText("Be ready 8:38–8:45 AM at Akuafo Hall")).toBeOnTheScreen();
     expect(screen.getByText("I'm coming")).toBeOnTheScreen();
     expect(screen.getByText("Cancel")).toBeOnTheScreen();
   });

@@ -24,7 +24,6 @@ export function ScheduledOfferPopup({ hidden }: { hidden: boolean }) {
           <Text variant="eyebrow" color="secondary">
             New scheduled trip
           </Text>
-          <Text variant="title3">{offer.label}</Text>
           <ScheduledCarCard car={offer} source="POPUP" onDone={() => dismiss(offer.carId)} />
           <Button label="Not now" variant="neutral" onPress={() => dismiss(offer.carId)} />
         </View>
