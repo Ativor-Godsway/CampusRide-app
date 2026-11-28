@@ -171,6 +171,11 @@ export function RideDetail({ id, onClose }: { id: string; onClose: () => void })
                     </td>
                     <td>
                       {s.pickup} → {s.dropoff}
+                      <span className="muted small block">
+                        {s.seatCount && s.seatCount > 1 ? `${s.seatCount} seats · ` : ""}
+                        {s.pickedUpAt ? `picked up ${clock(s.pickedUpAt)}` : s.arrivedAt ? `driver arrived ${clock(s.arrivedAt)}` : ""}
+                        {s.droppedOffAt ? ` · dropped off ${clock(s.droppedOffAt)}` : ""}
+                      </span>
                     </td>
                     <td>
                       {seatLabel(s)}
@@ -188,7 +193,10 @@ export function RideDetail({ id, onClose }: { id: string; onClose: () => void })
                         </span>
                       ) : null}
                     </td>
-                    <td className="right num">{cedis(s.farePesewas)}</td>
+                    <td className="right num">
+                      {cedis(s.farePesewas)}
+                      {s.waitFeePesewas ? <span className="muted small block">incl. {cedis(s.waitFeePesewas)} wait fee</span> : null}
+                    </td>
                     <td className="right">
                       {s.cancellable ? (
                         <button type="button" className="danger-text-button" onClick={() => setCancelling({ kind: "seat", seat: s })}>

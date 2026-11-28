@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { getRiders } from "../api";
 import { useToken } from "../auth";
+import { Collapsible } from "../components/Collapsible";
 import { Chip } from "../components/Chip";
 import { DataTable } from "../components/DataTable";
 import { PeriodPicker } from "../components/PeriodPicker";
@@ -54,7 +55,7 @@ export function RidersPage() {
               <StatTile label="Active this period" value={count(d.activeInPeriod)} note="At least one completed ride" />
               <StatTile label="Returning" value={count(d.returning)} note={d.returningRate === null ? "Not enough data yet" : `${percent(d.returningRate)} of riders who have ridden`} />
             </TileRow>
-            <Section title="Sign-ups per day">
+            <Collapsible id="riders.signups" title="Sign-ups per day" hint="New rider accounts each day of the range.">
               <PairedBars
                 series={[{ label: "Sign-ups", color: "var(--green-500)", values: d.signupsPerDay.map((s) => s.count) }]}
                 labels={d.signupsPerDay.map((s, i) => dayTick(s.day, i))}
@@ -62,7 +63,7 @@ export function RidersPage() {
                 height={160}
                 showEvery={d.signupsPerDay.length > 14 ? 3 : 1}
               />
-            </Section>
+            </Collapsible>
             <Section
               title={`${count(d.total)} ${q ? "matching" : ""} ${d.total === 1 ? "rider" : "riders"}`}
               actions={
@@ -104,7 +105,7 @@ export function RidersPage() {
         )}
       </Loaded>
 
-      <Section title="For any phone number">
+      <Collapsible id="riders.lookup" title="Look up a phone number" hint="Early access and rate limits for any number.">
         <div className="button-row">
           <button type="button" className={tool === "limits" ? "tonal-button active" : "tonal-button"} aria-expanded={tool === "limits"} onClick={() => setTool(tool === "limits" ? null : "limits")}>
             Can&apos;t log in? Check rate limits
@@ -115,7 +116,7 @@ export function RidersPage() {
         </div>
         {tool === "limits" ? <RateLimitsScreen /> : null}
         {tool === "delete" ? <DeleteAccountScreen /> : null}
-      </Section>
+      </Collapsible>
     </Page>
   );
 }

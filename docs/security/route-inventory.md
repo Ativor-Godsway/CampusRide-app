@@ -107,6 +107,8 @@ always the one in the token.
 | `GET /driver/scheduled` | Yes | DRIVER | The Schedule tab: the scheduled cars this driver accepted (riders' first names, seats and place names, never pins) and the open scheduled cars offered to drivers, with whether this driver can accept each. | account default |
 | `POST /driver/scheduled/:id/accept` | Yes | DRIVER | Accepts an open, offered scheduled car (first wins; online drivers only; refused within the driver gap of another scheduled car they hold). A car another driver holds answers 409. | 60 / 15 min; account default |
 | `POST /driver/scheduled/:id/cancel` | Yes | DRIVER | The driver who accepted a scheduled car gives it back before it starts: it is open again and its riders are told. Anyone else gets 404. | account default |
+| `GET /driver/settings` | Yes | DRIVER | The driver's own settings: "Auto-add riders on my way" (their choice, else the admin default). | account default |
+| `PATCH /driver/settings` | Yes | DRIVER | Saves the driver's own "Auto-add riders on my way". | account default |
 | `GET /driver/requests/board` | Yes | DRIVER | The request board: every open request on campus still searching (not ones this driver declined), with whether this driver can take each now. First names and place names, never pins. Empty when offline or while CampusRide is closed. | account default |
 | `GET /rides/mine` | Yes | RIDER | Own bookings only. | account default |
 | `GET /rides/active` | Yes | RIDER | Own current ride (as booker or passenger), own stops only. | account default |
@@ -154,6 +156,7 @@ The request names a resource. If it isn't the caller's: **404**, same body as
 | `POST /rides/:id/passengers/:passengerId/cancel` | Yes | DRIVER | As above (the assigned driver only, before pickup). "Cancel pickup" with a reason: the rider's request searches again for another driver; recorded as a `DriverCancellation`. With `{ reason: "NO_SHOW" }`: "Rider didn't show", unchanged. | account default |
 | `POST /rides/:id/passengers/:passengerId/no-show` | Yes | DRIVER | As above (older app builds). | account default |
 | `POST /rides/:id/passengers/:passengerId/undo` | Yes | DRIVER | As above; only shortly after the step, never the trip's last drop-off. | account default |
+| `POST /rides/:id/passengers/:passengerId/undo-add` | Yes | DRIVER | The car's driver undoes a rider who was auto-added (fill moving cars first) within 15 s, before pickup: no penalty, the rider's request searches again. Anyone else gets 404. | account default |
 
 ## Admin
 
@@ -223,6 +226,15 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `POST /admin/drivers/:id/waive` | Yes | ADMIN | Waives some or all of one driver's balance (never more than owed) with a required reason. Audit-logged (`cash.waive`). | account default; plus 60 changes / 15 min |
 | `GET /admin/commission-settings` | Yes | ADMIN | The commission rules: debt limit, warning level, enforcement, Paystack fee and cap; whether a Paystack key is set (never the key). | account default |
 | `PUT /admin/commission-settings` | Yes | ADMIN | Saves the commission rules (bounds checked). Audit-logged (`commission.settings`, before → after). | account default; plus 60 changes / 15 min |
+| `GET /admin/kpis` | Yes | ADMIN | The investor KPIs for a period (sign-ups, requesters, riders served, repeat, requests, completed, completion and no-driver %, GMV, riders per car trip, active drivers, median time to accept), per-day and per-hour series, top places, funnel and retention; week-1 report definitions, test data left out. No names or phones. Cached 60 s per period. | account default |
+| `GET /admin/commission-terms` | Yes | ADMIN | The commission rate, whether commission is waived and from which day, and the all-time waived / charged totals. | account default |
+| `PUT /admin/commission-terms` | Yes | ADMIN | Saves the rate (0–50%) and the waiver (on from a day not in the future, or off). On marks trips completed from that day as waived (owed by nobody). Audit-logged (`commission.terms`, before → after). | account default; plus 60 changes / 15 min |
+| `GET /admin/payouts` | Yes | ADMIN | The period's top-ups paid to drivers (with who recorded or removed each), and fares − commission due + top-ups per driver and per day. Cached 60 s per period. | account default |
+| `POST /admin/payouts` | Yes | ADMIN | Records a top-up paid to a driver (amount, day, MoMo or cash, note). Audit-logged (`payout.topup.record`). | account default; plus 60 changes / 15 min |
+| `POST /admin/payouts/:id/remove` | Yes | ADMIN | Removes a top-up recorded by mistake, with a required reason; the row is kept, marked removed. Audit-logged (`payout.topup.remove`). | account default; plus 60 changes / 15 min |
+| `GET /admin/settings/changes` | Yes | ADMIN | For each Settings section, the latest audit entry that changed it: when and which admin (by name). | account default |
+| `GET /admin/admins` | Yes | ADMIN | The admin accounts: name, masked phone, when added, which one is the caller. | account default |
+| `PATCH /admin/admins/:id` | Yes | ADMIN | Changes an admin account's display name (2–60 characters). Audit-logged (`admin.rename`, old → new). | account default; plus 60 changes / 15 min |
 | `GET /admin/far-pricing` | Yes | ADMIN | The two Shared prices (normal, far) and the places in each far end (North, South). | account default |
 | `PUT /admin/far-pricing` | Yes | ADMIN | Saves both Shared prices (GH₵1–100, far ≤ Ride alone) and exactly these far-end places (each North or South). New requests only. Audit-logged (`fares.update`). | account default; plus 60 changes / 15 min |
 | `GET /admin/zone-neighbours` | Yes | ADMIN | Zones in service, the neighbour pairs dispatch uses, and the suggested pairs (from where the zones are). | account default |

@@ -404,3 +404,103 @@ npm run staging:fake-schedule:cleanup
 ```
 
 It removes the fake riders' scheduled bookings, and any car only they were in, then the fake riders and their rides. Real staging accounts and their bookings stay. The tool and the cleanup refuse any database but staging.
+
+## Fill moving cars first + auto-add (`fill-moving-cars-first`)
+
+A new Shared request goes first to the best car already on a trip going the same way. The limit is the scheduled-rides detour: 1 km / 5 min by default (admin Settings → Scheduled rides). With auto-add on, the rider joins at once and the driver can undo for 15 s. With it off, that driver alone gets the offer for 20 s. Only then does anyone else see the request.
+
+**Auto-add is OFF by default** (since 2026-11-28, migration `20261129180000_auto_add_default_off`): new drivers and every driver who never touched the switch get the 20 s "On your way" offer. Only a driver who turned **Auto-add riders on my way** on themselves is auto-added. The admin default (Settings → Dispatch → Auto-add riders, by default) is off too.
+
+### Deploy it
+
+This also adds the migrations `20261128180000_moving_cars_first` and `20261129180000_auto_add_default_off` to the staging database. (The `admin-redesign` branch includes this branch: deploying `admin-redesign` covers both.)
+
+```sh
+npm run staging:deploy -- fill-moving-cars-first
+```
+
+```sh
+npm run staging:wake
+```
+
+```sh
+git checkout fill-moving-cars-first
+```
+
+```sh
+npm run staging:update -- rider "fill moving cars first"
+```
+
+```sh
+npm run staging:update -- driver "fill moving cars first"
+```
+
+Open each staging app, close it, and open it again. The driver app must have the update before it is auto-added to: an older app gets the 20 s offer instead.
+
+### Set up: one moving car, one idle driver
+
+1. Sign in two staging driver apps: **Yaw** (`99 000 0011`) and **Abena** (`99 000 0012`). Two phones, or one phone and a second device. Go online on both.
+2. In Yaw's app, check **Account → Auto-add riders on my way** is **off** (the default).
+3. **Ama** (`99 000 0001`) requests **Shared, Pentagon → Balme Library**. Yaw accepts. Yaw now has a moving car with a free seat. Abena stays free.
+
+### Auto-add (on)
+
+1. Yaw turns **Auto-add riders on my way** on.
+2. Send one fake rider on Ama's route:
+   ```sh
+   npm run staging:fake-requests -- --count 1 --minutes 0 --shared 1 --from pentagon --to balme --open-now
+   ```
+3. **Yaw:** a different sound (three rising notes) and a different buzz. A dark banner shows "Rider added · … · Pentagon … · +GH₵7 · +N min" with **Undo 15**. The stop list already has the new rider, in shortest-route order. With Yaw's app in the background, the same words come as a notification.
+4. **Abena:** sees nothing: no pop-up, nothing on the board.
+5. **Undo:** tap Undo within 15 s. The rider comes off Yaw's car without penalty, and Abena gets the request at once as a normal pop-up. Yaw is never offered it again. After 15 s, Undo is gone.
+
+### Auto-add off: the exclusive 20 s offer
+
+1. Yaw turns **Auto-add riders on my way** off.
+2. Run the same fake-requests command again.
+3. **Yaw:** the full-screen add, headed "On your way · add this rider", with "+GH₵7 · +N min · Pentagon … → Balme Library", one big **Add**, and a louder alert. It counts down 20 s.
+4. **Abena:** nothing during those 20 s. If Yaw taps Skip, or lets it run out, Abena gets it at once.
+
+### The rider who joins a moving car
+
+1. With Yaw carrying Ama, and auto-add back on, **Kofi** (`99 000 0002`) requests **Shared, Pentagon → Balme Library**.
+2. Kofi skips the search: "You've joined Yaw's car, already on the way. Pickup in about N min", with the car and plate, and the same as a notification.
+3. Yaw taps **Undo**. Kofi's screen just goes back to searching, with no error and no "driver had to cancel".
+
+### What doesn't pool
+
+- Run fake-requests `--from pentagon --to jean-nelson` (the other way): it goes to normal dispatch, and Abena gets it.
+- A Ride alone request is never auto-added.
+- A request for more seats than Yaw has free is never auto-added.
+
+### The board
+
+1. In the admin site, turn **Settings → Dispatch → Fill moving cars first** off, so requests stay open.
+2. Send one rider each way:
+   ```sh
+   npm run staging:fake-requests -- --count 2 --minutes 0 --shared 1 --from pentagon --to balme
+   ```
+   ```sh
+   npm run staging:fake-requests -- --count 2 --minutes 0 --shared 1 --from bani --to jean-nelson
+   ```
+3. On Yaw's **Requests** tab, the Pentagon → Balme riders are at the top, marked "On your way · +N min".
+4. Turn the switch back on.
+
+### Admin
+
+```sh
+npm run staging:admin
+```
+
+**Settings → Dispatch** has:
+- **Fill moving cars first**: the whole step on or off.
+- **Auto-add riders, by default**: for drivers who haven't chosen. Off by default.
+- The last 7 days' counts: auto-added, offered, declined, didn't answer, undone, no moving car fitted.
+
+Every request records its step in `Ride.movingStep`, for analysis.
+
+### Clean up
+
+```sh
+npm run staging:fake-requests:cleanup
+```

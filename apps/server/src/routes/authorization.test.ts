@@ -133,6 +133,9 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /rides/:id/passengers/:passengerId/cancel": "owner",
   "POST /rides/:id/passengers/:passengerId/no-show": "owner",
   "POST /rides/:id/passengers/:passengerId/undo": "owner",
+  "POST /rides/:id/passengers/:passengerId/undo-add": "owner",
+  "GET /driver/settings": "self",
+  "PATCH /driver/settings": "self",
 
   "GET /admin/drivers/pending": "admin",
   "POST /admin/drivers/:id/approve": "admin",
@@ -191,6 +194,15 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /admin/drivers/:id/waive": "admin",
   "GET /admin/commission-settings": "admin",
   "PUT /admin/commission-settings": "admin",
+  "GET /admin/kpis": "admin",
+  "GET /admin/commission-terms": "admin",
+  "PUT /admin/commission-terms": "admin",
+  "GET /admin/payouts": "admin",
+  "POST /admin/payouts": "admin",
+  "POST /admin/payouts/:id/remove": "admin",
+  "GET /admin/settings/changes": "admin",
+  "GET /admin/admins": "admin",
+  "PATCH /admin/admins/:id": "admin",
   "GET /admin/far-pricing": "admin",
   "PUT /admin/far-pricing": "admin",
   "GET /admin/zone-neighbours": "admin",
@@ -554,7 +566,7 @@ function cases(): OwnershipCase[] {
     w;
   const seatA = car.seatIds[riderA.user.id]!;
 
-  const passengerActions = ["arrived", "pickup", "dropoff", "cancel", "no-show"].map(
+  const passengerActions = ["arrived", "pickup", "dropoff", "cancel", "no-show", "undo-add"].map(
     (action): OwnershipCase => ({
       route: `POST /rides/:id/passengers/:passengerId/${action}`,
       name: `another driver can't ${action} a rider on D1's car`,

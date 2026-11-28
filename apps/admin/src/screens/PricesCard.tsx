@@ -5,13 +5,7 @@ import { useToken } from "../auth";
 import { cedis, cedisInput, parseCedis } from "../lib/money";
 import { dayAndTime } from "../lib/time";
 
-const FIELDS: Array<{ key: keyof FarePrices; label: string }> = [
-  { key: "sharedPesewas", label: "Shared, 1 seat (GH₵)" },
-  { key: "shared2Pesewas", label: "Shared, 2 seats (GH₵)" },
-  { key: "shared3Pesewas", label: "Shared, 3 seats (GH₵)" },
-  { key: "farPerSeatPesewas", label: "Far trip, added per seat (GH₵)" },
-  { key: "lonePesewas", label: "Ride alone, whole car (GH₵)" },
-];
+const FIELDS: Array<{ key: keyof FarePrices }> = [{ key: "sharedPesewas" }, { key: "shared2Pesewas" }, { key: "shared3Pesewas" }, { key: "farPerSeatPesewas" }, { key: "lonePesewas" }];
 
 /**
  * The prices (server: services/ride/farePricing.ts, 2026-11-26). Shared is
@@ -78,73 +72,49 @@ export function PricesCard() {
     }
   }
 
+  const ok = !problem;
+  const example = (n: number, far: boolean) => (ok ? cedis(sharedFare(n, far, values)) : "—");
+  const ITEMS: Array<{ key: keyof FarePrices; title: string; help: string; example: string }> = [
+    { key: "sharedPesewas", title: "Shared, 1 seat", help: "One rider sharing the car with others going the same way.", example: `Night Market → Balme Library, 1 seat = ${example(1, false)}` },
+    { key: "shared2Pesewas", title: "Shared, 2 seats", help: "One booking for the rider and a friend: one price, two of the 4 seats.", example: `Night Market → Balme Library, 2 seats = ${example(2, false)}` },
+    { key: "shared3Pesewas", title: "Shared, 3 seats", help: "The rider and two friends in one booking.", example: `Night Market → Balme Library, 3 seats = ${example(3, false)}` },
+    { key: "farPerSeatPesewas", title: "Far trip, per seat", help: "Added for each seat when a Shared trip goes between the north and south ends.", example: `Pentagon → Jean Nelson, 2 seats = ${example(2, true)}` },
+    { key: "lonePesewas", title: "Ride alone", help: "The whole car, up to 4 people, the same price anywhere on campus.", example: `Any trip, 1–4 people = ${ok ? cedis(values.lonePesewas) : "—"}` },
+  ];
+
   return (
-    <div className="inset">
-      <h3>Prices</h3>
-      <p className="muted">
-        A rider can book Shared for up to 3 people (themself and two friends): one booking, one price, and it takes that many of the car&apos;s 4 seats.
-        On a trip between the north and south ends, the far surcharge is added for each seat. Ride alone is one price for the whole car, up to 4 people.
-        The wait fee is per booking. The driver keeps 85% of whatever the rider pays.
-      </p>
+    <div className="stack">
       {error ? <p className="error-text" role="alert">{error}</p> : null}
-      {notice ? <p className="muted">{notice}</p> : null}
+      {notice ? <p className="saved-note">✓ {notice}</p> : null}
       {!loaded ? (
         <p className="muted">Loading…</p>
       ) : (
-        <form className="settings-form" onSubmit={(e) => void save(e)}>
-          <div className="filters">
-            {FIELDS.map(({ key, label }) => (
-              <label className="field" key={key}>
-                <span>{label}</span>
-                <input
-                  inputMode="decimal"
-                  value={inputs[key]}
-                  onChange={(e) => setInputs((all) => ({ ...all, [key]: e.target.value }))}
-                  required
-                />
+        <form className="stack" onSubmit={(e) => void save(e)}>
+          <div className="price-grid">
+            {ITEMS.map(({ key, title, help, example: ex }) => (
+              <label className="price-item" key={key}>
+                <strong>{title}</strong>
+                <span className="price-input">
+                  GH₵
+                  <input inputMode="decimal" value={inputs[key]} onChange={(e) => setInputs((all) => ({ ...all, [key]: e.target.value }))} required aria-label={`${title} (GH₵)`} />
+                </span>
+                <p>{help}</p>
+                <span className="example">{ex}</span>
               </label>
             ))}
           </div>
-          {problem ? (
-            <p className="error-text">{problem}</p>
-          ) : (
-            <table className="data-table" aria-label="What riders pay">
-              <thead>
-                <tr>
-                  <th scope="col">Shared</th>
-                  <th scope="col">1 seat</th>
-                  <th scope="col">2 seats</th>
-                  <th scope="col">3 seats</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th scope="row">Normal trip</th>
-                  {[1, 2, 3].map((n) => (
-                    <td key={n}>{cedis(sharedFare(n, false, values))}</td>
-                  ))}
-                </tr>
-                <tr>
-                  <th scope="row">North ↔ South</th>
-                  {[1, 2, 3].map((n) => (
-                    <td key={n}>{cedis(sharedFare(n, true, values))}</td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          )}
-          <p className="muted small">
-            {loaded.settings.updatedAt
-              ? `Last changed ${dayAndTime(loaded.settings.updatedAt)}${loaded.settings.updatedBy ? ` by ${loaded.settings.updatedBy.name}` : ""}.`
-              : `Not changed yet: the defaults, Shared ${cedis(loaded.defaults.sharedPesewas)} / ${cedis(loaded.defaults.shared2Pesewas)} / ${cedis(
-                  loaded.defaults.shared3Pesewas,
-                )}, +${cedis(loaded.defaults.farPerSeatPesewas)} a seat far, Ride alone ${cedis(loaded.defaults.lonePesewas)}.`}
-          </p>
-          <p>
-            <button type="submit" className="tonal-button" disabled={busy || !!problem || unchanged}>
+          {problem ? <p className="error-text">{problem}</p> : null}
+          <div className="row-between">
+            <span className="section-meta">
+              {loaded.settings.updatedAt
+                ? `Last changed by ${loaded.settings.updatedBy?.name ?? "an admin"} · ${dayAndTime(loaded.settings.updatedAt)}`
+                : `Not changed yet: the defaults.`}{" "}
+              New requests use a change at once; rides already requested keep their price.
+            </span>
+            <button type="submit" className="primary-button" disabled={busy || !!problem || unchanged}>
               {busy ? "Saving…" : "Save prices"}
             </button>
-          </p>
+          </div>
         </form>
       )}
     </div>

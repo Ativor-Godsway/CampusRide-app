@@ -112,8 +112,14 @@ export interface CompletedTrip {
   pickupZoneId: string;
   /** Σ the stored fares of the seats the ride was paid for (pesewas). */
   farePesewas: number;
-  /** CampusRide's 15%: the stored CommissionLedger amount (or 15% of the fare when there is no ledger row). */
+  /** CampusRide's commission at the rate then: the stored CommissionLedger amount (or 15% of the fare when there is no ledger row). */
   commissionPesewas: number;
+  /** What the driver owes for it: the commission, or 0 when it was completed while commission was waived. */
+  commissionDuePesewas: number;
+  /** Completed while commission was waived. */
+  commissionWaived: boolean;
+  /** Bookings dropped off (riders carried, not seats). */
+  riders: number;
   seats: number;
 }
 
@@ -133,7 +139,7 @@ export async function loadCompletedTrips(
       completedAt: true,
       pickupZoneId: true,
       passengers: { select: { status: true, lockedFare: true, fareCharged: true } },
-      commissionLedger: { select: { amountPesewas: true } },
+      commissionLedger: { select: { amountPesewas: true, waived: true } },
     },
     orderBy: { completedAt: "asc" },
   });
@@ -148,6 +154,9 @@ export async function loadCompletedTrips(
       pickupZoneId: r.pickupZoneId,
       farePesewas: fare,
       commissionPesewas: r.commissionLedger?.amountPesewas ?? splitFare(fare).commission,
+      commissionDuePesewas: r.commissionLedger?.waived ? 0 : (r.commissionLedger?.amountPesewas ?? splitFare(fare).commission),
+      commissionWaived: r.commissionLedger?.waived ?? false,
+      riders: r.type === "LONE" ? 1 : r.passengers.filter((p) => p.status === "DROPPED_OFF").length,
       seats: r.type === "LONE" ? 1 : r.passengers.filter((p) => p.status === "DROPPED_OFF").length,
     };
   });

@@ -44,6 +44,7 @@ export function RidesPage() {
   const filters = {
     status: search.get("status") ?? "",
     type: search.get("type") ?? "",
+    booking: search.get("booking") ?? "",
     zoneId: search.get("zone") ?? "",
     driverId: search.get("driverId") ?? "",
     riderPhone: search.get("phone") ?? "",
@@ -72,7 +73,7 @@ export function RidesPage() {
       controls={<Freshness updatedAt={rides.updatedAt} onRefresh={rides.refresh} loading={rides.loading} />}
     >
       <div className="toolbar">
-        <PeriodPicker value={period} onChange={setPeriod} />
+        <PeriodPicker value={period} onChange={setPeriod} choices={["today", "yesterday", "this-week", "last-week", "since-launch"]} />
       </div>
       <form
         className="filters"
@@ -97,6 +98,14 @@ export function RidesPage() {
             <option value="">Shared and alone</option>
             <option value="SHARED">Shared</option>
             <option value="LONE">Alone</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Booked</span>
+          <select value={filters.booking} onChange={(e) => set("booking", e.target.value)}>
+            <option value="">Live and scheduled</option>
+            <option value="LIVE">Live (go now)</option>
+            <option value="SCHEDULED">Scheduled ahead</option>
           </select>
         </label>
         <label className="field">

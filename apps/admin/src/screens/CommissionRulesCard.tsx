@@ -67,7 +67,7 @@ export function CommissionRulesCard() {
     <div className="inset">
       <h3>Driver commission</h3>
       <p className="muted">
-        Drivers keep 85% of each cash fare and owe CampusRide 15%. They pay it from the driver app through Paystack (MoMo), or to you in person (Finances).
+        Drivers owe CampusRide the commission on each cash fare (the rate above). They pay it from the driver app through Paystack (MoMo), or to you in person (Payouts &amp; commission). These rules decide when a driver who owes too much is stopped from going online.
       </p>
       {error ? <p className="error-text" role="alert">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}

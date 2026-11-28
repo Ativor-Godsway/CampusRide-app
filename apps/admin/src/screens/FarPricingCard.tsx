@@ -18,8 +18,6 @@ export function FarPricingCard() {
   const token = useToken();
   const [loaded, setLoaded] = useState<FarPricing | null>(null);
   const [places, setPlaces] = useState<FarPlace[]>([]);
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<AdminPlace[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -33,20 +31,6 @@ export function FarPricingCard() {
     getFarPricing(token).then(show, (err) => setError(failureText("Loading far-trip places", err)));
   }, [token]);
 
-  useEffect(() => {
-    const q = query.trim();
-    if (q.length < 2) {
-      setResults([]);
-      return;
-    }
-    const t = setTimeout(() => {
-      getPlaces(token, q).then(
-        (r) => setResults(r.places.slice(0, 8)),
-        () => setResults([]),
-      );
-    }, 250);
-    return () => clearTimeout(t);
-  }, [query, token]);
 
   const chosen = useMemo(() => new Set(places.map((p) => p.id)), [places]);
   const changed =
@@ -57,7 +41,6 @@ export function FarPricingCard() {
     setPlaces((all) => (end ? all.map((p) => (p.id === id ? { ...p, end } : p)) : all.filter((p) => p.id !== id)));
   const add = (r: AdminPlace, end: End) => {
     setPlaces((all) => [...all, { id: r.id, name: r.name, isActive: r.isActive, zoneName: r.zone.name, end }].sort((a, b) => a.name.localeCompare(b.name)));
-    setQuery("");
   };
 
   async function save(e: React.FormEvent) {
@@ -78,82 +61,98 @@ export function FarPricingCard() {
   }
 
   return (
-    <div className="inset">
-      <h3>Far-trip places</h3>
-      <p className="muted">
+    <div className="stack">
+      <p className="section-help">
         Campus has two far ends. A Shared booking pays the far surcharge
-        {loaded ? ` (${cedis(loaded.settings.farPerSeatPesewas)} a seat)` : ""} only when the trip goes from the north end to the south end, or back.
-        Every other Shared trip pays the normal price. Ride alone is the same price everywhere. A pin counts as the place it&apos;s at or near (within
-        250 m). Prices are set in Settings → Prices.
+        {loaded ? ` (${cedis(loaded.settings.farPerSeatPesewas)} a seat)` : ""} only on a trip from one end to the other. Every other trip pays the normal price.
+        A pin counts as the place it&apos;s at or near (within 250 m). Annexes and places beside a hall count separately.
       </p>
       {error ? <p className="error-text" role="alert">{error}</p> : null}
-      {notice ? <p className="muted">{notice}</p> : null}
+      {notice ? <p className="saved-note">✓ {notice}</p> : null}
       {!loaded ? (
         <p className="muted">Loading…</p>
       ) : (
-        <form className="settings-form" onSubmit={(e) => void save(e)}>
-          {(["NORTH", "SOUTH"] as const).map((e) => {
-            const mine = places.filter((p) => p.end === e);
-            return (
-              <div key={e}>
-                <h4>
-                  {END_LABEL[e]} ({mine.length})
-                </h4>
-                {mine.length === 0 ? <p className="muted small">No places yet: no trip pays the far price.</p> : null}
-                <ul className="chip-list">
-                  {mine.map((p) => (
-                    <li key={p.id}>
-                      <span>
-                        {p.name} <span className="muted small">· {p.zoneName}{p.isActive ? "" : " · hidden from riders"}</span>
-                      </span>{" "}
-                      <select aria-label={`Far end for ${p.name}`} value={p.end} onChange={(ev) => setEnd(p.id, ev.target.value as End | "")}>
-                        <option value="NORTH">North</option>
-                        <option value="SOUTH">South</option>
-                        <option value="">None</option>
-                      </select>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
-          <label className="field">
-            <span>Add a place (annexes, &ldquo;other spot near&rdquo; places and places beside a hall count separately)</span>
-            <input type="search" value={query} placeholder="Search places" onChange={(e) => setQuery(e.target.value)} />
-          </label>
-          {results.filter((r) => !chosen.has(r.id)).length > 0 ? (
-            <ul className="chip-list">
-              {results
-                .filter((r) => !chosen.has(r.id))
-                .map((r) => (
-                  <li key={r.id}>
-                    <span>
-                      {r.name} <span className="muted small">· {r.zone.name}</span>
-                    </span>{" "}
-                    <button type="button" className="text-button" aria-label={`Add ${r.name} to the north end`} onClick={() => add(r, "NORTH")}>
-                      North
-                    </button>
-                    <button type="button" className="text-button" aria-label={`Add ${r.name} to the south end`} onClick={() => add(r, "SOUTH")}>
-                      South
-                    </button>
-                  </li>
-                ))}
-            </ul>
-          ) : null}
-
-          {loaded.settings.updatedAt ? (
-            <p className="muted small">
-              Last changed {dayAndTime(loaded.settings.updatedAt)}
-              {loaded.settings.updatedBy ? ` by ${loaded.settings.updatedBy.name}` : ""}.
-            </p>
-          ) : null}
-          <p>
-            <button type="submit" className="tonal-button" disabled={busy || !changed}>
+        <form className="stack" onSubmit={(e) => void save(e)}>
+          <div className="far-columns">
+            {(["NORTH", "SOUTH"] as const).map((end) => (
+              <EndColumn key={end} end={end} places={places.filter((p) => p.end === end)} chosen={chosen} onRemove={(id) => setEnd(id, "")} onAdd={(r) => add(r, end)} />
+            ))}
+          </div>
+          <div className="row-between">
+            <span className="section-meta">
+              {loaded.settings.updatedAt
+                ? `Last changed by ${loaded.settings.updatedBy?.name ?? "an admin"} · ${dayAndTime(loaded.settings.updatedAt)}`
+                : "Not changed yet"}
+            </span>
+            <button type="submit" className="primary-button" disabled={busy || !changed}>
               {busy ? "Saving…" : "Save far-trip places"}
             </button>
-          </p>
+          </div>
         </form>
       )}
+    </div>
+  );
+}
+
+/** One far end: its places as chips (× removes), and a search to add one. */
+function EndColumn({ end, places, chosen, onRemove, onAdd }: { end: End; places: FarPlace[]; chosen: Set<string>; onRemove: (id: string) => void; onAdd: (p: AdminPlace) => void }) {
+  const token = useToken();
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<AdminPlace[]>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) {
+      setResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      getPlaces(token, q).then(
+        (r) => setResults(r.places.slice(0, 8)),
+        () => setResults([]),
+      );
+    }, 250);
+    return () => clearTimeout(t);
+  }, [query, token]);
+  const open = results.filter((r) => !chosen.has(r.id));
+  return (
+    <div className="far-column">
+      <h3>
+        {END_LABEL[end]} <span className="muted num">{places.length}</span>
+      </h3>
+      {places.length === 0 ? (
+        <p className="muted small">No places yet: no trip pays the far price.</p>
+      ) : (
+        <div className="chip-list">
+          {places.map((p) => (
+            <span key={p.id} className="place-chip" title={`${p.zoneName}${p.isActive ? "" : " · hidden from riders"}`}>
+              {p.name}
+              <button type="button" aria-label={`Remove ${p.name} from the ${END_LABEL[end].toLowerCase()}`} onClick={() => onRemove(p.id)}>
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="place-search">
+        <input type="search" value={query} placeholder="Add place…" aria-label={`Add a place to the ${END_LABEL[end].toLowerCase()}`} onChange={(e) => setQuery(e.target.value)} />
+        {open.length > 0 ? (
+          <ul className="place-results">
+            {open.map((r) => (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAdd(r);
+                    setQuery("");
+                  }}
+                >
+                  {r.name} <span className="muted small">· {r.zone.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     </div>
   );
 }

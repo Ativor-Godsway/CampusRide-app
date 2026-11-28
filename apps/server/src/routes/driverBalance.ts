@@ -7,7 +7,7 @@ import { empty, object, oneOf, text } from "../http/schemas";
 import { RULES } from "../rateLimit/rules";
 import { config } from "../config";
 import { driverBalance } from "../services/admin/cash";
-import { getCommissionSettings } from "../services/commission/settings";
+import { getCommissionSettings, getCommissionTerms } from "../services/commission/settings";
 import { driverLedger } from "../services/commission/ledger";
 import type { PaystackClient } from "../services/commission/paystack";
 import {
@@ -86,9 +86,10 @@ export function registerDriverBalanceRoutes(app: FastifyInstance, prisma: Prisma
     if (!requireDriver(request, reply)) return;
     const userId = request.user!.userId;
     logChecks(request.log, await syncDriverPayments(prisma, paystack, userId));
-    const [balance, settings, history, pending, lastCredit] = await Promise.all([
+    const [balance, settings, terms, history, pending, lastCredit] = await Promise.all([
       driverBalance(prisma, userId),
       getCommissionSettings(prisma),
+      getCommissionTerms(prisma),
       driverLedger(prisma, userId),
       prisma.driverPaystackPayment.findFirst({ where: { driverUserId: userId, status: "PENDING" }, orderBy: { createdAt: "desc" } }),
       // A payment or waiver that still stands (not a reversal, not reversed).
@@ -98,10 +99,15 @@ export function registerDriverBalanceRoutes(app: FastifyInstance, prisma: Prisma
         select: { kind: true, amountPesewas: true, paidAt: true },
       }),
     ]);
-    const owed = balance.balancePesewas;
+    // Commission waived (admin site): nothing is owed and nothing is shown
+    // as owed — every build shows "You're all paid up" for a 0 balance, no
+    // Pay button, no warning, and nobody is blocked.
+    const waived = terms.waived;
+    const owed = waived ? 0 : balance.balancePesewas;
     return reply.send({
       balancePesewas: owed,
-      commissionPesewas: balance.owedPesewas,
+      commissionPesewas: waived ? 0 : balance.owedPesewas,
+      commissionWaived: waived,
       paidPesewas: balance.paidPesewas,
       waivedPesewas: balance.waivedPesewas,
       rules: {
@@ -117,12 +123,12 @@ export function registerDriverBalanceRoutes(app: FastifyInstance, prisma: Prisma
       canPay: paystack.configured,
       minPaymentPesewas: MIN_PAYMENT_PESEWAS,
       quote: owed >= MIN_PAYMENT_PESEWAS ? paystackQuote(owed, settings.feeBps, settings.feeCapPesewas) : null,
-      pendingPayment: pending ? paymentView(pending) : null,
+      pendingPayment: pending && !waived ? paymentView(pending) : null,
       lastCredit: lastCredit
         ? { kind: lastCredit.kind as "PAYMENT" | "WAIVER", amountPesewas: lastCredit.amountPesewas, at: lastCredit.paidAt.toISOString() }
         : null,
       // Driver builds before 2026-11-09's redesign list it on Balance; newer ones don't.
-      history: history.map(({ note: _note, recordedBy: _by, ...entry }) => entry),
+      history: waived ? [] : history.filter((e) => !e.waived).map(({ note: _note, recordedBy: _by, waived: _w, ...entry }) => entry),
     });
   });
 

@@ -18,80 +18,184 @@ import { clearAdminCache } from "./cache";
 
 export interface DriverBalance {
   driverUserId: string;
-  /** All-time commission on completed cash rides. */
+  /** All-time commission on completed cash rides at the rate then, waived trips included. */
+  earnedPesewas: number;
+  /** Of that, on trips completed while commission was waived: never owed. */
+  commissionWaivedPesewas: number;
+  /** Charged: commission on trips not waived (what could ever be owed). */
   owedPesewas: number;
   /** All-time payments (in person and Paystack), reversals taken off. */
   paidPesewas: number;
-  /** All-time waivers, reversals taken off. */
+  /**
+   * Balance waivers that actually forgave something: a waiver only counts up
+   * to what the driver owed when it was given (a launch "waive all" over
+   * trips that were later waived anyway forgives nothing twice).
+   */
   waivedPesewas: number;
   /** All-time adjustments. */
   adjustedPesewas: number;
-  /** owed − paid − waived − adjusted. Positive: the driver still owes. */
+  /** charged − paid − waived − adjusted. Positive: still owed; negative: paid ahead. */
   balancePesewas: number;
+  /** When the oldest commission not yet covered was recorded; null when nothing is owed. */
+  oldestUnpaidAt: Date | null;
 }
 
-/** Every driver's all-time balance (two grouped queries), optionally only these drivers. */
-export async function driverBalances(prisma: PrismaClient, driverUserIds?: readonly string[]): Promise<Map<string, DriverBalance>> {
-  const only = driverUserIds ? { driverUserId: { in: [...driverUserIds] } } : {};
-  const [owed, credited] = await Promise.all([
-    prisma.commissionLedger.groupBy({ by: ["driverUserId"], where: only, _sum: { amountPesewas: true } }),
-    prisma.driverCashPayment.groupBy({ by: ["driverUserId", "kind"], where: only, _sum: { amountPesewas: true } }),
-  ]);
-  const out = new Map<string, DriverBalance>();
-  const row = (id: string) => {
-    let b = out.get(id);
-    if (!b) {
-      b = { driverUserId: id, owedPesewas: 0, paidPesewas: 0, waivedPesewas: 0, adjustedPesewas: 0, balancePesewas: 0 };
-      out.set(id, b);
+/**
+ * The reconciliation every money page uses, per driver and in total:
+ *
+ *   earned = paid + waived (trips + balances) + adjusted + still owed − paid ahead
+ */
+export function reconciles(b: Pick<DriverBalance, "earnedPesewas" | "commissionWaivedPesewas" | "paidPesewas" | "waivedPesewas" | "adjustedPesewas" | "balancePesewas">): boolean {
+  return b.earnedPesewas === b.paidPesewas + b.commissionWaivedPesewas + b.waivedPesewas + b.adjustedPesewas + b.balancePesewas;
+}
+
+type Ledgerish = Pick<PrismaClient, "commissionLedger" | "driverCashPayment">;
+
+interface Charge {
+  at: Date;
+  amount: number;
+}
+interface Credit {
+  id: string;
+  at: Date;
+  kind: "PAYMENT" | "WAIVER" | "ADJUSTMENT";
+  amount: number;
+  reversesId: string | null;
+  createdAt: Date;
+}
+
+/**
+ * One driver's balance from their charges and credits, in time order. Payments
+ * and adjustments always count (a payment beyond what is owed is "paid ahead");
+ * a waiver forgives at most what is owed at that moment, and reversing a
+ * waiver brings back exactly what it forgave. Charges are paid off oldest first.
+ */
+export function walkBalance(driverUserId: string, charges: Charge[], credits: Credit[], commissionWaivedPesewas: number): DriverBalance {
+  type Event = { at: number; order: number; charge?: Charge; credit?: Credit };
+  const events: Event[] = [
+    ...charges.map((c) => ({ at: c.at.getTime(), order: 0, charge: c })),
+    ...credits.map((c) => ({ at: c.at.getTime(), order: 1 + c.createdAt.getTime() / 1e15, credit: c })),
+  ].sort((a, b) => a.at - b.at || a.order - b.order);
+  const queue: Array<{ at: Date; left: number }> = [];
+  let prepaid = 0;
+  let owed = 0;
+  let paid = 0;
+  let waived = 0;
+  let adjusted = 0;
+  // What each waiver forgave, slice by slice (the charges' dates), so reversing it puts back exactly those.
+  const applied = new Map<string, Array<{ at: Date; left: number }>>();
+  const consume = (amount: number): Array<{ at: Date; left: number }> => {
+    let left = amount;
+    const slices: Array<{ at: Date; left: number }> = [];
+    while (left > 0 && queue.length) {
+      const head = queue[0]!;
+      const take = Math.min(head.left, left);
+      head.left -= take;
+      left -= take;
+      slices.push({ at: head.at, left: take });
+      if (head.left === 0) queue.shift();
     }
-    return b;
+    return slices;
   };
-  for (const o of owed) row(o.driverUserId).owedPesewas = o._sum.amountPesewas ?? 0;
-  for (const c of credited) {
-    const b = row(c.driverUserId);
-    const amount = c._sum.amountPesewas ?? 0;
-    if (c.kind === "WAIVER") b.waivedPesewas += amount;
-    else if (c.kind === "ADJUSTMENT") b.adjustedPesewas += amount;
-    else b.paidPesewas += amount;
+  const sum = (slices: Array<{ left: number }>) => slices.reduce((t, x) => t + x.left, 0);
+  const addOwed = (at: Date, amount: number) => {
+    const fromPrepaid = Math.min(prepaid, amount);
+    prepaid -= fromPrepaid;
+    if (amount - fromPrepaid > 0) queue.push({ at, left: amount - fromPrepaid });
+  };
+  for (const e of events) {
+    if (e.charge) {
+      owed += e.charge.amount;
+      addOwed(e.charge.at, e.charge.amount);
+      continue;
+    }
+    const c = e.credit!;
+    if (c.kind === "WAIVER") {
+      if (c.amount >= 0) {
+        const used = consume(c.amount);
+        applied.set(c.id, used);
+        waived += sum(used);
+      } else {
+        const back = c.reversesId ? (applied.get(c.reversesId) ?? []) : [];
+        waived -= sum(back);
+        for (const slice of back) addOwed(slice.at, slice.left);
+        queue.sort((a, b) => a.at.getTime() - b.at.getTime());
+      }
+      continue;
+    }
+    if (c.kind === "PAYMENT") paid += c.amount;
+    else adjusted += c.amount;
+    if (c.amount >= 0) prepaid += c.amount - sum(consume(c.amount));
+    else addOwed(c.at, -c.amount);
   }
-  for (const b of out.values()) b.balancePesewas = b.owedPesewas - b.paidPesewas - b.waivedPesewas - b.adjustedPesewas;
+  const balance = owed - paid - waived - adjusted;
+  return {
+    driverUserId,
+    earnedPesewas: owed + commissionWaivedPesewas,
+    commissionWaivedPesewas,
+    owedPesewas: owed,
+    paidPesewas: paid,
+    waivedPesewas: waived,
+    adjustedPesewas: adjusted,
+    balancePesewas: balance,
+    oldestUnpaidAt: balance > 0 ? (queue[0]?.at ?? null) : null,
+  };
+}
+
+/** Every driver's all-time balance (three queries), optionally only these drivers. */
+export async function driverBalances(prisma: Ledgerish, driverUserIds?: readonly string[]): Promise<Map<string, DriverBalance>> {
+  const only = driverUserIds ? { driverUserId: { in: [...driverUserIds] } } : {};
+  const [charges, waivedTrips, credits] = await Promise.all([
+    // Commission on trips completed while commission was waived is never owed.
+    prisma.commissionLedger.findMany({ where: { ...only, waived: false }, select: { driverUserId: true, amountPesewas: true, createdAt: true } }),
+    prisma.commissionLedger.groupBy({ by: ["driverUserId"], where: { ...only, waived: true }, _sum: { amountPesewas: true } }),
+    prisma.driverCashPayment.findMany({
+      where: only,
+      select: { id: true, driverUserId: true, kind: true, amountPesewas: true, paidAt: true, reversesId: true, createdAt: true },
+    }),
+  ]);
+  const ids = new Set<string>([...charges.map((c) => c.driverUserId), ...waivedTrips.map((w) => w.driverUserId), ...credits.map((c) => c.driverUserId)]);
+  const chargesBy = new Map<string, Charge[]>();
+  for (const c of charges) chargesBy.set(c.driverUserId, [...(chargesBy.get(c.driverUserId) ?? []), { at: c.createdAt, amount: c.amountPesewas }]);
+  const creditsBy = new Map<string, Credit[]>();
+  for (const c of credits) {
+    creditsBy.set(c.driverUserId, [
+      ...(creditsBy.get(c.driverUserId) ?? []),
+      { id: c.id, at: c.paidAt, kind: c.kind, amount: c.amountPesewas, reversesId: c.reversesId, createdAt: c.createdAt },
+    ]);
+  }
+  const waivedBy = new Map(waivedTrips.map((w) => [w.driverUserId, w._sum.amountPesewas ?? 0]));
+  const out = new Map<string, DriverBalance>();
+  for (const id of ids) out.set(id, walkBalance(id, chargesBy.get(id) ?? [], creditsBy.get(id) ?? [], waivedBy.get(id) ?? 0));
   return out;
 }
 
 /** One driver's balance (zeros for a driver who never owed anything). */
-export async function driverBalance(prisma: PrismaClient, driverUserId: string): Promise<DriverBalance> {
-  return (
-    (await driverBalances(prisma, [driverUserId])).get(driverUserId) ?? {
-      driverUserId,
-      owedPesewas: 0,
-      paidPesewas: 0,
-      waivedPesewas: 0,
-      adjustedPesewas: 0,
-      balancePesewas: 0,
-    }
-  );
+export async function driverBalance(prisma: Ledgerish, driverUserId: string): Promise<DriverBalance> {
+  return (await driverBalances(prisma, [driverUserId])).get(driverUserId) ?? walkBalance(driverUserId, [], [], 0);
 }
 
-/**
- * For each driver still owing: when the oldest commission not yet covered
- * by their payments was recorded (payments pay off the oldest first). One
- * query with a running total.
- */
-export async function oldestUnpaid(prisma: PrismaClient): Promise<Map<string, Date>> {
-  const rows = await prisma.$queryRaw<Array<{ driverUserId: string; since: Date }>>`
-    WITH running AS (
-      SELECT "driverUserId", "createdAt",
-             SUM("amountPesewas") OVER (PARTITION BY "driverUserId" ORDER BY "createdAt", id) AS cumulative
-      FROM "CommissionLedger"
-    ),
-    paid AS (
-      SELECT "driverUserId", SUM("amountPesewas") AS total FROM "DriverCashPayment" GROUP BY "driverUserId"
-    )
-    SELECT r."driverUserId", MIN(r."createdAt") AS since
-    FROM running r LEFT JOIN paid p ON p."driverUserId" = r."driverUserId"
-    WHERE r.cumulative > COALESCE(p.total, 0)
-    GROUP BY r."driverUserId"`;
-  return new Map(rows.map((r) => [r.driverUserId, r.since]));
+/** For each driver still owing: when the oldest commission not yet covered was recorded (payments pay off the oldest first). */
+export async function oldestUnpaid(prisma: Ledgerish): Promise<Map<string, Date>> {
+  const out = new Map<string, Date>();
+  for (const [id, b] of await driverBalances(prisma)) if (b.oldestUnpaidAt) out.set(id, b.oldestUnpaidAt);
+  return out;
+}
+
+/** All drivers together: earned = paid + waived + adjusted + still owed − paid ahead. */
+export function totalReconciliation(balances: Iterable<DriverBalance>) {
+  const t = { earnedPesewas: 0, commissionWaivedPesewas: 0, balanceWaivedPesewas: 0, paidPesewas: 0, adjustedPesewas: 0, stillOwedPesewas: 0, paidAheadPesewas: 0, chargedPesewas: 0 };
+  for (const b of balances) {
+    t.earnedPesewas += b.earnedPesewas;
+    t.commissionWaivedPesewas += b.commissionWaivedPesewas;
+    t.balanceWaivedPesewas += b.waivedPesewas;
+    t.paidPesewas += b.paidPesewas;
+    t.adjustedPesewas += b.adjustedPesewas;
+    t.chargedPesewas += b.owedPesewas;
+    if (b.balancePesewas > 0) t.stillOwedPesewas += b.balancePesewas;
+    else t.paidAheadPesewas += -b.balancePesewas;
+  }
+  return { ...t, waivedPesewas: t.commissionWaivedPesewas + t.balanceWaivedPesewas };
 }
 
 /** Payment status for the period's table: Paid (nothing owed), Part paid (paid something this period), Not paid. */
@@ -257,14 +361,9 @@ export async function waiveAllBalances(prisma: PrismaClient, input: { reason: st
   const reason = input.reason.trim();
   if (!reason) throw new CashPaymentError("Say why every balance is waived.", 400);
   const result = await prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<Array<{ driverUserId: string; balance: bigint }>>`
-      SELECT c."driverUserId", c.owed - COALESCE(p.credited, 0) AS balance
-      FROM (SELECT "driverUserId", SUM("amountPesewas") AS owed FROM "CommissionLedger" GROUP BY "driverUserId") c
-      LEFT JOIN (SELECT "driverUserId", SUM("amountPesewas") AS credited FROM "DriverCashPayment" GROUP BY "driverUserId") p
-        ON p."driverUserId" = c."driverUserId"
-      WHERE c.owed - COALESCE(p.credited, 0) > 0`;
+    const balances = await driverBalances(tx);
     const now = new Date();
-    const owing = rows.map((r) => ({ driverUserId: r.driverUserId, amountPesewas: Number(r.balance) }));
+    const owing = [...balances.values()].filter((b) => b.balancePesewas > 0).map((b) => ({ driverUserId: b.driverUserId, amountPesewas: b.balancePesewas }));
     if (owing.length > 0) {
       await tx.driverCashPayment.createMany({
         data: owing.map((r) => ({

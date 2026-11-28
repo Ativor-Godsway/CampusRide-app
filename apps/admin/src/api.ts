@@ -19,6 +19,8 @@ import {
   type PublicKeyCredentialRequestOptionsJSON,
 } from "@simplewebauthn/browser";
 
+import { investorMaskingOn, maskPayload } from "./lib/investor";
+
 const API_URL = (import.meta.env.VITE_API_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
 /** GET with the session token (the dashboard's many reads). */
@@ -139,6 +141,9 @@ export async function keepSessionAlive(): Promise<void> {
   await renewAccessToken().catch(() => null);
 }
 
+/** Fired on window after every successful write to an /admin route (detail: { path }). */
+export const ADMIN_SAVED_EVENT = "campusride:admin-saved";
+
 async function request<T>(path: string, init: RequestInit = {}, token?: string, retried = false): Promise<T> {
   const headers = new Headers(init.headers);
   headers.set("Content-Type", "application/json");
@@ -186,6 +191,14 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string, 
     throw new ApiError(message, res.status, null, typeof code === "string" ? code : null);
   }
 
+  // A change was saved (any write to /admin/…): Settings closes its editor and shows "Saved".
+  const method = (init.method ?? "GET").toUpperCase();
+  if (method !== "GET" && path.startsWith("/admin") && typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(ADMIN_SAVED_EVENT, { detail: { path } }));
+  }
+
+  // Investor view: people's names, phones and plates never reach a page.
+  if (investorMaskingOn() && path.startsWith("/admin")) return maskPayload(body) as T;
   return body as T;
 }
 
@@ -658,6 +671,9 @@ export interface RideRow {
   type: "LONE" | "SHARED";
   source: string;
   paymentMethod: string;
+  /** Booked ahead or live (redesign; absent from older servers). */
+  booking?: "LIVE" | "SCHEDULED";
+  waitFeePesewas?: number;
   seats: number;
   fareTotal: number | null;
   fareFinal: boolean;
@@ -746,6 +762,7 @@ export interface RideQuery {
   period?: string;
   status?: string;
   type?: string;
+  booking?: string;
   zoneId?: string;
   driverId?: string;
   riderPhone?: string;
@@ -763,7 +780,7 @@ export interface RidePage {
 
 export function getRidePage(token: string, query: RideQuery): Promise<RidePage> {
   const params = new URLSearchParams(query.period ?? "");
-  for (const key of ["status", "type", "zoneId", "driverId", "riderPhone", "q"] as const) {
+  for (const key of ["status", "type", "booking", "zoneId", "driverId", "riderPhone", "q"] as const) {
     if (query[key]) params.set(key, query[key]!);
   }
   if (query.page) params.set("page", String(query.page));
@@ -794,6 +811,10 @@ export interface RideDetail {
     joinedAt: string;
     arrivedAt: string | null;
     noShowAt: string | null;
+    pickedUpAt?: string | null;
+    droppedOffAt?: string | null;
+    seatCount?: number;
+    waitFeePesewas?: number;
     /** The leftover seat of a request merged into another car (the rider rides there). */
     movedToCar?: boolean;
     /** This seat can be cancelled from here (anything not finished). */
@@ -919,6 +940,17 @@ export interface DriverRow {
   avgReplyMs: number | null;
   rating: number | null;
   ratings: number;
+  /** Since the 2026-11-29 redesign (absent from older servers). */
+  riders?: number;
+  faresPesewas?: number;
+  commissionDuePesewas?: number;
+  commissionWaivedPesewas?: number;
+  incomePesewas?: number;
+  topUpsPesewas?: number;
+  faresPerOnlineHourPesewas?: number | null;
+  commissionChargedPesewas?: number;
+  commissionPaidPesewas?: number;
+  balancePesewas?: number;
 }
 
 export interface DriverList {
@@ -960,12 +992,19 @@ export interface DriverDetail {
     acceptanceRate: number | null;
     avgReplyMs: number | null;
     cancelledByDriver: number;
+    riders?: number;
+    commissionWaivedPesewas?: number;
+    topUpsPesewas?: number;
+    incomePesewas?: number;
+    faresPerOnlineHourPesewas?: number | null;
   };
+  /** Earnings by Accra day (redesign; absent from older servers). */
+  byDay?: Array<{ day: string; trips: number; riders: number; faresPesewas: number; commissionDuePesewas: number; commissionWaivedPesewas?: number; topUpsPesewas: number; hoursOnlineMs: number }>;
   /** Their "Cancel pickup"s in the period, newest first. Absent from older servers. */
   cancellations?: Array<{ at: string; rideId: string; riderName: string; reason: string | null; reasonLabel: string | null; note: string | null }>;
   rating: number | null;
   ratings: number;
-  balance: { owedPesewas: number; paidPesewas: number; waivedPesewas: number; balancePesewas: number; oldestUnpaidAt: string | null };
+  balance: { earnedPesewas?: number; commissionWaivedPesewas?: number; owedPesewas: number; paidPesewas: number; waivedPesewas: number; balancePesewas: number; oldestUnpaidAt: string | null };
   recentTrips: RideRow[];
   sessions: Array<{ startedAt: string; endedAt: string | null; endReason: string | null; ms: number }>;
   offers: Array<{ rideId: string; offeredAt: string; outcome: string | null; responseMs: number | null }>;
@@ -998,10 +1037,27 @@ export interface CashDriverRow {
   balancePesewas: number;
   oldestUnpaidAt: string | null;
   status: "PAID" | "PART_PAID" | "NOT_PAID";
+  /** All time, reconciled (redesign round 2): earned = paid + waived + still owed − paid ahead. */
+  earnedPesewas?: number;
+  allPaidPesewas?: number;
+  allWaivedPesewas?: number;
+}
+
+export interface CommissionReconciliation {
+  earnedPesewas: number;
+  chargedPesewas: number;
+  commissionWaivedPesewas: number;
+  balanceWaivedPesewas: number;
+  waivedPesewas: number;
+  paidPesewas: number;
+  adjustedPesewas: number;
+  stillOwedPesewas: number;
+  paidAheadPesewas: number;
 }
 
 export interface CashOwed {
   generatedAt: string;
+  reconciliation?: CommissionReconciliation;
   outstandingPesewas: number;
   driversOwing: number;
   oldestUnpaidAt: string | null;
@@ -1013,6 +1069,8 @@ export interface CashOwed {
   collectedInPersonPesewas: number;
   waivedInPeriodPesewas: number;
   adjustedInPeriodPesewas: number;
+  /** Commission on the period's trips completed while commission was waived (redesign). */
+  waivedCommissionInPeriodPesewas?: number;
   /** The payment fees drivers added on top of their balance. */
   paystackFeesPaidByDriversPesewas: number;
   /** What Paystack reports it kept. */
@@ -1271,14 +1329,25 @@ export const getRefusedBookings = (token: string, period: string) => get<Refused
 // ─── Ride requests: the search window (2026-11-25) ──────────────────────────
 
 export interface DispatchSettings {
-  settings: { searchWindowSeconds: number; updatedAt: string | null; updatedBy: { id: string; name: string } | null };
+  settings: {
+    searchWindowSeconds: number;
+    /** Fill moving cars first: the whole step, and drivers' auto-add default. Absent from older servers. */
+    movingFirstEnabled?: boolean;
+    autoAddDefault?: boolean;
+    updatedAt: string | null;
+    updatedBy: { id: string; name: string } | null;
+  };
   defaults: { searchWindowSeconds: number };
   bounds: { min: number; max: number };
+  /** How long a driver's offer pop-up lasts (set on the server; redesign). */
+  offerSeconds?: number;
+  /** What the moving-car step did with live Shared requests in the last 7 days. */
+  movingSteps7d?: Record<string, number>;
 }
 
 export const getDispatchSettings = (token: string) => get<DispatchSettings>(token, "/admin/dispatch-settings");
-export const saveDispatchSettings = (token: string, searchWindowSeconds: number) =>
-  request<DispatchSettings>("/admin/dispatch-settings", { method: "PUT", body: JSON.stringify({ searchWindowSeconds }) }, token);
+export const saveDispatchSettings = (token: string, searchWindowSeconds: number, moving?: { movingFirstEnabled: boolean; autoAddDefault: boolean }) =>
+  request<DispatchSettings>("/admin/dispatch-settings", { method: "PUT", body: JSON.stringify({ searchWindowSeconds, ...(moving ?? {}) }) }, token);
 
 // ─── Pickup wait fee (2026-11-25) ───────────────────────────────────────────
 
@@ -1355,3 +1424,128 @@ export interface ScheduleSettingsBody {
 export const getScheduleSettings = (token: string) => get<ScheduleSettingsBody>(token, "/admin/schedule-settings");
 export const saveScheduleSettings = (token: string, values: import("@rida/shared").ScheduleSettings) =>
   request<ScheduleSettingsBody>("/admin/schedule-settings", { method: "PUT", body: JSON.stringify(values) }, token);
+
+// ── Admin redesign (2026-11-29): KPIs, commission terms, payouts ───────────
+
+export interface Kpis {
+  generatedAt: string;
+  launchDay: string;
+  period: { from: string; to: string };
+  kpis: {
+    registeredRiders: number;
+    newSignups: number;
+    ridersRequested: number;
+    ridersServed: number;
+    repeatRiders: number;
+    repeatPct: number | null;
+    requests: number;
+    tripAttempts: number;
+    completedRides: number;
+    seatsCarried: number;
+    completionPct: number | null;
+    completionPctOfAttempts: number | null;
+    acceptedPct: number | null;
+    noDriverPct: number | null;
+    gmvPesewas: number;
+    avgFarePesewas: number | null;
+    carTrips: number;
+    ridersPerCarTrip: number | null;
+    activeDrivers: number;
+    medianAcceptSeconds: number | null;
+    medianPickupWaitMin: number | null;
+    commissionAtRatePesewas: number;
+    rateBps: number;
+  };
+  daily: Array<{ day: string; signups: number; requests: number; completed: number; completionPct: number | null; noDriver: number; gmvPesewas: number; carTrips: number; ridersRequesting: number }>;
+  byHour: Array<{ hour: number; requests: number; completed: number }>;
+  topPickups: Array<{ name: string; requests: number; completed: number }>;
+  topDropoffs: Array<{ name: string; requests: number; completed: number }>;
+  funnel: Array<{ step: string; riders: number; pctOfRegistered: number | null; pctOfPrevious: number | null }>;
+  retention: {
+    served: number;
+    repeat: number;
+    repeatPct: number | null;
+    cameBackBase: number;
+    cameBack: number;
+    cameBackPct: number | null;
+    neverServedBase: number;
+    neverServedCameBack: number;
+    neverServedCameBackPct: number | null;
+  };
+}
+
+export const getKpis = (token: string, period: string) => get<Kpis>(token, `/admin/kpis?${period}`);
+
+export interface CommissionTerms {
+  terms: { rateBps: number; waived: boolean; waivedFromDay: string | null; updatedAt: string | null; updatedBy: { id: string; name: string } | null };
+  bounds: { min: number; max: number };
+  launchDay: string;
+  totals: { waivedPesewas: number; waivedTrips: number; chargedPesewas: number; chargedTrips: number };
+}
+
+export const getCommissionTerms = (token: string) => get<CommissionTerms>(token, "/admin/commission-terms");
+
+export const saveCommissionTerms = (token: string, input: { rateBps: number; waived: boolean; waivedFromDay: string | null }) =>
+  request<CommissionTerms>("/admin/commission-terms", { method: "PUT", body: JSON.stringify(input) }, token);
+
+/** How a top-up was paid. */
+export type TopUpMethod = "MOMO" | "CASH";
+
+export interface TopUp {
+  id: string;
+  driver: { userId: string; driverId: string | null; name: string };
+  amountPesewas: number;
+  paidOn: string;
+  method: TopUpMethod;
+  note: string | null;
+  recordedBy: string;
+  createdAt: string;
+  removed: { at: string; by: string | null; reason: string | null } | null;
+}
+
+export interface DriverIncome {
+  userId: string;
+  driverId: string | null;
+  name: string;
+  plate: string | null;
+  trips: number;
+  riders: number;
+  faresPesewas: number;
+  commissionDuePesewas: number;
+  topUpsPesewas: number;
+  incomePesewas: number;
+}
+
+export interface Payouts {
+  generatedAt: string;
+  totals: { trips: number; faresPesewas: number; commissionDuePesewas: number; topUpsPesewas: number; incomePesewas: number; topUpCount: number };
+  perDriver: DriverIncome[];
+  perDay: Array<{ day: string; trips: number; faresPesewas: number; commissionDuePesewas: number; topUpsPesewas: number; incomePesewas: number }>;
+  topUps: TopUp[];
+}
+
+export const getPayouts = (token: string, period: string) => get<Payouts>(token, `/admin/payouts?${period}`);
+
+export const recordTopUp = (token: string, input: { driverId: string; amountPesewas: number; paidOn: string; method: TopUpMethod; note: string | null }) =>
+  post<{ topUp: { id: string; amountPesewas: number } }>(token, "/admin/payouts", input);
+
+export const removeTopUp = (token: string, id: string, reason: string) =>
+  post<{ topUp: { id: string } }>(token, `/admin/payouts/${encodeURIComponent(id)}/remove`, { reason });
+
+export type SettingsSectionKey = "serviceHours" | "dispatch" | "pricing" | "scheduled" | "commission" | "notifications" | "admins";
+
+export const getSettingsChanges = (token: string) =>
+  get<{ sections: Partial<Record<SettingsSectionKey, { at: string; action: string; by: string } | null>> }>(token, "/admin/settings/changes");
+
+export interface AdminAccount {
+  id: string;
+  name: string;
+  maskedPhone: string | null;
+  joinedAt: string;
+  isMe: boolean;
+}
+
+export const getAdmins = (token: string) => get<{ admins: AdminAccount[] }>(token, "/admin/admins");
+
+export const renameAdmin = (token: string, id: string, name: string) =>
+  request<{ admin: { id: string; name: string } }>(`/admin/admins/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify({ name }) }, token);

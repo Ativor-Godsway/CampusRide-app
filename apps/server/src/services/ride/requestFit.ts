@@ -93,6 +93,14 @@ export function openRequestWhere(now: Date): Prisma.RideWhereInput {
   };
 }
 
+/**
+ * Fill moving cars first (services/ride/movingFirst.ts): a request offered to
+ * one moving car only is hidden from every other driver until its hold ends.
+ */
+export function notHeldFrom(driverUserId: string, now: Date): Prisma.RideWhereInput {
+  return { OR: [{ movingHoldUntil: null }, { movingHoldUntil: { lte: now } }, { movingHoldDriverId: driverUserId }] };
+}
+
 /** Leaves out what this driver declined. A timed-out pop-up (TIMED_OUT) doesn't count; rows from before offers (no reason) were declines. */
 export function notDeclinedBy(driverUserId: string): Prisma.RideWhereInput {
   return {
@@ -202,6 +210,7 @@ export async function requestsThatFitCar(
     where: {
       ...openRequestWhere(now),
       ...notDeclinedBy(driver.userId),
+      AND: [notHeldFrom(driver.userId, now)],
       type: "SHARED",
       occupancy: { lte: free },
       // Demo riders only fill demo cars, real riders real cars.
@@ -357,6 +366,7 @@ export async function requestsForFreeDriver(
   const where = {
     ...openRequestWhere(now),
     ...notDeclinedBy(driver.userId),
+    AND: [notHeldFrom(driver.userId, now)],
     occupancy: { lte: CAR_CAPACITY },
     // Demo requests for demo drivers only, real ones for real drivers only.
     isReviewDemo: driver.isReviewDemo,

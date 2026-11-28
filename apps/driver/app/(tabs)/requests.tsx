@@ -231,6 +231,9 @@ export default function RequestsScreen() {
                     {formatCedis(item.farePesewas)}
                   </Text>
                 </View>
+                {item.onYourWay ? (
+                  <StatusChip label={item.onYourWay.label} tone="brand" icon="navigate" testID="on-your-way" />
+                ) : null}
                 <Text variant="bodyStrong">
                   {from} → {to}
                 </Text>

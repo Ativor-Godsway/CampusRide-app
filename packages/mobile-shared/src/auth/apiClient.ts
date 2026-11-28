@@ -1,5 +1,5 @@
 import axios from "axios";
-import { CLIENT_FEATURES_HEADER, WAIT_FEE_FEATURE } from "@rida/shared";
+import { AUTO_ADD_FEATURE, CLIENT_FEATURES_HEADER, WAIT_FEE_FEATURE } from "@rida/shared";
 import { getServerUrl } from "../config/serverUrl";
 import { getAccessToken, setAccessToken } from "./tokenStore";
 import { clearStoredRefreshToken, getStoredRefreshToken, setStoredRefreshToken } from "./storage";
@@ -35,7 +35,8 @@ api.interceptors.request.use((config) => {
   // What this JavaScript can show (an OTA update adds features without a new
   // store version): "wait-fee" — the pickup wait timer and fee (@rida/shared
   // rides/waitFee.ts). The server only charges a fee a rider was warned about.
-  config.headers[CLIENT_FEATURES_HEADER] = WAIT_FEE_FEATURE;
+  // wait-fee: the wait timer; auto-add: the driver app shows an auto-added rider with Undo (the server marks drivers only).
+  config.headers[CLIENT_FEATURES_HEADER] = `${WAIT_FEE_FEATURE},${AUTO_ADD_FEATURE}`;
   return config;
 });
 

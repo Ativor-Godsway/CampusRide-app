@@ -20,7 +20,7 @@ import { assertLocalApiUrl } from "../../db/devDbGuard";
 import { dbHostFromUrl } from "../../db/dbHostGuard";
 import { signAccessToken } from "../../services/auth/tokens";
 import { ensureSimRiders, MAX_SIM_RIDERS } from "../sim/simAccounts";
-import { SIM_SPOTS, planRequests, type SpotKey } from "./plan";
+import { SIM_SPOTS, planRequests, spotKey, type SpotKey } from "./plan";
 
 function arg(name: string): string | undefined {
   const i = process.argv.indexOf(`--${name}`);
@@ -84,7 +84,13 @@ async function main() {
       if (!places.has(spot.key)) console.log(`  ! no place found for ${spot.label}: left out`);
     }
     const spots = [...places.keys()];
-    const plan = planRequests({ count, minutes, sharedRatio, seed: Date.now() % 100_000, spots });
+    const from = spotKey(arg("from"));
+    const to = spotKey(arg("to"));
+    if ((arg("from") && !from) || (arg("to") && !to) || Boolean(from) !== Boolean(to)) {
+      throw new Error(`--from and --to go together, each one of: ${SIM_SPOTS.map((s) => s.key).join(", ")}`);
+    }
+    if (from && to && (!places.has(from) || !places.has(to))) throw new Error("That spot has no place on this database.");
+    const plan = planRequests({ count, minutes, sharedRatio, seed: Date.now() % 100_000, spots, route: from && to ? { pickup: from, dropoff: to } : null });
     const riders = await ensureSimRiders(prisma, count);
     console.log(`  ${count} requests over ${minutes} min · ${Math.round(sharedRatio * 100)}% Shared · at ${spots.map((s) => places.get(s)!.name).join(", ")}\n`);
 

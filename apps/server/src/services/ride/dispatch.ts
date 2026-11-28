@@ -21,6 +21,7 @@ import { liveDriverWhere } from "../zones/driverLiveness";
 import type { SearchScope } from "@rida/shared";
 import { forgetSearch, noteSearchDispatched, noteSearchOfferedTo } from "./searchProgress";
 import { pushSearchStatus } from "./searchStatus";
+import { runMovingCarsFirst } from "./movingFirst";
 
 /**
  * Returns the candidate set of drivers who could be dispatched a ride:
@@ -196,6 +197,11 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
   }
   // The search ends exactly when its window does, not at the next sweep.
   if (ride.status === "REQUESTED") scheduleRequestExpiry(prisma, ride.id, ride.broadcastStartedAt ?? ride.createdAt);
+  // Fill moving cars first (services/ride/movingFirst.ts): while one moving
+  // car has it, nobody else is offered it; a new Shared request goes to the
+  // best compatible moving car before anyone else.
+  if (ride.status === "REQUESTED" && ride.movingHoldUntil && ride.movingHoldUntil > new Date()) return [];
+  if (ride.status === "REQUESTED" && ride.movingStep === null && ride.type === "SHARED" && (await runMovingCarsFirst(prisma, ride.id))) return [];
   const plan = await dispatchPlan(prisma, ride);
   const eligible = plan.driverIds.map((userId) => ({ userId }));
   // The rider's search screen: who has it, how far it went, what was checked.
@@ -246,7 +252,7 @@ export async function broadcastRide(prisma: PrismaClient, rideId: string) {
 }
 
 /** The ride:broadcast payload: names and money, never a rider's coordinates. */
-function broadcastPayload(ride: RequestRow, pickupZoneName: string, dropoffZoneName: string) {
+export function broadcastPayload(ride: RequestRow, pickupZoneName: string, dropoffZoneName: string) {
   // The fare the rider was quoted, stored on their seat (services/ride/fares).
   const farePesewas = requestFare(ride.type, ride.passengers, ride.riderId);
   const { driverShare } = splitFare(farePesewas);
@@ -355,6 +361,8 @@ export async function claimIfOpen(
       "acceptedVia" = ${acceptedVia}
     WHERE id = ${rideId} AND status = 'REQUESTED' AND "driverId" IS NULL
       AND "isReviewDemo" = (SELECT u."isReviewDemo" FROM "User" u WHERE u.id = ${driverId})
+      -- Offered to one moving car only (services/ride/movingFirst.ts): nobody else may take it yet.
+      AND ("movingHoldUntil" IS NULL OR "movingHoldUntil" <= now() OR "movingHoldDriverId" = ${driverId})
     RETURNING *`;
   return rows[0] ?? null;
 }

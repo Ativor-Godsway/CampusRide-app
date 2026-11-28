@@ -295,7 +295,12 @@ export async function seatCancelledBy(
   prisma: PrismaClient,
   rideId: string,
   seatId: string,
-): Promise<{ seatCancelledBy: "driver" | "admin"; rebookedRideId: string | null } | null> {
+): Promise<{ seatCancelledBy: "driver" | "admin"; rebookedRideId: string | null; undone?: true } | null> {
+  // The driver undid an auto-add (services/ride/movingFirst.ts): the search
+  // carries on on the rider's own request. Apps follow rebookedRideId; current
+  // ones say nothing (undone), older ones show their "driver had to cancel" toast.
+  const undone = await prisma.ridePassenger.findUnique({ where: { id: seatId }, select: { undoneRequestRideId: true } });
+  if (undone?.undoneRequestRideId) return { seatCancelledBy: "driver", rebookedRideId: undone.undoneRequestRideId, undone: true };
   const [byDriver, byAdmin] = await Promise.all([
     prisma.driverCancellation.findFirst({
       where: { ridePassengerId: seatId },

@@ -7,7 +7,7 @@ import { DAY_MS, midnightOf, mondayOf, shortDay } from "./time";
  * link opens the same view.
  */
 
-export type PeriodPreset = "today" | "yesterday" | "this-week" | "last-week" | "this-month" | "last-30" | "all-time" | "custom";
+export type PeriodPreset = "today" | "yesterday" | "this-week" | "last-week" | "this-month" | "last-30" | "since-launch" | "all-time" | "custom";
 
 export interface Period {
   preset: PeriodPreset;
@@ -22,12 +22,16 @@ export const PRESET_LABELS: Record<PeriodPreset, string> = {
   "last-week": "Last week",
   "this-month": "This month",
   "last-30": "Last 30 days",
+  "since-launch": "Since launch",
   "all-time": "All time",
   custom: "Custom",
 };
 
 /** When records begin: the pilot's first rides (all time starts here). */
 export const ALL_TIME_FROM = new Date("2026-01-01T00:00:00.000Z");
+
+/** The public launch, Mon 23 Nov 2026 ("Since launch"). */
+export const LAUNCH_FROM = new Date("2026-11-23T00:00:00.000Z");
 
 /** The period a preset means at `now`. */
 export function presetPeriod(preset: Exclude<PeriodPreset, "custom">, now: number = Date.now()): Period {
@@ -55,6 +59,8 @@ export function presetPeriod(preset: Exclude<PeriodPreset, "custom">, now: numbe
     }
     case "last-30":
       return { preset, from: new Date(today - 29 * DAY_MS), to: new Date(today + DAY_MS) };
+    case "since-launch":
+      return { preset, from: LAUNCH_FROM, to: new Date(Math.max(today + DAY_MS, LAUNCH_FROM.getTime() + DAY_MS)) };
     case "all-time":
       return { preset, from: ALL_TIME_FROM, to: new Date(today + DAY_MS) };
   }

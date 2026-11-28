@@ -134,6 +134,9 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
             createdAt: true,
             arrivedAt: true,
             noShowAt: true,
+            pickedUpAt: true,
+            droppedOffAt: true,
+            waitFee: true,
             pickupLabel: true,
             dropoffLabel: true,
             pickupLat: true,
@@ -204,6 +207,8 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
     push(ride.matchedAt, "matched", ride.driver ? `${ride.driver.name} took it` : "A driver took it");
     for (const s of ride.passengers) {
       push(s.arrivedAt, "arrived", `Driver arrived for ${s.rider.name}`);
+      push(s.pickedUpAt, "picked_up", `${s.rider.name} picked up`);
+      push(s.droppedOffAt, "dropped_off", `${s.rider.name} dropped off`);
       push(s.noShowAt, "no_show", `${s.rider.name} didn't show`);
     }
     for (const c of driverCancels) {
@@ -272,6 +277,11 @@ export function registerAdminInsightRoutes(app: FastifyInstance, prisma: PrismaC
         joinedAt: s.createdAt.toISOString(),
         arrivedAt: s.arrivedAt?.toISOString() ?? null,
         noShowAt: s.noShowAt?.toISOString() ?? null,
+        pickedUpAt: s.pickedUpAt?.toISOString() ?? null,
+        droppedOffAt: s.droppedOffAt?.toISOString() ?? null,
+        /** Seats booked on this booking (1–3), and the wait fee charged on top (pesewas). */
+        seatCount: s.seats,
+        waitFeePesewas: s.waitFee ?? 0,
         /**
          * The leftover seat of a request merged into another car: the rider
          * really rides there (mergedIntoRideId). Cancelling it cancels that one too.

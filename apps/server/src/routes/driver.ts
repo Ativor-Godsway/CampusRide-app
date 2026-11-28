@@ -14,7 +14,7 @@ import {
   encodePolyline,
   firstName,
   indexRoutes,
-  onboardAddNotice,
+  onYourWayLabel,
   previewAddRider,
   splitFare,
   earningsTotals,
@@ -29,7 +29,7 @@ import {
 import { requireAuth } from "../middleware/auth";
 import { isValidDriverPhotoUrl } from "../services/uploads/cloudinarySignature";
 import { config } from "../config";
-import { claimIfOpen, closeOffer, reofferToDriver } from "../services/ride/dispatch";
+import { claimIfOpen } from "../services/ride/dispatch";
 import { paidFareTotal, requestFare, type RideKind } from "../services/ride/fares";
 import { ACCEPTED_VIA, departRide, addRiderToCar, FILLABLE_STATUSES, type AcceptedVia } from "../services/ride/assembly";
 import { getStoredZoneRoutes, getZoneAdjacency, getZoneMap, servedZoneId } from "../services/zones/zoneCache";
@@ -51,6 +51,7 @@ import {
   driverCar,
   notDeclinedBy,
   openRequestWhere,
+  notHeldFrom,
   requestsForFreeDriver,
   requestsThatFitCar,
   seatFit,
@@ -85,6 +86,9 @@ import { RULES } from "../rateLimit/rules";
 import { checkDriverPosition, hasActiveTrip, lastPositionData, parseDriverPoint } from "../services/zones/driverPosition";
 import { closeDriverSession, openDriverSession } from "../services/stats/driverSessions";
 import { commissionBlock } from "../services/commission/enforcement";
+import { announceRiderAdded, detourCheck } from "../services/ride/riderAdded";
+import { UndoAddError, addedToCar, movingOfferAccepted, releaseHold, undoAutoAdd } from "../services/ride/movingFirst";
+import { movingFirstSettings } from "../services/ride/searchWindow";
 import { driverSchedule } from "../services/scheduled/views";
 import { recordOfferAnswer } from "../services/stats/rideOffers";
 import {
@@ -132,6 +136,9 @@ const SCHEMAS = {
   reject: { params: idParams, body: object({ reason: oneOf(["DECLINED", "TIMED_OUT"]) }) },
   eligible: { querystring: object({ lat: latitude, lng: longitude }) },
   board: { querystring: object({ lat: latitude, lng: longitude }) },
+  undoAdd: { params: object({ id, passengerId: id }, ["id", "passengerId"]), body: empty },
+  driverSettings: noInput,
+  saveDriverSettings: { body: object({ autoAddRiders: boolean }, ["autoAddRiders"]) },
   fillSuggestions: { params: idParams, querystring: empty },
   addPreview: {
     params: idParams,
@@ -548,6 +555,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     const completed = { driverId: userId, status: "COMPLETED" as const };
     const seatFares = { select: { status: true, lockedFare: true, fareCharged: true } };
+    // The commission actually recorded on the trip (its rate; none if waived).
+    const ledgerSelect = { select: { amountPesewas: true, waived: true } };
     const [rides, allRides] = await Promise.all([
       prisma.ride.findMany({
         where: since ? { ...completed, OR: [{ completedAt: { gte: since } }, { completedAt: null, createdAt: { gte: since } }] } : completed,
@@ -555,16 +564,26 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           pickupZone: { select: { name: true } },
           dropoffZone: { select: { name: true } },
           passengers: seatFares,
+          commissionLedger: ledgerSelect,
         },
         orderBy: { completedAt: "desc" },
       }),
       // All time, for the totals: only what the fares need.
-      since ? prisma.ride.findMany({ where: completed, select: { type: true, passengers: seatFares } }) : null,
+      since ? prisma.ride.findMany({ where: completed, select: { type: true, passengers: seatFares, commissionLedger: ledgerSelect } }) : null,
     ]);
 
-    const money = (ride: { type: RideKind; passengers: Parameters<typeof paidFareTotal>[1] }) => {
+    // The driver's share: the fare less the commission recorded on the trip
+    // (at the rate then; nothing while commission was waived). A trip with
+    // no record (not cash) splits at the standard rate.
+    const money = (ride: {
+      type: RideKind;
+      passengers: Parameters<typeof paidFareTotal>[1];
+      commissionLedger: { amountPesewas: number; waived: boolean } | null;
+    }) => {
       const facePesewas = paidFareTotal(ride.type, ride.passengers);
-      return { facePesewas, driverGrossPesewas: splitFare(facePesewas).driverShare };
+      const l = ride.commissionLedger;
+      const share = l ? facePesewas - (l.waived ? 0 : l.amountPesewas) : splitFare(facePesewas).driverShare;
+      return { facePesewas, driverGrossPesewas: share };
     };
 
     const items = rides.map((ride) => ({
@@ -591,7 +610,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // never create a ledger row (the commission is taken at source). It is
     // shown beside the totals, never subtracted from the driver's share again.
     const ledger = await prisma.commissionLedger.aggregate({
-      where: { driverUserId: userId },
+      where: { driverUserId: userId, waived: false },
       _sum: { amountPesewas: true },
       _count: true,
     });
@@ -831,6 +850,12 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       create: { rideId, driverUserId: userId, reason },
     });
     void recordOfferAnswer(prisma, rideId, userId, reason === "TIMED_OUT" ? "TIMED_OUT" : "DECLINED");
+    // The exclusive moving-car offer, passed on: normal dispatch now, not after the hold.
+    if (ride.movingHoldDriverId === userId && ride.movingStep === "OFFERED") {
+      void releaseHold(prisma, rideId, userId, reason === "TIMED_OUT" ? "EXPIRED" : "DECLINED").catch((err) =>
+        request.log.warn({ err, rideId }, "moving first: release failed"),
+      );
+    }
 
     return reply.code(200).send({ rejected: true, rideId });
   });
@@ -1065,6 +1090,45 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
    * Accepting: POST /rides/:id/claim or /rides/:id/add-passenger with
    * `source: "BOARD"`.
    */
+  /**
+   * Undo an auto-added rider (fill moving cars first, within 15 s, before
+   * pickup): no penalty; their request searches again at once with normal
+   * dispatch, never offered to this driver again. Someone else's car: 404.
+   */
+  app.post(
+    "/rides/:id/passengers/:passengerId/undo-add",
+    { onRequest: requireAuth, preValidation: bodyOptional, schema: SCHEMAS.undoAdd },
+    async (request, reply) => {
+      if (!(await requireDriver(request, reply))) return;
+      const { id, passengerId } = request.params as { id: string; passengerId: string };
+      try {
+        const out = await undoAutoAdd(prisma, request.user!.userId, id, passengerId);
+        return reply.code(200).send({ undone: true, ...out });
+      } catch (err) {
+        if (err instanceof UndoAddError) {
+          return err.status === 404 ? rideNotFound(reply) : refuse(reply, err.status, err.code, err.message);
+        }
+        throw err;
+      }
+    },
+  );
+
+  /** The driver's settings: "Auto-add riders on my way" (their choice, else the admin default). */
+  app.get("/driver/settings", { onRequest: requireAuth, schema: SCHEMAS.driverSettings }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+    const driver = await prisma.driver.findUnique({ where: { userId: request.user!.userId }, select: { autoAddRiders: true } });
+    const fallback = movingFirstSettings().autoAddDefault;
+    return reply.send({ autoAddRiders: driver?.autoAddRiders ?? fallback, autoAddDefault: fallback, movingFirstEnabled: movingFirstSettings().movingFirstEnabled });
+  });
+
+  app.patch("/driver/settings", { onRequest: requireAuth, schema: SCHEMAS.saveDriverSettings }, async (request, reply) => {
+    if (!(await requireDriver(request, reply))) return;
+    const { autoAddRiders } = request.body as { autoAddRiders: boolean };
+    await prisma.driver.update({ where: { userId: request.user!.userId }, data: { autoAddRiders } });
+    const fallback = movingFirstSettings().autoAddDefault;
+    return reply.send({ autoAddRiders, autoAddDefault: fallback, movingFirstEnabled: movingFirstSettings().movingFirstEnabled });
+  });
+
   app.get("/driver/requests/board", { onRequest: requireAuth, schema: SCHEMAS.board }, async (request, reply) => {
     if (!(await requireDriver(request, reply))) return;
     const userId = request.user!.userId;
@@ -1099,6 +1163,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
       where: {
         ...openRequestWhere(now),
         ...notDeclinedBy(userId),
+        AND: [notHeldFrom(userId, now)],
         isReviewDemo: driver.user.isReviewDemo,
         ...(car ? { id: { not: car.id }, riderId: { notIn: car.passengers.map((p) => p.riderId) } } : {}),
       },
@@ -1120,6 +1185,11 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         const dropoffZoneName = zoneMap.get(ride.dropoffZoneId)?.name ?? "";
         const refusal = car ? seatFit(ride, car) : seatFit(ride, null);
         const canTake = fitting ? fitting.has(ride.id) : refusal === null;
+        // Fits the car this driver is driving: top of the board, "On your way · +3 min".
+        const added =
+          car && canTake
+            ? addedToCar(car, driverPoint ?? (driver.lastLat != null && driver.lastLng != null ? { latitude: driver.lastLat, longitude: driver.lastLng } : null), ride, zoneMap)
+            : null;
         return {
           rideId: ride.id,
           riderFirstName: firstName(ride.rider.name),
@@ -1140,10 +1210,17 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           offerSeconds: config.driverOfferSeconds,
           boardCanTake: canTake,
           boardNote: canTake ? null : boardNote(refusal, ride.occupancy, carSummary?.freeSeats ?? 0),
+          onYourWay: added?.fits ? { extraMinutes: Math.round(added.extraMinutes * 10) / 10, label: onYourWayLabel(added.extraMinutes) } : null,
         };
       }),
     );
-    rides.sort((a, b) => (a.pickupDistanceMeters ?? Infinity) - (b.pickupDistanceMeters ?? Infinity) || b.createdAt.localeCompare(a.createdAt));
+    rides.sort(
+      (a, b) =>
+        Number(b.onYourWay !== null) - Number(a.onYourWay !== null) ||
+        (a.onYourWay && b.onYourWay ? a.onYourWay.extraMinutes - b.onYourWay.extraMinutes : 0) ||
+        (a.pickupDistanceMeters ?? Infinity) - (b.pickupDistanceMeters ?? Infinity) ||
+        b.createdAt.localeCompare(a.createdAt),
+    );
     return reply.code(200).send({ open: true, online: true, car: carSummary, rides, scheduled });
   });
 
@@ -1207,15 +1284,25 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
         farePesewas: requestFare("SHARED", r.passengers, r.riderId),
         /** Seats this request needs (1 from every app today). */
         seats: r.occupancy,
+        /** Fill moving cars first: offered to this driver only, until then (ISO), adding about this much. */
+        movingOffer:
+          r.movingHoldDriverId === userId && r.movingHoldUntil && r.movingHoldUntil > new Date()
+            ? { until: r.movingHoldUntil.toISOString(), extraMinutes: Math.round(((r.movingDetourMeters ?? 0) / ((20_000) / 60)) * 10) / 10 }
+            : null,
       };
     };
 
-    const suggestions = [
+    const ranked = [
       ...compatibleRanked
         .map((r) => byId.get(r.id))
         .filter((r): r is NonNullable<typeof r> => r !== undefined)
         .map((r) => toSuggestion(r, true)),
       ...fitting.filter((r) => !compatibleIds.has(r.id)).map((r) => toSuggestion(r, false)),
+    ];
+    // The exclusive moving-car offer comes first, and counts as compatible.
+    const suggestions = [
+      ...ranked.filter((x) => x.movingOffer).map((x) => ({ ...x, compatible: true })),
+      ...ranked.filter((x) => !x.movingOffer),
     ];
 
     // isActivePassengerStatus (WAITING/ARRIVED/PICKED_UP) — a passenger the
@@ -1408,79 +1495,29 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     const from = Number.isFinite(lat) && Number.isFinite(lng) && body.lat !== undefined ? { latitude: lat, longitude: lng } : null;
 
     try {
-      const [zones, storedRoutes, places, standing] = await Promise.all([
-        getZoneMap(prisma),
-        getStoredZoneRoutes(prisma),
-        getActivePlaces(prisma),
-        prisma.driver.findUnique({ where: { userId }, select: { isOnline: true, isApproved: true } }),
-      ]);
+      const standing = await prisma.driver.findUnique({ where: { userId }, select: { isOnline: true, isApproved: true } });
       // Offline drivers are offered nothing, so they add no one either.
       if (!standing?.isOnline || !standing.isApproved) {
         return refuse(reply, 403, "NOT_ONLINE", "Go online to accept requests.");
       }
       // Worked out inside the transaction, with the car locked, so it is
-      // exactly the car the rider joins.
-      let onboardDelaySeconds: Record<string, number> = {};
-      let requestPickupZoneId: string | null = null;
-      let requestRiderId: string | null = null;
-      const car = await addRiderToCar(prisma, userId, rideId, requestRideId, {
-        acceptedVia: body.source ?? null,
-        checkCar: ({ passengers, candidate }) => {
-          requestPickupZoneId = candidate.pickupZoneId;
-          requestRiderId = candidate.riderId;
-          // Built exactly as GET /add-preview builds it, so the add is
-          // refused for the same reasons the preview showed.
-          const preview = previewAddRider({
-            passengers: passengers.map((p) => ({
-              id: p.id,
-              pickupZoneId: p.pickupZoneId,
-              dropoffZoneId: p.dropoffZoneId,
-              lockedFare: p.lockedFare,
-              status: p.status as PassengerStatus,
-              ...pinFieldsOf(p),
-            })),
-            candidate: {
-              requestRideId,
-              pickupZoneId: candidate.pickupZoneId,
-              dropoffZoneId: candidate.dropoffZoneId,
-              farePesewas: candidate.quotedFare,
-              ...approximatePins(candidate, zones, places),
-            },
-            zones: [...zones.values()],
-            routes: indexRoutes(storedRoutes),
-            from,
-          });
-          if (preview && !preview.withinDetourLimit) throw new DetourTooLongError(preview.maxOnboardDelaySeconds);
-          onboardDelaySeconds = preview?.onboardDelaySeconds ?? {};
-        },
-      });
+      // exactly the car the rider joins (services/ride/riderAdded.ts).
+      const { checkCar, outcome, zones } = await detourCheck(prisma, requestRideId, from);
+      const car = await addRiderToCar(prisma, userId, rideId, requestRideId, { acceptedVia: body.source ?? null, checkCar });
 
       if (car.changed) {
-        if (requestPickupZoneId)
-          closeOffer(prisma, { id: requestRideId, pickupZoneId: requestPickupZoneId, driverId: userId }, "TAKEN");
-        // #7 merged-rider reach: the absorbed request is now CANCELLED /
-        // MERGED_INTO_ANOTHER_RIDE. That rider's app is still tracking it, so
-        // tell its room — with the reason and this car, which the client
-        // follows. A bare "CANCELLED" showed them "Ride cancelled" (2026-11-05).
-        emitRideEvent(requestRideId, "ride:status", {
-          rideId: requestRideId,
-          status: "CANCELLED",
-          cancelReason: "MERGED_INTO_ANOTHER_RIDE",
-          mergedIntoRideId: rideId,
+        // The exclusive moving-car offer, accepted: "You've joined Kofi's car".
+        const held = car.absorbed;
+        const fromMovingOffer =
+          held?.movingStep === "OFFERED" && held.movingHoldDriverId === userId && held.movingHoldUntil !== null && held.movingHoldUntil > new Date();
+        announceRiderAdded(prisma, {
+          carId: rideId,
+          driverUserId: userId,
+          requestRideId,
+          outcome,
+          passengers: car.passengers,
+          ...(fromMovingOffer ? { riderPush: () => void movingOfferAccepted(prisma, rideId, requestRideId, userId) } : {}),
         });
-        if (requestRiderId) notifyRider(prisma, requestRiderId, "DRIVER_ASSIGNED", rideId, { driverUserId: userId });
-        // One seat fewer: this driver's lists are worked out again.
-        reofferToDriver(prisma, userId);
-        // Riders already in the car hear about the detour.
-        for (const p of car.passengers) {
-          const delay = onboardDelaySeconds[p.id];
-          if (p.status !== "PICKED_UP" || delay === undefined) continue;
-          emitToRider(p.riderId, "ride:car_notice", {
-            rideId,
-            message: onboardAddNotice(delay),
-            delayMinutes: Math.max(1, Math.round(delay / 60)),
-          });
-        }
       }
 
       return reply.code(200).send({

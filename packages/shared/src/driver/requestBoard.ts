@@ -20,6 +20,8 @@ export interface BoardRequest {
   dropoffZoneName: string;
   pickupDistanceMeters?: number | null;
   createdAt: string;
+  /** Fits the car this driver is driving (fill moving cars first): listed first, least added time first. */
+  onYourWay?: { extraMinutes: number } | null;
 }
 
 export interface BoardChip {
@@ -64,7 +66,10 @@ export function filterBoard<T extends BoardRequest>(items: readonly T[], filter:
     .filter((r) => filter.dropoff === BOARD_ALL || r.dropoffZoneId === filter.dropoff)
     .sort(
       (a, b) =>
-        (a.pickupDistanceMeters ?? Infinity) - (b.pickupDistanceMeters ?? Infinity) || b.createdAt.localeCompare(a.createdAt),
+        Number(Boolean(b.onYourWay)) - Number(Boolean(a.onYourWay)) ||
+        (a.onYourWay && b.onYourWay ? a.onYourWay.extraMinutes - b.onYourWay.extraMinutes : 0) ||
+        (a.pickupDistanceMeters ?? Infinity) - (b.pickupDistanceMeters ?? Infinity) ||
+        b.createdAt.localeCompare(a.createdAt),
     );
 }
 

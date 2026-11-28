@@ -1,6 +1,5 @@
 import type { PrismaClient } from "@prisma/client";
 import {
-  splitFare,
   type PaymentMethod,
   type PaymentStatus,
   type RideCompletedFareSummary,
@@ -9,6 +8,7 @@ import {
 import { emitToRider } from "../../realtime/rideSocket";
 import { getRidePaymentSummary } from "../payment/paymentFlow";
 import { notifyUssdRiders } from "../sms/notifyUssdRiders";
+import { commissionFor, currentCommissionTerms, isWaivedAt } from "../commission/settings";
 import { paidFareTotal } from "./fares";
 
 /**
@@ -62,11 +62,15 @@ export async function finalizeRideCompletion(
     // commission on what was actually collected. Shared: the riders dropped
     // off (occupancy drops as seats are cancelled, and can be 0 at the end);
     // a trip that dropped nobody off owes nothing. Same rule as the history.
-    const { commission } = splitFare(paidFareTotal(ride.type, passengers));
+    // At the rate in force (admin site, Payouts & commission), and marked
+    // waived while commission is waived: then it is kept for the record but
+    // never owed (services/commission/settings.ts).
+    const terms = await currentCommissionTerms(prisma);
+    const commission = commissionFor(paidFareTotal(ride.type, passengers), terms.rateBps);
     // createMany + skipDuplicates is a single INSERT … ON CONFLICT DO NOTHING
     // (an upsert is two round trips); repeating it is harmless.
     await prisma.commissionLedger.createMany({
-      data: [{ driverUserId, rideId: ride.id, amountPesewas: commission }],
+      data: [{ driverUserId, rideId: ride.id, amountPesewas: commission, rateBps: terms.rateBps, waived: isWaivedAt(terms, new Date()) }],
       skipDuplicates: true,
     });
   }

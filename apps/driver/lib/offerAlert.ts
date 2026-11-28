@@ -36,6 +36,45 @@ export function alertNewOffer(): void {
   }
 }
 
+let addedPlayer: AudioPlayer | null = null;
+
+/**
+ * A rider was AUTO-ADDED to the trip (fill moving cars first): a different
+ * sound from a request — three rising notes (assets/sounds/rider-added.wav)
+ * — and a different buzz: a warning pulse, then two firm taps.
+ */
+export function alertRiderAdded(): void {
+  void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+  setTimeout(() => void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}), 220);
+  setTimeout(() => void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {}), 380);
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- bundled asset
+    addedPlayer ??= createAudioPlayer(require("../assets/sounds/rider-added.wav"));
+    addedPlayer.volume = 1;
+    void addedPlayer.seekTo(0);
+    addedPlayer.play();
+  } catch {
+    // The banner still shows.
+  }
+}
+
+/** An exclusive "on your way" offer while driving: louder — the chime twice at full volume, and a heavy buzz. */
+export function alertMovingOffer(): void {
+  alertNewOffer();
+  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+  setTimeout(() => {
+    try {
+      if (player) {
+        player.volume = 1;
+        void player.seekTo(0);
+        player.play();
+      }
+    } catch {
+      // Once is enough.
+    }
+  }, 650);
+}
+
 /** A lighter tap for the driver's own Accept / Decline. */
 export function tapFeedback(): void {
   void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});

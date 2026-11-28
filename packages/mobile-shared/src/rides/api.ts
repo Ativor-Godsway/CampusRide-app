@@ -212,6 +212,10 @@ export interface GetRideResult {
   seatCancelledBy?: "driver" | "admin";
   /** With seatCancelledBy "driver": the new request their search moved to. */
   rebookedRideId?: string | null;
+  /** The driver undid an auto-add: the search simply carries on (say nothing). */
+  undone?: boolean;
+  /** Joined a car already on its way (fill moving cars first), until pickup: the estimate then. */
+  joinedMovingCar?: { pickupEtaMinutes: number } | null;
 }
 
 export async function getRide(rideId: string): Promise<GetRideResult> {

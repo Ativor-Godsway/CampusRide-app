@@ -212,7 +212,7 @@ export function registerAdminDashboardRoutes(app: FastifyInstance, prisma: Prism
           trips: trips.length,
           sharedTrips: trips.filter((t) => t.type === "SHARED").length,
           faresPesewas: trips.reduce((s, t) => s + t.farePesewas, 0),
-          commissionPesewas: trips.reduce((s, t) => s + t.commissionPesewas, 0),
+          commissionPesewas: trips.reduce((s, t) => s + t.commissionDuePesewas, 0),
         },
         cashOutstandingPesewas: owed.pesewas,
         hourly: { requests: perHour, driversOnline: driversOnlineByHour(sessions, p, now) },

@@ -45,13 +45,18 @@ export function rideTypeLabel(type: string): string {
 
 /** "Ama O." for tables (the full name is in the detail). */
 export function shortName(name: string): string {
+  // Investor view's labels ("Rider #4821", "Driver D317") are already short.
+  if (MASKED_LABEL.test(name)) return name;
   const parts = name.trim().split(/\s+/);
   if (parts.length < 2) return name;
   return `${parts[0]} ${parts[parts.length - 1]![0]}.`;
 }
 
-/** "KA" for an avatar. */
+const MASKED_LABEL = /^(Rider #|Driver D|Person #)\S+$/;
+
+/** "KA" for an avatar ("R" / "D" for investor view's labels). */
 export function initials(name: string): string {
+  if (MASKED_LABEL.test(name)) return name[0]!;
   const parts = name.trim().split(/\s+/).filter(Boolean);
   return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1]![0] : "")).toUpperCase() || "?";
 }

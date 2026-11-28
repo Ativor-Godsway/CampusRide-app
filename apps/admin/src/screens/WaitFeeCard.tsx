@@ -73,19 +73,18 @@ export function WaitFeeCard() {
   }
 
   return (
-    <div className="inset">
-      <h3>Pickup wait fee</h3>
-      <p className="muted">
+    <div className="stack">
+      <p className="section-help">
         When the driver taps Arrived within about 100 m of the pickup, the rider gets a free wait. If they aren&rsquo;t picked up by the end of it, a flat
         fee is added to their fare (theirs only), and only if they were told: the arrival notification reached their phone or their app shows the timer.
         &ldquo;Rider didn&rsquo;t show&rdquo; opens after the no-show wait; a no-show pays nothing.
       </p>
       {error ? <p className="error-text" role="alert">{error}</p> : null}
-      {notice ? <p className="muted">{notice}</p> : null}
+      {notice ? <p className="saved-note">✓ {notice}</p> : null}
       {!loaded ? (
         <p className="muted">Loading…</p>
       ) : (
-        <form className="settings-form" onSubmit={(e) => void save(e)}>
+        <form className="stack" onSubmit={(e) => void save(e)}>
           <div className="filters">
             <label className="field">
               <span>Free wait (m:ss)</span>
@@ -101,16 +100,21 @@ export function WaitFeeCard() {
             </label>
           </div>
           {problem ? <p className="error-text">{problem}</p> : null}
-          <p className="muted small">
-            {loaded.settings.updatedAt
-              ? `Last changed ${dayAndTime(loaded.settings.updatedAt)}${loaded.settings.updatedBy ? ` by ${loaded.settings.updatedBy.name}` : ""}.`
-              : `Not changed yet: the defaults, ${clock(loaded.defaults.freeWaitSeconds)} free, ${cedis(loaded.defaults.feePesewas)}, no-show after ${loaded.defaults.noShowMinutes} min.`}
-          </p>
-          <p>
-            <button type="submit" className="tonal-button" disabled={busy || !!problem || unchanged}>
-              {busy ? "Saving…" : "Save"}
+          {!problem ? (
+            <p className="example">
+              Example: the driver arrives at 10:00 and the rider gets in at 10:{String(Math.floor((loaded.settings.freeWaitSeconds + 60) / 60)).padStart(2, "0")} → their fare goes up by {cedis(loaded.settings.feePesewas)}.
+            </p>
+          ) : null}
+          <div className="row-between">
+            <span className="section-meta">
+              {loaded.settings.updatedAt
+                ? `Last changed by ${loaded.settings.updatedBy?.name ?? "an admin"} · ${dayAndTime(loaded.settings.updatedAt)}`
+                : `Not changed yet: the defaults, ${clock(loaded.defaults.freeWaitSeconds)} free, ${cedis(loaded.defaults.feePesewas)}, no-show after ${loaded.defaults.noShowMinutes} min.`}
+            </span>
+            <button type="submit" className="primary-button" disabled={busy || !!problem || unchanged}>
+              {busy ? "Saving…" : "Save wait fee"}
             </button>
-          </p>
+          </div>
         </form>
       )}
     </div>

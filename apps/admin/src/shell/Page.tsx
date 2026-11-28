@@ -5,25 +5,41 @@ import { Link } from "../lib/router";
 import { ago } from "../lib/time";
 import { useNow } from "../lib/usePolled";
 import { useShell } from "./ShellContext";
-import { GlobalSearch } from "./GlobalSearch";
+import { useInvestorView } from "../lib/useInvestorView";
 
-const LAUNCH_WORDS = { OFF: "Off", COUNTDOWN: "Countdown", LIVE: "Live" } as const;
+/** Settings → Display: the "Investor view" switch (masks people everywhere, hides audit details and settings edits). */
+export function InvestorSwitch() {
+  const { on, toggle } = useInvestorView();
+  return (
+    <div className="switch-row">
+      <button type="button" role="switch" aria-checked={on} aria-label="Investor view" className="big-switch" onClick={toggle} />
+      <span>
+        <strong>Investor view {on ? "on" : "off"}</strong>
+        <span className="muted small">
+          For a screen share: riders, drivers and admins become &ldquo;Rider #4821&rdquo; and &ldquo;Driver D317&rdquo;, phone numbers &ldquo;054 *** **46&rdquo;,
+          plates and photos are hidden, the audit log is hidden and settings can&apos;t be changed. A small badge shows in the corner while it&apos;s on.
+          It stays on until you switch it off or sign out.
+        </span>
+      </span>
+    </div>
+  );
+}
 
-/** "Updated 12 s ago · Refresh". */
+/** "Updated 2 min ago" and a small refresh button, in the page header's corner. */
 export function Freshness({ updatedAt, onRefresh, loading }: { updatedAt: number | null; onRefresh: () => void; loading?: boolean }) {
-  const now = useNow(5000);
+  const now = useNow(15_000);
   return (
     <span className="freshness">
       <span className="muted" aria-live="off">
         {loading && !updatedAt ? "Loading…" : updatedAt ? `Updated ${ago(updatedAt, now)}` : ""}
       </span>
-      <button type="button" className="text-button small" onClick={onRefresh} disabled={loading}>
-        <Icon name="refresh" size={14} />
-        Refresh
+      <button type="button" className={`icon-button refresh-button${loading ? " spinning" : ""}`} onClick={onRefresh} disabled={loading} aria-label="Refresh" title="Refresh">
+        <Icon name="refresh" size={16} />
       </button>
     </span>
   );
 }
+
 
 /**
  * Every page's frame: the top bar (title 28/800 and subtitle, the page's own
@@ -32,7 +48,6 @@ export function Freshness({ updatedAt, onRefresh, loading }: { updatedAt: number
  */
 export function Page({ title, subtitle, controls, children, wide = false }: { title: string; subtitle?: ReactNode; controls?: ReactNode; children: ReactNode; wide?: boolean }) {
   const { summary } = useShell();
-  const mode = summary?.launchMode ?? null;
   return (
     <>
       <header className="topbar">
@@ -40,16 +55,7 @@ export function Page({ title, subtitle, controls, children, wide = false }: { ti
           <h1>{title}</h1>
           {subtitle ? <p className="subtitle">{subtitle}</p> : null}
         </div>
-        <div className="topbar-tools">
-          {controls}
-          {mode ? (
-            <Link to="/settings" className={`launch-pill launch-${mode.toLowerCase()}`} aria-label={`Launch mode: ${LAUNCH_WORDS[mode]}. Open Settings`}>
-              <span className="dot" aria-hidden="true" />
-              Launch mode: {LAUNCH_WORDS[mode]}
-            </Link>
-          ) : null}
-          <GlobalSearch />
-        </div>
+        {controls ? <div className="topbar-tools">{controls}</div> : null}
       </header>
       {summary?.database === "down" ? (
         <div className="page-alert">
@@ -58,6 +64,17 @@ export function Page({ title, subtitle, controls, children, wide = false }: { ti
       ) : null}
       <div className={`page${wide ? " page-wide" : ""}`}>{children}</div>
     </>
+  );
+}
+
+/** While investor view is on: a small badge in the corner (it is switched in Settings → Display). */
+export function InvestorBadge() {
+  const { on } = useInvestorView();
+  if (!on) return null;
+  return (
+    <Link to="/settings?section=display" className="investor-badge" title="Names, phone numbers and plates are hidden. Switch it off in Settings → Display.">
+      <Icon name="eye" size={14} /> Investor view
+    </Link>
   );
 }
 

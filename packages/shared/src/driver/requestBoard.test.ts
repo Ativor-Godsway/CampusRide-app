@@ -108,3 +108,21 @@ describe("Add to my trip: what a selection may hold", () => {
     expect(boardTakeSummary([{ rideId: "a", outcome: "refused", message: "Your car is full." }])).toBe("Your car is full.");
   });
 });
+
+describe("requests on the driver's way", () => {
+  it("come first, least added time first, then by distance", () => {
+    const r = (id: string, m: number | null, extra?: number) => ({
+      rideId: id,
+      type: "SHARED" as const,
+      pickupZoneId: "Z",
+      pickupZoneName: "Z",
+      dropoffZoneId: "Y",
+      dropoffZoneName: "Y",
+      pickupDistanceMeters: m,
+      createdAt: "2026-11-28T09:00:00Z",
+      onYourWay: extra === undefined ? null : { extraMinutes: extra },
+    });
+    const out = filterBoard([r("near", 100), r("onway-3", 900, 3), r("onway-1", 1200, 1)], { pickup: "ALL", dropoff: "ALL" });
+    expect(out.map((x) => x.rideId)).toEqual(["onway-1", "onway-3", "near"]);
+  });
+});

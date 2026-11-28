@@ -16,12 +16,10 @@ function d(value: Date | string | number): Date {
   return value instanceof Date ? value : new Date(value);
 }
 
-/** "5:42 pm". */
+/** "17:42" (24-hour, Ghana time). */
 export function clock(value: Date | string | number): string {
   const t = d(value);
-  const h = t.getUTCHours();
-  const m = String(t.getUTCMinutes()).padStart(2, "0");
-  return `${h % 12 === 0 ? 12 : h % 12}:${m} ${h < 12 ? "am" : "pm"}`;
+  return `${String(t.getUTCHours()).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")}`;
 }
 
 /** "6 pm", "7 am" for an hour of the day (0–23). */
@@ -43,14 +41,34 @@ export function longDay(value: Date | string | number): string {
   return `${LONG_DAYS[t.getUTCDay()]} ${t.getUTCDate()} ${LONG_MONTHS[t.getUTCMonth()]}`;
 }
 
-/** "Fri 30 Oct, 6:10 pm". */
-export function dayAndTime(value: Date | string | number): string {
-  return `${shortDay(value)}, ${clock(value)}`;
+/**
+ * A moment the human way, Ghana time: "Today 09:14", "Yesterday 18:02",
+ * "Fri 30 Oct 18:10" (with the year when it isn't this year's).
+ */
+export function dayAndTime(value: Date | string | number, now: number = Date.now()): string {
+  const t = d(value);
+  const today = midnightOf(now).getTime();
+  const day = midnightOf(t).getTime();
+  if (day === today) return `Today ${clock(t)}`;
+  if (day === today - DAY_MS) return `Yesterday ${clock(t)}`;
+  if (day === today + DAY_MS) return `Tomorrow ${clock(t)}`;
+  const year = t.getUTCFullYear() !== new Date(now).getUTCFullYear() ? ` ${t.getUTCFullYear()}` : "";
+  return `${shortDay(t)}${year} ${clock(t)}`;
 }
 
-/** "5:42 pm" today, "Fri 30 Oct, 6:10 pm" another day. */
+/** "17:42" today, else as dayAndTime. */
 export function whenShort(value: Date | string | number, now: number = Date.now()): string {
-  return sameDay(d(value), new Date(now)) ? clock(value) : dayAndTime(value);
+  return sameDay(d(value), new Date(now)) ? clock(value) : dayAndTime(value, now);
+}
+
+/** "Today", "Yesterday", "Mon 23 Nov" for a day ("YYYY-MM-DD" or a moment). */
+export function humanDay(value: Date | string | number, now: number = Date.now()): string {
+  const t = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T00:00:00Z`) : d(value);
+  const today = midnightOf(now).getTime();
+  const day = midnightOf(t).getTime();
+  if (day === today) return "Today";
+  if (day === today - DAY_MS) return "Yesterday";
+  return shortDay(t);
 }
 
 export function sameDay(a: Date, b: Date): boolean {

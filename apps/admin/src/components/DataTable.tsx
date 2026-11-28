@@ -39,6 +39,9 @@ export function DataTable<T>({
   paging,
   initialSort,
   caption,
+  searchText,
+  searchLabel = "Search this table",
+  footer,
 }: {
   columns: Column<T>[];
   rows: T[] | null;
@@ -54,16 +57,27 @@ export function DataTable<T>({
   paging?: ServerPaging;
   initialSort?: { key: string; dir: "asc" | "desc" };
   caption?: string;
+  /** Turns on the search box above the table: the text a row is searched by. */
+  searchText?: (row: T) => string;
+  searchLabel?: string;
+  /** A totals row under the rows ("All drivers"), one cell per column key. */
+  footer?: Record<string, ReactNode>;
 }) {
   const [sort, setSort] = useState(initialSort ?? null);
   const [page, setPage] = useState(1);
+  const [term, setTerm] = useState("");
+  const filtered = useMemo(() => {
+    const q = term.trim().toLowerCase();
+    if (!rows || !searchText || !q) return rows;
+    return rows.filter((r) => searchText(r).toLowerCase().includes(q));
+  }, [rows, searchText, term]);
 
   const sorted = useMemo(() => {
-    if (!rows || !sort) return rows ?? [];
+    if (!filtered || !sort) return filtered ?? [];
     const col = columns.find((c) => c.key === sort.key);
-    if (!col?.sortValue) return rows;
+    if (!col?.sortValue) return filtered;
     const get = col.sortValue;
-    return [...rows].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const x = get(a);
       const y = get(b);
       if (x === y) return 0;
@@ -72,7 +86,7 @@ export function DataTable<T>({
       const order = x < y ? -1 : 1;
       return sort.dir === "asc" ? order : -order;
     });
-  }, [rows, sort, columns]);
+  }, [filtered, sort, columns]);
 
   if (rows === null) {
     if (error) return <ErrorNote message={error} onRetry={onRetry} />;
@@ -90,8 +104,27 @@ export function DataTable<T>({
   return (
     <div className="table-block">
       {error ? <ErrorNote message={`Couldn't refresh: ${error}`} onRetry={onRetry} /> : null}
+      {searchText && rows.length > 0 ? (
+        <div className="table-tools">
+          <label className="table-search">
+            <span className="sr-only">{searchLabel}</span>
+            <input
+              type="search"
+              placeholder={searchLabel}
+              value={term}
+              onChange={(e) => {
+                setTerm(e.target.value);
+                setPage(1);
+              }}
+            />
+          </label>
+          <span className="table-count num">{term.trim() ? `${sorted.length} of ${rows.length}` : `${rows.length} in all`}</span>
+        </div>
+      ) : null}
       {rows.length === 0 ? (
         <Empty>{empty}</Empty>
+      ) : sorted.length === 0 ? (
+        <Empty>Nothing matches &ldquo;{term.trim()}&rdquo;.</Empty>
       ) : (
         <div className="table-scroll">
           <table className="data-table">
@@ -149,6 +182,17 @@ export function DataTable<T>({
                 </tr>
               ))}
             </tbody>
+            {footer ? (
+              <tfoot>
+                <tr>
+                  {columns.map((c) => (
+                    <td key={c.key} data-label={c.header} className={`${c.align === "right" ? "right" : ""}${c.phoneHidden ? " phone-hidden" : ""}`}>
+                      {footer[c.key] ?? null}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            ) : null}
           </table>
         </div>
       )}
@@ -159,7 +203,7 @@ export function DataTable<T>({
           </button>
           <span className="num">
             Page {current} of {pages}
-            {paging ? ` · ${paging.total} in all` : ` · ${rows.length} in all`}
+            {paging ? ` · ${paging.total} in all` : ` · ${sorted.length} in all`}
           </span>
           <button type="button" className="text-button" disabled={current >= pages} onClick={() => go(current + 1)}>
             Next

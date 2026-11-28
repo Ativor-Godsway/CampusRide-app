@@ -75,3 +75,4 @@ export * from "./rides/waitFee";
 export * from "./rides/searchStatus";
 export * from "./rides/seats";
 export * from "./rides/scheduled";
+export * from "./rides/movingCar";

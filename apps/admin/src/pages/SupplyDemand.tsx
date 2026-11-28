@@ -1,5 +1,6 @@
 import { getSupplyDemand, type ZoneSupply } from "../api";
 import { useToken } from "../auth";
+import { Collapsible } from "../components/Collapsible";
 import { Chip } from "../components/Chip";
 import { DataTable } from "../components/DataTable";
 import { PeriodPicker } from "../components/PeriodPicker";
@@ -119,7 +120,7 @@ export function SupplyDemandPage() {
                 />
               </Section>
 
-              <Section title="By pickup zone">
+              <Collapsible id="supply.zones" title="By pickup zone" hint="Requests, drivers and the verdict for each pickup zone.">
                 <DataTable
                   columns={[
                     { key: "zone", header: "Zone", render: (z) => <strong>{z.name}</strong>, sortValue: (z) => z.name },
@@ -150,7 +151,7 @@ export function SupplyDemandPage() {
                   A zone needs more drivers in a 3-hour window when at least 3 requests were made there and 15% or more found no driver. How many: the unanswered
                   requests divided by the trips one online driver completed per hour in that window (at least 1), at most 5. See docs/admin-metrics.md.
                 </p>
-              </Section>
+              </Collapsible>
             </>
           );
         }}

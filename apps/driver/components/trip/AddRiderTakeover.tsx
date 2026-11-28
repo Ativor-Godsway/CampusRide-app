@@ -1,4 +1,4 @@
-import { splitFare, type LatLng, type TripZone, bookingLabel } from "@rida/shared";
+import { splitFare, type LatLng, type TripZone, bookingLabel, movingOfferLine } from "@rida/shared";
 import { StatusChip, type AddRiderPreviewResult, type FillSuggestion } from "@rida/mobile-shared";
 import { RequestTakeover, type TakeoverCountdown } from "../offers/RequestTakeover";
 
@@ -19,6 +19,7 @@ export function AddRiderTakeover({
   countdown,
   sharedFarePesewas,
   freeSeats,
+  movingOffer = null,
   committing,
   onAdd,
   onDecline,
@@ -34,6 +35,8 @@ export function AddRiderTakeover({
   /** Today's shared fare: shown until the preview (or the suggestion) gives the rider's own. */
   sharedFarePesewas: number;
   freeSeats: number;
+  /** Fill moving cars first: offered to this driver only, as their car is on the way. */
+  movingOffer?: { until: string; extraMinutes: number } | null;
   committing: boolean;
   onAdd: () => void;
   onDecline: () => void;
@@ -68,9 +71,16 @@ export function AddRiderTakeover({
       route={path.length >= 2 ? path : undefined}
       routeIsRoad={path.length >= 2}
       countdown={countdown}
-      eyebrow="Add a rider"
+      eyebrow={movingOffer ? "On your way · add this rider" : "Add a rider"}
       chips={
         <>
+          {movingOffer ? (
+            <StatusChip
+              tone="brand"
+              icon="navigate"
+              label={movingOfferLine({ farePesewas: fare, extraMinutes: preview?.addedMinutes ?? movingOffer.extraMinutes, from, to })}
+            />
+          ) : null}
           <StatusChip tone="neutral" icon="people-outline" label={bookingLabel("SHARED", suggestion.seats ?? 1)} />
           {preview ? (
             <StatusChip

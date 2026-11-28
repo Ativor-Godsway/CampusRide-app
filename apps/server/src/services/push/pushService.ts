@@ -115,6 +115,9 @@ const DEDUPE_MS: Record<PushKind, number> = {
   SCHEDULE_LEAVE_SOON: 60 * 60_000,
   SCHEDULE_CHANGED: 30_000,
   SCHEDULE_STARTED: 60_000,
+  // Fill moving cars first: each send passes its own key (the seat / the car).
+  JOINED_CAR: 60_000,
+  RIDER_ADDED: 30_000,
 };
 
 /**

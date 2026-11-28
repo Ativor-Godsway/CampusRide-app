@@ -593,12 +593,20 @@ export function registerRideRoutes(app: FastifyInstance, prisma: PrismaClient): 
     const cancelledSeat = ride.passengers.find((p) => p.riderId === userId && p.status === "CANCELLED");
     const seatCancel = cancelledSeat ? await seatCancelledBy(prisma, ride.id, cancelledSeat.id) : null;
 
+    // Joined a car already on its way (fill moving cars first): "You've joined
+    // Kofi's car, already on the way. Pickup in about 4 min" until pickup.
+    const mine = ride.passengers.find((p) => p.riderId === userId && (p.status === "WAITING" || p.status === "ARRIVED"));
+    const joinedMovingCar = mine?.movingJoinEtaMin != null ? { pickupEtaMinutes: mine.movingJoinEtaMin } : null;
+
     const shown = hideOtherRidersPins(ride, userId);
+    // The join estimate goes out as joinedMovingCar only, never as a seat field.
+    const seats = riderSeatsView(shown.passengers, userId).map(({ movingJoinEtaMin: _eta, ...p }) => p);
     return reply.code(200).send({
-      ride: { ...shown, passengers: riderSeatsView(shown.passengers, userId) },
+      ride: { ...shown, passengers: seats },
       driver,
       ...(fareSummary ? { fareSummary } : {}),
       ...(seatCancel ?? {}),
+      ...(joinedMovingCar ? { joinedMovingCar } : {}),
     });
   });
 

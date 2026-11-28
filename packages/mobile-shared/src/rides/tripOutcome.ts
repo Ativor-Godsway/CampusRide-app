@@ -33,6 +33,15 @@ export function rebookedRideId(result: Pick<GetRideResult, "rebookedRideId" | "s
 }
 
 /**
+ * The driver undid an auto-add (fill moving cars first): the screen follows
+ * the rider's search back (rebookedRideId) and says nothing — no "driver had
+ * to cancel", the search simply carries on.
+ */
+export function rebookIsSilent(result: Pick<GetRideResult, "undone"> | undefined): boolean {
+  return result?.undone === true;
+}
+
+/**
  * Whether this rider's trip is over, and how — null while it is going on.
  *
  * - their seat cancelled by CampusRide (an admin) → "adminCancelled";

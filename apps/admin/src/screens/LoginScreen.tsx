@@ -1,3 +1,4 @@
+import logoName from "../assets/brand/logo-name.png";
 import { useEffect, useState } from "react";
 import {
   GHANA_PHONE_EXAMPLE,
@@ -134,9 +135,11 @@ export function LoginScreen() {
   }
 
   return (
-    <div className="login">
+    <div className="login-page">
+      <main className="login-main">
       <div className="card login-card">
-        <h1>CampusRide Admin</h1>
+        <img className="login-logo" src={logoName} alt="CampusRide" />
+        <h1>Sign in to Admin</h1>
         {passkeysWork ? (
           <>
             <p className="muted">Sign in with your passkey (Face ID or Touch ID).</p>
@@ -205,9 +208,15 @@ export function LoginScreen() {
           </form>
         )}
 
-        {error ? <p className="error">{error}</p> : null}
+        {error ? (
+          <p className="error-text" role="alert">
+            {error}
+          </p>
+        ) : null}
         {!error && endedReason ? <p className="muted">{endedReason}</p> : null}
+        <p className="muted small">Administrators only. Every sign-in is recorded.</p>
       </div>
+      </main>
     </div>
   );
 }

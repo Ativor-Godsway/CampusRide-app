@@ -1,7 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { blocksGoingOnline, formatCedis } from "@rida/shared";
 import { driverBalance } from "../admin/cash";
-import { getCommissionSettings } from "./settings";
+import { currentCommissionTerms, getCommissionSettings } from "./settings";
 
 export interface CommissionBlock {
   owedPesewas: number;
@@ -17,6 +17,8 @@ export interface CommissionBlock {
 export async function commissionBlock(prisma: PrismaClient, driverUserId: string): Promise<CommissionBlock | null> {
   const settings = await getCommissionSettings(prisma);
   if (!settings.enforcementEnabled) return null;
+  // While commission is waived nobody owes anything, so nobody is blocked.
+  if ((await currentCommissionTerms(prisma)).waived) return null;
   const { balancePesewas } = await driverBalance(prisma, driverUserId);
   if (!blocksGoingOnline(balancePesewas, settings)) return null;
   return {

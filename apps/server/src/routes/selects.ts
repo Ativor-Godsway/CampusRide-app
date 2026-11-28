@@ -107,7 +107,7 @@ export const seatWaitSelect = {
 /** GET /rides/:id — as above, plus the passenger manifest. */
 export const riderRideDetailSelect = {
   ...riderRideListSelect,
-  passengers: { select: { ...ridePassengerSelect, ...seatWaitSelect } },
+  passengers: { select: { ...ridePassengerSelect, ...seatWaitSelect, movingJoinEtaMin: true } },
 } satisfies Prisma.RideSelect;
 
 /**

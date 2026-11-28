@@ -11,6 +11,7 @@ import { registerRideRoutes } from "./rides";
 import { registerRatingRoutes } from "./ratings";
 import { registerDriverRoutes } from "./driver";
 import { installWaitFeeAppMarker } from "../services/ride/waitFee";
+import { installAutoAddAppMarker } from "../services/ride/movingFirst";
 import { registerAdminRoutes } from "./admin";
 import { registerAdminAccountDeletionRoutes } from "./adminAccountDeletion";
 import { registerUssdRoutes } from "./ussd";
@@ -29,6 +30,7 @@ import { registerAdminDashboardRoutes } from "./adminDashboard";
 import { registerAdminInsightRoutes } from "./adminInsights";
 import { registerAdminDispatchRoutes } from "./adminDispatch";
 import { registerAdminPeopleRoutes } from "./adminPeople";
+import { registerAdminMoneyRoutes } from "./adminMoney";
 import { registerAdminRideCancelRoutes } from "./adminRideCancel";
 import { registerDriverBalanceRoutes } from "./driverBalance";
 import { registerScheduledRoutes } from "./scheduled";
@@ -66,6 +68,8 @@ export function registerAllRoutes(
   // A signed-in rider whose app shows the wait timer counts as warned about
   // the wait fee (services/ride/waitFee.ts).
   installWaitFeeAppMarker(app, prisma);
+  // A driver whose app can show an auto-added rider with Undo (services/ride/movingFirst.ts).
+  installAutoAddAppMarker(app, prisma);
 
   // /health (Render) and /health/ready (UptimeRobot): unlimited, see health.ts.
   registerHealthRoutes(app, prisma);
@@ -106,6 +110,7 @@ export function registerAllRoutes(
   registerAdminInsightRoutes(app, prisma);
   registerAdminDispatchRoutes(app, prisma);
   registerAdminPeopleRoutes(app, prisma);
+  registerAdminMoneyRoutes(app, prisma);
   registerAdminRideCancelRoutes(app, prisma);
   // Scheduled Shared rides: rider, driver and admin (services/scheduled).
   registerScheduledRoutes(app, prisma);
