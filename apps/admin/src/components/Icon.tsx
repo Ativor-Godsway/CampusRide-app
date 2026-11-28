@@ -1,4 +1,4 @@
-import markWhite from "../assets/brand/mark-white.png";
+import markGreen from "../assets/brand/mark-green.png";
 
 /** The admin site's line icons (24×24, 1.8 stroke, currentColor), drawn inline: no icon font or image files. */
 const PATHS = {
@@ -116,7 +116,7 @@ export function Icon({ name, size = 18, className }: { name: IconName; size?: nu
   );
 }
 
-/** The CampusRide mark (white, for the dark-green sidebar). */
-export function Logo({ size = 34 }: { size?: number }) {
-  return <img className="brand-mark" src={markWhite} width={size} height={size} alt="" aria-hidden="true" />;
+/** The CampusRide mark (green, on the light sidebar). */
+export function Logo({ size = 30 }: { size?: number }) {
+  return <img className="brand-mark" src={markGreen} width={size} height={size} alt="" aria-hidden="true" />;
 }

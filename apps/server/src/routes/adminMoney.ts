@@ -16,6 +16,7 @@ import {
   saveCommissionTerms,
 } from "../services/commission/settings";
 import { periodOr400 } from "./adminDashboard";
+import { listPhone } from "../services/admin/rows";
 
 /**
  * Admin redesign (2026-11-29):
@@ -58,6 +59,8 @@ const SCHEMAS = {
   },
   removeTopUp: { params: idParams, body: object({ reason: text(500, { nonEmpty: true }) }, ["reason"]) },
   settingsChanges: { querystring: empty },
+  admins: { querystring: empty },
+  renameAdmin: { params: idParams, body: object({ name: text(60, { nonEmpty: true }) }, ["name"]) },
 };
 
 /** Settings sections and the audit actions that change them (Settings: "Last changed by X at …"). */
@@ -68,7 +71,7 @@ export const SETTINGS_SECTIONS: Record<string, readonly string[]> = {
   scheduled: ["schedule.settings"],
   commission: ["commission.settings", "commission.terms"],
   notifications: ["launch.update", "notification.send", "notification.launch", "notification.opening"],
-  admins: ["admin.passkey.add", "admin.passkey.remove"],
+  admins: ["admin.passkey.add", "admin.passkey.remove", "admin.rename"],
 };
 
 function sendError(reply: FastifyReply, err: unknown) {
@@ -194,5 +197,29 @@ export function registerAdminMoneyRoutes(app: FastifyInstance, prisma: PrismaCli
         entries.map(([section, r]) => [section, r ? { at: r.timestamp.toISOString(), action: r.action, by: names.get(r.actor) ?? "Unknown admin" } : null]),
       ),
     });
+  });
+
+  /** The admin accounts: name, masked phone, which one is you. */
+  app.get("/admin/admins", { ...gate, schema: SCHEMAS.admins }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const admins = await prisma.user.findMany({ where: { role: "ADMIN", deletedAt: null }, select: { id: true, name: true, phone: true, createdAt: true }, orderBy: { createdAt: "asc" } });
+    return reply.send({
+      admins: admins.map((a) => ({ id: a.id, name: a.name, maskedPhone: listPhone(a.phone), joinedAt: a.createdAt.toISOString(), isMe: a.id === request.user!.userId })),
+    });
+  });
+
+  /** Changes an admin's display name (yours or another admin's). Audit-logged with the old and new name. */
+  app.patch("/admin/admins/:id", { ...gate, schema: SCHEMAS.renameAdmin, config: write }, async (request, reply) => {
+    if (!(await requireAdmin(request, reply))) return;
+    const id = (request.params as { id: string }).id;
+    const name = (request.body as { name: string }).name.trim().replace(/\s+/g, " ");
+    if (name.length < 2) return reply.code(400).send({ error: "Enter a name of at least 2 letters." });
+    const target = await prisma.user.findFirst({ where: { id, role: "ADMIN", deletedAt: null }, select: { id: true, name: true } });
+    if (!target) return reply.code(404).send({ error: "Admin not found" });
+    await prisma.$transaction([
+      prisma.user.update({ where: { id }, data: { name } }),
+      prisma.adminAuditLog.create({ data: { actor: request.user!.userId, action: "admin.rename", target: id, reason: `${target.name} → ${name}`.slice(0, 1000) } }),
+    ]);
+    return reply.send({ admin: { id, name } });
   });
 }

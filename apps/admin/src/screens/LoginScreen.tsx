@@ -1,4 +1,3 @@
-import markWhite from "../assets/brand/mark-white.png";
 import logoName from "../assets/brand/logo-name.png";
 import { useEffect, useState } from "react";
 import {
@@ -137,25 +136,10 @@ export function LoginScreen() {
 
   return (
     <div className="login-page">
-      <aside className="login-aside" aria-hidden="true">
-        <div className="brand-line">
-          <img src={markWhite} alt="" />
-          CampusRide Admin
-        </div>
-        <div>
-          <h2>Shared rides around campus, run from one place.</h2>
-          <p>Live operations, riders and drivers, payouts and commission, and the numbers that show how CampusRide is growing.</p>
-        </div>
-        <ul className="login-points">
-          <li>Live map of drivers and rides</li>
-          <li>Investor-ready KPIs, the same as the weekly report</li>
-          <li>Driver income, top-ups and commission in one view</li>
-        </ul>
-      </aside>
       <main className="login-main">
       <div className="card login-card">
         <img className="login-logo" src={logoName} alt="CampusRide" />
-        <h1>Sign in</h1>
+        <h1>Sign in to Admin</h1>
         {passkeysWork ? (
           <>
             <p className="muted">Sign in with your passkey (Face ID or Touch ID).</p>

@@ -201,6 +201,8 @@ const ROUTE_ACCESS: Record<string, Access> = {
   "POST /admin/payouts": "admin",
   "POST /admin/payouts/:id/remove": "admin",
   "GET /admin/settings/changes": "admin",
+  "GET /admin/admins": "admin",
+  "PATCH /admin/admins/:id": "admin",
   "GET /admin/far-pricing": "admin",
   "PUT /admin/far-pricing": "admin",
   "GET /admin/zone-neighbours": "admin",

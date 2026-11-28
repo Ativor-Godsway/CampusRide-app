@@ -1,6 +1,7 @@
 import { getKpis, type Kpis, type Overview } from "../api";
 import { useToken } from "../auth";
 import { StatTile } from "../components/StatTile";
+import { Collapsible } from "../components/Collapsible";
 import { Loaded } from "../components/States";
 import { PeriodPicker } from "../components/PeriodPicker";
 import { BarList } from "../charts/BarList";
@@ -174,14 +175,18 @@ function KpiBody({ k }: { k: Kpis }) {
         </Section>
       </div>
 
-      <div className="grid-2">
-        <Section title="Top pickup places">
-          <BarList items={k.topPickups.map((p) => ({ label: p.name, value: p.requests }))} summary="Most requested pickup places" />
-        </Section>
-        <Section title="Top drop-off places">
-          <BarList items={k.topDropoffs.map((p) => ({ label: p.name, value: p.requests }))} color="var(--green-400)" summary="Most requested drop-off places" />
-        </Section>
-      </div>
+      <Collapsible id="overview.places" title="Top places" hint="Where most requests start and end in this period." aside={k.topPickups[0]?.name}>
+        <div className="grid-2">
+          <section className="stack-tight">
+            <h3>Pickups</h3>
+            <BarList items={k.topPickups.map((p) => ({ label: p.name, value: p.requests }))} summary="Most requested pickup places" />
+          </section>
+          <section className="stack-tight">
+            <h3>Drop-offs</h3>
+            <BarList items={k.topDropoffs.map((p) => ({ label: p.name, value: p.requests }))} color="var(--green-400)" summary="Most requested drop-off places" />
+          </section>
+        </div>
+      </Collapsible>
 
       <p className="muted small">
         Same definitions as the week-1 investor report: test, staging and review-demo accounts and rides are left out. A request is a booking a rider made (not
@@ -207,10 +212,16 @@ export function OverviewPage() {
   const kpis = usePolled(() => getKpis(token, query), query, undefined, "Loading the KPIs");
 
   return (
-    <Page title="Overview" subtitle={periodLabel(period)} controls={<Freshness updatedAt={kpis.updatedAt} onRefresh={kpis.refresh} loading={kpis.loading} />}>
-      <div className="toolbar">
-        <PeriodPicker value={period} onChange={setPeriod} choices={["today", "this-week", "since-launch"]} />
-      </div>
+    <Page
+      title="Overview"
+      subtitle={periodLabel(period)}
+      controls={
+        <>
+          <PeriodPicker value={period} onChange={setPeriod} choices={["today", "this-week", "since-launch"]} />
+          <Freshness updatedAt={kpis.updatedAt} onRefresh={kpis.refresh} loading={kpis.loading} />
+        </>
+      }
+    >
       {!investor.on && summary && (summary.openSos > 0 || summary.driversNeedingApproval > 0) ? (
         <div className="alerts">
           {summary.openSos > 0 ? (

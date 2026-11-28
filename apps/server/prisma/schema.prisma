@@ -1357,8 +1357,9 @@ model DispatchSetting {
   /// Fill moving cars first (2026-11-28): a Shared request goes first to the
   /// best compatible car already on a trip. Off: dispatch as before.
   movingFirstEnabled  Boolean  @default(true)
-  /// "Auto-add riders on my way" for drivers who haven't chosen.
-  autoAddDefault      Boolean  @default(true)
+  /// "Auto-add riders on my way" for drivers who haven't chosen. Off by
+  /// default (2026-11-28): they get the 20 s exclusive offer instead.
+  autoAddDefault      Boolean  @default(false)
   updatedAt           DateTime @updatedAt
   /// User.id of the admin who last changed it.
   updatedBy           String?

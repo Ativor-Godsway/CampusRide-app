@@ -89,3 +89,18 @@ describe("ride table columns", () => {
     expect(rideColumns({ compact: "rider" }).map((c) => c.key)).toEqual(["time", "driver", "route", "fare", "status"]);
   });
 });
+
+describe("Scheduled history", () => {
+  it("keeps only earlier days since launch with something in them, newest first", async () => {
+    const { historyDays } = await import("./Scheduled");
+    const z = { bookings: 0, seats: 0, cars: 0, started: 0, toLive: 0, noShows: 0, strikes: 0 };
+    const recent = [
+      { ...z, day: "2026-11-20", bookings: 3 },
+      { ...z, day: "2026-11-24" },
+      { ...z, day: "2026-11-25", bookings: 2, seats: 2 },
+      { ...z, day: "2026-11-26", strikes: 1 },
+      { ...z, day: "2026-11-28", bookings: 4 },
+    ];
+    expect(historyDays({ day: "2026-11-28", recent } as never).map((r) => r.day)).toEqual(["2026-11-26", "2026-11-25"]);
+  });
+});

@@ -233,6 +233,8 @@ See [admin-and-secrets.md](admin-and-secrets.md).
 | `POST /admin/payouts` | Yes | ADMIN | Records a top-up paid to a driver (amount, day, MoMo or cash, note). Audit-logged (`payout.topup.record`). | account default; plus 60 changes / 15 min |
 | `POST /admin/payouts/:id/remove` | Yes | ADMIN | Removes a top-up recorded by mistake, with a required reason; the row is kept, marked removed. Audit-logged (`payout.topup.remove`). | account default; plus 60 changes / 15 min |
 | `GET /admin/settings/changes` | Yes | ADMIN | For each Settings section, the latest audit entry that changed it: when and which admin (by name). | account default |
+| `GET /admin/admins` | Yes | ADMIN | The admin accounts: name, masked phone, when added, which one is the caller. | account default |
+| `PATCH /admin/admins/:id` | Yes | ADMIN | Changes an admin account's display name (2–60 characters). Audit-logged (`admin.rename`, old → new). | account default; plus 60 changes / 15 min |
 | `GET /admin/far-pricing` | Yes | ADMIN | The two Shared prices (normal, far) and the places in each far end (North, South). | account default |
 | `PUT /admin/far-pricing` | Yes | ADMIN | Saves both Shared prices (GH₵1–100, far ≤ Ride alone) and exactly these far-end places (each North or South). New requests only. Audit-logged (`fares.update`). | account default; plus 60 changes / 15 min |
 | `GET /admin/zone-neighbours` | Yes | ADMIN | Zones in service, the neighbour pairs dispatch uses, and the suggested pairs (from where the zones are). | account default |

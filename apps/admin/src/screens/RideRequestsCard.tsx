@@ -22,7 +22,7 @@ export function RideRequestsCard() {
   const [loaded, setLoaded] = useState<DispatchSettings | null>(null);
   const [value, setValue] = useState("");
   const [movingFirst, setMovingFirst] = useState(true);
-  const [autoAddDefault, setAutoAddDefault] = useState(true);
+  const [autoAddDefault, setAutoAddDefault] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -31,7 +31,7 @@ export function RideRequestsCard() {
     setLoaded(d);
     setValue(String(d.settings.searchWindowSeconds / 60));
     setMovingFirst(d.settings.movingFirstEnabled ?? true);
-    setAutoAddDefault(d.settings.autoAddDefault ?? true);
+    setAutoAddDefault(d.settings.autoAddDefault ?? false);
   };
   useEffect(() => {
     getDispatchSettings(token).then(show, (err) => setError(failureText("Loading the ride request settings", err)));
@@ -119,7 +119,7 @@ export function RideRequestsCard() {
                 !valid ||
                 (parsed === loaded.settings.searchWindowSeconds &&
                   movingFirst === (loaded.settings.movingFirstEnabled ?? true) &&
-                  autoAddDefault === (loaded.settings.autoAddDefault ?? true))
+                  autoAddDefault === (loaded.settings.autoAddDefault ?? false))
               }>
               {busy ? "Saving…" : "Save"}
             </button>

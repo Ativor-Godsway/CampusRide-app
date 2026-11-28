@@ -41,6 +41,7 @@ export function DataTable<T>({
   caption,
   searchText,
   searchLabel = "Search this table",
+  footer,
 }: {
   columns: Column<T>[];
   rows: T[] | null;
@@ -59,6 +60,8 @@ export function DataTable<T>({
   /** Turns on the search box above the table: the text a row is searched by. */
   searchText?: (row: T) => string;
   searchLabel?: string;
+  /** A totals row under the rows ("All drivers"), one cell per column key. */
+  footer?: Record<string, ReactNode>;
 }) {
   const [sort, setSort] = useState(initialSort ?? null);
   const [page, setPage] = useState(1);
@@ -179,6 +182,17 @@ export function DataTable<T>({
                 </tr>
               ))}
             </tbody>
+            {footer ? (
+              <tfoot>
+                <tr>
+                  {columns.map((c) => (
+                    <td key={c.key} data-label={c.header} className={`${c.align === "right" ? "right" : ""}${c.phoneHidden ? " phone-hidden" : ""}`}>
+                      {footer[c.key] ?? null}
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            ) : null}
           </table>
         </div>
       )}

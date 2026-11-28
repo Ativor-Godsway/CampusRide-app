@@ -8,6 +8,7 @@ import { initials } from "../lib/labels";
 import { usePolled } from "../lib/usePolled";
 import { NAV, navGroups, type NavItem } from "./nav";
 import { useInvestorView } from "../lib/useInvestorView";
+import { InvestorBadge } from "./Page";
 import { ShellContext, useShell as useContextSummary } from "./ShellContext";
 
 function Badge({ item, summary }: { item: NavItem; summary: Summary | null }) {
@@ -93,7 +94,9 @@ export function Shell({ children }: { children: ReactNode }) {
               {initials(name)}
             </span>
             <div className="me-text">
-              <span className="me-name">{name}</span>
+              <Link to="/settings?section=admins" className="me-name" title="Your name and the other admins: Settings → Admin users">
+                {name}
+              </Link>
               <span className="me-how">{session?.signedInWith === "passkey" ? "Signed in with passkey" : session?.signedInWith === "code" ? "Signed in with code" : "Signed in"}</span>
             </div>
             <button type="button" className="icon-button" aria-label="Sign out" title="Sign out" onClick={() => signOut()}>
@@ -103,6 +106,7 @@ export function Shell({ children }: { children: ReactNode }) {
         </nav>
         <main id="main" className="main" tabIndex={-1}>
           {children}
+          <InvestorBadge />
         </main>
         <nav className="tabbar" aria-label="Admin sections">
           {NAV.filter((n) => n.tab).map((item) => (

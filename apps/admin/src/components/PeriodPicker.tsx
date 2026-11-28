@@ -12,7 +12,7 @@ export function PeriodPicker({
 }: {
   value: Period;
   onChange: (p: Period) => void;
-  choices?: Exclude<PeriodPreset, "custom">[];
+  choices?: ReadonlyArray<Exclude<PeriodPreset, "custom">>;
   allowCustom?: boolean;
 }) {
   const [custom, setCustom] = useState(value.preset === "custom");

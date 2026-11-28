@@ -358,7 +358,9 @@ describe("HTTP: undo, driver setting, board, admin switches", () => {
     await prisma.user.update({ where: { id: admin.id }, data: { role: "ADMIN" } });
     users.push(admin.id);
     const before = (await app.inject({ method: "GET", url: "/admin/dispatch-settings", headers: auth(admin.id, "ADMIN") })).json();
-    expect(before.settings).toMatchObject({ movingFirstEnabled: true, autoAddDefault: true });
+    expect(before.settings).toMatchObject({ movingFirstEnabled: true });
+    // Auto-add is off unless an admin turns the default on (2026-11-28).
+    expect(before.defaults).toMatchObject({ autoAddDefault: false });
     expect(before.movingSteps7d).toEqual(expect.any(Object));
     const put = await app.inject({
       method: "PUT",
@@ -370,4 +372,28 @@ describe("HTTP: undo, driver setting, board, admin switches", () => {
     expect(put.json().settings).toMatchObject({ movingFirstEnabled: false, autoAddDefault: false });
     expect(await prisma.adminAuditLog.count({ where: { actor: admin.id, action: "dispatch.moving_first" } })).toBe(1);
   });
+  it("auto-add is OFF by default: a driver who never chose gets the exclusive offer; one who turned it on is auto-added", async () => {
+    setMovingFirstForTests({ movingFirstEnabled: true });
+    const undecided = await driver({ autoAdd: null });
+    const car = await movingCar(undecided.id);
+    const req = await request();
+    await broadcastRide(prisma, req.id);
+    expect((await reload(req.id)).movingStep).toBe("OFFERED");
+    expect((await reload(car.id)).passengers.some((p) => p.riderId === req.riderId)).toBe(false);
+    expect((await app.inject({ method: "GET", url: "/driver/settings", headers: auth(undecided.id, "DRIVER") })).json()).toMatchObject({
+      autoAddRiders: false,
+      autoAddDefault: false,
+    });
+    await prisma.ride.update({ where: { id: car.id }, data: { status: "COMPLETED", completedAt: new Date() } });
+
+    const chose = await driver({ autoAdd: true });
+    const car2 = await movingCar(chose.id);
+    const req2 = await request();
+    await broadcastRide(prisma, req2.id);
+    expect((await reload(req2.id)).movingStep).toBe("AUTO_ADDED");
+    expect((await reload(car2.id)).passengers.some((p) => p.riderId === req2.riderId)).toBe(true);
+    await prisma.ride.update({ where: { id: car2.id }, data: { status: "COMPLETED", completedAt: new Date() } });
+    await prisma.driver.updateMany({ where: { userId: { in: [undecided.id, chose.id] } }, data: { isOnline: false } });
+  });
+
 });

@@ -15,7 +15,7 @@ import { signAccessToken } from "../services/auth/tokens";
 import { getTestZones } from "../services/ride/testFixtures";
 import { uniqueGhanaPhone } from "../test/testPhone";
 import { clearAdminCache } from "../services/admin/cache";
-import { driverBalance } from "../services/admin/cash";
+import { driverBalance, reconciles, walkBalance } from "../services/admin/cash";
 import { commissionBlock } from "../services/commission/enforcement";
 import { clearCommissionTermsCache, commissionFor, commissionTermsProblem, isWaivedAt } from "../services/commission/settings";
 import { finalizeRideCompletion } from "../services/ride/completion";
@@ -107,6 +107,8 @@ afterAll(async () => {
   await prisma.commissionSetting.deleteMany({});
   clearCommissionTermsCache();
   await prisma.driverTopUp.deleteMany({ where: { driverUserId: { in: userIds } } });
+  await prisma.driverCashPayment.deleteMany({ where: { driverUserId: { in: userIds }, reversesId: { not: null } } });
+  await prisma.driverCashPayment.deleteMany({ where: { driverUserId: { in: userIds } } });
   await prisma.driverPaystackPayment.deleteMany({ where: { driverUserId: { in: userIds } } });
   await prisma.commissionLedger.deleteMany({ where: { rideId: { in: rideIds } } });
   await prisma.ridePassenger.deleteMany({ where: { rideId: { in: rideIds } } });
@@ -290,5 +292,113 @@ describe("GET /admin/kpis", () => {
 
   it("refuses a bad period", async () => {
     expect((await get("/admin/kpis?from=nope&to=nope", admin)).statusCode).toBe(400);
+  });
+});
+
+describe("commission reconciliation: earned = paid + waived + still owed (− paid ahead)", () => {
+  const at = (iso: string) => new Date(`2026-11-${iso}Z`);
+  const credit = (id: string, when: string, kind: "PAYMENT" | "WAIVER", amount: number, reversesId: string | null = null) => ({
+    id,
+    at: at(when),
+    kind,
+    amount,
+    reversesId,
+    createdAt: at(when),
+  });
+
+  it("a launch 'waive all' over trips that were later waived anyway forgives nothing twice", () => {
+    // Owed 3.00 from before launch; launch-week trips (3.30) are waived trips now; "waive all" gave 6.30 on 27 Nov.
+    const b = walkBalance("d", [{ at: at("20T10:00:00"), amount: 300 }], [credit("w1", "27T18:00:00", "WAIVER", 630)], 330);
+    expect(b).toMatchObject({ earnedPesewas: 630, commissionWaivedPesewas: 330, waivedPesewas: 300, paidPesewas: 0, balancePesewas: 0 });
+    // The bug: waived (trips 3.30 + credit 6.30 = 9.60) was more than all commission ever earned (6.30).
+    expect(b.commissionWaivedPesewas + b.waivedPesewas).toBeLessThanOrEqual(b.earnedPesewas);
+    expect(reconciles(b)).toBe(true);
+  });
+
+  it("a waiver forgives only what is owed then; reversing it brings back exactly that", () => {
+    const charges = [
+      { at: at("20T10:00:00"), amount: 200 },
+      { at: at("22T10:00:00"), amount: 100 },
+    ];
+    const credits = [credit("w1", "21T00:00:00", "WAIVER", 500), credit("r1", "23T00:00:00", "WAIVER", -500, "w1")];
+    const b = walkBalance("d", charges, credits, 0);
+    expect(b).toMatchObject({ earnedPesewas: 300, waivedPesewas: 0, balancePesewas: 300 });
+    expect(b.oldestUnpaidAt?.toISOString()).toBe("2026-11-20T10:00:00.000Z");
+    expect(reconciles(b)).toBe(true);
+  });
+
+  it("payments beyond what is owed are paid ahead, and cover the next trips", () => {
+    const b = walkBalance("d", [{ at: at("25T10:00:00"), amount: 105 }], [credit("p1", "24T10:00:00", "PAYMENT", 500)], 0);
+    expect(b).toMatchObject({ earnedPesewas: 105, paidPesewas: 500, balancePesewas: -395, oldestUnpaidAt: null });
+    expect(reconciles(b)).toBe(true);
+  });
+
+  it("on the admin site: every driver's row and the totals reconcile after 'waive all' plus a back-dated waiver", async () => {
+    const d = await driver("Reconcile Driver");
+    await pastCommission(d, 300, new Date(Date.now() - 10 * 86_400_000));
+    await pastCommission(d, 105, new Date(Date.now() - 2 * 86_400_000));
+    await pastCommission(d, 225, new Date(Date.now() - 1 * 86_400_000));
+    await prisma.driverCashPayment.create({ data: { driverUserId: d.id, amountPesewas: 50, method: "CASH", paidAt: new Date(Date.now() - 9 * 86_400_000), recordedBy: admin.id } });
+    // Waive the driver's whole balance (580), THEN back-date the commission waiver over the last 3 days.
+    const all = await post(`/admin/drivers/${d.id}/waive`, { amountPesewas: 580, reason: "Commission-free launch" }, admin);
+    expect(all.statusCode).toBe(201);
+    expect((await setTerms({ rateBps: 1500, waived: true, waivedFromDay: day(-3) })).statusCode).toBe(200);
+    await setTerms({ rateBps: 1500, waived: false });
+
+    const b = await driverBalance(prisma, d.id);
+    // Earned 6.30 = paid 0.50 + waived trips 3.30 + waived balance 2.50 + still owed 0.
+    expect(b).toMatchObject({ earnedPesewas: 630, paidPesewas: 50, commissionWaivedPesewas: 330, waivedPesewas: 250, balancePesewas: 0 });
+    expect(reconciles(b)).toBe(true);
+
+    clearAdminCache();
+    const cash = (await get(`/admin/cash?from=${encodeURIComponent(`${day(-30)}T00:00:00.000Z`)}&to=${encodeURIComponent(`${day(1)}T00:00:00.000Z`)}`, admin)).json();
+    const row = cash.drivers.find((r: { userId: string }) => r.userId === d.id);
+    expect(row).toMatchObject({ earnedPesewas: 630, allPaidPesewas: 50, allWaivedPesewas: 580, balancePesewas: 0 });
+    const t = cash.reconciliation;
+    expect(t.waivedPesewas).toBeLessThanOrEqual(t.earnedPesewas);
+    expect(t.earnedPesewas).toBe(t.paidPesewas + t.waivedPesewas + t.adjustedPesewas + t.stillOwedPesewas - t.paidAheadPesewas);
+  });
+});
+
+describe("driver earnings for any range", () => {
+  it("today, a week and all time give each range's fares, commission waived/charged, top-ups and income", async () => {
+    const d = await driver("Range Driver");
+    await setTerms({ rateBps: 1500, waived: true, waivedFromDay: day(-5) });
+    await completeTrip(d, 700, new Date(Date.now() - 3 * 86_400_000));
+    await completeTrip(d, 1500);
+    await setTerms({ rateBps: 2000, waived: false });
+    await completeTrip(d, 1000);
+    await post("/admin/payouts", { driverId: d.id, amountPesewas: 3000, paidOn: day(0), method: "CASH" }, admin);
+    clearAdminCache();
+    const range = (from: string, to: string) => `from=${encodeURIComponent(`${from}T00:00:00.000Z`)}&to=${encodeURIComponent(`${to}T00:00:00.000Z`)}`;
+
+    const today = (await get(`/admin/drivers/${d.id}?${range(day(0), day(1))}`, admin)).json();
+    expect(today.period).toMatchObject({ trips: 2, faresPesewas: 2500, commissionPesewas: 200, commissionWaivedPesewas: 225, topUpsPesewas: 3000, incomePesewas: 2500 - 200 + 3000 });
+
+    const week = (await get(`/admin/drivers/${d.id}?${range(day(-6), day(1))}`, admin)).json();
+    expect(week.period).toMatchObject({ trips: 3, faresPesewas: 3200, commissionPesewas: 200, commissionWaivedPesewas: 330, topUpsPesewas: 3000 });
+    // Only days with something in them.
+    expect(week.byDay.map((b: { day: string }) => b.day)).toEqual([day(-3), day(0)]);
+
+    const allTime = (await get(`/admin/drivers/${d.id}?${range("2026-01-01", day(1))}`, admin)).json();
+    expect(allTime.period).toMatchObject({ trips: 3, faresPesewas: 3200 });
+
+    const list = (await get(`/admin/drivers?${range(day(0), day(1))}`, admin)).json();
+    expect(list.drivers.find((r: { userId: string }) => r.userId === d.id)).toMatchObject({ trips: 2, faresPesewas: 2500, commissionDuePesewas: 200, commissionWaivedPesewas: 225, incomePesewas: 5300 });
+  });
+});
+
+describe("admin accounts", () => {
+  it("lists admins and renames one (audit-logged); refuses non-admins and tiny names", async () => {
+    const other = await user("ADMIN", "Wrong Name");
+    const list = (await get("/admin/admins", admin)).json();
+    expect(list.admins.find((a: { id: string }) => a.id === admin.id)).toMatchObject({ isMe: true });
+    expect((await app.inject({ method: "PATCH", url: `/admin/admins/${other.id}`, headers: auth(admin), payload: { name: "  Ama   Owusu " } })).json()).toMatchObject({ admin: { name: "Ama Owusu" } });
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: other.id } })).name).toBe("Ama Owusu");
+    expect(await prisma.adminAuditLog.count({ where: { actor: admin.id, action: "admin.rename", reason: "Wrong Name → Ama Owusu" } })).toBe(1);
+    expect((await app.inject({ method: "PATCH", url: `/admin/admins/${other.id}`, headers: auth(admin), payload: { name: "A" } })).statusCode).toBe(400);
+    const d = await driver("Some Driver");
+    expect((await app.inject({ method: "PATCH", url: `/admin/admins/${d.id}`, headers: auth(admin), payload: { name: "Hacker" } })).statusCode).toBe(404);
+    expect((await app.inject({ method: "PATCH", url: `/admin/admins/${other.id}`, headers: auth(d), payload: { name: "Hacker" } })).statusCode).toBe(403);
   });
 });

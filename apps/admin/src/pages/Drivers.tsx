@@ -4,7 +4,7 @@ import { Chip, type ChipTone } from "../components/Chip";
 import { CsvButton } from "../components/CsvButton";
 import { DataTable } from "../components/DataTable";
 import { PeriodPicker } from "../components/PeriodPicker";
-import { cedis, percent } from "../lib/money";
+import { cedis } from "../lib/money";
 import { initials } from "../lib/labels";
 import { periodLabel, periodQuery } from "../lib/period";
 import { useRouter, withParams } from "../lib/router";
@@ -16,6 +16,40 @@ import { Freshness, Page, Section } from "../shell/Page";
 import { useShell } from "../shell/ShellContext";
 
 type Tab = "all" | "online" | "approval" | "suspended";
+
+/** The ranges the earnings views offer: Today, Yesterday, This week, All time (and Custom). */
+export const EARNINGS_RANGES = ["today", "yesterday", "this-week", "all-time"] as const;
+
+const money = (p: number | undefined | null) => (p ? cedis(p) : "—");
+
+/** "GH₵2.10", or "GH₵0 · GH₵1.05 waived". */
+export function CommissionCell({ charged, waived }: { charged: number; waived: number }) {
+  if (!charged && !waived) return <span className="num">—</span>;
+  return (
+    <span className="num">
+      {cedis(charged)}
+      {waived ? <span className="muted small block">{cedis(waived)} waived</span> : null}
+    </span>
+  );
+}
+
+/** The "All drivers" row: the sums of the shown drivers. */
+export function driverTotals(rows: DriverRow[]): Record<string, React.ReactNode> {
+  const sum = (f: (d: DriverRow) => number) => rows.reduce((t, d) => t + f(d), 0);
+  const fares = sum((d) => d.faresPesewas ?? 0);
+  const online = sum((d) => d.hoursOnlineMs);
+  return {
+    driver: `All drivers (${rows.length})`,
+    trips: <span className="num">{sum((d) => d.trips)}</span>,
+    riders: <span className="num">{sum((d) => d.riders ?? 0)}</span>,
+    online: <span className="num">{hours(online)}</span>,
+    fares: <span className="num">{cedis(fares)}</span>,
+    commission: <CommissionCell charged={sum((d) => d.commissionDuePesewas ?? 0)} waived={sum((d) => d.commissionWaivedPesewas ?? 0)} />,
+    topups: <span className="num">{cedis(sum((d) => d.topUpsPesewas ?? 0))}</span>,
+    income: <span className="num">{cedis(sum((d) => d.incomePesewas ?? 0))}</span>,
+    perHour: <span className="num">{online >= 30 * 60_000 ? cedis(Math.round(fares / (online / 3_600_000))) : "—"}</span>,
+  };
+}
 
 /** What a driver is doing now, as a chip. */
 export function driverNow(d: Pick<DriverRow, "isApproved" | "suspended" | "isOnline" | "onTrip">): { label: string; tone: ChipTone } {
@@ -75,7 +109,7 @@ export function DriversPage() {
             </button>
           ))}
         </div>
-        <PeriodPicker value={period} onChange={setPeriod} choices={["today", "yesterday", "this-week", "last-week", "since-launch"]} />
+        <PeriodPicker value={period} onChange={setPeriod} choices={EARNINGS_RANGES} />
       </div>
 
       {tab === "approval" ? (
@@ -92,7 +126,7 @@ export function DriversPage() {
           actions={
             <CsvButton
               filename={`drivers-${period.from.toISOString().slice(0, 10)}.csv`}
-              header={["Driver", "Plate", "Status", "Trips", "Riders", "Online hours", "Fares GHS", "Fares per online hour GHS", "Commission due GHS", "Top-ups GHS", "Balance owed GHS", "Rating"]}
+              header={["Driver", "Plate", "Status", "Trips", "Riders", "Online hours", "Fares GHS", "Commission charged GHS", "Commission waived GHS", "Top-ups GHS", "Total income GHS", "Fares per online hour GHS"]}
               rows={() =>
                 rows.map((d) => [
                   d.name,
@@ -102,11 +136,11 @@ export function DriversPage() {
                   d.riders ?? "",
                   Math.round(d.hoursOnlineMs / 360_000) / 10,
                   (d.faresPesewas ?? 0) / 100,
-                  d.faresPerOnlineHourPesewas != null ? d.faresPerOnlineHourPesewas / 100 : "",
                   (d.commissionDuePesewas ?? 0) / 100,
+                  (d.commissionWaivedPesewas ?? 0) / 100,
                   (d.topUpsPesewas ?? 0) / 100,
-                  Math.max(0, d.balancePesewas ?? 0) / 100,
-                  d.rating ?? "",
+                  (d.incomePesewas ?? 0) / 100,
+                  d.faresPerOnlineHourPesewas != null ? d.faresPerOnlineHourPesewas / 100 : "",
                 ])
               }
             />
@@ -123,49 +157,34 @@ export function DriversPage() {
                   return <Chip tone={n.tone}>{n.label}</Chip>;
                 },
                 sortValue: (d) => driverNow(d).label,
+                phoneHidden: true,
               },
               { key: "trips", header: "Trips", render: (d) => <span className="num">{d.trips}</span>, sortValue: (d) => d.trips, align: "right" },
-              { key: "riders", header: "Riders", render: (d) => <span className="num">{d.riders ?? "—"}</span>, sortValue: (d) => d.riders ?? 0, align: "right" },
-              { key: "online", header: "Online", render: (d) => <span className="num">{hours(d.hoursOnlineMs)}</span>, sortValue: (d) => d.hoursOnlineMs, align: "right" },
-              { key: "fares", header: "Fares", render: (d) => <span className="num">{d.trips ? cedis(d.faresPesewas ?? 0) : "—"}</span>, sortValue: (d) => d.faresPesewas ?? 0, align: "right" },
+              { key: "riders", header: "Riders", render: (d) => <span className="num">{d.riders ?? "—"}</span>, sortValue: (d) => d.riders ?? 0, align: "right", phoneHidden: true },
+              { key: "online", header: "Online", render: (d) => <span className="num">{hours(d.hoursOnlineMs)}</span>, sortValue: (d) => d.hoursOnlineMs, align: "right", phoneHidden: true },
+              { key: "fares", header: "Fares", render: (d) => <span className="num">{money(d.faresPesewas)}</span>, sortValue: (d) => d.faresPesewas ?? 0, align: "right" },
+              {
+                key: "commission",
+                header: "Commission",
+                render: (d) => <CommissionCell charged={d.commissionDuePesewas ?? 0} waived={d.commissionWaivedPesewas ?? 0} />,
+                sortValue: (d) => (d.commissionDuePesewas ?? 0) + (d.commissionWaivedPesewas ?? 0),
+                align: "right",
+              },
+              { key: "topups", header: "Top-ups", render: (d) => <span className="num">{money(d.topUpsPesewas)}</span>, sortValue: (d) => d.topUpsPesewas ?? 0, align: "right" },
+              {
+                key: "income",
+                header: "Total income",
+                render: (d) => <strong className="num">{money(d.incomePesewas)}</strong>,
+                sortValue: (d) => d.incomePesewas ?? 0,
+                align: "right",
+              },
               {
                 key: "perHour",
-                header: "Per online h",
+                header: "Per online hour",
                 render: (d) => <span className="num" title="Fares ÷ hours online">{d.faresPerOnlineHourPesewas != null ? cedis(d.faresPerOnlineHourPesewas) : "—"}</span>,
                 sortValue: (d) => d.faresPerOnlineHourPesewas ?? null,
                 align: "right",
-              },
-              { key: "topups", header: "Top-ups", render: (d) => <span className="num">{d.topUpsPesewas ? cedis(d.topUpsPesewas) : "—"}</span>, sortValue: (d) => d.topUpsPesewas ?? 0, align: "right", phoneHidden: true },
-              {
-                key: "owed",
-                header: "Owes",
-                render: (d) => <span className="num">{(d.balancePesewas ?? 0) > 0 ? cedis(d.balancePesewas) : "—"}</span>,
-                sortValue: (d) => d.balancePesewas ?? 0,
-                align: "right",
                 phoneHidden: true,
-              },
-              {
-                key: "accepted",
-                header: "Accepted",
-                render: (d) => (
-                  <span className="num" title={d.acceptanceRate === null ? "Not enough data yet" : `${d.offers} offers`}>
-                    {percent(d.acceptanceRate)}
-                  </span>
-                ),
-                sortValue: (d) => d.acceptanceRate,
-                align: "right",
-                phoneHidden: true,
-              },
-              {
-                key: "rating",
-                header: "Rating",
-                render: (d) => (
-                  <span className="num" title={d.rating === null ? "Not enough data yet" : `${d.ratings} ratings`}>
-                    {d.rating === null ? "—" : `${d.rating.toFixed(1)} ★`}
-                  </span>
-                ),
-                sortValue: (d) => d.rating,
-                align: "right",
               },
             ]}
             rows={list.data ? rows : null}
@@ -176,13 +195,14 @@ export function DriversPage() {
             onRowClick={(d) => navigate(withParams(path, search, { driver: d.driverId }))}
             rowLabel={(d) => `Open ${d.name}`}
             searchText={(d) => `${d.name} ${d.plate ?? ""} ${d.car ?? ""}`}
-            searchLabel="Search drivers by name or plate"
+            searchLabel="Search by name or plate"
             empty={tab === "online" ? "No drivers are online right now." : tab === "suspended" ? "No driver is suspended." : "No drivers yet."}
-            initialSort={{ key: "trips", dir: "desc" }}
+            initialSort={{ key: "income", dir: "desc" }}
+            pageSize={50}
+            footer={rows.length > 1 ? driverTotals(rows) : undefined}
           />
           <p className="muted small">
-            Fares are the fares of trips completed in the period. Per online h = fares ÷ hours the app was online. Owes = commission still owed, all time
-            (nothing while commission is waived). Top-ups are recorded on Payouts &amp; commission.
+            For the range chosen above. Total income = fares − commission charged + top-ups. Commission shows what was charged, and what was waived in grey.
           </p>
         </Section>
       )}

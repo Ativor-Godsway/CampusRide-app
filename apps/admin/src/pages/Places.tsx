@@ -1,5 +1,6 @@
 import { getPlacesActivity } from "../api";
 import { useToken } from "../auth";
+import { Collapsible } from "../components/Collapsible";
 import { DataTable } from "../components/DataTable";
 import { PeriodPicker } from "../components/PeriodPicker";
 import { Loaded } from "../components/States";
@@ -83,14 +84,14 @@ export function PlacesPage() {
           );
         }}
       </Loaded>
-      <Section title="Zone neighbours">
+      <Collapsible id="places.neighbours" title="Zone neighbours" hint="Which zones dispatch treats as next door, so a driver nearby still gets the request.">
         <div className="settings-stack">
           <ZoneNeighboursCard />
         </div>
-      </Section>
-      <Section title="Edit places">
+      </Collapsible>
+      <Collapsible id="places.edit" title="Edit places" hint="Add a place riders can pick, or change one: its name, pin and zone.">
         <PlacesScreen />
-      </Section>
+      </Collapsible>
     </Page>
   );
 }

@@ -1,5 +1,6 @@
 import { getCancellations, type DriverCancelRow } from "../api";
 import { useToken } from "../auth";
+import { Collapsible } from "../components/Collapsible";
 import { DataTable } from "../components/DataTable";
 import { PeriodPicker } from "../components/PeriodPicker";
 import { StatTile, TileRow } from "../components/StatTile";
@@ -104,14 +105,14 @@ export function CancellationsPage() {
                 />
               </Section>
             ) : null}
-            <Section title="By hour of the request">
+            <Collapsible id="cancels.hour" title="By hour of the request" hint="When in the day requests were cancelled.">
               <PairedBars
                 series={[{ label: "Cancellations", color: "var(--red-600)", values: DAY_HOURS.map((h) => d.byHour[h] ?? 0) }]}
                 labels={DAY_HOURS.map((h) => (h === 7 || h === 12 ? hourLabel(h) : hourLabel(h, false)))}
                 summary="Cancelled requests by the hour they were made"
                 height={160}
               />
-            </Section>
+            </Collapsible>
             <Section
               title="Cancelled rides"
               actions={

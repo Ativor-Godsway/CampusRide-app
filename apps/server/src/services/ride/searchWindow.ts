@@ -16,7 +16,8 @@ import { logger } from "../../lib/logger";
 const SETTING_ID = "dispatch";
 let windowSeconds = DEFAULT_SEARCH_WINDOW_SECONDS;
 /** Fill moving cars first (services/ride/movingFirst.ts): the whole step, and the auto-add default. */
-let moving = { movingFirstEnabled: true, autoAddDefault: true };
+// Auto-add is OFF by default (2026-11-28): drivers who never chose get the 20 s exclusive offer.
+let moving = { movingFirstEnabled: true, autoAddDefault: false };
 
 /** The moving-car step's switches now (from memory). */
 export function movingFirstSettings(): { movingFirstEnabled: boolean; autoAddDefault: boolean } {
@@ -40,7 +41,7 @@ export interface SearchWindowSetting {
 export async function readSearchWindow(prisma: PrismaClient): Promise<SearchWindowSetting> {
   const row = await prisma.dispatchSetting.findUnique({ where: { id: SETTING_ID } });
   windowSeconds = row?.searchWindowSeconds ?? DEFAULT_SEARCH_WINDOW_SECONDS;
-  moving = { movingFirstEnabled: row?.movingFirstEnabled ?? true, autoAddDefault: row?.autoAddDefault ?? true };
+  moving = { movingFirstEnabled: row?.movingFirstEnabled ?? true, autoAddDefault: row?.autoAddDefault ?? false };
   return { searchWindowSeconds: windowSeconds, ...moving, updatedAt: row?.updatedAt ?? null, updatedBy: row?.updatedBy ?? null };
 }
 
@@ -95,7 +96,7 @@ export async function saveMovingFirstSettings(
 
 /** Tests only: the moving-car switches without the database. */
 export function setMovingFirstForTests(next: Partial<{ movingFirstEnabled: boolean; autoAddDefault: boolean }> = {}): void {
-  moving = { movingFirstEnabled: true, autoAddDefault: true, ...next };
+  moving = { movingFirstEnabled: true, autoAddDefault: false, ...next };
 }
 
 /** Tests only: set the window without the database. */

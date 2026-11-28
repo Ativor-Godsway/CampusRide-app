@@ -193,7 +193,7 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
         updatedAt: setting.updatedAt?.toISOString() ?? null,
         updatedBy: admin,
       },
-      defaults: { searchWindowSeconds: DEFAULT_SEARCH_WINDOW_SECONDS, movingFirstEnabled: true, autoAddDefault: true },
+      defaults: { searchWindowSeconds: DEFAULT_SEARCH_WINDOW_SECONDS, movingFirstEnabled: true, autoAddDefault: false },
       bounds: SEARCH_WINDOW_BOUNDS_SECONDS,
       /** How long a driver's offer pop-up lasts: set on the server (DRIVER_OFFER_SECONDS), shown read-only. */
       offerSeconds: config.driverOfferSeconds,

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ApiError, getSafety, handleSos, type SosRow } from "../api";
 import { useToken } from "../auth";
+import { Collapsible } from "../components/Collapsible";
 import { Chip } from "../components/Chip";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PeriodPicker } from "../components/PeriodPicker";
@@ -115,7 +116,7 @@ export function SafetyPage() {
                 </p>
               ) : null}
             </Section>
-            <Section title="Low ratings (1–2 stars)">
+            <Collapsible id="safety.lowratings" title="Low ratings (1–2 stars)" hint="Trips riders rated 1 or 2 stars in this range, with their comments.">
               {d.lowRatings.length === 0 ? (
                 <Empty>No 1 or 2 star ratings in this period.</Empty>
               ) : (
@@ -133,7 +134,7 @@ export function SafetyPage() {
                   ))}
                 </ul>
               )}
-            </Section>
+            </Collapsible>
             <p className="muted small">
               Admin sign-ins are in <Link to="/settings#logins">Settings</Link>.
             </p>

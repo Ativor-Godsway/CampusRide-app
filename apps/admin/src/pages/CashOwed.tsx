@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { ApiError, getCash, getPayments, recordPayment, reversePayment, waiveAllBalances, type CashDriverRow, type CashMethod, type CashPayment } from "../api";
+import { Collapsible } from "../components/Collapsible";
+import { ApiError, type CommissionReconciliation, getCash, getPayments, recordPayment, reversePayment, waiveAllBalances, type CashDriverRow, type CashMethod, type CashPayment } from "../api";
 import { useToken } from "../auth";
 import { Chip } from "../components/Chip";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -34,6 +35,27 @@ function Frame({ embedded, controls, children }: { embedded: boolean; controls: 
     <Page title="Commission owed" subtitle="Riders pay drivers in cash. Drivers owe CampusRide the commission on each fare." controls={controls}>
       {children}
     </Page>
+  );
+}
+
+/** Earned = Paid + Waived + Still owed (− paid ahead): the commission totals, all time, that always add up. */
+export function Reconciliation({ r }: { r: CommissionReconciliation }) {
+  return (
+    <div className="stack-tight">
+      <div className="equation" role="group" aria-label="Commission earned equals paid plus waived plus still owed">
+        <StatTile dark label="Commission earned" value={cedis(r.earnedPesewas)} note="All time, at the rate on each trip" />
+        <span className="op" aria-hidden="true">=</span>
+        <StatTile label="Paid" value={cedis(r.paidPesewas)} note="In person and Paystack" />
+        <span className="op" aria-hidden="true">+</span>
+        <StatTile label="Waived" value={cedis(r.waivedPesewas)} note={`${cedis(r.commissionWaivedPesewas)} trips · ${cedis(r.balanceWaivedPesewas)} balances`} />
+        <span className="op" aria-hidden="true">+</span>
+        <StatTile label="Still owed" value={cedis(r.stillOwedPesewas)} note={r.paidAheadPesewas ? `− ${cedis(r.paidAheadPesewas)} paid ahead` : "By drivers"} />
+      </div>
+      <p className="muted small">
+        Waived = commission on trips completed while commission was waived, plus balances an admin forgave. A balance waiver only counts up to what the driver
+        owed at the time, so nothing is waived twice.
+      </p>
+    </div>
   );
 }
 
@@ -177,38 +199,29 @@ export function CashOwedPage({ embedded = false }: { embedded?: boolean } = {}) 
       <Loaded {...cash} onRetry={cash.refresh}>
         {(c) => (
           <>
-            <div className="tiles tiles-hero">
-              <div className="hero">
-                <span className="hero-label">Still owed to CampusRide</span>
-                <span className="hero-value num">{cedis(c.outstandingPesewas)}</span>
-                <span className="hero-note">
-                  {c.driversOwing} {c.driversOwing === 1 ? "driver" : "drivers"} · {oldestWords(c.oldestUnpaidAt)}
-                </span>
+            {c.reconciliation ? <Reconciliation r={c.reconciliation} /> : null}
+            <Collapsible
+              id="commission.period"
+              title={`In this range: ${periodLabel(period)}`}
+              hint="Commission charged and waived on the range's trips, and what came in, by how it was paid."
+              aside={cedis(c.paidInPeriodPesewas)}
+            >
+              <div className="kpi-grid">
+                <StatTile label="Commission charged" value={cedis(c.earnedInPeriodPesewas)} note={`On ${cedis(c.faresInPeriodPesewas)} in fares`} />
+                <StatTile label="Commission waived" value={cedis(c.waivedCommissionInPeriodPesewas ?? 0)} note="Trips completed while waived" />
+                <StatTile label="Collected" value={cedis(c.paidInPeriodPesewas)} note={`${c.paymentsInPeriod} ${c.paymentsInPeriod === 1 ? "payment" : "payments"}`} />
+                <StatTile label="Via Paystack" value={cedis(c.collectedPaystackPesewas)} note="Paid by drivers in the app" />
+                <StatTile label="In person" value={cedis(c.collectedInPersonPesewas)} note="Recorded by an admin" />
+                <StatTile
+                  label="Paystack fees paid by drivers"
+                  value={cedis(c.paystackFeesPaidByDriversPesewas)}
+                  note={c.paystackFeesChargedPesewas ? `Paystack kept ${cedis(c.paystackFeesChargedPesewas)}` : "Added on top of their balance"}
+                />
               </div>
-              <StatTile
-                label="Commission charged"
-                value={cedis(c.earnedInPeriodPesewas)}
-                note={
-                  c.waivedCommissionInPeriodPesewas
-                    ? `On ${cedis(c.faresInPeriodPesewas)} in fares · ${cedis(c.waivedCommissionInPeriodPesewas)} waived`
-                    : `On ${cedis(c.faresInPeriodPesewas)} in fares`
-                }
-              />
-              <StatTile label="Collected" value={cedis(c.paidInPeriodPesewas)} note={`${c.paymentsInPeriod} ${c.paymentsInPeriod === 1 ? "payment" : "payments"}`} />
-            </div>
-            <div className="tiles">
-              <StatTile label="Collected via Paystack" value={cedis(c.collectedPaystackPesewas)} note="Paid by drivers in the app" />
-              <StatTile label="Collected in person" value={cedis(c.collectedInPersonPesewas)} note="Recorded by an admin" />
-              <StatTile label="Balances waived" value={cedis(c.waivedInPeriodPesewas)} note="Forgiven by an admin, driver by driver" />
-              <StatTile
-                label="Paystack fees paid by drivers"
-                value={cedis(c.paystackFeesPaidByDriversPesewas)}
-                note={c.paystackFeesChargedPesewas ? `Paystack reports ${cedis(c.paystackFeesChargedPesewas)} kept` : "Added on top of their balance"}
-              />
-            </div>
+            </Collapsible>
 
             <Section
-              title="By driver"
+              title="By driver, all time"
               actions={
                 c.outstandingPesewas > 0 ? (
                   <button type="button" className="danger-text-button" onClick={() => setWaivingAll(true)}>
@@ -220,18 +233,17 @@ export function CashOwedPage({ embedded = false }: { embedded?: boolean } = {}) 
               <DataTable
                 columns={[
                   { key: "driver", header: "Driver", render: (d) => <strong>{d.name}</strong>, sortValue: (d) => d.name },
-                  { key: "owed", header: "Owed this period", render: (d) => <span className="num">{cedis(d.owedInPeriodPesewas)}</span>, sortValue: (d) => d.owedInPeriodPesewas, align: "right" },
-                  { key: "paid", header: "Paid", render: (d) => <span className="num">{cedis(d.paidInPeriodPesewas)}</span>, sortValue: (d) => d.paidInPeriodPesewas, align: "right" },
+                  { key: "earned", header: "Commission earned", render: (d) => <span className="num">{cedis(d.earnedPesewas ?? 0)}</span>, sortValue: (d) => d.earnedPesewas ?? 0, align: "right" },
+                  { key: "paid", header: "Paid", render: (d) => <span className="num">{cedis(d.allPaidPesewas ?? 0)}</span>, sortValue: (d) => d.allPaidPesewas ?? 0, align: "right" },
+                  { key: "waived", header: "Waived", render: (d) => <span className="num">{cedis(d.allWaivedPesewas ?? 0)}</span>, sortValue: (d) => d.allWaivedPesewas ?? 0, align: "right" },
                   {
                     key: "still",
                     header: "Still owed",
                     render: (d) => (
                       <span className="num">
                         <strong>{cedis(Math.max(0, d.balancePesewas))}</strong>
-                        {d.balancePesewas > d.owedInPeriodPesewas - d.paidInPeriodPesewas && d.balancePesewas > 0 ? (
-                          <span className="muted small block">includes {cedis(d.balancePesewas - Math.max(0, d.owedInPeriodPesewas - d.paidInPeriodPesewas))} from before</span>
-                        ) : null}
                         {d.balancePesewas < 0 ? <span className="muted small block">{cedis(-d.balancePesewas)} paid ahead</span> : null}
+                        {d.balancePesewas > 0 && d.oldestUnpaidAt ? <span className="muted small block">{oldestWords(d.oldestUnpaidAt)}</span> : null}
                       </span>
                     ),
                     sortValue: (d) => d.balancePesewas,
@@ -266,8 +278,11 @@ export function CashOwedPage({ embedded = false }: { embedded?: boolean } = {}) 
         )}
       </Loaded>
 
-      <WaitFeesSection query={query} />
+      <Collapsible id="commission.waitfees" title="Wait fees" hint="Fees riders paid for keeping the driver waiting, and no-shows, in this range.">
+        <WaitFeesSection query={query} />
+      </Collapsible>
 
+      <Collapsible id="commission.payments" title="Payments" hint="Every payment drivers made, in person or through Paystack, with reversals. Download as CSV.">
       <Section
         title="Payments"
         actions={
@@ -361,7 +376,9 @@ export function CashOwedPage({ embedded = false }: { embedded?: boolean } = {}) 
           themselves once Paystack confirms them; the reference matches the Paystack dashboard.
         </p>
       </Section>
+      </Collapsible>
 
+      <Collapsible id="commission.waivers" title="Waivers" hint="Balances an admin forgave, with the reason.">
       <Section
         title="Waivers"
         actions={
@@ -431,6 +448,7 @@ export function CashOwedPage({ embedded = false }: { embedded?: boolean } = {}) 
           paging={waivers.data ? { page: waiverPage, pageSize: waivers.data.pageSize, total: waivers.data.total, onPage: setWaiverPage } : undefined}
         />
       </Section>
+      </Collapsible>
 
       {paying ? (
         <RecordPayment

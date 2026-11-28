@@ -409,9 +409,11 @@ It removes the fake riders' scheduled bookings, and any car only they were in, t
 
 A new Shared request goes first to the best car already on a trip going the same way. The limit is the scheduled-rides detour: 1 km / 5 min by default (admin Settings → Scheduled rides). With auto-add on, the rider joins at once and the driver can undo for 15 s. With it off, that driver alone gets the offer for 20 s. Only then does anyone else see the request.
 
+**Auto-add is OFF by default** (since 2026-11-28, migration `20261129180000_auto_add_default_off`): new drivers and every driver who never touched the switch get the 20 s "On your way" offer. Only a driver who turned **Auto-add riders on my way** on themselves is auto-added. The admin default (Settings → Dispatch → Auto-add riders, by default) is off too.
+
 ### Deploy it
 
-This also adds the migration `20261128180000_moving_cars_first` to the staging database.
+This also adds the migrations `20261128180000_moving_cars_first` and `20261129180000_auto_add_default_off` to the staging database. (The `admin-redesign` branch includes this branch: deploying `admin-redesign` covers both.)
 
 ```sh
 npm run staging:deploy -- fill-moving-cars-first
@@ -438,18 +440,19 @@ Open each staging app, close it, and open it again. The driver app must have the
 ### Set up: one moving car, one idle driver
 
 1. Sign in two staging driver apps: **Yaw** (`99 000 0011`) and **Abena** (`99 000 0012`). Two phones, or one phone and a second device. Go online on both.
-2. In Yaw's app, check **Account → Auto-add riders on my way** is on (the default).
+2. In Yaw's app, check **Account → Auto-add riders on my way** is **off** (the default).
 3. **Ama** (`99 000 0001`) requests **Shared, Pentagon → Balme Library**. Yaw accepts. Yaw now has a moving car with a free seat. Abena stays free.
 
 ### Auto-add (on)
 
-1. Send one fake rider on Ama's route:
+1. Yaw turns **Auto-add riders on my way** on.
+2. Send one fake rider on Ama's route:
    ```sh
    npm run staging:fake-requests -- --count 1 --minutes 0 --shared 1 --from pentagon --to balme --open-now
    ```
-2. **Yaw:** a different sound (three rising notes) and a different buzz. A dark banner shows "Rider added · … · Pentagon … · +GH₵7 · +N min" with **Undo 15**. The stop list already has the new rider, in shortest-route order. With Yaw's app in the background, the same words come as a notification.
-3. **Abena:** sees nothing: no pop-up, nothing on the board.
-4. **Undo:** tap Undo within 15 s. The rider comes off Yaw's car without penalty, and Abena gets the request at once as a normal pop-up. Yaw is never offered it again. After 15 s, Undo is gone.
+3. **Yaw:** a different sound (three rising notes) and a different buzz. A dark banner shows "Rider added · … · Pentagon … · +GH₵7 · +N min" with **Undo 15**. The stop list already has the new rider, in shortest-route order. With Yaw's app in the background, the same words come as a notification.
+4. **Abena:** sees nothing: no pop-up, nothing on the board.
+5. **Undo:** tap Undo within 15 s. The rider comes off Yaw's car without penalty, and Abena gets the request at once as a normal pop-up. Yaw is never offered it again. After 15 s, Undo is gone.
 
 ### Auto-add off: the exclusive 20 s offer
 
@@ -472,7 +475,7 @@ Open each staging app, close it, and open it again. The driver app must have the
 
 ### The board
 
-1. In the admin site, turn **Settings → Ride requests → Fill moving cars first** off, so requests stay open.
+1. In the admin site, turn **Settings → Dispatch → Fill moving cars first** off, so requests stay open.
 2. Send one rider each way:
    ```sh
    npm run staging:fake-requests -- --count 2 --minutes 0 --shared 1 --from pentagon --to balme
@@ -489,9 +492,9 @@ Open each staging app, close it, and open it again. The driver app must have the
 npm run staging:admin
 ```
 
-**Settings → Ride requests** has:
+**Settings → Dispatch** has:
 - **Fill moving cars first**: the whole step on or off.
-- **Auto-add riders, by default**: for drivers who haven't chosen.
+- **Auto-add riders, by default**: for drivers who haven't chosen. Off by default.
 - The last 7 days' counts: auto-added, offered, declined, didn't answer, undone, no moving car fitted.
 
 Every request records its step in `Ride.movingStep`, for analysis.

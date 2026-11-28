@@ -8,6 +8,9 @@ import { Loaded } from "../components/States";
 import { count } from "../lib/money";
 import { useRouter, withParams } from "../lib/router";
 import { usePolled } from "../lib/usePolled";
+import { Collapsible } from "../components/Collapsible";
+import { LAUNCH_FROM } from "../lib/period";
+import { humanDay, isoDay } from "../lib/time";
 import { Freshness, Page, Section } from "../shell/Page";
 
 export const CAR_STATUS_WORDS: Record<ScheduledCarRow["status"], string> = {
@@ -50,7 +53,16 @@ const COLUMNS: Column<ScheduledCarRow & { arriveBy: string }>[] = [
   { key: "noshow", header: "No-shows", render: (c) => <span className="num">{c.noShows}</span>, align: "right", phoneHidden: true },
 ];
 
-/** Scheduled rides: one day by slot and car, its totals, and the last 14 days. */
+/** Earlier days since launch with any scheduled activity, newest first (no rows of zeros). */
+export function historyDays(d: Pick<ScheduledDayBody, "recent" | "day">): ScheduledDayBody["recent"] {
+  return [...d.recent]
+    .filter((r) => r.day >= LAUNCH_DAY && r.day !== d.day && (r.bookings > 0 || r.cars > 0 || r.started > 0 || r.toLive > 0 || r.noShows > 0 || r.strikes > 0))
+    .sort((a, b) => (a.day < b.day ? 1 : -1));
+}
+
+const LAUNCH_DAY = LAUNCH_FROM.toISOString().slice(0, 10);
+
+/** Scheduled rides: today (or a chosen day) by slot and car with its totals; earlier days folded away under History. */
 export function ScheduledPage() {
   const token = useToken();
   const { path, search, navigate } = useRouter();
@@ -58,7 +70,7 @@ export function ScheduledPage() {
   const data = usePolled(() => getScheduledDay(token, day || undefined), day, undefined, "Loading scheduled rides");
 
   return (
-    <Page title="Scheduled rides" subtitle={data.data?.day ?? day} controls={<Freshness updatedAt={data.updatedAt} onRefresh={data.refresh} loading={data.loading} />}>
+    <Page title="Scheduled rides" subtitle={data.data ? (data.data.day === isoDay(Date.now()) ? "Today" : humanDay(data.data.day)) : "Today"} controls={<Freshness updatedAt={data.updatedAt} onRefresh={data.refresh} loading={data.loading} />}>
       <div className="toolbar">
         <label className="field">
           <span>Day</span>
@@ -76,7 +88,7 @@ export function ScheduledPage() {
               <StatTile label="No-shows" value={count(d.totals.noShows)} noteTone={d.totals.noShows > 0 ? "bad" : undefined} note={`${count(d.totals.lateCancels)} late cancels`} />
               <StatTile label="Strikes" value={count(d.totals.strikes)} note={`${count(d.totals.blockedRiders)} riders can't schedule now`} />
             </TileRow>
-            <Section title="Cars by slot">
+            <Section title={data.data?.day === isoDay(Date.now()) ? "Today's cars, by slot" : "Cars by slot"}>
               <DataTable
                 columns={COLUMNS}
                 rows={carRows(d)}
@@ -86,10 +98,15 @@ export function ScheduledPage() {
                 empty="No scheduled rides this day."
               />
             </Section>
-            <Section title="Last 14 days">
+            <Collapsible
+              id="scheduled.history"
+              title="History"
+              hint="Earlier days since launch that had scheduled bookings (days with nothing are left out)."
+              aside={`${historyDays(d).length} ${historyDays(d).length === 1 ? "day" : "days"}`}
+            >
               <DataTable
                 columns={[
-                  { key: "day", header: "Day", render: (r) => <span className="num">{r.day}</span>, sortValue: (r) => r.day },
+                  { key: "day", header: "Day", render: (r) => humanDay(r.day), sortValue: (r) => r.day },
                   { key: "b", header: "Bookings", render: (r) => <span className="num">{r.bookings}</span>, align: "right" },
                   { key: "s", header: "Seats", render: (r) => <span className="num">{r.seats}</span>, align: "right" },
                   { key: "c", header: "Cars", render: (r) => <span className="num">{r.cars}</span>, align: "right", phoneHidden: true },
@@ -98,12 +115,13 @@ export function ScheduledPage() {
                   { key: "n", header: "No-shows", render: (r) => <span className="num">{r.noShows}</span>, align: "right", phoneHidden: true },
                   { key: "k", header: "Strikes", render: (r) => <span className="num">{r.strikes}</span>, align: "right", phoneHidden: true },
                 ]}
-                rows={[...d.recent].reverse()}
+                rows={historyDays(d)}
                 rowKey={(r) => r.day}
                 onRowClick={(r) => navigate(withParams(path, search, { day: r.day }))}
                 rowLabel={(r) => r.day}
+                empty="No scheduled bookings on earlier days yet."
               />
-            </Section>
+            </Collapsible>
           </>
         )}
       </Loaded>
