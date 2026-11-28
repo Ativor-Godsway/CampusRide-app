@@ -10,7 +10,6 @@ import { useRouter } from "../lib/router";
 import { usePagePeriod } from "../lib/usePeriod";
 import { usePolled } from "../lib/usePolled";
 import { PlacesScreen } from "../screens/PlacesScreen";
-import { FarPricingCard } from "../screens/FarPricingCard";
 import { ZoneNeighboursCard } from "../screens/ZoneNeighboursCard";
 import { Freshness, Page, Section } from "../shell/Page";
 
@@ -28,7 +27,7 @@ export function PlacesPage() {
   const data = usePolled(() => getPlacesActivity(token, query), query);
 
   return (
-    <Page title="Places" subtitle="Where rides start and end, and the campus place list" controls={<Freshness updatedAt={data.updatedAt} onRefresh={data.refresh} loading={data.loading} />}>
+    <Page title="Places & zones" subtitle="Where rides start and end, the campus place list, and which zones are next door (far-trip places are on Pricing)" controls={<Freshness updatedAt={data.updatedAt} onRefresh={data.refresh} loading={data.loading} />}>
       <div className="toolbar">
         <PeriodPicker value={period} onChange={setPeriod} choices={["this-week", "last-week", "this-month", "last-30", "all-time"]} />
         <span className="muted">{periodLabel(period)}</span>
@@ -84,9 +83,8 @@ export function PlacesPage() {
           );
         }}
       </Loaded>
-      <Section title="Far-trip pricing and zone neighbours">
+      <Section title="Zone neighbours">
         <div className="settings-stack">
-          <FarPricingCard />
           <ZoneNeighboursCard />
         </div>
       </Section>

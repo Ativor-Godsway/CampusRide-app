@@ -39,7 +39,18 @@ export function rideColumns(opts: { now?: number; withSeats?: boolean; compact?:
         </span>
       ),
     },
-    { key: "type", header: "Type", render: (r) => rideTypeLabel(r.type), sortValue: (r) => r.type, phoneHidden: true },
+    {
+      key: "type",
+      header: "Type",
+      render: (r) => (
+        <span className="nowrap">
+          {rideTypeLabel(r.type)}
+          {r.booking === "SCHEDULED" ? <span className="muted small"> · ahead</span> : null}
+        </span>
+      ),
+      sortValue: (r) => r.type,
+      phoneHidden: true,
+    },
   ];
   if (opts.compact) {
     const kept = cols.filter((c) => c.key !== opts.compact && c.key !== "type");
@@ -54,6 +65,7 @@ export function rideColumns(opts: { now?: number; withSeats?: boolean; compact?:
         <span className="num">
           {cedis(r.fareTotal)}
           {r.fareTotal !== null && !r.fareFinal ? <span className="muted small"> so far</span> : null}
+          {r.waitFeePesewas ? <span className="muted small block">incl. {cedis(r.waitFeePesewas)} wait</span> : null}
         </span>
       ),
       sortValue: (r) => r.fareTotal,

@@ -6,7 +6,8 @@ import { cedis } from "../lib/money";
 import { Link, useRouter } from "../lib/router";
 import { initials } from "../lib/labels";
 import { usePolled } from "../lib/usePolled";
-import { NAV, type NavItem } from "./nav";
+import { NAV, navGroups, type NavItem } from "./nav";
+import { useInvestorView } from "../lib/useInvestorView";
 import { ShellContext, useShell as useContextSummary } from "./ShellContext";
 
 function Badge({ item, summary }: { item: NavItem; summary: Summary | null }) {
@@ -53,7 +54,8 @@ export function Shell({ children }: { children: ReactNode }) {
   const refreshSummary = polled.refresh;
   const shell = useMemo(() => ({ summary, refreshSummary }), [summary, refreshSummary]);
   const isActive = useCallback((item: NavItem) => (item.path === "/" ? path === "/" : path.startsWith(item.path)), [path]);
-  const name = session?.user.name ?? "Admin";
+  const investor = useInvestorView();
+  const name = investor.on ? "Admin" : (session?.user.name ?? "Admin");
   const moreActive = !NAV.some((n) => n.tab && isActive(n)) && path !== "/";
 
   return (
@@ -70,17 +72,22 @@ export function Shell({ children }: { children: ReactNode }) {
               <span className="brand-sub">Admin</span>
             </div>
           </div>
-          <ul className="nav-list">
-            {NAV.map((item) => (
-              <li key={item.path}>
-                <Link to={item.path} className={isActive(item) ? "nav-link active" : "nav-link"} aria-current={isActive(item) ? "page" : undefined}>
-                  <Icon name={item.icon} />
-                  <span>{item.label}</span>
-                  <Badge item={item} summary={summary} />
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {navGroups().map(({ group, items }) => (
+            <div key={group ?? "top"} role="group" aria-label={group ?? "Overview"}>
+              {group ? <div className="nav-group">{group}</div> : null}
+              <ul className="nav-list">
+                {items.map((item) => (
+                  <li key={item.path}>
+                    <Link to={item.path} className={isActive(item) ? "nav-link active" : "nav-link"} aria-current={isActive(item) ? "page" : undefined}>
+                      <Icon name={item.icon} />
+                      <span>{item.label}</span>
+                      <Badge item={item} summary={summary} />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
           <div className="me">
             <span className="avatar" aria-hidden="true">
               {initials(name)}
@@ -128,7 +135,7 @@ export function MorePage() {
     <div className="page more-page">
       <h1>More</h1>
       <ul className="more-list">
-        {NAV.filter((n) => !n.tab).map((item) => (
+        {NAV.filter((n) => !n.tab && !n.hidden).map((item) => (
           <li key={item.path}>
             <Link to={item.path} className="more-link">
               <Icon name={item.icon} />

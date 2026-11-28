@@ -34,7 +34,8 @@ export interface DriverBalance {
 export async function driverBalances(prisma: PrismaClient, driverUserIds?: readonly string[]): Promise<Map<string, DriverBalance>> {
   const only = driverUserIds ? { driverUserId: { in: [...driverUserIds] } } : {};
   const [owed, credited] = await Promise.all([
-    prisma.commissionLedger.groupBy({ by: ["driverUserId"], where: only, _sum: { amountPesewas: true } }),
+    // Commission on trips completed while waived is never owed.
+    prisma.commissionLedger.groupBy({ by: ["driverUserId"], where: { ...only, waived: false }, _sum: { amountPesewas: true } }),
     prisma.driverCashPayment.groupBy({ by: ["driverUserId", "kind"], where: only, _sum: { amountPesewas: true } }),
   ]);
   const out = new Map<string, DriverBalance>();
@@ -82,7 +83,7 @@ export async function oldestUnpaid(prisma: PrismaClient): Promise<Map<string, Da
     WITH running AS (
       SELECT "driverUserId", "createdAt",
              SUM("amountPesewas") OVER (PARTITION BY "driverUserId" ORDER BY "createdAt", id) AS cumulative
-      FROM "CommissionLedger"
+      FROM "CommissionLedger" WHERE NOT waived
     ),
     paid AS (
       SELECT "driverUserId", SUM("amountPesewas") AS total FROM "DriverCashPayment" GROUP BY "driverUserId"
@@ -259,7 +260,7 @@ export async function waiveAllBalances(prisma: PrismaClient, input: { reason: st
   const result = await prisma.$transaction(async (tx) => {
     const rows = await tx.$queryRaw<Array<{ driverUserId: string; balance: bigint }>>`
       SELECT c."driverUserId", c.owed - COALESCE(p.credited, 0) AS balance
-      FROM (SELECT "driverUserId", SUM("amountPesewas") AS owed FROM "CommissionLedger" GROUP BY "driverUserId") c
+      FROM (SELECT "driverUserId", SUM("amountPesewas") AS owed FROM "CommissionLedger" WHERE NOT waived GROUP BY "driverUserId") c
       LEFT JOIN (SELECT "driverUserId", SUM("amountPesewas") AS credited FROM "DriverCashPayment" GROUP BY "driverUserId") p
         ON p."driverUserId" = c."driverUserId"
       WHERE c.owed - COALESCE(p.credited, 0) > 0`;

@@ -211,6 +211,8 @@ const SCHEMAS = {
       // OPEN: any status still going on (to spot stuck rides).
       status: oneOf([...RIDE_STATUSES, "OPEN"]),
       type: oneOf(["LONE", "SHARED"]),
+      // LIVE: booked to go now; SCHEDULED: from a scheduled booking (booked ahead).
+      booking: oneOf(["LIVE", "SCHEDULED"]),
       zoneId: id,
       driverId: id,
       riderPhone: phoneField,
@@ -412,6 +414,7 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
     const query = request.query as {
       status?: string;
       type?: "LONE" | "SHARED";
+      booking?: "LIVE" | "SCHEDULED";
       zoneId?: string;
       driverId?: string;
       riderPhone?: string;
@@ -455,6 +458,8 @@ export function registerAdminRoutes(app: FastifyInstance, prisma: PrismaClient):
     if (query.status === "OPEN") where.status = { in: [...ACTIVE_RIDE_STATUSES] };
     else if (query.status !== undefined) where.status = query.status as Prisma.RideWhereInput["status"];
     if (query.type) where.type = query.type;
+    if (query.booking === "LIVE") where.booking = "LIVE";
+    else if (query.booking === "SCHEDULED") where.booking = { not: "LIVE" };
     if (query.zoneId) where.pickupZoneId = query.zoneId;
     if (query.driverId) where.driverId = query.driverId;
     if (query.q) where.id = { startsWith: query.q.trim() };

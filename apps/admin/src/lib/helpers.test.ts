@@ -36,10 +36,13 @@ describe("money", () => {
 describe("Accra time (GMT, whatever the computer's zone)", () => {
   const t = "2026-10-31T17:42:00.000Z";
   it("formats clock, day and both", () => {
-    expect(clock(t)).toBe("5:42 pm");
-    expect(clock("2026-10-31T00:05:00Z")).toBe("12:05 am");
+    expect(clock(t)).toBe("17:42");
+    expect(clock("2026-10-31T00:05:00Z")).toBe("00:05");
     expect(shortDay(t)).toBe("Sat 31 Oct");
-    expect(dayAndTime(t)).toBe("Sat 31 Oct, 5:42 pm");
+    expect(dayAndTime(t, Date.parse("2026-11-29T10:00:00Z"))).toBe("Sat 31 Oct 17:42");
+    expect(dayAndTime(t, Date.parse("2026-10-31T20:00:00Z"))).toBe("Today 17:42");
+    expect(dayAndTime(t, Date.parse("2026-11-01T08:00:00Z"))).toBe("Yesterday 17:42");
+    expect(dayAndTime(t, Date.parse("2027-01-05T08:00:00Z"))).toBe("Sat 31 Oct 2026 17:42");
     expect(hourLabel(18)).toBe("6 pm");
     expect(hourLabel(12)).toBe("12 pm");
     expect(hourLabel(0, false)).toBe("12");
@@ -111,5 +114,15 @@ describe("ride status labels (ride cancel fixes)", () => {
     const { RIDE_STATUS_FILTERS, rideStatusChip } = await import("./labels");
     expect(rideStatusChip({ status: "CANCELLED", cancelReason: "ADMIN_CANCELLED" })).toEqual({ label: "Cancelled by admin", tone: "red" });
     expect(RIDE_STATUS_FILTERS.map((f) => f.value)).toContain("OPEN");
+  });
+});
+
+describe("investor view labels", () => {
+  it("keeps masked labels whole", async () => {
+    const { shortName, initials } = await import("./labels");
+    expect(shortName("Rider #5227")).toBe("Rider #5227");
+    expect(shortName("Driver D317")).toBe("Driver D317");
+    expect(shortName("Ama Owusu Mensah")).toBe("Ama M.");
+    expect(initials("Driver D317")).toBe("D");
   });
 });

@@ -6,6 +6,25 @@ import { ago } from "../lib/time";
 import { useNow } from "../lib/usePolled";
 import { useShell } from "./ShellContext";
 import { GlobalSearch } from "./GlobalSearch";
+import { useInvestorView } from "../lib/useInvestorView";
+
+/** The top bar's "Investor view" switch: masks people everywhere, hides audit details and settings edits. */
+export function InvestorSwitch() {
+  const { on, toggle } = useInvestorView();
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      className="investor-switch"
+      onClick={toggle}
+      title={on ? "Names, phone numbers and plates are hidden. Click to show them." : "Hide names, phone numbers and plates for a screen share"}
+    >
+      <span className="track" aria-hidden="true" />
+      Investor view
+    </button>
+  );
+}
 
 const LAUNCH_WORDS = { OFF: "Off", COUNTDOWN: "Countdown", LIVE: "Live" } as const;
 
@@ -32,6 +51,7 @@ export function Freshness({ updatedAt, onRefresh, loading }: { updatedAt: number
  */
 export function Page({ title, subtitle, controls, children, wide = false }: { title: string; subtitle?: ReactNode; controls?: ReactNode; children: ReactNode; wide?: boolean }) {
   const { summary } = useShell();
+  const investor = useInvestorView();
   const mode = summary?.launchMode ?? null;
   return (
     <>
@@ -42,6 +62,7 @@ export function Page({ title, subtitle, controls, children, wide = false }: { ti
         </div>
         <div className="topbar-tools">
           {controls}
+          <InvestorSwitch />
           {mode ? (
             <Link to="/settings" className={`launch-pill launch-${mode.toLowerCase()}`} aria-label={`Launch mode: ${LAUNCH_WORDS[mode]}. Open Settings`}>
               <span className="dot" aria-hidden="true" />
@@ -51,6 +72,11 @@ export function Page({ title, subtitle, controls, children, wide = false }: { ti
           <GlobalSearch />
         </div>
       </header>
+      {investor.on ? (
+        <p className="investor-banner" role="status">
+          <Icon name="eye" size={16} /> Investor view: names, phone numbers and plates are hidden, and so are the audit log and settings changes.
+        </p>
+      ) : null}
       {summary?.database === "down" ? (
         <div className="page-alert">
           <Chip tone="red">Database</Chip> The server can&apos;t reach the database right now. Numbers may be out of date.

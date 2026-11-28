@@ -1,11 +1,18 @@
 import type { ReactNode } from "react";
 
-/** Loading, empty and error states, the same everywhere. */
-export function Loading({ what = "Loading…" }: { what?: string }) {
+/** Loading, empty and error states, the same everywhere. Loading is a skeleton of grey bars (the words are for screen readers). */
+export function Loading({ what = "Loading…", rows = 4 }: { what?: string; rows?: number }) {
   return (
-    <div className="state" role="status" aria-live="polite">
-      <span className="spinner" aria-hidden="true" />
-      {what}
+    <div className="skeleton" role="status" aria-live="polite">
+      <span className="sr-only">{what}</span>
+      <div className="skeleton-row" aria-hidden="true">
+        {[0, 1, 2, 3].map((i) => (
+          <span key={i} className="skeleton-bar tall" />
+        ))}
+      </div>
+      {Array.from({ length: rows }, (_, i) => (
+        <span key={i} className="skeleton-bar" style={{ width: `${92 - i * 9}%` }} aria-hidden="true" />
+      ))}
     </div>
   );
 }

@@ -555,6 +555,8 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
 
     const completed = { driverId: userId, status: "COMPLETED" as const };
     const seatFares = { select: { status: true, lockedFare: true, fareCharged: true } };
+    // The commission actually recorded on the trip (its rate; none if waived).
+    const ledgerSelect = { select: { amountPesewas: true, waived: true } };
     const [rides, allRides] = await Promise.all([
       prisma.ride.findMany({
         where: since ? { ...completed, OR: [{ completedAt: { gte: since } }, { completedAt: null, createdAt: { gte: since } }] } : completed,
@@ -562,16 +564,26 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
           pickupZone: { select: { name: true } },
           dropoffZone: { select: { name: true } },
           passengers: seatFares,
+          commissionLedger: ledgerSelect,
         },
         orderBy: { completedAt: "desc" },
       }),
       // All time, for the totals: only what the fares need.
-      since ? prisma.ride.findMany({ where: completed, select: { type: true, passengers: seatFares } }) : null,
+      since ? prisma.ride.findMany({ where: completed, select: { type: true, passengers: seatFares, commissionLedger: ledgerSelect } }) : null,
     ]);
 
-    const money = (ride: { type: RideKind; passengers: Parameters<typeof paidFareTotal>[1] }) => {
+    // The driver's share: the fare less the commission recorded on the trip
+    // (at the rate then; nothing while commission was waived). A trip with
+    // no record (not cash) splits at the standard rate.
+    const money = (ride: {
+      type: RideKind;
+      passengers: Parameters<typeof paidFareTotal>[1];
+      commissionLedger: { amountPesewas: number; waived: boolean } | null;
+    }) => {
       const facePesewas = paidFareTotal(ride.type, ride.passengers);
-      return { facePesewas, driverGrossPesewas: splitFare(facePesewas).driverShare };
+      const l = ride.commissionLedger;
+      const share = l ? facePesewas - (l.waived ? 0 : l.amountPesewas) : splitFare(facePesewas).driverShare;
+      return { facePesewas, driverGrossPesewas: share };
     };
 
     const items = rides.map((ride) => ({
@@ -598,7 +610,7 @@ export function registerDriverRoutes(app: FastifyInstance, prisma: PrismaClient)
     // never create a ledger row (the commission is taken at source). It is
     // shown beside the totals, never subtracted from the driver's share again.
     const ledger = await prisma.commissionLedger.aggregate({
-      where: { driverUserId: userId },
+      where: { driverUserId: userId, waived: false },
       _sum: { amountPesewas: true },
       _count: true,
     });

@@ -1,11 +1,13 @@
-import { useState } from "react";
-import { getAudit, getSystem } from "../api";
+import { useEffect, useState, type ReactNode } from "react";
+import { getDispatchSettings, getSettingsChanges, getSystem, type SettingsSectionKey } from "../api";
 import { useToken } from "../auth";
 import { Chip } from "../components/Chip";
-import { DataTable } from "../components/DataTable";
+import { ConfirmSubmit } from "../components/ConfirmSubmit";
 import { Loaded } from "../components/States";
 import { usePolled } from "../lib/usePolled";
+import { useInvestorView } from "../lib/useInvestorView";
 import { dayAndTime, ago } from "../lib/time";
+import { Link } from "../lib/router";
 import { AdminLoginsScreen } from "../screens/AdminLoginsScreen";
 import { SettingsScreen } from "../screens/SettingsScreen";
 import { CommissionRulesCard } from "../screens/CommissionRulesCard";
@@ -13,86 +15,44 @@ import { RideRequestsCard } from "../screens/RideRequestsCard";
 import { WaitFeeCard } from "../screens/WaitFeeCard";
 import { ScheduleSettingsCard } from "../screens/ScheduleSettingsCard";
 import { PricesCard } from "../screens/PricesCard";
+import { FarPricingCard } from "../screens/FarPricingCard";
+import { PasskeysCard } from "../screens/PasskeysCard";
+import { ServiceHoursCard } from "../screens/ServiceHoursCard";
 import { Page, Section } from "../shell/Page";
+import { CommissionTermsCard } from "./Money";
 
-function AuditLog() {
-  const token = useToken();
-  const [action, setAction] = useState("");
-  const [actor, setActor] = useState("");
-  const [term, setTerm] = useState("");
-  const [q, setQ] = useState("");
-  const [page, setPage] = useState(1);
-  const log = usePolled(() => getAudit(token, { action, actor, q, page }), `${action}|${actor}|${q}|${page}`, undefined, "Loading the audit log");
-  return (
-    <>
-      <form
-        className="filters"
-        onSubmit={(e) => {
-          e.preventDefault();
-          setQ(term.trim());
-          setPage(1);
-        }}
-      >
-        <label className="field">
-          <span>Action</span>
-          <select
-            value={action}
-            onChange={(e) => {
-              setAction(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">Every action</option>
-            {(log.data?.actions ?? []).map((a) => (
-              <option key={a} value={a}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Admin</span>
-          <select
-            value={actor}
-            onChange={(e) => {
-              setActor(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">Every admin</option>
-            {(log.data?.admins ?? []).map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="field">
-          <span>Search target or reason</span>
-          <input type="search" value={term} onChange={(e) => setTerm(e.target.value)} />
-        </label>
-        <button type="submit" className="tonal-button">
-          Search
-        </button>
-      </form>
-      <DataTable
-        columns={[
-          { key: "at", header: "When", render: (e) => <span className="num nowrap">{dayAndTime(e.at)}</span> },
-          { key: "who", header: "Admin", render: (e) => e.actor?.name ?? <span className="muted">Server or unknown</span> },
-          { key: "action", header: "Action", render: (e) => <code>{e.action}</code> },
-          { key: "target", header: "Target", render: (e) => <span className="muted small break">{e.target}</span>, phoneHidden: true },
-          { key: "reason", header: "Details", render: (e) => e.reason ?? <span className="muted">—</span> },
-        ]}
-        rows={log.data?.entries ?? null}
-        loading={log.loading}
-        error={log.error}
-        onRetry={log.refresh}
-        rowKey={(e) => e.id}
-        empty="Nothing in the audit log matches."
-        paging={log.data ? { page, pageSize: log.data.pageSize, total: log.data.total, onPage: setPage } : undefined}
-      />
-    </>
-  );
+interface SectionDef {
+  key: SettingsSectionKey;
+  id: string;
+  title: string;
+  help: string;
+}
+
+/** The Settings sections, in order: plain-English titles and what each controls. */
+export const SETTINGS_SECTIONS: SectionDef[] = [
+  { key: "serviceHours", id: "service-hours", title: "Service hours", help: "When riders can book. Outside these hours the apps say when CampusRide opens. Switch it open or closed now with an override." },
+  {
+    key: "dispatch",
+    id: "dispatch",
+    title: "Dispatch",
+    help: "How a request finds a driver: how long it searches, how long each driver's pop-up lasts, and whether cars already on a trip are filled first.",
+  },
+  { key: "pricing", id: "pricing", title: "Pricing", help: "What riders pay: Shared seat prices, far trips between the north and south ends, Ride alone, and the pickup wait fee." },
+  { key: "scheduled", id: "scheduled", title: "Scheduled rides", help: "Booking a Shared ride ahead: the slots, when cars are offered to drivers, reminders and late cancels." },
+  {
+    key: "commission",
+    id: "commission",
+    title: "Commission",
+    help: "CampusRide's share of each completed fare, the waiver for the commission-free launch, and when a driver who owes too much is stopped.",
+  },
+  { key: "notifications", id: "notifications", title: "Notifications & launch", help: "Launch mode and early access, the one-time launch push. Send a push to riders or drivers from Notifications." },
+  { key: "admins", id: "admins", title: "Admin users", help: "Passkeys for signing in to this site, recent admin sign-ins, and facts about this system." },
+];
+
+/** "Last changed by Ama at Today 09:14", or "Not changed yet". */
+export function lastChangedLine(change: { at: string; by: string } | null | undefined, now: number = Date.now()): string {
+  if (!change) return "Not changed yet: the defaults apply";
+  return `Last changed by ${change.by} · ${dayAndTime(change.at, now)}`;
 }
 
 function SystemFacts() {
@@ -133,28 +93,119 @@ function SystemFacts() {
   );
 }
 
-/** Settings: launch mode and early access, the launch push, passkeys, how long requests search, the pickup wait fee, the driver commission rules, admin sign-ins, the audit log, and read-only facts. */
-export function SettingsPage() {
+/** The driver pop-up length: set on the server, shown here so it's clear where it comes from. */
+function OfferSecondsLine() {
+  const token = useToken();
+  const [seconds, setSeconds] = useState<number | null>(null);
+  useEffect(() => {
+    getDispatchSettings(token).then((d) => setSeconds(d.offerSeconds ?? null), () => setSeconds(null));
+  }, [token]);
   return (
-    <Page title="Settings" subtitle="Launch, access, commission, sign-ins and the audit log">
-      <SettingsScreen />
-      <div className="settings-stack">
-        <RideRequestsCard />
-        <PricesCard />
-        <WaitFeeCard />
-        <ScheduleSettingsCard />
-        <CommissionRulesCard />
+    <div className="switch-row">
+      <span>
+        <strong>Driver pop-up: {seconds === null ? "—" : `${seconds} seconds`}</strong>
+        <span className="muted small">
+          How long each driver&apos;s new-request pop-up stays up before it moves on. Set on the server (DRIVER_OFFER_SECONDS on Render), not here.
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function SettingsSection({ def, change, readOnly, children }: { def: SectionDef; change: { at: string; by: string } | null | undefined; readOnly: boolean; children: ReactNode }) {
+  return (
+    <Section
+      className="settings-section"
+      title={<span id={def.id}>{def.title}</span>}
+      actions={<span className="section-meta">{readOnly ? "Changes hidden in investor view" : lastChangedLine(change)}</span>}
+    >
+      <p className="section-help">{def.help}</p>
+      <fieldset className="read-only" disabled={readOnly}>
+        <ConfirmSubmit what={def.title.toLowerCase()}>
+          <div className="settings-stack">{children}</div>
+        </ConfirmSubmit>
+      </fieldset>
+    </Section>
+  );
+}
+
+/**
+ * Settings, split into sections that each save on their own (with a
+ * confirm) and say when they were last changed and by whom. In investor
+ * view everything is read-only and who changed what is hidden.
+ */
+export function SettingsPage() {
+  const token = useToken();
+  const investor = useInvestorView();
+  const changes = usePolled(() => getSettingsChanges(token), "settings-changes", undefined, "Loading when settings changed");
+  const [active, setActive] = useState("service-hours");
+  const change = (key: SettingsSectionKey) => changes.data?.sections[key] ?? null;
+  const ro = investor.on;
+  const def = (key: SettingsSectionKey) => SETTINGS_SECTIONS.find((s) => s.key === key)!;
+
+  return (
+    <Page title="Settings" subtitle="Each section saves on its own. Every change is written to the audit log.">
+      <div className="settings-layout">
+        <nav className="settings-index" aria-label="Settings sections">
+          {SETTINGS_SECTIONS.map((s) => (
+            <a
+              key={s.id}
+              href={`#${s.id}`}
+              className={active === s.id ? "active" : undefined}
+              onClick={(e) => {
+                e.preventDefault();
+                setActive(s.id);
+                document.getElementById(s.id)?.closest(".settings-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+            >
+              {s.title}
+            </a>
+          ))}
+        </nav>
+        <div className="settings-stack">
+          <SettingsSection def={def("serviceHours")} change={change("serviceHours")} readOnly={ro}>
+            <ServiceHoursCard />
+          </SettingsSection>
+          <SettingsSection def={def("dispatch")} change={change("dispatch")} readOnly={ro}>
+            <RideRequestsCard />
+            <OfferSecondsLine />
+          </SettingsSection>
+          <SettingsSection def={def("pricing")} change={change("pricing")} readOnly={ro}>
+            <PricesCard />
+            <WaitFeeCard />
+            <FarPricingCard />
+          </SettingsSection>
+          <SettingsSection def={def("scheduled")} change={change("scheduled")} readOnly={ro}>
+            <ScheduleSettingsCard />
+          </SettingsSection>
+          <SettingsSection def={def("commission")} change={change("commission")} readOnly={ro}>
+            <CommissionTermsCard readOnly={ro} />
+            <CommissionRulesCard />
+          </SettingsSection>
+          <SettingsSection def={def("notifications")} change={change("notifications")} readOnly={ro}>
+            <SettingsScreen />
+            <p className="muted small">
+              To send a push notification to riders, drivers or one number, use <Link to="/notifications">Notifications</Link>.
+            </p>
+          </SettingsSection>
+          <SettingsSection def={def("admins")} change={change("admins")} readOnly={ro}>
+            <PasskeysCard />
+            {ro ? (
+              <p className="muted">Admin sign-ins are hidden in investor view.</p>
+            ) : (
+              <div className="inset">
+                <h3>Recent admin sign-ins</h3>
+                <span id="logins" />
+                <AdminLoginsScreen />
+              </div>
+            )}
+            <div className="inset">
+              <h3>About this system</h3>
+              <SystemFacts />
+            </div>
+          </SettingsSection>
+        </div>
       </div>
-      <Section title="Admin sign-ins" className="anchor" >
-        <span id="logins" />
-        <AdminLoginsScreen />
-      </Section>
-      <Section title="Audit log">
-        <AuditLog />
-      </Section>
-      <Section title="About this system">
-        <SystemFacts />
-      </Section>
     </Page>
   );
 }

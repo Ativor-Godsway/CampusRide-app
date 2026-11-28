@@ -84,7 +84,7 @@ export function PricesCard() {
       <p className="muted">
         A rider can book Shared for up to 3 people (themself and two friends): one booking, one price, and it takes that many of the car&apos;s 4 seats.
         On a trip between the north and south ends, the far surcharge is added for each seat. Ride alone is one price for the whole car, up to 4 people.
-        The wait fee is per booking. The driver keeps 85% of whatever the rider pays.
+        The wait fee is per booking. The driver keeps the fare less CampusRide&apos;s commission (Payouts &amp; commission).
       </p>
       {error ? <p className="error-text" role="alert">{error}</p> : null}
       {notice ? <p className="muted">{notice}</p> : null}

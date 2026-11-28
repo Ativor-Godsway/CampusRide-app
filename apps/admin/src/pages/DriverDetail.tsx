@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ApiError, getDriverDetail, getDriverTrail, suspendDriver, unsuspendDriver, type TrailPoint } from "../api";
+import { ApiError, approveDriver, getDriverDetail, getDriverTrail, rejectDriver, suspendDriver, unsuspendDriver, type TrailPoint } from "../api";
 import { useToken } from "../auth";
 import { Chip } from "../components/Chip";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -14,7 +14,9 @@ import { cedis, percent } from "../lib/money";
 import { OFFER_OUTCOME_LABELS, SESSION_END_LABELS } from "../lib/labels";
 import { periodLabel, periodQuery } from "../lib/period";
 import { Link, useRouter, withParams } from "../lib/router";
-import { clock, dayAndTime, duration, hours, shortDay } from "../lib/time";
+import { clock, dayAndTime, duration, hours, humanDay, shortDay } from "../lib/time";
+import { PairedBars } from "../charts/PairedBars";
+import { useInvestorView } from "../lib/useInvestorView";
 import { usePagePeriod } from "../lib/usePeriod";
 import { usePolled } from "../lib/usePolled";
 import { useShell } from "../shell/ShellContext";
@@ -95,7 +97,8 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
   const [period] = usePagePeriod("drivers", "this-week");
   const query = periodQuery(period);
   const detail = usePolled(() => getDriverDetail(token, id, query), `driver:${id}:${query}`);
-  const [confirm, setConfirm] = useState<"suspend" | "unsuspend" | null>(null);
+  const [confirm, setConfirm] = useState<"suspend" | "unsuspend" | "approve" | "reject" | null>(null);
+  const investor = useInvestorView();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const d = detail.data;
@@ -106,8 +109,18 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
     setError(null);
     try {
       if (confirm === "suspend") await suspendDriver(token, d.driver.driverId, reason);
-      else await unsuspendDriver(token, d.driver.driverId, reason);
-      toast(confirm === "suspend" ? `${d.driver.name} is suspended` : `${d.driver.name} can go online again`);
+      else if (confirm === "unsuspend") await unsuspendDriver(token, d.driver.driverId, reason);
+      else if (confirm === "approve") await approveDriver(token, d.driver.driverId);
+      else await rejectDriver(token, d.driver.driverId, reason);
+      toast(
+        confirm === "suspend"
+          ? `${d.driver.name} is suspended`
+          : confirm === "unsuspend"
+            ? `${d.driver.name} can go online again`
+            : confirm === "approve"
+              ? `${d.driver.name} is approved`
+              : `${d.driver.name} was not approved`,
+      );
       setConfirm(null);
       detail.refresh();
       refreshSummary();
@@ -161,12 +174,19 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
             </div>
 
             <div className="hero">
-              <span className="hero-label">{periodLabel(period)}</span>
-              <span className="hero-value num">{cedis(x.period.earnedPesewas)}</span>
+              <span className="hero-label">{periodLabel(period)} · income (fares − commission + top-ups)</span>
+              <span className="hero-value num">{cedis(x.period.incomePesewas ?? x.period.earnedPesewas)}</span>
               <span className="hero-note">
-                {x.period.trips} {x.period.trips === 1 ? "trip" : "trips"} · {hours(x.period.hoursOnlineMs)} online · {cedis(x.period.commissionPesewas)} to CampusRide
-                {x.balance.balancePesewas > 0 ? ` · ${cedis(x.balance.balancePesewas)} still owed in all` : " · nothing owed"}
+                {x.period.trips} {x.period.trips === 1 ? "trip" : "trips"}
+                {x.period.riders !== undefined ? ` · ${x.period.riders} riders` : ""} · {hours(x.period.hoursOnlineMs)} online · fares {cedis(x.period.faresPesewas)}
+                {x.period.topUpsPesewas ? ` · top-ups ${cedis(x.period.topUpsPesewas)}` : ""}
+                {x.period.faresPerOnlineHourPesewas != null ? ` · ${cedis(x.period.faresPerOnlineHourPesewas)} per online hour` : ""}
               </span>
+            </div>
+
+            <div className="tiles tiles-2">
+              <StatTile label="Commission due" value={cedis(x.period.commissionPesewas)} note="On this period's trips" />
+              <StatTile label="Still owed, all time" value={cedis(Math.max(0, x.balance.balancePesewas))} note={`${cedis(x.balance.paidPesewas)} paid · ${cedis(x.balance.waivedPesewas)} waived`} />
             </div>
 
             <div className="tiles tiles-2">
@@ -176,9 +196,23 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
               <StatTile label="Rating" value={x.rating === null ? null : x.rating.toFixed(1)} note={x.ratings ? `${x.ratings} ratings, all time` : undefined} />
             </div>
 
+            {investor.on ? null : (
             <div className="button-row">
-              <Link to={`/cash?driverId=${x.driver.userId}`} className="tonal-button">
-                Payments on Finances
+              {!x.driver.isApproved && !x.driver.suspendedAt ? (
+                <>
+                  <button type="button" className="primary-button" onClick={() => setConfirm("approve")}>
+                    Approve driver
+                  </button>
+                  <button type="button" className="danger-text-button" onClick={() => setConfirm("reject")}>
+                    Don&apos;t approve
+                  </button>
+                </>
+              ) : null}
+              <Link to={`/rides?driverId=${x.driver.userId}`} className="tonal-button">
+                All their rides
+              </Link>
+              <Link to={`/money?tab=commission&driverId=${x.driver.userId}`} className="tonal-button">
+                Commission payments
               </Link>
               {x.driver.suspendedAt ? (
                 <button type="button" className="tonal-button" onClick={() => setConfirm("unsuspend")}>
@@ -190,6 +224,43 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
                 </button>
               ) : null}
             </div>
+            )}
+
+            {x.byDay && x.byDay.length > 0 ? (
+              <>
+                <h3>Earnings by day</h3>
+                {x.byDay.length > 1 ? (
+                  <PairedBars
+                    series={[
+                      { label: "Fares", color: "var(--green-500)", values: x.byDay.map((b) => b.faresPesewas / 100) },
+                      { label: "Top-ups", color: "var(--green-400)", values: x.byDay.map((b) => b.topUpsPesewas / 100) },
+                    ]}
+                    labels={x.byDay.map((b) => shortDay(`${b.day}T00:00:00Z`).replace(/ [A-Z][a-z]{2}$/, ""))}
+                    summary="Fares and top-ups per day, in cedis"
+                    height={170}
+                  />
+                ) : null}
+                <DataTable
+                  columns={[
+                    { key: "day", header: "Day", render: (b) => humanDay(b.day), sortValue: (b) => b.day },
+                    { key: "trips", header: "Trips", render: (b) => <span className="num">{b.trips}</span>, align: "right" },
+                    { key: "riders", header: "Riders", render: (b) => <span className="num">{b.riders}</span>, align: "right" },
+                    { key: "online", header: "Online", render: (b) => <span className="num">{hours(b.hoursOnlineMs)}</span>, align: "right" },
+                    { key: "fares", header: "Fares", render: (b) => <span className="num">{cedis(b.faresPesewas)}</span>, align: "right" },
+                    { key: "topups", header: "Top-ups", render: (b) => <span className="num">{b.topUpsPesewas ? cedis(b.topUpsPesewas) : "—"}</span>, align: "right" },
+                    {
+                      key: "perHour",
+                      header: "Per online h",
+                      render: (b) => <span className="num">{b.hoursOnlineMs >= 30 * 60_000 ? cedis(Math.round(b.faresPesewas / (b.hoursOnlineMs / 3_600_000))) : "—"}</span>,
+                      align: "right",
+                    },
+                  ]}
+                  rows={[...x.byDay].reverse()}
+                  rowKey={(b) => b.day}
+                  pageSize={14}
+                />
+              </>
+            ) : null}
 
             <DriverBalancePanel
               driver={{ userId: x.driver.userId, name: x.driver.name }}
@@ -258,10 +329,18 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
       </Loaded>
       {confirm && d ? (
         <ConfirmDialog
-          title={confirm === "suspend" ? `Suspend ${d.driver.name}?` : `Lift ${d.driver.name}'s suspension?`}
-          confirmLabel={confirm === "suspend" ? "Suspend" : "Lift suspension"}
-          danger={confirm === "suspend"}
-          reasonLabel={confirm === "suspend" ? "Why (saved in the audit log)" : "Why (saved in the audit log)"}
+          title={
+            confirm === "suspend"
+              ? `Suspend ${d.driver.name}?`
+              : confirm === "unsuspend"
+                ? `Lift ${d.driver.name}'s suspension?`
+                : confirm === "approve"
+                  ? `Approve ${d.driver.name}?`
+                  : `Don't approve ${d.driver.name}?`
+          }
+          confirmLabel={confirm === "suspend" ? "Suspend" : confirm === "unsuspend" ? "Lift suspension" : confirm === "approve" ? "Approve" : "Don't approve"}
+          danger={confirm === "suspend" || confirm === "reject"}
+          reasonLabel={confirm === "approve" ? undefined : "Why (saved in the audit log)"}
           reasonPlaceholder={confirm === "suspend" ? "e.g. Two complaints about speeding this week" : "e.g. Spoke to the driver; warned"}
           busy={busy}
           error={error}
@@ -273,6 +352,10 @@ export function DriverDetail({ id, onClose }: { id: string; onClose: () => void 
         >
           {confirm === "suspend" ? (
             <p>They go offline at once and can&apos;t go online until you lift the suspension. A trip they&apos;re on now carries on. Their approval stays.</p>
+          ) : confirm === "approve" ? (
+            <p>They can go online and take rides straight away. Check their car photo and details above first.</p>
+          ) : confirm === "reject" ? (
+            <p>They stay unable to drive. The reason is saved in the audit log.</p>
           ) : (
             <p>They&apos;ll be able to go online again.</p>
           )}

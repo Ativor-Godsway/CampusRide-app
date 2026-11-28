@@ -29,6 +29,8 @@ export interface LedgerEntry {
   feePesewas: number | null;
   /** This row cancels an earlier one. */
   isReversal: boolean;
+  /** COMMISSION on a trip completed while commission was waived: never owed. */
+  waived: boolean;
   /** The admin's note or a waiver's reason; the reversal's reason. Admin site only. */
   note: string | null;
   /** The admin who recorded it, or "paystack". Admin site only. */
@@ -52,6 +54,7 @@ export async function driverLedger(
         amountPesewas: true,
         createdAt: true,
         rideId: true,
+        waived: true,
         ride: {
           select: {
             pickupLabel: true,
@@ -95,6 +98,7 @@ export async function driverLedger(
         grossPesewas: null,
         feePesewas: null,
         isReversal: false,
+        waived: c.waived,
         note: null,
         recordedBy: null,
       };
@@ -113,6 +117,7 @@ export async function driverLedger(
       grossPesewas: c.paystackPayment?.grossPesewas ?? null,
       feePesewas: c.paystackPayment?.feePesewas ?? null,
       isReversal: c.reversesId !== null,
+      waived: false,
       note: options.forAdmin ? (c.reversesId ? c.reversalReason : c.note) : null,
       recordedBy: options.forAdmin
         ? c.recordedBy === PAYSTACK_RECORDER

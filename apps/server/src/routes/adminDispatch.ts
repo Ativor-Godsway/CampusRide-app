@@ -6,6 +6,7 @@ import { useRequestValidation } from "../http/validation";
 import { adminOnly, requireAdmin, requireAuth } from "../middleware/auth";
 import { boolean, id, integer, noInput, object, oneOf, text } from "../http/schemas";
 import { RULES } from "../rateLimit/rules";
+import { config } from "../config";
 import { cached, clearAdminCache } from "../services/admin/cache";
 import { accraDay, daysIn, periodKey } from "../services/admin/period";
 import { getFarePricing, saveFarePricing } from "../services/ride/farePricing";
@@ -194,6 +195,8 @@ export function registerAdminDispatchRoutes(app: FastifyInstance, prisma: Prisma
       },
       defaults: { searchWindowSeconds: DEFAULT_SEARCH_WINDOW_SECONDS, movingFirstEnabled: true, autoAddDefault: true },
       bounds: SEARCH_WINDOW_BOUNDS_SECONDS,
+      /** How long a driver's offer pop-up lasts: set on the server (DRIVER_OFFER_SECONDS), shown read-only. */
+      offerSeconds: config.driverOfferSeconds,
       movingSteps7d: Object.fromEntries(steps.map((r) => [r.movingStep!, r._count._all])),
     };
   }

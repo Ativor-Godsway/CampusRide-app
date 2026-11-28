@@ -30,8 +30,12 @@ first, a phone code as the fallback.
 - `src/screens/`: the screens kept from before (login, approval queue, place
   editor, notifications, launch settings, passkeys, rate limits, account
   deletion, admin sign-ins), restyled.
-- Figtree is self-hosted (`src/assets/fonts`, OFL): the CSP allows fonts from
-  this site only.
+- Type is the computer's own Helvetica/Arial (no web font since the
+  2026-11-29 redesign: nothing to download, and the cedi sign ₵ always
+  renders). Brand greens #347641 / #6AB55A; logos in `src/assets/brand`.
+- Investor view (top bar): masks every rider, driver and admin name, phone
+  and plate in every API answer (`src/lib/investor.ts`), hides the audit log
+  and makes Settings read-only. Remembered for the admin session.
 
 Pages refresh every 60 s while the tab is visible (the live map every 5 s,
 answered from the server's memory); the server caches aggregates for 60 s.

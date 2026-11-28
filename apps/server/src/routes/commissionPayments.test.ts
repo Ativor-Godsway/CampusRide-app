@@ -545,9 +545,12 @@ describe("earnings: GET /driver/rides/history", () => {
     const since = new Date(Date.now() - 6 * DAY).toISOString();
     const week = (await get(`/driver/rides/history?since=${encodeURIComponent(since)}`, d)).json();
     expect(week.rides.map((r: { rideId: string }) => r.rideId)).toEqual([recent.id, yesterday.id]);
-    // All time, both ways: 3 trips, GH₵42 gross, 15% commission, 85% kept.
+    // All time, both ways: 3 trips, GH₵42 gross, and the commission RECORDED
+    // on each trip taken off (since the admin-set rate and waiver, 2026-11-29,
+    // the driver's share is the fare less its CommissionLedger amount; trip()
+    // records 100 + 200 + 300).
     for (const body of [all, week]) {
-      expect(body.summary).toMatchObject({ totalRides: 3, totalGrossPesewas: 4_200, totalCommissionPesewas: 630, netPesewas: 3_570 });
+      expect(body.summary).toMatchObject({ totalRides: 3, totalGrossPesewas: 4_200, totalCommissionPesewas: 600, netPesewas: 3_600 });
     }
 
     // Asking for more than 8 days still lists only 8.

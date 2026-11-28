@@ -28,6 +28,7 @@ import { acceptance, clippedMs, type OfferRecord } from "../services/admin/metri
 import { accraDay, daysIn, periodKey, startOfAccraDay, type Period } from "../services/admin/period";
 import { RIDE_ROW_SELECT, listPhone, rideRow } from "../services/admin/rows";
 import { LOCATION_TRAIL_KEEP_DAYS } from "../services/stats/locationTrail";
+import { topUpsByDriver } from "../services/admin/payouts";
 import { periodOr400 } from "./adminDashboard";
 
 /**
@@ -153,7 +154,7 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
     if (!p) return;
     const body = await cached(`drivers:${periodKey(p)}`, async () => {
       const now = new Date();
-      const [drivers, trips, sessions, offers, ratings, active] = await Promise.all([
+      const [drivers, trips, sessions, offers, ratings, active, balances, topUps] = await Promise.all([
         prisma.driver.findMany({
           where: { user: { isReviewDemo: false, deletedAt: null } },
           select: {
@@ -178,15 +179,20 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         loadOffers(prisma, p),
         driverRatings(prisma),
         prisma.ride.findMany({ where: { status: { in: [...ACTIVE_DRIVER_STATUSES] }, driverId: { not: null } }, select: { driverId: true } }),
+        driverBalances(prisma),
+        topUpsByDriver(prisma, p),
       ]);
       const onTrip = new Set(active.map((r) => r.driverId));
       const offerMap = offersByDriver(offers);
       const rows = drivers.map((d) => {
         const mine = trips.filter((t) => t.driverId === d.userId);
         const fares = mine.reduce((s, t) => s + t.farePesewas, 0);
-        const commission = mine.reduce((s, t) => s + t.commissionPesewas, 0);
+        const commission = mine.reduce((s, t) => s + t.commissionDuePesewas, 0);
         const acc = acceptance(offerMap.get(d.userId) ?? []);
         const r = ratings.get(d.userId);
+        const hoursOnlineMs = sessions.filter((s) => s.driverUserId === d.userId).reduce((sum, s) => sum + clippedMs(s, p, now), 0);
+        const b = balances.get(d.userId);
+        const topUp = topUps.get(d.userId) ?? 0;
         return {
           driverId: d.id,
           userId: d.userId,
@@ -202,8 +208,19 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
           onTrip: onTrip.has(d.userId),
           joinedAt: d.createdAt.toISOString(),
           trips: mine.length,
-          hoursOnlineMs: sessions.filter((s) => s.driverUserId === d.userId).reduce((sum, s) => sum + clippedMs(s, p, now), 0),
+          hoursOnlineMs,
           earnedPesewas: fares - commission,
+          /** Riders carried (bookings dropped off) on the period's trips. */
+          riders: mine.reduce((sum, t) => sum + t.riders, 0),
+          faresPesewas: fares,
+          commissionDuePesewas: commission,
+          topUpsPesewas: topUp,
+          /** Fares per hour online (null under 30 minutes online). */
+          faresPerOnlineHourPesewas: hoursOnlineMs >= 30 * 60_000 ? Math.round(fares / (hoursOnlineMs / 3_600_000)) : null,
+          /** All time: commission charged (not waived), paid (in person and Paystack), still owed. */
+          commissionChargedPesewas: b?.owedPesewas ?? 0,
+          commissionPaidPesewas: b?.paidPesewas ?? 0,
+          balancePesewas: b?.balancePesewas ?? 0,
           offers: acc.offers,
           acceptanceRate: acc.rate,
           avgReplyMs: acc.avgReplyMs,
@@ -235,7 +252,7 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
     const body = await cached(`driver:${driver.userId}:${periodKey(p)}`, async () => {
       const now = new Date();
       const userId = driver.userId;
-      const [trips, sessions, offers, ratings, balances, owedSince, cancelledByDriver, recent, sessionRows, trailDays] = await Promise.all([
+      const [trips, sessions, offers, ratings, balances, owedSince, cancelledByDriver, recent, sessionRows, trailDays, topUpRows] = await Promise.all([
         loadCompletedTrips(prisma, p, { driverId: userId }),
         loadSessions(prisma, p, { driverUserId: userId }),
         loadOffers(prisma, p, userId),
@@ -263,6 +280,10 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
           SELECT DISTINCT to_char("recordedAt", 'YYYY-MM-DD') AS day FROM "DriverLocationPoint"
           WHERE "driverUserId" = ${userId} AND "recordedAt" > ${new Date(Date.now() - LOCATION_TRAIL_KEEP_DAYS * 86_400_000)}
           ORDER BY day DESC`,
+        prisma.driverTopUp.findMany({
+          where: { driverUserId: userId, removedAt: null, paidOn: { gte: startOfAccraDay(accraDay(p.from))!, lt: p.to } },
+          select: { paidOn: true, amountPesewas: true },
+        }),
       ]);
       const [backedOut, pickupCancels, pickupCancelCount] = cancelledByDriver;
       const cancelRiders = new Map(
@@ -271,17 +292,46 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         ),
       );
       const fares = trips.reduce((s, t) => s + t.farePesewas, 0);
-      const commission = trips.reduce((s, t) => s + t.commissionPesewas, 0);
+      const commission = trips.reduce((s, t) => s + t.commissionDuePesewas, 0);
       const acc = acceptance(offers);
       const balance = balances.get(userId);
+      // Earnings by Accra day: trips, riders, fares, commission due, top-ups, hours online.
+      const byDay = new Map(
+        daysIn(p).map((day) => [day, { day, trips: 0, riders: 0, faresPesewas: 0, commissionDuePesewas: 0, topUpsPesewas: 0, hoursOnlineMs: 0 }]),
+      );
+      for (const t of trips) {
+        const d = byDay.get(accraDay(t.completedAt));
+        if (!d) continue;
+        d.trips += 1;
+        d.riders += t.riders;
+        d.faresPesewas += t.farePesewas;
+        d.commissionDuePesewas += t.commissionDuePesewas;
+      }
+      for (const t of topUpRows) {
+        const d = byDay.get(accraDay(t.paidOn));
+        if (d) d.topUpsPesewas += t.amountPesewas;
+      }
+      for (const d of byDay.values()) {
+        const from = startOfAccraDay(d.day)!;
+        const dayPeriod = { from, to: new Date(Math.min(from.getTime() + 86_400_000, p.to.getTime())) };
+        d.hoursOnlineMs = sessions.reduce((sum, s) => sum + clippedMs(s, dayPeriod, now), 0);
+      }
+      const topUpTotal = topUpRows.reduce((sum, t) => sum + t.amountPesewas, 0);
+      const hoursOnlineMs = sessions.reduce((sum, s) => sum + clippedMs(s, p, now), 0);
       return {
         generatedAt: now.toISOString(),
+        byDay: [...byDay.values()],
         period: {
           trips: trips.length,
           faresPesewas: fares,
           commissionPesewas: commission,
           earnedPesewas: fares - commission,
-          hoursOnlineMs: sessions.reduce((sum, s) => sum + clippedMs(s, p, now), 0),
+          riders: trips.reduce((sum, t) => sum + t.riders, 0),
+          topUpsPesewas: topUpTotal,
+          /** Fares − commission due + top-ups. */
+          incomePesewas: fares - commission + topUpTotal,
+          faresPerOnlineHourPesewas: hoursOnlineMs >= 30 * 60_000 ? Math.round(fares / (hoursOnlineMs / 3_600_000)) : null,
+          hoursOnlineMs,
           offers: acc.offers,
           accepted: acc.accepted,
           declined: acc.declined,
@@ -441,7 +491,7 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
       const paidRows = creditRows.filter((r) => r.kind === "PAYMENT");
       const sum = (rows: typeof creditRows) => rows.reduce((total, r) => total + r.amountPesewas, 0);
       const owedInPeriod = new Map<string, number>();
-      for (const t of trips) if (t.driverId) owedInPeriod.set(t.driverId, (owedInPeriod.get(t.driverId) ?? 0) + t.commissionPesewas);
+      for (const t of trips) if (t.driverId) owedInPeriod.set(t.driverId, (owedInPeriod.get(t.driverId) ?? 0) + t.commissionDuePesewas);
       const paidInPeriod = new Map<string, number>();
       for (const r of paidRows) paidInPeriod.set(r.driverUserId, (paidInPeriod.get(r.driverUserId) ?? 0) + r.amountPesewas);
 
@@ -471,7 +521,9 @@ export function registerAdminPeopleRoutes(app: FastifyInstance, prisma: PrismaCl
         outstandingPesewas: owing.reduce((s, r) => s + r.balancePesewas, 0),
         driversOwing: owing.length,
         oldestUnpaidAt: oldest,
-        earnedInPeriodPesewas: trips.reduce((s, t) => s + t.commissionPesewas, 0),
+        earnedInPeriodPesewas: trips.reduce((s, t) => s + t.commissionDuePesewas, 0),
+        /** Commission on the period's trips completed while waived: what CampusRide would have earned. */
+        waivedCommissionInPeriodPesewas: trips.reduce((s, t) => s + (t.commissionWaived ? t.commissionPesewas : 0), 0),
         faresInPeriodPesewas: trips.reduce((s, t) => s + t.farePesewas, 0),
         paidInPeriodPesewas: sum(paidRows),
         paymentsInPeriod: paidRows.filter((r) => r.reversesId === null).length,

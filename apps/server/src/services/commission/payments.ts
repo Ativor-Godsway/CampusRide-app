@@ -3,7 +3,7 @@ import { Prisma, type DriverPaystackPayment, type PrismaClient } from "@prisma/c
 import { paystackQuote, type MomoNetwork } from "@rida/shared";
 import { normalizePhone } from "../../lib/phone";
 import { clearAdminCache } from "../admin/cache";
-import { getCommissionSettings } from "./settings";
+import { currentCommissionTerms, getCommissionSettings } from "./settings";
 import { isValidPaystackSignature, type ChargeAnswer, type PaystackClient } from "./paystack";
 
 /**
@@ -131,6 +131,9 @@ export async function startCommissionPayment(
 ): Promise<CommissionPaymentView> {
   if (!client.configured) {
     throw new CommissionPaymentError("PAYMENTS_UNAVAILABLE", "Paying in the app isn't available yet. Pay CampusRide in person for now.", 503);
+  }
+  if ((await currentCommissionTerms(prisma)).waived) {
+    throw new CommissionPaymentError("COMMISSION_WAIVED", "Commission is waived for now: you don't owe CampusRide anything.", 409);
   }
   let localPhone: string | null = null;
   if (input.channel === "MOMO") {

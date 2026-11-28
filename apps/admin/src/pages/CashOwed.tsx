@@ -27,6 +27,16 @@ const METHODS: Array<{ value: CashMethod; label: string }> = [
 const METHOD_LABEL: Record<NonNullable<CashPayment["method"]>, string> = { CASH: "Cash", MOMO: "MoMo", OTHER: "Other", PAYSTACK: "Paystack" };
 const methodLabel = (p: CashPayment) => (p.method ? METHOD_LABEL[p.method] : "—");
 
+/** The page frame, or just its content inside Payouts & commission. */
+function Frame({ embedded, controls, children }: { embedded: boolean; controls: React.ReactNode; children: React.ReactNode }) {
+  if (embedded) return <>{children}</>;
+  return (
+    <Page title="Commission owed" subtitle="Riders pay drivers in cash. Drivers owe CampusRide the commission on each fare." controls={controls}>
+      {children}
+    </Page>
+  );
+}
+
 export const CASH_STATUS: Record<CashDriverRow["status"], { label: string; tone: "green" | "amber" | "red" }> = {
   PAID: { label: "Paid", tone: "green" },
   PART_PAID: { label: "Part paid", tone: "amber" },
@@ -129,7 +139,7 @@ export function RecordPayment({ driver, onDone, onCancel }: { driver: Pick<CashD
  * balance at once; and the payments and waivers logs (reversible, never
  * edited). Formula: docs/admin-metrics.md.
  */
-export function CashOwedPage() {
+export function CashOwedPage({ embedded = false }: { embedded?: boolean } = {}) {
   const token = useToken();
   const toast = useToast();
   const { refreshSummary } = useShell();
@@ -159,7 +169,7 @@ export function CashOwedPage() {
   };
 
   return (
-    <Page title="Finances" subtitle="Riders pay drivers in cash. Drivers owe CampusRide 15% of each fare." controls={<Freshness updatedAt={cash.updatedAt} onRefresh={changed} loading={cash.loading} />}>
+    <Frame embedded={embedded} controls={<Freshness updatedAt={cash.updatedAt} onRefresh={changed} loading={cash.loading} />}>
       <div className="toolbar">
         <PeriodPicker value={period} onChange={setPeriod} choices={["this-week", "last-week", "this-month", "all-time"]} />
         <span className="muted">{periodLabel(period)}</span>
@@ -175,13 +185,21 @@ export function CashOwedPage() {
                   {c.driversOwing} {c.driversOwing === 1 ? "driver" : "drivers"} · {oldestWords(c.oldestUnpaidAt)}
                 </span>
               </div>
-              <StatTile label="Commission earned" value={cedis(c.earnedInPeriodPesewas)} note={`15% of ${cedis(c.faresInPeriodPesewas)} in fares`} />
+              <StatTile
+                label="Commission charged"
+                value={cedis(c.earnedInPeriodPesewas)}
+                note={
+                  c.waivedCommissionInPeriodPesewas
+                    ? `On ${cedis(c.faresInPeriodPesewas)} in fares · ${cedis(c.waivedCommissionInPeriodPesewas)} waived`
+                    : `On ${cedis(c.faresInPeriodPesewas)} in fares`
+                }
+              />
               <StatTile label="Collected" value={cedis(c.paidInPeriodPesewas)} note={`${c.paymentsInPeriod} ${c.paymentsInPeriod === 1 ? "payment" : "payments"}`} />
             </div>
             <div className="tiles">
               <StatTile label="Collected via Paystack" value={cedis(c.collectedPaystackPesewas)} note="Paid by drivers in the app" />
               <StatTile label="Collected in person" value={cedis(c.collectedInPersonPesewas)} note="Recorded by an admin" />
-              <StatTile label="Waived" value={cedis(c.waivedInPeriodPesewas)} />
+              <StatTile label="Balances waived" value={cedis(c.waivedInPeriodPesewas)} note="Forgiven by an admin, driver by driver" />
               <StatTile
                 label="Paystack fees paid by drivers"
                 value={cedis(c.paystackFeesPaidByDriversPesewas)}
@@ -490,6 +508,6 @@ export function CashOwedPage() {
           </p>
         </ConfirmDialog>
       ) : null}
-    </Page>
+    </Frame>
   );
 }

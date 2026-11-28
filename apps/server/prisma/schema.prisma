@@ -193,6 +193,7 @@ model User {
   driverLocationPoints   DriverLocationPoint[]
   adminPasskeys          AdminPasskey[]
   cashPayments           DriverCashPayment[]
+  topUps                 DriverTopUp[]           @relation("DriverTopUps")
   paystackPayments       DriverPaystackPayment[]
   sosEvents              SosEvent[]
   serviceOpenWaiter      ServiceOpenWaiter?
@@ -803,11 +804,19 @@ model CommissionLedger {
   rideId        String   @unique
   amountPesewas Int
   createdAt     DateTime @default(now())
+  /// The rate it was worked out at (basis points, 1500 = 15%). Null: rows
+  /// from before the admin could set the rate (2026-11-29), all at 15%.
+  rateBps       Int?
+  /// Completed while commission was waived (CommissionSetting.waived, from
+  /// its start date): kept for the record ("what CampusRide would have
+  /// earned") but never owed — balances count only waived = false.
+  waived        Boolean  @default(false)
 
   driver User @relation("DriverCommission", fields: [driverUserId], references: [id], onDelete: Restrict)
   ride   Ride @relation(fields: [rideId], references: [id], onDelete: Cascade)
 
   @@index([driverUserId])
+  @@index([createdAt])
 }
 
 enum LaunchMode {
@@ -1204,6 +1213,47 @@ model CommissionSetting {
   updatedAt          DateTime @updatedAt
   /// User.id of the admin who last changed it.
   updatedBy          String?
+  /// CampusRide's share of each completed fare, basis points (1500 = 15%).
+  /// Used for trips completed from when it is saved; earlier rows keep theirs.
+  rateBps            Int       @default(1500)
+  /// Commission waived (the commission-free launch): while on, trips
+  /// completed from `waivedFrom` owe nothing, no driver is shown anything
+  /// owed and nobody can be blocked. Switching it off charges trips from
+  /// then on, automatically.
+  waived             Boolean   @default(false)
+  /// The waiver's start (midnight Accra of the chosen day). Trips completed
+  /// from then on are marked waived — including ones before it was switched on.
+  waivedFrom         DateTime?
+}
+
+/// What CampusRide paid a driver on top of their fares (the launch
+/// guarantee, "top-ups"): recorded by an admin on the Payouts page. Not
+/// part of the commission balance. Never edited; a mistake is removed with
+/// a reason (removedAt), which keeps the row for the record.
+model DriverTopUp {
+  id            String        @id @default(cuid())
+  driverUserId  String
+  amountPesewas Int
+  /// The Accra day it was for (midnight UTC = Accra).
+  paidOn        DateTime
+  method        TopUpMethod
+  note          String?       @db.VarChar(500)
+  /// User.id of the admin who recorded it. Plain column, like AdminAuditLog.actor.
+  recordedBy    String
+  createdAt     DateTime      @default(now())
+  removedAt     DateTime?
+  removedBy     String?
+  removedReason String?       @db.VarChar(500)
+
+  driver User @relation("DriverTopUps", fields: [driverUserId], references: [id], onDelete: Restrict)
+
+  @@index([paidOn])
+  @@index([driverUserId, paidOn])
+}
+
+enum TopUpMethod {
+  MOMO
+  CASH
 }
 
 /// One SOS a rider raised (services/safety/sos.ts): who was told, and

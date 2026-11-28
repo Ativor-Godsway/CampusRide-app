@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback } from "react";
+import { lazy, Suspense, useCallback, useEffect } from "react";
 import { useAuth } from "./auth";
 import { LoginScreen } from "./screens/LoginScreen";
 import { Loading } from "./components/States";
@@ -9,6 +9,8 @@ import { OverviewPage } from "./pages/Overview";
 import { RideDetail } from "./pages/RideDetail";
 import { DriverDetail } from "./pages/DriverDetail";
 import { RiderDetail } from "./pages/RiderDetail";
+import { InvestorViewProvider, useInvestorView } from "./lib/useInvestorView";
+import { MOVED } from "./shell/nav";
 
 // Pages other than the Overview load when first opened, so the first
 // screen arrives quickly on a phone.
@@ -17,7 +19,9 @@ const RidesPage = lazy(() => import("./pages/Rides").then((m) => ({ default: m.R
 const SupplyPage = lazy(() => import("./pages/SupplyDemand").then((m) => ({ default: m.SupplyDemandPage })));
 const CancellationsPage = lazy(() => import("./pages/Cancellations").then((m) => ({ default: m.CancellationsPage })));
 const DriversPage = lazy(() => import("./pages/Drivers").then((m) => ({ default: m.DriversPage })));
-const CashPage = lazy(() => import("./pages/CashOwed").then((m) => ({ default: m.CashOwedPage })));
+const MoneyPage = lazy(() => import("./pages/Money").then((m) => ({ default: m.MoneyPage })));
+const PricingPage = lazy(() => import("./pages/Pricing").then((m) => ({ default: m.PricingPage })));
+const AuditPage = lazy(() => import("./pages/Audit").then((m) => ({ default: m.AuditPage })));
 const RidersPage = lazy(() => import("./pages/Riders").then((m) => ({ default: m.RidersPage })));
 const PlacesPage = lazy(() => import("./pages/Places").then((m) => ({ default: m.PlacesPage })));
 const ScheduledPage = lazy(() => import("./pages/Scheduled").then((m) => ({ default: m.ScheduledPage })));
@@ -25,8 +29,22 @@ const SafetyPage = lazy(() => import("./pages/Safety").then((m) => ({ default: m
 const NotificationsPage = lazy(() => import("./pages/Notifications").then((m) => ({ default: m.NotificationsPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then((m) => ({ default: m.SettingsPage })));
 
+/** An old address that moved (/cash → /money), keeping its query. */
+function Moved({ to }: { to: string }) {
+  const { search, navigate } = useRouter();
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    // The old Finances page is the Commission tab now.
+    if (to === "/money" && !params.has("tab")) params.set("tab", "commission");
+    const q = params.toString();
+    navigate(`${to}${q ? `?${q}` : ""}`, { replace: true });
+  }, [to, search, navigate]);
+  return null;
+}
+
 function Routes() {
   const { path } = useRouter();
+  if (MOVED[path]) return <Moved to={MOVED[path]} />;
   switch (path) {
     case "/":
       return <OverviewPage />;
@@ -42,8 +60,12 @@ function Routes() {
       return <CancellationsPage />;
     case "/drivers":
       return <DriversPage />;
-    case "/cash":
-      return <CashPage />;
+    case "/money":
+      return <MoneyPage />;
+    case "/pricing":
+      return <PricingPage />;
+    case "/audit":
+      return <AuditPage />;
     case "/riders":
       return <RidersPage />;
     case "/places":
@@ -90,15 +112,25 @@ export function App() {
   const { session } = useAuth();
   if (!session) return <LoginScreen />;
   return (
-    <RouterProvider>
-      <ToastProvider>
-        <Shell>
-          <Suspense fallback={<Loading />}>
-            <Routes />
-            <DetailLayer />
-          </Suspense>
-        </Shell>
-      </ToastProvider>
-    </RouterProvider>
+    <InvestorViewProvider>
+      <RouterProvider>
+        <ToastProvider>
+          <Pages />
+        </ToastProvider>
+      </RouterProvider>
+    </InvestorViewProvider>
+  );
+}
+
+/** The shell and pages, remounted when investor view switches so every page fetches again (masked or not). */
+function Pages() {
+  const { on } = useInvestorView();
+  return (
+    <Shell key={on ? "investor" : "normal"}>
+      <Suspense fallback={<Loading />}>
+        <Routes />
+        <DetailLayer />
+      </Suspense>
+    </Shell>
   );
 }

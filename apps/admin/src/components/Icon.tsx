@@ -1,3 +1,5 @@
+import markWhite from "../assets/brand/mark-white.png";
+
 /** The admin site's line icons (24×24, 1.8 stroke, currentColor), drawn inline: no icon font or image files. */
 const PATHS = {
   overview: <path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 8h6V4h-6z" />,
@@ -77,6 +79,19 @@ const PATHS = {
   chevron: <path d="m9 6 6 6-6 6" />,
   back: <path d="m15 6-6 6 6 6" />,
   signout: <path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10" />,
+  tag: (
+    <>
+      <path d="M3 12V4h8l10 10-8 8z" />
+      <circle cx="7.5" cy="8.5" r="1.2" />
+    </>
+  ),
+  list: <path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01" />,
+  eye: (
+    <>
+      <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+      <circle cx="12" cy="12" r="3" />
+    </>
+  ),
 } as const;
 
 export type IconName = keyof typeof PATHS;
@@ -101,13 +116,7 @@ export function Icon({ name, size = 18, className }: { name: IconName; size?: nu
   );
 }
 
-/** The CampusRide mark: a "C" on the brand green. */
-export function Logo({ size = 32 }: { size?: number }) {
-  return (
-    <span className="logo" style={{ width: size, height: size }} aria-hidden="true">
-      <svg width={size / 2} height={size / 2} viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth="2.4" strokeLinecap="round">
-        <path d="M17 7a7 7 0 1 0 0 10" />
-      </svg>
-    </span>
-  );
+/** The CampusRide mark (white, for the dark-green sidebar). */
+export function Logo({ size = 34 }: { size?: number }) {
+  return <img className="brand-mark" src={markWhite} width={size} height={size} alt="" aria-hidden="true" />;
 }
