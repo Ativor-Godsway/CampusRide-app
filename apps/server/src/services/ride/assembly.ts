@@ -116,18 +116,23 @@ export async function addRiderToCar(
     // Closes the request and, in the same round trip, reads the fare its
     // rider was quoted (their seat's lockedFare, services/ride/fares).
     const [request] = fillable && seated < PRICING.MAX_SHARED_OCCUPANCY
-      ? await tx.$queryRaw<(Ride & { quotedFare: number | null })[]>`
+      ? await tx.$queryRaw<(Ride & { quotedFare: number | null; heldBy: string | null; heldUntil: Date | null })[]>`
           WITH closed AS (
-            UPDATE "Ride"
+            UPDATE "Ride" r
             SET status = 'CANCELLED', "cancelReason" = 'MERGED_INTO_ANOTHER_RIDE', "mergedIntoRideId" = ${anchorRideId},
               -- Stats: the rider got a car (this one's), and the request closed, now.
-              "matchedAt" = COALESCE("matchedAt", now()), "cancelledAt" = now(),
-              "acceptedVia" = ${options.acceptedVia ?? null}
-            WHERE id = ${requestRideId} AND status = 'REQUESTED' AND "driverId" IS NULL AND type = 'SHARED'
-              AND "isReviewDemo" = ${anchor.isReviewDemo}
+              "matchedAt" = COALESCE(r."matchedAt", now()), "cancelledAt" = now(),
+              "acceptedVia" = ${options.acceptedVia ?? null},
+              -- The moving-car hold ends with the request, in this same write
+              -- (it used to be cleared afterwards, in the background: a race).
+              "movingHoldDriverId" = NULL, "movingHoldUntil" = NULL
+            -- The row as it was before this UPDATE: what the hold WAS (RETURNING gives the new values).
+            FROM (SELECT id, "movingHoldDriverId" AS "heldBy", "movingHoldUntil" AS "heldUntil" FROM "Ride" WHERE id = ${requestRideId}) before
+            WHERE r.id = before.id AND r.id = ${requestRideId} AND r.status = 'REQUESTED' AND r."driverId" IS NULL AND r.type = 'SHARED'
+              AND r."isReviewDemo" = ${anchor.isReviewDemo}
               -- Offered to one moving car only: nobody else may add it yet.
-              AND ("movingHoldUntil" IS NULL OR "movingHoldUntil" <= now() OR "movingHoldDriverId" = ${driverId})
-            RETURNING *
+              AND (r."movingHoldUntil" IS NULL OR r."movingHoldUntil" <= now() OR r."movingHoldDriverId" = ${driverId})
+            RETURNING r.*, before."heldBy", before."heldUntil"
           )
           SELECT closed.*, (
             SELECT seat."lockedFare" FROM "RidePassenger" seat
@@ -185,7 +190,7 @@ export async function addRiderToCar(
       passengers: joined.passengers,
       changed: true,
       // The request as it was absorbed (its moving-car hold, if any), from the same UPDATE.
-      absorbed: { movingStep: request.movingStep, movingHoldDriverId: request.movingHoldDriverId, movingHoldUntil: request.movingHoldUntil },
+      absorbed: { movingStep: request.movingStep, movingHoldDriverId: request.heldBy, movingHoldUntil: request.heldUntil },
     };
   }, TX_OPTIONS);
 }

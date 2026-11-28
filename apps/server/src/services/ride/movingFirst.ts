@@ -293,7 +293,7 @@ export async function movingOfferAccepted(prisma: PrismaClient, carId: string, r
   offerEta.delete(requestRideId);
   const request = await prisma.ride.findUnique({ where: { id: requestRideId }, select: { riderId: true } });
   if (!request) return;
-  await prisma.ride.update({ where: { id: requestRideId }, data: { movingHoldDriverId: null, movingHoldUntil: null } });
+  // The hold itself was cleared when the rider joined the car (addRiderToCar, same UPDATE).
   const seat = await prisma.ridePassenger.findFirst({ where: { rideId: carId, riderId: request.riderId, status: "WAITING" }, orderBy: { createdAt: "desc" } });
   if (seat && eta !== null) await prisma.ridePassenger.update({ where: { id: seat.id }, data: { movingJoinEtaMin: eta } });
   const driver = await prisma.user.findUnique({ where: { id: driverUserId }, select: { name: true } });
